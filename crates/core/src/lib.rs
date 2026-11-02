@@ -2,6 +2,8 @@
 //!
 //! Clients drive everything through [`Editor`].
 
+pub mod json;
+
 /// The core's public interface: owns the open Scene and everything that edits
 /// it. For now only an empty Scene exists; Tools, Selection, history and
 /// viewport join as the features that need them land.
