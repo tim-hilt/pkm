@@ -1,9 +1,19 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use crate::geometry::{Geometry, StrokeStyle};
 use crate::input::{MagnifyEvent, PointerEvent, ScrollEvent};
 use crate::navigation::{Bounds, Navigation};
 use crate::scene::{Element, LoadError, Scene};
+use crate::shape;
 use crate::tool::Tool;
 use crate::viewport::Viewport;
+
+/// Hands out [`Geometry::generation`]s; unique across all editors.
+static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+fn next_generation() -> u64 {
+    NEXT_GENERATION.fetch_add(1, Ordering::Relaxed)
+}
 
 /// The core's public interface: owns the open Scene and everything that edits
 /// it and the viewport onto it. Tools, Selection and history join as the
@@ -11,6 +21,9 @@ use crate::viewport::Viewport;
 #[derive(Debug)]
 pub struct Editor {
     scene: Scene,
+    /// Changes whenever Element handles are reassigned, see
+    /// [`Geometry::generation`].
+    generation: u64,
     navigation: Navigation,
     tool: Tool,
 }
@@ -26,6 +39,7 @@ impl Editor {
     pub fn new() -> Self {
         Self {
             scene: Scene::empty(),
+            generation: next_generation(),
             navigation: Navigation::default(),
             tool: Tool::default(),
         }
@@ -35,6 +49,7 @@ impl Editor {
     /// `.excalidraw` file. If the bytes are not a Drawing the Scene is kept.
     pub fn load(&mut self, bytes: &[u8]) -> Result<(), LoadError> {
         self.scene = Scene::from_bytes(bytes)?;
+        self.generation = next_generation();
         Ok(())
     }
 
@@ -52,23 +67,15 @@ impl Editor {
 
     /// The paths to draw for the Scene, in z-order.
     ///
-    /// For now every shown Element is drawn as a plain box around its bounds;
-    /// the real shapes replace this as the generators land.
+    /// Rectangles, diamonds and ellipses are drawn hand-drawn like on
+    /// excalidraw.com (see [`crate::shape`]). The other types are drawn as a
+    /// plain box around their bounds until their generators land.
     pub fn geometry(&self) -> Geometry {
-        let mut geometry = Geometry::new();
+        let mut geometry = Geometry::with_generation(self.generation);
         for element in self.shown() {
-            let style = StrokeStyle {
-                color: 0x1e1e_1eff,
-                width: 2.0,
-                opacity: element.opacity() as f32,
-            };
-            let [first, rest @ ..] = bounds_outline(&element);
-            let mut path = geometry.stroke(element.handle(), element.version(), style);
-            path.move_to(first.0 as f32, first.1 as f32);
-            for (x, y) in rest {
-                path.line_to(x as f32, y as f32);
+            if !shape::draw(&element, &mut geometry) {
+                draw_bounds(&element, &mut geometry);
             }
-            path.line_to(first.0 as f32, first.1 as f32);
         }
         geometry
     }
@@ -166,6 +173,23 @@ impl Editor {
     fn shown(&self) -> impl Iterator<Item = Element<'_>> {
         self.scene.elements().filter(|e| !e.is_deleted())
     }
+}
+
+/// Draws a box around the Element's bounds.
+fn draw_bounds(element: &Element, geometry: &mut Geometry) {
+    let style = StrokeStyle {
+        color: 0x1e1e_1eff,
+        width: 2.0,
+        opacity: element.opacity() as f32,
+        dash: None,
+    };
+    let [first, rest @ ..] = bounds_outline(element);
+    let mut path = geometry.stroke(element.handle(), element.version(), style);
+    path.move_to(first.0 as f32, first.1 as f32);
+    for (x, y) in rest {
+        path.line_to(x as f32, y as f32);
+    }
+    path.line_to(first.0 as f32, first.1 as f32);
 }
 
 /// The corners of the Element's bounds, clockwise from the top left, turned

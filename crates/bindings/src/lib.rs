@@ -232,6 +232,12 @@ pub struct Geometry {
 
 #[uniffi::export]
 impl Geometry {
+    /// Tells whether cached per-Element results are still valid; see
+    /// [`workingtitle_core::Geometry::generation`].
+    pub fn generation(&self) -> u64 {
+        self.inner.generation()
+    }
+
     /// Number of [`workingtitle_core::Part`] records at `parts_address`.
     pub fn part_count(&self) -> u64 {
         self.inner.parts().len() as u64
@@ -289,9 +295,11 @@ mod tests {
         let geometry = editor.geometry();
 
         assert_eq!(geometry.part_count(), 1);
-        assert_eq!(geometry.part_stride(), 36);
-        assert_eq!(geometry.verb_count(), 5);
-        assert_eq!(geometry.coord_count(), 10);
+        assert_eq!(geometry.generation(), editor.geometry().generation());
+        assert_eq!(geometry.part_stride(), 44);
+        // Four edges, each drawn twice as a move and a cubic.
+        assert_eq!(geometry.verb_count(), 16);
+        assert_eq!(geometry.coord_count(), 8 * 2 + 8 * 6);
         // SAFETY: the addresses come from `geometry`, which is alive and
         // whose buffers hold at least the counts reported above.
         unsafe {

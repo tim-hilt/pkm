@@ -60,6 +60,16 @@ impl Verb {
     }
 }
 
+/// A repeating dash pattern: `on` units drawn, then `off` units skipped, in
+/// Scene units along the path. The pattern starts over at every
+/// [`Verb::Move`], like a canvas' `setLineDash`; the round caps of the stroke
+/// come on top of the `on` length.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Dash {
+    pub on: f32,
+    pub off: f32,
+}
+
 /// Resolved style of a stroked path.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StrokeStyle {
@@ -70,6 +80,8 @@ pub struct StrokeStyle {
     /// Element opacity, `0.0` (invisible) to `1.0`; independent of the
     /// colour's own alpha.
     pub opacity: f32,
+    /// `None` for a solid line.
+    pub dash: Option<Dash>,
 }
 
 /// One drawable path: its style and where its ops live in the buffers.
@@ -97,11 +109,17 @@ pub struct Part {
     pub verb_count: u32,
     /// Index of this part's first operand in [`Geometry::coords`].
     pub coord_start: u32,
+    /// Length of the drawn stretches of a dashed line, see [`Dash`]; `0` (with
+    /// `dash_off` also `0`) for a solid line.
+    pub dash_on: f32,
+    /// Length of the gaps of a dashed line.
+    pub dash_off: f32,
 }
 
 /// Paths to draw, in z-order (later parts are drawn over earlier ones).
 #[derive(Debug, Default)]
 pub struct Geometry {
+    generation: u64,
     parts: Vec<Part>,
     verbs: Vec<u8>,
     coords: Vec<f32>,
@@ -110,6 +128,25 @@ pub struct Geometry {
 impl Geometry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Empty geometry of the Scene state `generation`; see
+    /// [`Geometry::generation`].
+    pub fn with_generation(generation: u64) -> Self {
+        Self {
+            generation,
+            ..Self::default()
+        }
+    }
+
+    /// Tells clients whether their per-Element caches, keyed by
+    /// `(Part::element, Part::version)`, are still valid: it changes whenever
+    /// an [`Part::element`] handle may stand for another Element than before
+    /// (the Scene was replaced, Elements were added or removed). While it
+    /// stays the same, an Element with an unchanged version has unchanged
+    /// geometry.
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     /// Appends an empty stroked part for `element` at `version` and returns
@@ -126,6 +163,8 @@ impl Geometry {
             verb_start: index(self.verbs.len()),
             verb_count: 0,
             coord_start: index(self.coords.len()),
+            dash_on: style.dash.map_or(0.0, |d| d.on),
+            dash_off: style.dash.map_or(0.0, |d| d.off),
         });
         PartWriter { geometry: self }
     }

@@ -17,13 +17,25 @@ import Testing
 
             #expect(buffers.verbs.first == GeometryVerb.move.rawValue)
             #expect(Array(buffers.coords.prefix(2)) == [50, 100])
+            #expect(part.dash == nil)
         }
     }
 
     @Test func eachPartExposesItsOwnVerbs() {
         TestScenes.rectangle().withBuffers { buffers in
             let verbs = buffers.verbs(of: buffers.parts[0])
-            #expect(verbs.map { GeometryVerb(rawValue: $0) } == [.move, .line, .line, .line, .line])
+            // Four edges, each a move and a curve, drawn twice.
+            #expect(
+                verbs.map { GeometryVerb(rawValue: $0) } == Array(repeating: [.move, .cubic], count: 8).flatMap { $0 })
+        }
+    }
+
+    @Test func aDashedStrokeCarriesItsDashPattern() {
+        TestScenes.rectangle(extra: #","strokeStyle":"dashed""#).withBuffers { buffers in
+            let part = buffers.parts[0]
+            #expect(part.width == 2.5)
+            #expect(part.dash?.on == 8)
+            #expect(part.dash?.off == 10)
         }
     }
 }

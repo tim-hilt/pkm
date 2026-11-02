@@ -17,6 +17,9 @@ struct PartUniforms {
     float4 color;
     // Line width in Scene units.
     float width;
+    // 1: draw only the pixels the stroke covers completely (the first of the
+    // two passes that draw a translucent stroke without double blending).
+    float interiorOnly;
 };
 
 struct StrokeVertexOut {
@@ -76,7 +79,11 @@ fragment float4 stroke_fragment(
     float t = clamp(dot(p - in.a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
     float distance = length(p - in.a - ab * t);
     float coverage = clamp(in.radius + 0.5 - distance, 0.0, 1.0);
+
     // Lines thinner than a pixel cannot reach full coverage.
     coverage *= min(1.0, in.radius * 2.0);
+    if (part.interiorOnly > 0.5 && coverage < 1.0) {
+        discard_fragment();
+    }
     return part.color * coverage;
 }

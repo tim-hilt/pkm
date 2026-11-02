@@ -29,6 +29,7 @@ final class CanvasMetalView: MTKView {
 
         colorPixelFormat = CanvasRenderer.pixelFormat
         sampleCount = CanvasRenderer.sampleCount
+        depthStencilPixelFormat = CanvasRenderer.stencilFormat
         // On demand only: MTKView draws when `requestRedraw` marks it dirty,
         // never from its own display-link timer.
         isPaused = true

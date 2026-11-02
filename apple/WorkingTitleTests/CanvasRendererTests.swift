@@ -1,10 +1,11 @@
+import Foundation
 import Metal
 import Testing
 
 @testable import WorkingTitle
 
-/// Renders offscreen and probes pixels: the rectangle Element's bounds must really be
-/// visible where the core put it, at any zoom.
+/// Renders offscreen and probes pixels: the strokes must really be visible where the
+/// core put them, at any zoom, in the style the core asked for.
 @MainActor @Suite struct CanvasRendererTests {
     private func render(
         viewport: Viewport, pixelsPerPoint: Float = 1, size: Int = 400
@@ -30,8 +31,10 @@ import Testing
     @Test func edgesAreAntiAliased() throws {
         // The top edge spans y = 99...101. Shifting the view by half a unit makes it
         // span 98.5...100.5, so pixel row 98 is half covered: neither paper nor ink.
+        // (Hand-drawn shapes draw every edge twice, as Excalidraw does, so the
+        // coverage of the edge pixels adds up to more than a half.)
         let (frame, _) = try render(viewport: Viewport(origin: [0, 0.5], zoom: 1))
-        #expect((100...190).contains(frame.red(200, 98)))
+        #expect((60...190).contains(frame.red(200, 98)))
     }
 
     @Test func zoomAndOriginMoveTheRectangle() throws {
@@ -65,5 +68,99 @@ import Testing
 
         #expect(requests == 2)
         #expect(renderer.framesRendered == 0)
+    }
+
+    // MARK: Stroke styles
+
+    private func render(rectangle extra: String) throws -> RenderedImage {
+        try OffscreenRender.render(TestScenes.rectangle(extra: extra), viewport: Viewport()).image
+    }
+
+    @Test func dashedStrokesAlternateInkAndPaperAlongTheEdge() throws {
+        // The top edge runs from x = 50: 8 on, 10 off, 8 on, ... (round caps
+        // of 1.25 on top).
+        let frame = try render(rectangle: #","strokeStyle":"dashed""#)
+
+        #expect(frame.red(54, 100) < 60, "first dash")
+        #expect(frame.red(63, 100) == 255, "first gap")
+        #expect(frame.red(72, 100) < 60, "second dash")
+        #expect(frame.red(81, 100) == 255, "second gap")
+    }
+
+    @Test func dottedStrokesAreSmallDotsFarApart() throws {
+        // Dots 1.5 long (plus caps) every 9.5 units from x = 50.
+        let frame = try render(rectangle: #","strokeStyle":"dotted""#)
+
+        #expect(frame.red(51, 100) < 60, "first dot")
+        #expect(frame.red(55, 100) == 255, "gap")
+        #expect(frame.red(60, 100) < 60, "second dot")
+    }
+
+    @Test func translucentStrokesBlendOnceWhereTheySketchOverThemselves() throws {
+        // Roughness 0 draws every edge twice on the very same line. At 50 %
+        // opacity ink (30) over paper (255) is 142; blending twice would give 86.
+        let frame = try render(rectangle: #","opacity":50"#)
+
+        #expect((130...155).contains(frame.red(200, 100)), "\(frame.red(200, 100))")
+        #expect((130...155).contains(frame.red(50, 200)), "left edge")
+        #expect(frame.red(200, 190) == 255, "inside stays paper")
+    }
+
+    @Test func translucentStrokeJoinsAreNotDarkerThanTheRestOfTheLine() throws {
+        // The roundness 3 corners are curves made of many overlapping capsules.
+        let frame = try render(rectangle: #","opacity":50,"roundness":{"type":3}"#)
+
+        for (x, y) in [(200, 100), (330, 190), (200, 280)] {
+            #expect((130...155).contains(frame.red(x, y)), "edge at (\(x), \(y)): \(frame.red(x, y))")
+        }
+        // The middle of the top right corner's curve: from (298, 100) via
+        // (330, 100) to (330, 132), at t = 1/2 that is (322, 108).
+        #expect((130...155).contains(frame.red(322, 108)), "corner: \(frame.red(322, 108))")
+    }
+
+    // MARK: Caching
+
+    @Test func replacingTheGeometryOfTheSameSceneRebuildsNothing() throws {
+        let renderer = try OffscreenRender.makeRenderer()
+        let editor = Editor()
+        try editor.load(
+            bytes: Data(
+                TestScenes.drawing().replacingOccurrences(
+                    of: #""roughness":0}]"#,
+                    with: #""roughness":0},{"id":"b","type":"ellipse","width":50,"height":50}]"#
+                ).utf8))
+        renderer.setGeometry(editor.geometry())
+        _ = OffscreenRender.draw(with: renderer)
+        #expect(renderer.elementsBuilt == 2)
+
+        renderer.setGeometry(editor.geometry())
+        _ = OffscreenRender.draw(with: renderer)
+
+        #expect(renderer.elementsBuilt == 2, "versions are unchanged")
+    }
+
+    @Test func loadingAnotherDrawingRebuildsEverything() throws {
+        let renderer = try OffscreenRender.makeRenderer()
+        renderer.setGeometry(TestScenes.rectangle())
+        _ = OffscreenRender.draw(with: renderer)
+        // The same handle and version, but another Element.
+        renderer.setGeometry(TestScenes.rectangle(extra: ##","strokeColor":"#e03131""##))
+        let frame = OffscreenRender.draw(with: renderer)
+
+        #expect(renderer.elementsBuilt == 2)
+        #expect(frame.red(200, 100) > 200, "red ink, not the cached dark one")
+    }
+
+    @Test func zoomingToAnotherLevelFlattensAgainButPanningDoesNot() throws {
+        let renderer = try OffscreenRender.makeRenderer()
+        renderer.setGeometry(TestScenes.rectangle())
+        _ = OffscreenRender.draw(with: renderer)
+        renderer.viewport = Viewport(origin: [30, 30], zoom: 1)
+        _ = OffscreenRender.draw(with: renderer)
+        #expect(renderer.elementsBuilt == 1, "panned")
+
+        renderer.viewport = Viewport(origin: [30, 30], zoom: 4)
+        _ = OffscreenRender.draw(with: renderer)
+        #expect(renderer.elementsBuilt == 2, "zoomed in")
     }
 }

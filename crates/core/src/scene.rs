@@ -55,6 +55,30 @@ impl ElementType {
     }
 }
 
+/// How a stroke is drawn: the Element's `strokeStyle`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineStyle {
+    Solid,
+    Dashed,
+    Dotted,
+}
+
+/// Rounded corners of an Element: its `roundness` property. Elements with
+/// sharp corners have none.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Roundness {
+    /// Type 1, from old files; behaves like [`Roundness::Proportional`].
+    Legacy,
+    /// Type 2: a quarter of the side (diamonds and linear Elements).
+    Proportional,
+    /// Type 3: a fixed radius (32 by default) that shrinks on small shapes
+    /// (rectangles).
+    Adaptive { radius: Option<f64> },
+    /// A type this version does not know; its corners are not rounded, but
+    /// the shape is still drawn the rounded way.
+    Other,
+}
+
 /// Why a file could not be loaded as a Drawing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoadError {
@@ -213,6 +237,50 @@ impl Element<'_> {
     /// Rotation about the Element's centre in radians, clockwise.
     pub fn angle(&self) -> f64 {
         self.number("angle", 0.0)
+    }
+
+    /// The seed of the Element's hand-drawn jitter; any number, as in the file.
+    pub fn seed(&self) -> f64 {
+        self.number("seed", 1.0)
+    }
+
+    /// The stroke colour as written in the file (a CSS colour, usually hex).
+    pub fn stroke_color(&self) -> &str {
+        self.object
+            .get("strokeColor")
+            .and_then(Value::as_str)
+            .unwrap_or("#1e1e1e")
+    }
+
+    pub fn stroke_width(&self) -> f64 {
+        self.number("strokeWidth", 2.0)
+    }
+
+    pub fn line_style(&self) -> LineStyle {
+        match self.object.get("strokeStyle").and_then(Value::as_str) {
+            Some("dashed") => LineStyle::Dashed,
+            Some("dotted") => LineStyle::Dotted,
+            _ => LineStyle::Solid,
+        }
+    }
+
+    /// How sketchy the Element is drawn: 0 (architect), 1 (artist) or 2
+    /// (cartoonist).
+    pub fn roughness(&self) -> f64 {
+        self.number("roughness", 1.0)
+    }
+
+    /// The Element's rounded corners, if it has any.
+    pub fn roundness(&self) -> Option<Roundness> {
+        let roundness = self.object.get("roundness")?.as_object()?;
+        Some(match roundness.get("type").and_then(Value::as_f64) {
+            Some(1.0) => Roundness::Legacy,
+            Some(2.0) => Roundness::Proportional,
+            Some(3.0) => Roundness::Adaptive {
+                radius: roundness.get("value").and_then(Value::as_f64),
+            },
+            _ => Roundness::Other,
+        })
     }
 
     /// `0.0` (invisible) to `1.0`.

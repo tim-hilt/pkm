@@ -8,12 +8,14 @@ pub mod input;
 pub mod json;
 mod navigation;
 mod restore;
+mod rough;
 pub mod scene;
+mod shape;
 mod tool;
 mod viewport;
 
 pub use editor::Editor;
-pub use geometry::{Geometry, Part, PartKind, PartWriter, StrokeStyle, Verb};
+pub use geometry::{Dash, Geometry, Part, PartKind, PartWriter, StrokeStyle, Verb};
 pub use input::{MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase, ScrollEvent};
 pub use scene::LoadError;
 pub use tool::Tool;

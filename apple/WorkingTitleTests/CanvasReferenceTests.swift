@@ -30,4 +30,10 @@ import Testing
         let geometry = try SampleDrawing.makeEditor().geometry()
         expectMatchesReference(try render(Viewport(), of: geometry, size: 700), named: "sample-drawing")
     }
+
+    /// Dashed, dotted, translucent, thick, rounded and every sloppiness.
+    @Test func handDrawnStyles() throws {
+        let geometry = TestScenes.handDrawnStyles()
+        expectMatchesReference(try render(Viewport(), of: geometry, size: 420), named: "hand-drawn-styles")
+    }
 }

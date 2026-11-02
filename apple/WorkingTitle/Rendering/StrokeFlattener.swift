@@ -3,7 +3,7 @@ typealias Segment = SIMD4<Float>
 
 /// Turns a stroked part's paths into straight segments. Curves are subdivided
 /// on the client (ADR-0008) because only the client knows how large a Scene
-/// unit is on screen.
+/// unit is on screen; dashes are cut here too, along the flattened path.
 enum StrokeFlattener {
     /// The segments of `part`, in drawing order.
     ///
@@ -12,12 +12,13 @@ enum StrokeFlattener {
     ///   the zoom so that the error stays a fraction of a device pixel.
     ///
     /// A `move` starts a new subpath without producing a segment; zero-length
-    /// `line`s are kept, they draw a round dot.
+    /// `line`s are kept, they draw a round dot. For a dashed part only the
+    /// drawn stretches are returned, split at the path's vertices.
     static func segments(of part: GeometryPart, in buffers: GeometryBuffers, tolerance: Float) -> [Segment] {
         let coords = buffers.coords(of: part)
         var next = 0
         var current = SIMD2<Float>.zero
-        var segments: [Segment] = []
+        var output = SegmentWriter(dash: part.dash)
 
         func point() -> SIMD2<Float> {
             defer { next += 2 }
@@ -28,9 +29,10 @@ enum StrokeFlattener {
             switch GeometryVerb(rawValue: byte) {
             case .move:
                 current = point()
+                output.beginSubpath()
             case .line:
                 let end = point()
-                segments.append(Segment(current, end))
+                output.add(from: current, to: end)
                 current = end
             case .cubic:
                 let (c1, c2, end) = (point(), point(), point())
@@ -40,7 +42,7 @@ enum StrokeFlattener {
                     let t = Float(step) / Float(steps)
                     // Land exactly on the end point instead of on rounding noise.
                     let p = step == steps ? end : cubic(current, c1, c2, end, at: t)
-                    segments.append(Segment(previous, p))
+                    output.add(from: previous, to: p)
                     previous = p
                 }
                 current = end
@@ -48,7 +50,55 @@ enum StrokeFlattener {
                 preconditionFailure("unknown verb \(byte)")
             }
         }
-        return segments
+        return output.segments
+    }
+
+    /// Collects segments, cutting them into dashes if the stroke is dashed.
+    private struct SegmentWriter {
+        private(set) var segments: [Segment] = []
+        private let dash: (on: Float, off: Float)?
+        /// Whether the pattern is in a drawn stretch, and how much of that
+        /// stretch or gap is left.
+        private var drawing = true
+        private var remaining: Float
+
+        init(dash: (on: Float, off: Float)?) {
+            self.dash = dash
+            remaining = dash?.on ?? 0
+        }
+
+        /// The pattern starts over with every subpath.
+        mutating func beginSubpath() {
+            drawing = true
+            remaining = dash?.on ?? 0
+        }
+
+        mutating func add(from start: SIMD2<Float>, to end: SIMD2<Float>) {
+            guard let dash else {
+                segments.append(Segment(start, end))
+                return
+            }
+            let length = ((end - start) * (end - start)).sum().squareRoot()
+            guard length > 0 else { return }
+            let direction = (end - start) / length
+            var travelled: Float = 0
+            while travelled < length {
+                let left = length - travelled
+                let step = min(left, remaining)
+                // Land exactly on the end when the stretch reaches it.
+                let reachesEnd = step == left
+                if drawing {
+                    let from = start + direction * travelled
+                    segments.append(Segment(from, reachesEnd ? end : start + direction * (travelled + step)))
+                }
+                travelled = reachesEnd ? length : travelled + step
+                remaining -= step
+                if remaining <= 0 {
+                    drawing.toggle()
+                    remaining = drawing ? dash.on : dash.off
+                }
+            }
+        }
     }
 
     /// Number of chords that keep a cubic within `tolerance`, from the bound

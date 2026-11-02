@@ -340,18 +340,16 @@ fn deleted_elements_stay_in_the_file_but_not_in_the_scene() {
 fn deleted_elements_are_not_drawn() {
     let geometry = editor_with(WITH_DELETED).geometry();
 
-    let x_of_first_corner: Vec<f32> = (0..geometry.parts().len())
-        .map(|part| ops(&geometry, part)[0].1[0])
-        .collect();
-    assert_eq!(x_of_first_corner, [0.0, 40.0], "a and c, not b");
+    let drawn: Vec<u32> = geometry.parts().iter().map(|part| part.element).collect();
+    assert_eq!(drawn, [0, 2], "a and c, not b");
 }
 
 // --- Bounds on the Canvas -------------------------------------------------
 
 #[test]
-fn every_shown_element_is_drawn_as_a_box_around_its_bounds() {
+fn elements_without_a_generator_yet_are_drawn_as_a_box_around_their_bounds() {
     let editor = editor_with(&drawing_with_element(
-        r#""id":"a","type":"rectangle","x":10,"y":20,"width":30,"height":40"#,
+        r#""id":"a","type":"line","x":10,"y":20,"width":30,"height":40"#,
     ));
     let geometry = editor.geometry();
 
@@ -378,7 +376,7 @@ fn the_box_of_a_rotated_element_turns_about_its_centre() {
     // Centre (25, 40); a quarter turn clockwise (y points down) takes the
     // corner (10, 20) to (45, 25), the next one (40, 20) to (45, 55), ...
     let editor = editor_with(&drawing_with_element(&format!(
-        r#""id":"a","type":"rectangle","x":10,"y":20,"width":30,"height":40,"angle":{}"#,
+        r#""id":"a","type":"line","x":10,"y":20,"width":30,"height":40,"angle":{}"#,
         std::f64::consts::FRAC_PI_2
     )));
     let geometry = editor.geometry();

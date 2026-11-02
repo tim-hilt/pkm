@@ -3,7 +3,7 @@ import Testing
 
 @testable import WorkingTitle
 
-/// The Drawing bundled with the app opens, shows its Elements' bounds and
+/// The Drawing bundled with the app opens, shows its Elements and
 /// survives load -> save unchanged.
 @Suite struct SampleDrawingTests {
     @Test func showsEveryNonDeletedElementOfASupportedType() throws {

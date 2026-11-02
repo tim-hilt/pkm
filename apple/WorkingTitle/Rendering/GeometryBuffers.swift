@@ -22,6 +22,17 @@ struct GeometryPart {
     var verbCount: UInt32
     /// Index of this part's first operand in `GeometryBuffers.coords`.
     var coordStart: UInt32
+    /// Length of the drawn stretches and of the gaps of a dashed line, in
+    /// Scene units; both 0 for a solid line.
+    var dashOn: Float
+    var dashOff: Float
+
+    /// The dash pattern, if the part is dashed. Like a canvas' `setLineDash`
+    /// it starts over at every `move`, and the round caps come on top of the
+    /// dashes' length.
+    var dash: (on: Float, off: Float)? {
+        dashOn > 0 && dashOff > 0 ? (dashOn, dashOff) : nil
+    }
 }
 
 /// Path operation numbers, as in the core's `Verb`.

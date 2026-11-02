@@ -7,15 +7,16 @@
 
 use std::mem::{offset_of, size_of};
 
-use workingtitle_core::{Geometry, Part, PartKind, Verb};
+use workingtitle_core::{Dash, Geometry, Part, PartKind, StrokeStyle, Verb};
 
 #[test]
 fn parts_follow_each_other_in_the_shared_buffers() {
     let mut geometry = Geometry::new();
-    let style = workingtitle_core::StrokeStyle {
+    let style = StrokeStyle {
         color: 0xff00_00ff,
         width: 1.5,
         opacity: 0.5,
+        dash: None,
     };
     let mut first = geometry.stroke(7, 3, style);
     first.move_to(1.0, 2.0);
@@ -37,7 +38,7 @@ fn parts_follow_each_other_in_the_shared_buffers() {
 
 #[test]
 fn record_layout_is_the_c_layout_clients_read_directly() {
-    assert_eq!(size_of::<Part>(), 36);
+    assert_eq!(size_of::<Part>(), 44);
     assert_eq!(offset_of!(Part, element), 0);
     assert_eq!(offset_of!(Part, version), 4);
     assert_eq!(offset_of!(Part, kind), 8);
@@ -47,6 +48,8 @@ fn record_layout_is_the_c_layout_clients_read_directly() {
     assert_eq!(offset_of!(Part, verb_start), 24);
     assert_eq!(offset_of!(Part, verb_count), 28);
     assert_eq!(offset_of!(Part, coord_start), 32);
+    assert_eq!(offset_of!(Part, dash_on), 36);
+    assert_eq!(offset_of!(Part, dash_off), 40);
 }
 
 #[test]
@@ -56,4 +59,27 @@ fn verb_and_kind_numbers_are_stable() {
     assert_eq!(Verb::Cubic as u8, 2);
     assert_eq!(Verb::from_byte(3), None);
     assert_eq!(PartKind::Stroke as u32, 0);
+}
+
+#[test]
+fn a_part_records_its_dash_pattern_and_solid_parts_record_zeros() {
+    let mut geometry = Geometry::new();
+    let solid = StrokeStyle {
+        color: 0,
+        width: 2.0,
+        opacity: 1.0,
+        dash: None,
+    };
+    let dashed = StrokeStyle {
+        dash: Some(Dash { on: 8.0, off: 10.0 }),
+        ..solid
+    };
+    geometry.stroke(0, 1, solid).move_to(0.0, 0.0);
+    geometry.stroke(1, 1, dashed).move_to(0.0, 0.0);
+
+    let [a, b] = geometry.parts() else {
+        panic!("two parts")
+    };
+    assert_eq!((a.dash_on, a.dash_off), (0.0, 0.0));
+    assert_eq!((b.dash_on, b.dash_off), (8.0, 10.0));
 }
