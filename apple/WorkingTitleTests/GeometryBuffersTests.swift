@@ -38,4 +38,27 @@ import Testing
             #expect(part.dash?.off == 10)
         }
     }
+
+    @Test func aSolidFilledRectangleIsAFillPartThenAStrokePart() {
+        TestScenes.rectangle(extra: ##","backgroundColor":"#a5d8ff","fillStyle":"solid""##).withBuffers { buffers in
+            #expect(buffers.parts.count == 2)
+            let fill = buffers.parts[0]
+            #expect(fill.kind == GeometryPart.fillKind)
+            #expect(fill.color == 0xa5d8_ffff)
+            #expect(fill.rule == .nonZero)
+            #expect(fill.width == 0)
+            #expect(fill.dash == nil)
+            #expect(buffers.parts[1].kind == GeometryPart.strokeKind)
+            #expect(buffers.parts[1].rule == .nonZero, "strokes carry rule 0")
+        }
+    }
+
+    @Test func shapesMadeWithAPolygonAreFilledByTheEvenOddRule() {
+        TestScenes.geometry(
+            of:
+                ##"{"type":"excalidraw","version":2,"elements":[{"id":"d","type":"diamond","width":80,"height":80,"backgroundColor":"#a5d8ff","fillStyle":"solid"}]}"##
+        ).withBuffers { buffers in
+            #expect(buffers.parts[0].rule == .evenOdd)
+        }
+    }
 }

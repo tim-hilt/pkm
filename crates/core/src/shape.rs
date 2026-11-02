@@ -1,41 +1,98 @@
 //! What Excalidraw draws for an Element (`shape.ts` at the pinned commit),
 //! as geometry: the Element's style turned into rough.js options, its shape
-//! into strokes (ADR-0004), placed in the Scene.
+//! into a fill and strokes (ADR-0004), placed in the Scene.
 
-use crate::geometry::{Dash, Geometry, PartWriter, StrokeStyle};
-use crate::rough::{Op, Point, Segment, Sketcher, Style};
-use crate::scene::{Element, ElementType, LineStyle, Roundness};
+use crate::geometry::{Dash, FillRule, FillStyle, Geometry, PartWriter, StrokeStyle};
+use crate::path::{Point, Segment};
+use crate::rough::{Fill, FillOps, Hatch, Op, Pattern, Sketcher, Style};
+use crate::scene::{Element, ElementType, FillPattern, LineStyle, Roundness};
 
-/// Adds the strokes of `element` to `geometry`. Returns `false`, adding
-/// nothing, for Element types that have no generator yet.
+/// Adds the fill and the strokes of `element` to `geometry`. Returns `false`,
+/// adding nothing, for Element types that have no generator yet.
 pub(crate) fn draw(element: &Element, geometry: &mut Geometry) -> bool {
     let (width, height) = (element.width(), element.height());
     let mut sketcher = Sketcher::new(element.seed(), style_of(element));
-    let ops = match element.kind() {
+    // rough.js fills rectangles and ellipses by the non-zero rule, and the
+    // shapes it makes with a polygon or a path by the even-odd rule.
+    let (drawing, rule) = match element.kind() {
         ElementType::Rectangle => match element.roundness() {
-            Some(roundness) => sketcher.path(&rounded_rectangle(width, height, roundness)),
-            None => sketcher.polygon(&[(0.0, 0.0), (width, 0.0), (width, height), (0.0, height)]),
+            Some(roundness) => (
+                sketcher.path(&rounded_rectangle(width, height, roundness)),
+                FillRule::EvenOdd,
+            ),
+            None => (
+                sketcher.polygon(&[(0.0, 0.0), (width, 0.0), (width, height), (0.0, height)]),
+                FillRule::NonZero,
+            ),
         },
         ElementType::Diamond => match element.roundness() {
-            Some(roundness) => sketcher.path(&rounded_diamond(width, height, roundness)),
-            None => sketcher.polygon(&diamond_corners(width, height)),
+            Some(roundness) => (
+                sketcher.path(&rounded_diamond(width, height, roundness)),
+                FillRule::EvenOdd,
+            ),
+            None => (
+                sketcher.polygon(&diamond_corners(width, height)),
+                FillRule::EvenOdd,
+            ),
         },
-        ElementType::Ellipse => sketcher.ellipse(width / 2.0, height / 2.0, width, height),
+        ElementType::Ellipse => (
+            sketcher.ellipse(width / 2.0, height / 2.0, width, height),
+            FillRule::NonZero,
+        ),
         _ => return false,
     };
 
+    let placement = Placement::of(element);
+    let (handle, version, opacity) = (
+        element.handle(),
+        element.version(),
+        element.opacity() as f32,
+    );
+
+    if let Some(fill) = drawing.fill {
+        let color = parse_color(element.background_color());
+        match fill {
+            FillOps::Area(ops) => {
+                let style = FillStyle {
+                    color,
+                    opacity,
+                    rule,
+                };
+                write_all(&mut geometry.fill(handle, version, style), ops, &placement);
+            }
+            FillOps::Lines(ops) => {
+                let style = StrokeStyle {
+                    color,
+                    width: fill_weight(element) as f32,
+                    opacity,
+                    dash: None,
+                };
+                write_all(
+                    &mut geometry.stroke(handle, version, style),
+                    ops,
+                    &placement,
+                );
+            }
+        }
+    }
     let stroke = StrokeStyle {
         color: parse_color(element.stroke_color()),
         width: stroke_width(element) as f32,
-        opacity: element.opacity() as f32,
+        opacity,
         dash: dash_of(element),
     };
-    let placement = Placement::of(element);
-    let mut path = geometry.stroke(element.handle(), element.version(), stroke);
-    for op in ops {
-        write(&mut path, op, &placement);
-    }
+    write_all(
+        &mut geometry.stroke(handle, version, stroke),
+        drawing.outline,
+        &placement,
+    );
     true
+}
+
+fn write_all(path: &mut PartWriter, ops: Vec<Op>, placement: &Placement) {
+    for op in ops {
+        write(path, op, placement);
+    }
 }
 
 // --- Options (generateRoughOptions) --------------------------------------
@@ -54,7 +111,34 @@ fn style_of(element: &Element) -> Style {
         } else {
             0.95
         },
+        fill: fill_of(element),
     }
+}
+
+/// How the background is filled; `None` for a transparent one.
+fn fill_of(element: &Element) -> Option<Fill> {
+    if parse_color(element.background_color()) & 0xff == 0 {
+        return None;
+    }
+    // Hatch lines are as far apart as four stroke widths, whatever the
+    // dashes do to the stroke.
+    let hatch = |pattern| {
+        Fill::Hatch(Hatch {
+            pattern,
+            gap: element.stroke_width() * 4.0,
+        })
+    };
+    Some(match element.fill_pattern() {
+        FillPattern::Solid => Fill::Solid,
+        FillPattern::Hachure => hatch(Pattern::Hachure),
+        FillPattern::CrossHatch => hatch(Pattern::CrossHatch),
+        FillPattern::Zigzag => hatch(Pattern::Zigzag),
+    })
+}
+
+/// Hatch lines are half as thick as the stroke, dashes or not.
+fn fill_weight(element: &Element) -> f64 {
+    element.stroke_width() / 2.0
 }
 
 /// Rectangles and diamonds with rounded corners are drawn as a path.
@@ -217,6 +301,10 @@ fn write(path: &mut PartWriter, op: Op, placement: &Placement) {
         Op::Move(p) => {
             let (x, y) = placement.apply(p);
             path.move_to(x, y);
+        }
+        Op::Line(p) => {
+            let (x, y) = placement.apply(p);
+            path.line_to(x, y);
         }
         Op::Cubic(c1, c2, p) => {
             let (x1, y1) = placement.apply(c1);

@@ -68,7 +68,8 @@ impl Editor {
     /// The paths to draw for the Scene, in z-order.
     ///
     /// Rectangles, diamonds and ellipses are drawn hand-drawn like on
-    /// excalidraw.com (see [`crate::shape`]). The other types are drawn as a
+    /// excalidraw.com, with their background filled by hachure, cross-hatch,
+    /// zigzag or solid (see [`crate::shape`]). The other types are drawn as a
     /// plain box around their bounds until their generators land.
     pub fn geometry(&self) -> Geometry {
         let mut geometry = Geometry::with_generation(self.generation);

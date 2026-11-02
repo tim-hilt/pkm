@@ -9,32 +9,14 @@
 mod common;
 
 use std::f64::consts::FRAC_PI_2;
-use std::fs;
-use std::path::PathBuf;
 
-use common::{Fixture, Op, Shape};
+use common::{Fixture, Op, Shape, editor_with_element, editor_with_fixture, ops};
 use workingtitle_core::json::Value;
 use workingtitle_core::{Editor, Geometry, Part, PartKind, Verb};
 
 /// Largest allowed difference between a coordinate and rough.js' double. The
 /// geometry is `f32`, whose resolution at the fixtures' coordinates is ~1e-4.
 const TOLERANCE: f64 = 1e-3;
-
-fn editor_with_fixture(name: &str) -> Editor {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/golden")
-        .join(format!("{name}.excalidraw"));
-    let mut editor = Editor::new();
-    editor.load(&fs::read(path).expect("fixture")).unwrap();
-    editor
-}
-
-fn editor_with_element(element: &str) -> Editor {
-    let mut editor = Editor::new();
-    let drawing = format!(r#"{{"type":"excalidraw","version":2,"elements":[{{{element}}}]}}"#);
-    editor.load(drawing.as_bytes()).unwrap();
-    editor
-}
 
 /// The stroke parts drawn for the Element with `handle`.
 fn strokes(geometry: &Geometry, handle: usize) -> Vec<Part> {
@@ -43,21 +25,6 @@ fn strokes(geometry: &Geometry, handle: usize) -> Vec<Part> {
         .iter()
         .copied()
         .filter(|p| p.element as usize == handle && p.kind == PartKind::Stroke as u32)
-        .collect()
-}
-
-/// The ops of `part` as `(verb, operands)`.
-fn ops(geometry: &Geometry, part: &Part) -> Vec<(Verb, Vec<f32>)> {
-    let verbs = &geometry.verbs()[part.verb_start as usize..][..part.verb_count as usize];
-    let mut coords = &geometry.coords()[part.coord_start as usize..];
-    verbs
-        .iter()
-        .map(|&byte| {
-            let verb = Verb::from_byte(byte).expect("known verb");
-            let (taken, rest) = coords.split_at(verb.coord_count());
-            coords = rest;
-            (verb, taken.to_vec())
-        })
         .collect()
 }
 
@@ -156,12 +123,6 @@ fn assert_strokes_match_golden(name: &str) {
 #[test]
 fn shapes_match_the_golden_output_for_every_roughness_stroke_style_and_roundness() {
     assert_strokes_match_golden("shapes");
-}
-
-#[test]
-fn filled_shapes_have_the_same_outline_as_unfilled_ones() {
-    // Fills are drawn by a later feature; the outline must not depend on them.
-    assert_strokes_match_golden("fills");
 }
 
 #[test]

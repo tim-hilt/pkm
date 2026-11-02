@@ -8,6 +8,40 @@ use std::fs;
 use std::path::PathBuf;
 
 use workingtitle_core::json::{Object, Value, parse};
+use workingtitle_core::{Editor, Geometry, Part, Verb};
+
+/// An editor that has loaded golden fixture `<name>.excalidraw`.
+pub fn editor_with_fixture(name: &str) -> Editor {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/golden")
+        .join(format!("{name}.excalidraw"));
+    let mut editor = Editor::new();
+    editor.load(&fs::read(path).expect("fixture")).unwrap();
+    editor
+}
+
+/// An editor whose Scene is one Element with the given JSON members.
+pub fn editor_with_element(element: &str) -> Editor {
+    let mut editor = Editor::new();
+    let drawing = format!(r#"{{"type":"excalidraw","version":2,"elements":[{{{element}}}]}}"#);
+    editor.load(drawing.as_bytes()).unwrap();
+    editor
+}
+
+/// The ops of `part` as `(verb, operands)`.
+pub fn ops(geometry: &Geometry, part: &Part) -> Vec<(Verb, Vec<f32>)> {
+    let verbs = &geometry.verbs()[part.verb_start as usize..][..part.verb_count as usize];
+    let mut coords = &geometry.coords()[part.coord_start as usize..];
+    verbs
+        .iter()
+        .map(|&byte| {
+            let verb = Verb::from_byte(byte).expect("known verb");
+            let (taken, rest) = coords.split_at(verb.coord_count());
+            coords = rest;
+            (verb, taken.to_vec())
+        })
+        .collect()
+}
 
 /// One `.excalidraw` source file and the output Excalidraw generated for it.
 pub struct Fixture {

@@ -4,8 +4,11 @@
 /// Mirror of the core's `Part` record, read straight out of the core's memory.
 /// Field order and sizes must match; `withBuffers` checks the record size.
 struct GeometryPart {
-    /// The only kind so far: constant-width outline with round caps and joins.
+    /// Constant-width outline with round caps and joins.
     static let strokeKind: UInt32 = 0
+    /// The area enclosed by the path, whose subpaths are implicitly closed;
+    /// `fillRule` says what counts as enclosed.
+    static let fillKind: UInt32 = 1
 
     /// Core-assigned Element handle; with `version` the cache key.
     var element: UInt32
@@ -15,7 +18,7 @@ struct GeometryPart {
     var color: UInt32
     /// Element opacity, 0...1.
     var opacity: Float
-    /// Line width in Scene units.
+    /// Line width in Scene units; 0 for fills.
     var width: Float
     /// Range of this part's verbs in `GeometryBuffers.verbs`.
     var verbStart: UInt32
@@ -26,6 +29,11 @@ struct GeometryPart {
     /// Scene units; both 0 for a solid line.
     var dashOn: Float
     var dashOff: Float
+    /// A `GeometryFillRule` number; 0 for strokes.
+    var fillRule: UInt32 = 0
+
+    /// How a fill treats overlapping stretches of its path.
+    var rule: GeometryFillRule? { GeometryFillRule(rawValue: fillRule) }
 
     /// The dash pattern, if the part is dashed. Like a canvas' `setLineDash`
     /// it starts over at every `move`, and the round caps come on top of the
@@ -33,6 +41,15 @@ struct GeometryPart {
     var dash: (on: Float, off: Float)? {
         dashOn > 0 && dashOff > 0 ? (dashOn, dashOff) : nil
     }
+}
+
+/// Which points a fill covers where its path crosses itself, as in the core's
+/// `FillRule`.
+enum GeometryFillRule: UInt32 {
+    /// Inside where the path winds around at all: overlaps stay filled.
+    case nonZero = 0
+    /// Inside where a ray crosses the path an odd number of times: overlaps are holes.
+    case evenOdd = 1
 }
 
 /// Path operation numbers, as in the core's `Verb`.
@@ -63,6 +80,18 @@ struct GeometryBuffers {
         UnsafeBufferPointer(rebasing: coords[Int(part.coordStart)...])
     }
 }
+
+/// Geometry the renderer can draw: the core's `Geometry`, or hand-built
+/// geometry in tests.
+protocol GeometrySource: AnyObject {
+    /// Tells whether cached per-Element results are still valid, see the
+    /// core's `Geometry::generation`.
+    func generation() -> UInt64
+    /// Runs `body` with the buffers, which must not escape it.
+    func withBuffers<R>(_ body: (GeometryBuffers) throws -> R) rethrows -> R
+}
+
+extension Geometry: GeometrySource {}
 
 extension Geometry {
     /// Runs `body` with the core's buffers, read in place without copying.

@@ -25,6 +25,23 @@
 pub enum PartKind {
     /// Outline of constant width with round caps and joins.
     Stroke = 0,
+    /// The area enclosed by the path, which clients treat as closed: every
+    /// subpath ends with an implicit line back to its [`Verb::Move`]. Which
+    /// points count as enclosed is decided by the part's [`FillRule`].
+    Fill = 1,
+}
+
+/// Which points of the plane a [`PartKind::Fill`] covers when its path
+/// crosses itself. Numbers are part of the client contract.
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FillRule {
+    /// A point is inside if the path winds around it at all; overlapping
+    /// stretches stay filled.
+    NonZero = 0,
+    /// A point is inside if a ray from it crosses the path an odd number of
+    /// times; overlapping stretches become holes.
+    EvenOdd = 1,
 }
 
 /// One path operation. Numbers are part of the client contract.
@@ -84,6 +101,16 @@ pub struct StrokeStyle {
     pub dash: Option<Dash>,
 }
 
+/// Resolved style of a filled path.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FillStyle {
+    /// Colour as `0xRRGGBBAA`.
+    pub color: u32,
+    /// See [`StrokeStyle::opacity`].
+    pub opacity: f32,
+    pub rule: FillRule,
+}
+
 /// One drawable path: its style and where its ops live in the buffers.
 ///
 /// Parts of one Element share `element` and `version`; clients key their
@@ -114,6 +141,8 @@ pub struct Part {
     pub dash_on: f32,
     /// Length of the gaps of a dashed line.
     pub dash_off: f32,
+    /// A [`FillRule`] number; `0` for strokes, which have no use for it.
+    pub fill_rule: u32,
 }
 
 /// Paths to draw, in z-order (later parts are drawn over earlier ones).
@@ -153,19 +182,49 @@ impl Geometry {
     /// the writer that fills it with ops. Parts cannot be reopened, so
     /// buffers only ever grow at their end.
     pub fn stroke(&mut self, element: u32, version: u32, style: StrokeStyle) -> PartWriter<'_> {
-        self.parts.push(Part {
-            element,
-            version,
+        let dash = style.dash.unwrap_or(Dash { on: 0.0, off: 0.0 });
+        self.begin(Part {
             kind: PartKind::Stroke as u32,
             color: style.color,
             opacity: style.opacity,
             width: style.width,
+            dash_on: dash.on,
+            dash_off: dash.off,
+            ..self.empty_part(element, version)
+        })
+    }
+
+    /// Like [`Geometry::stroke`] for a filled part.
+    pub fn fill(&mut self, element: u32, version: u32, style: FillStyle) -> PartWriter<'_> {
+        self.begin(Part {
+            kind: PartKind::Fill as u32,
+            color: style.color,
+            opacity: style.opacity,
+            fill_rule: style.rule as u32,
+            ..self.empty_part(element, version)
+        })
+    }
+
+    /// A part with no ops yet that would start at the buffers' ends.
+    fn empty_part(&self, element: u32, version: u32) -> Part {
+        Part {
+            element,
+            version,
+            kind: PartKind::Stroke as u32,
+            color: 0,
+            opacity: 1.0,
+            width: 0.0,
             verb_start: index(self.verbs.len()),
             verb_count: 0,
             coord_start: index(self.coords.len()),
-            dash_on: style.dash.map_or(0.0, |d| d.on),
-            dash_off: style.dash.map_or(0.0, |d| d.off),
-        });
+            dash_on: 0.0,
+            dash_off: 0.0,
+            fill_rule: FillRule::NonZero as u32,
+        }
+    }
+
+    fn begin(&mut self, part: Part) -> PartWriter<'_> {
+        self.parts.push(part);
         PartWriter { geometry: self }
     }
 
@@ -182,7 +241,7 @@ impl Geometry {
     }
 }
 
-/// Appends ops to the part it was created for by [`Geometry::stroke`].
+/// Appends ops to the part it was created for by [`Geometry::stroke`] or [`Geometry::fill`].
 pub struct PartWriter<'a> {
     geometry: &'a mut Geometry,
 }

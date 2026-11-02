@@ -28,6 +28,13 @@ struct Viewport: Equatable {
 /// fringe on pixels not marked. Only fringe
 /// pixels where capsules overlap still blend twice, which is invisible.
 ///
+/// Fills are stencil-then-cover: the first pass rasterises a triangle fan per
+/// subpath into the stencil buffer, which counts how often the path winds
+/// around each sample (or toggles it, for the even-odd rule); the second paints
+/// a rectangle over the fill wherever the count is not zero and resets the
+/// stencil. That is exact for concave and self-intersecting outlines and,
+/// per sample, anti-aliased by the 4x MSAA.
+///
 /// What is drawn for an Element is cached per Element handle and version (and
 /// flattening level), so a changed Scene only rebuilds the Elements that changed.
 @MainActor
@@ -54,6 +61,9 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
 
     private let queue: any MTLCommandQueue
     private let pipeline: any MTLRenderPipelineState
+    /// The fill shaders: into the stencil buffer only, and onto the colour target.
+    private let fillStencilPipeline: any MTLRenderPipelineState
+    private let fillCoverPipeline: any MTLRenderPipelineState
     let device: any MTLDevice
 
     /// Depth-stencil states for opaque strokes, and for the two passes of
@@ -61,22 +71,28 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
     private let plain: any MTLDepthStencilState
     private let interior: any MTLDepthStencilState
     private let fringe: any MTLDepthStencilState
+    /// Depth-stencil states of fills: counting the winding by either rule,
+    /// painting where it is not zero, and clearing.
+    private let windingNonZero: any MTLDepthStencilState
+    private let windingEvenOdd: any MTLDepthStencilState
+    private let paintInside: any MTLDepthStencilState
+    private let clearStencil: any MTLDepthStencilState
 
-    private(set) var geometry: Geometry?
+    private(set) var geometry: (any GeometrySource)?
     /// Everything to draw, in z-order: the cached draws of all Elements.
-    private var strokes: [StrokeDraw] = []
+    private var draws: [Draw] = []
     private var cache: [UInt32: CachedElement] = [:]
     /// The `Geometry.generation` the cache belongs to.
     private var cacheGeneration: UInt64?
-    /// Power-of-two zoom level `strokes` were flattened for; curves are only
+    /// Power-of-two zoom level `draws` were flattened for; curves are only
     /// re-flattened when it changes, not on every zoom step.
     private var flatteningLevel: Int?
-    private var strokesAreStale = true
-    /// Elements whose strokes were built (flattened and uploaded) so far; a
+    private var drawsAreStale = true
+    /// Elements whose draws were built (flattened and uploaded) so far; a
     /// cache hit does not count. Tests use it to see what was rebuilt.
     private(set) var elementsBuilt = 0
 
-    /// A part's segments on the GPU plus how to draw them.
+    /// A stroked part's segments on the GPU plus how to draw them.
     private struct StrokeDraw {
         var segments: any MTLBuffer
         var segmentCount: Int
@@ -85,11 +101,25 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         var isTranslucent: Bool
     }
 
+    /// A filled part's triangles on the GPU plus how to draw them.
+    private struct FillDraw {
+        /// The fan triangles, then the cover rectangle's two triangles.
+        var vertices: any MTLBuffer
+        var fanVertexCount: Int
+        var uniforms: PartUniforms
+        var rule: GeometryFillRule
+    }
+
+    private enum Draw {
+        case stroke(StrokeDraw)
+        case fill(FillDraw)
+    }
+
     /// The draws of one Element at the version and flattening level they were built for.
     private struct CachedElement {
         var version: UInt32
         var level: Int
-        var draws: [StrokeDraw]
+        var draws: [Draw]
     }
 
     /// Mirrors `FrameUniforms` in StrokeShaders.metal.
@@ -129,37 +159,69 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         color.destinationAlphaBlendFactor = .oneMinusSourceAlpha
         guard let pipeline = try? device.makeRenderPipelineState(descriptor: descriptor) else { return nil }
 
-        func stencilState(compare: MTLCompareFunction, pass: MTLStencilOperation) -> (any MTLDepthStencilState)? {
-            let stencil = MTLStencilDescriptor()
-            stencil.stencilCompareFunction = compare
-            stencil.depthStencilPassOperation = pass
+        // Fills: the same target, other shaders; the first pipeline only
+        // feeds the stencil buffer.
+        guard let fillVertex = library.makeFunction(name: "fill_vertex"),
+            let fillFragment = library.makeFunction(name: "fill_fragment")
+        else { return nil }
+        descriptor.vertexFunction = fillVertex
+        descriptor.fragmentFunction = fillFragment
+        guard let fillCoverPipeline = try? device.makeRenderPipelineState(descriptor: descriptor) else { return nil }
+        color.writeMask = []
+        guard let fillStencilPipeline = try? device.makeRenderPipelineState(descriptor: descriptor) else {
+            return nil
+        }
+
+        /// A state whose front- and back-facing triangles pass the stencil
+        /// test as `compare` says and then do `pass` to the stencil value.
+        func stencilState(
+            compare: MTLCompareFunction, pass: MTLStencilOperation, backPass: MTLStencilOperation? = nil
+        ) -> (any MTLDepthStencilState)? {
+            func stencil(_ operation: MTLStencilOperation) -> MTLStencilDescriptor {
+                let stencil = MTLStencilDescriptor()
+                stencil.stencilCompareFunction = compare
+                stencil.depthStencilPassOperation = operation
+                return stencil
+            }
             let state = MTLDepthStencilDescriptor()
-            state.frontFaceStencil = stencil
-            state.backFaceStencil = stencil
+            state.frontFaceStencil = stencil(pass)
+            state.backFaceStencil = stencil(backPass ?? pass)
             return device.makeDepthStencilState(descriptor: state)
         }
         guard
             let plain = stencilState(compare: .always, pass: .keep),
             let interior = stencilState(compare: .notEqual, pass: .replace),
-            let fringe = stencilState(compare: .notEqual, pass: .keep)
+            let fringe = stencilState(compare: .notEqual, pass: .keep),
+            // Triangles facing one way count up and the others down, so that
+            // the stencil value is the winding number (mod 256).
+            let windingNonZero = stencilState(compare: .always, pass: .incrementWrap, backPass: .decrementWrap),
+            let windingEvenOdd = stencilState(compare: .always, pass: .invert),
+            let paintInside = stencilState(compare: .notEqual, pass: .zero),
+            let clearStencil = stencilState(compare: .always, pass: .zero)
         else { return nil }
 
         self.device = device
         self.queue = queue
         self.pipeline = pipeline
+        self.fillStencilPipeline = fillStencilPipeline
+        self.fillCoverPipeline = fillCoverPipeline
         self.plain = plain
         self.interior = interior
         self.fringe = fringe
+        self.windingNonZero = windingNonZero
+        self.windingEvenOdd = windingEvenOdd
+        self.paintInside = paintInside
+        self.clearStencil = clearStencil
     }
 
     /// Replaces what is drawn; the same object again is a no-op. Keeps
     /// `geometry` alive: curves are flattened from the core's buffers again
     /// whenever the zoom level changes. Elements whose version is unchanged
     /// are not rebuilt.
-    func setGeometry(_ geometry: Geometry) {
+    func setGeometry(_ geometry: any GeometrySource) {
         guard geometry !== self.geometry else { return }
         self.geometry = geometry
-        strokesAreStale = true
+        drawsAreStale = true
         onNeedsDisplay?()
     }
 
@@ -184,10 +246,9 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         pass.stencilAttachment.storeAction = .dontCare
 
         let scale = viewport.zoom * pixelsPerPoint
-        refreshStrokes(scale: scale)
+        refreshDraws(scale: scale)
 
         if let encoder = commands.makeRenderCommandEncoder(descriptor: pass) {
-            encoder.setRenderPipelineState(pipeline)
             var frame = FrameUniforms(
                 origin: viewport.origin, viewSize: SIMD2(Float(target.width), Float(target.height)), scale: scale)
             encoder.setVertexBytes(&frame, length: MemoryLayout<FrameUniforms>.stride, index: 1)
@@ -195,18 +256,34 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
             // value (1...255, then around again; a stale equal value only
             // costs a fringe pixel).
             var translucentCount = 0
-            for stroke in strokes {
-                encoder.setVertexBuffer(stroke.segments, offset: 0, index: 0)
-                if stroke.isTranslucent {
-                    encoder.setStencilReferenceValue(UInt32(translucentCount % 255 + 1))
-                    translucentCount += 1
-                    var uniforms = stroke.uniforms
-                    uniforms.interiorOnly = 1
-                    draw(stroke, uniforms, with: interior, in: encoder)
-                    uniforms.interiorOnly = 0
-                    draw(stroke, uniforms, with: fringe, in: encoder)
-                } else {
-                    draw(stroke, stroke.uniforms, with: plain, in: encoder)
+            // Whether translucent strokes left marks that a fill must not
+            // count as winding.
+            var stencilIsMarked = false
+            var drawingStrokes = false
+            for item in draws {
+                switch item {
+                case .stroke(let stroke):
+                    if !drawingStrokes {
+                        encoder.setRenderPipelineState(pipeline)
+                        drawingStrokes = true
+                    }
+                    encoder.setVertexBuffer(stroke.segments, offset: 0, index: 0)
+                    if stroke.isTranslucent {
+                        encoder.setStencilReferenceValue(UInt32(translucentCount % 255 + 1))
+                        translucentCount += 1
+                        stencilIsMarked = true
+                        var uniforms = stroke.uniforms
+                        uniforms.interiorOnly = 1
+                        draw(stroke, uniforms, with: interior, in: encoder)
+                        uniforms.interiorOnly = 0
+                        draw(stroke, uniforms, with: fringe, in: encoder)
+                    } else {
+                        draw(stroke, stroke.uniforms, with: plain, in: encoder)
+                    }
+                case .fill(let fill):
+                    drawingStrokes = false
+                    draw(fill, clearingMarks: stencilIsMarked, in: encoder)
+                    stencilIsMarked = false
                 }
             }
             encoder.endEncoding()
@@ -229,6 +306,28 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
             type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: stroke.segmentCount)
     }
 
+    /// Draws `fill` with stencil-then-cover. The stencil is zero again where it
+    /// ends, so fills never need the whole buffer cleared.
+    private func draw(_ fill: FillDraw, clearingMarks: Bool, in encoder: any MTLRenderCommandEncoder) {
+        var uniforms = fill.uniforms
+        let coverStart = fill.fanVertexCount
+        encoder.setVertexBuffer(fill.vertices, offset: 0, index: 0)
+        encoder.setRenderPipelineState(fillStencilPipeline)
+        encoder.setStencilReferenceValue(0)
+        if clearingMarks {
+            // Only what the fill's rectangle touches matters.
+            encoder.setDepthStencilState(clearStencil)
+            encoder.drawPrimitives(type: .triangle, vertexStart: coverStart, vertexCount: 6)
+        }
+        encoder.setDepthStencilState(fill.rule == .evenOdd ? windingEvenOdd : windingNonZero)
+        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: coverStart)
+
+        encoder.setRenderPipelineState(fillCoverPipeline)
+        encoder.setDepthStencilState(paintInside)
+        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<PartUniforms>.stride, index: 2)
+        encoder.drawPrimitives(type: .triangle, vertexStart: coverStart, vertexCount: 6)
+    }
+
     // MARK: MTKViewDelegate
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
@@ -243,13 +342,13 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
 
     // MARK: Flattening
 
-    /// Brings `strokes` up to date with the geometry and the zoom: rebuilds
+    /// Brings `draws` up to date with the geometry and the zoom: rebuilds
     /// the Elements that changed or were flattened for another power-of-two
     /// zoom level, reuses the others.
-    private func refreshStrokes(scale: Float) {
+    private func refreshDraws(scale: Float) {
         let level = Int(log2(max(scale, .leastNormalMagnitude)).rounded(.up))
-        guard strokesAreStale || level != flatteningLevel, let geometry else { return }
-        strokesAreStale = false
+        guard drawsAreStale || level != flatteningLevel, let geometry else { return }
+        drawsAreStale = false
         flatteningLevel = level
         if geometry.generation() != cacheGeneration {
             // Element handles may mean other Elements now.
@@ -259,7 +358,7 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         let tolerance = Self.flatteningTolerancePixels / exp2(Float(level))
 
         var kept: [UInt32: CachedElement] = [:]
-        var all: [StrokeDraw] = []
+        var all: [Draw] = []
         geometry.withBuffers { buffers in
             var first = 0
             while first < buffers.parts.count {
@@ -273,7 +372,7 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
                     let parts = buffers.parts[first..<end]
                     entry = CachedElement(
                         version: version, level: level,
-                        draws: parts.compactMap { strokeDraw(for: $0, in: buffers, tolerance: tolerance) })
+                        draws: parts.compactMap { makeDraw(for: $0, in: buffers, tolerance: tolerance) })
                     elementsBuilt += 1
                 }
                 if let entry {
@@ -284,11 +383,21 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
             }
         }
         cache = kept
-        strokes = all
+        draws = all
+    }
+
+    private func makeDraw(for part: GeometryPart, in buffers: GeometryBuffers, tolerance: Float) -> Draw? {
+        switch part.kind {
+        case GeometryPart.strokeKind:
+            return strokeDraw(for: part, in: buffers, tolerance: tolerance).map(Draw.stroke)
+        case GeometryPart.fillKind:
+            return fillDraw(for: part, in: buffers, tolerance: tolerance).map(Draw.fill)
+        default:
+            return nil
+        }
     }
 
     private func strokeDraw(for part: GeometryPart, in buffers: GeometryBuffers, tolerance: Float) -> StrokeDraw? {
-        guard part.kind == GeometryPart.strokeKind else { return nil }
         let segments = StrokeFlattener.segments(of: part, in: buffers, tolerance: tolerance)
         guard !segments.isEmpty,
             let buffer = segments.withUnsafeBytes({
@@ -299,6 +408,21 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         return StrokeDraw(
             segments: buffer, segmentCount: segments.count,
             uniforms: PartUniforms(color: color, width: part.width), isTranslucent: color.w < 1)
+    }
+
+    private func fillDraw(for part: GeometryPart, in buffers: GeometryBuffers, tolerance: Float) -> FillDraw? {
+        guard let rule = part.rule,
+            let mesh = FillMesh.mesh(of: part, in: buffers, tolerance: tolerance)
+        else { return nil }
+        let vertices = mesh.triangles + mesh.cover
+        guard
+            let buffer = vertices.withUnsafeBytes({
+                device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared)
+            })
+        else { return nil }
+        return FillDraw(
+            vertices: buffer, fanVertexCount: mesh.triangles.count,
+            uniforms: PartUniforms(color: premultipliedColor(of: part), width: 0), rule: rule)
     }
 
     private func premultipliedColor(of part: GeometryPart) -> SIMD4<Float> {

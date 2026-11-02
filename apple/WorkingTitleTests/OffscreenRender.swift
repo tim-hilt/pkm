@@ -21,7 +21,7 @@ enum OffscreenRender {
     /// - Returns: the finished image and the renderer that drew it, so tests
     ///   can inspect renderer state such as the frame counter.
     static func render(
-        _ geometry: Geometry, viewport: Viewport, pixelsPerPoint: Float = 1, size: Int = 400
+        _ geometry: any GeometrySource, viewport: Viewport, pixelsPerPoint: Float = 1, size: Int = 400
     ) throws -> (image: RenderedImage, renderer: CanvasRenderer) {
         let renderer = try makeRenderer()
         renderer.setGeometry(geometry)

@@ -296,7 +296,7 @@ mod tests {
 
         assert_eq!(geometry.part_count(), 1);
         assert_eq!(geometry.generation(), editor.geometry().generation());
-        assert_eq!(geometry.part_stride(), 44);
+        assert_eq!(geometry.part_stride(), 48);
         // Four edges, each drawn twice as a move and a cubic.
         assert_eq!(geometry.verb_count(), 16);
         assert_eq!(geometry.coord_count(), 8 * 2 + 8 * 6);

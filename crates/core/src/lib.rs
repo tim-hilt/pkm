@@ -4,9 +4,11 @@
 
 mod editor;
 pub mod geometry;
+mod hachure;
 pub mod input;
 pub mod json;
 mod navigation;
+mod path;
 mod restore;
 mod rough;
 pub mod scene;
@@ -15,7 +17,9 @@ mod tool;
 mod viewport;
 
 pub use editor::Editor;
-pub use geometry::{Dash, Geometry, Part, PartKind, PartWriter, StrokeStyle, Verb};
+pub use geometry::{
+    Dash, FillRule, FillStyle, Geometry, Part, PartKind, PartWriter, StrokeStyle, Verb,
+};
 pub use input::{MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase, ScrollEvent};
 pub use scene::LoadError;
 pub use tool::Tool;

@@ -6,7 +6,7 @@ import Testing
 /// (see docs/renderer-reference-images.md for how to re-record them).
 @MainActor @Suite struct CanvasReferenceTests {
     private func render(
-        _ viewport: Viewport, of geometry: Geometry = TestScenes.rectangle(), pixelsPerPoint: Float = 1,
+        _ viewport: Viewport, of geometry: any GeometrySource = TestScenes.rectangle(), pixelsPerPoint: Float = 1,
         size: Int = 400
     ) throws -> RenderedImage {
         try OffscreenRender.render(geometry, viewport: viewport, pixelsPerPoint: pixelsPerPoint, size: size).image
@@ -35,5 +35,20 @@ import Testing
     @Test func handDrawnStyles() throws {
         let geometry = TestScenes.handDrawnStyles()
         expectMatchesReference(try render(Viewport(), of: geometry, size: 420), named: "hand-drawn-styles")
+    }
+
+    /// Hachure, cross-hatch, zigzag and solid, plus architect and thick variants.
+    @Test func fillStyles() throws {
+        expectMatchesReference(try render(Viewport(), of: TestScenes.fillStyles(), size: 420), named: "fill-styles")
+    }
+
+    /// Ellipse, diamond, rounded and rotated rectangle, translucent solid.
+    @Test func filledShapes() throws {
+        expectMatchesReference(try render(Viewport(), of: TestScenes.filledShapes(), size: 420), named: "filled-shapes")
+    }
+
+    /// Concave and self-intersecting outlines by the non-zero and even-odd rules.
+    @Test func fillRules() throws {
+        expectMatchesReference(try render(Viewport(), of: TestScenes.fillRules(), size: 400), named: "fill-rules")
     }
 }

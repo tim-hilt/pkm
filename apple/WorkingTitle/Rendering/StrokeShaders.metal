@@ -1,7 +1,7 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// Keep both structs in sync with CanvasRenderer.swift.
+// Keep both structs in sync with CanvasRenderer.swift. Strokes first, fills below.
 
 struct FrameUniforms {
     // Scene point at the top-left corner of the view.
@@ -86,4 +86,26 @@ fragment float4 stroke_fragment(
         discard_fragment();
     }
     return part.color * coverage;
+}
+
+// Fills (stencil-then-cover): the same two functions draw the fan triangles
+// into the stencil buffer (colour writes off) and the cover rectangle that
+// paints where the stencil says "inside". Vertices are Scene points.
+struct FillVertexOut {
+    float4 position [[position]];
+};
+
+vertex FillVertexOut fill_vertex(
+    uint vertexId [[vertex_id]],
+    constant float2 *points [[buffer(0)]],
+    constant FrameUniforms &frame [[buffer(1)]]
+) {
+    float2 pixel = (points[vertexId] - frame.origin) * frame.scale;
+    FillVertexOut out;
+    out.position = float4(pixel.x / frame.viewSize.x * 2.0 - 1.0, 1.0 - pixel.y / frame.viewSize.y * 2.0, 0.0, 1.0);
+    return out;
+}
+
+fragment float4 fill_fragment(constant PartUniforms &part [[buffer(2)]]) {
+    return part.color;
 }

@@ -10,31 +10,67 @@
 //! otherwise organised the Rust way: a [`Sketcher`] owns the generator and
 //! its style and turns shapes into [`Op`]s.
 //!
-//! Only the strokes are generated here; fills are a separate feature. The
-//! outline does not depend on a fill: rough.js draws it first.
+//! A shape is drawn as its outline and, if it has a fill, a fill. rough.js
+//! computes the outline first, so its jitter does not depend on the fill; the
+//! fill then continues the same random sequence.
 
 use std::f64::consts::PI;
 
-pub(crate) type Point = (f64, f64);
+use crate::hachure::{self, Line};
+use crate::path::{Point, Segment, points_on_path, to_cubics};
 
 /// One drawing operation, in the coordinate frame of the shape.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Op {
     Move(Point),
+    Line(Point),
     /// Control point, control point, end point.
     Cubic(Point, Point, Point),
 }
 
-/// A piece of an SVG-like path, the input of [`Sketcher::path`].
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum Segment {
-    Move(Point),
-    Line(Point),
-    /// Control point, end point.
-    Quad(Point, Point),
-    /// Control point, control point, end point.
-    Cubic(Point, Point, Point),
+/// A shape as rough.js draws it: first the fill, then the outline over it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Drawing {
+    pub fill: Option<FillOps>,
+    pub outline: Vec<Op>,
 }
+
+/// What rough.js draws to fill a shape.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum FillOps {
+    /// Lines that are stroked in the fill colour (hatching).
+    Lines(Vec<Op>),
+    /// An outline whose enclosed area is filled.
+    Area(Vec<Op>),
+}
+
+/// How the inside of a shape is filled.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Fill {
+    Solid,
+    Hatch(Hatch),
+}
+
+/// Parallel lines across a shape.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Hatch {
+    pub pattern: Pattern,
+    /// Distance between neighbouring lines.
+    pub gap: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Pattern {
+    /// Lines at -41 degrees.
+    Hachure,
+    /// Hachure lines and lines at right angles to them.
+    CrossHatch,
+    /// Lines at -41 degrees that bend back and forth between neighbours.
+    Zigzag,
+}
+
+/// rough.js' `hachureAngle`, in degrees.
+const HACHURE_ANGLE: f64 = -41.0;
 
 /// rough.js' random number generator: a Lehmer / "minstd" generator
 /// (multiplier 48271) on 32-bit integers, which JavaScript computes with
@@ -86,12 +122,16 @@ pub(crate) struct Style {
     /// How well an ellipse's stroke fits it: `1` is exact, rough.js'
     /// default `0.95` lets the radii wobble a little.
     pub curve_fitting: f64,
+    /// How the inside is filled, if at all.
+    pub fill: Option<Fill>,
 }
 
 /// rough.js' `maxRandomnessOffset`.
 const MAX_OFFSET: f64 = 2.0;
 const BOWING: f64 = 1.0;
 const CURVE_STEP_COUNT: f64 = 9.0;
+/// How much rougher the single stroke of a solid fill is than the outline.
+const FILL_SHAPE_ROUGHNESS_GAIN: f64 = 0.8;
 
 /// Draws shapes with jitter from one seeded generator. Shapes drawn one after
 /// the other continue the same random sequence.
@@ -109,21 +149,26 @@ impl Sketcher {
         }
     }
 
-    /// A closed polygon through `points` (rough.js `polygon`).
-    pub(crate) fn polygon(&mut self, points: &[Point]) -> Vec<Op> {
-        let mut ops = Vec::new();
+    /// A closed polygon through `points` (rough.js `polygon`; also its
+    /// `rectangle`, which is one).
+    pub(crate) fn polygon(&mut self, points: &[Point]) -> Drawing {
+        let mut outline = Vec::new();
         if points.len() > 2 {
             for pair in points.windows(2) {
-                self.double_line(pair[0], pair[1], &mut ops);
+                self.double_line(pair[0], pair[1], &mut outline);
             }
-            self.double_line(points[points.len() - 1], points[0], &mut ops);
+            self.double_line(points[points.len() - 1], points[0], &mut outline);
         }
-        ops
+        let fill = self.style.fill.map(|fill| match fill {
+            Fill::Solid => FillOps::Area(self.solid_polygons(&[points.to_vec()])),
+            Fill::Hatch(hatch) => FillOps::Lines(self.hatch(&mut [points.to_vec()], hatch)),
+        });
+        Drawing { fill, outline }
     }
 
     /// An ellipse with the given centre and full width and height
     /// (rough.js `ellipse`).
-    pub(crate) fn ellipse(&mut self, cx: f64, cy: f64, width: f64, height: f64) -> Vec<Op> {
+    pub(crate) fn ellipse(&mut self, cx: f64, cy: f64, width: f64, height: f64) -> Drawing {
         let radius_mean = ((width / 2.0).powi(2) + (height / 2.0).powi(2)) / 2.0;
         let psq = (PI * 2.0 * radius_mean.sqrt()).sqrt();
         let steps = CURVE_STEP_COUNT
@@ -136,22 +181,80 @@ impl Sketcher {
         let mut ry = (height / 2.0).abs();
         ry += self.jitter(ry * wobble);
 
+        let (outline, mut core) = self.sketched_ellipse(increment, (cx, cy), (rx, ry));
+        let fill = self.style.fill.map(|fill| match fill {
+            // A solid ellipse is sketched a second time, with fresh jitter,
+            // and that sketch is the fill.
+            Fill::Solid => FillOps::Area(self.sketched_ellipse(increment, (cx, cy), (rx, ry)).0),
+            Fill::Hatch(hatch) => {
+                FillOps::Lines(self.hatch(std::slice::from_mut(&mut core), hatch))
+            }
+        });
+        Drawing { fill, outline }
+    }
+
+    /// The ops of one hand-drawn ellipse and the points it passes through
+    /// (rough.js `ellipseWithParams`).
+    fn sketched_ellipse(
+        &mut self,
+        increment: f64,
+        centre: Point,
+        radii: Point,
+    ) -> (Vec<Op>, Vec<Point>) {
         let reach = self.offset(0.4, 1.0, 1.0);
         let overlap = increment * self.offset(0.1, reach, 1.0);
-        let outline = self.ellipse_points(increment, (cx, cy), (rx, ry), 1.0, overlap);
+        let (outline, core) = self.ellipse_points(increment, centre, radii, 1.0, overlap);
         let mut ops = curve(&outline);
         if self.style.multi_stroke && self.style.roughness != 0.0 {
-            let second = self.ellipse_points(increment, (cx, cy), (rx, ry), 1.5, 0.0);
+            let (second, _) = self.ellipse_points(increment, centre, radii, 1.5, 0.0);
             ops.extend(curve(&second));
         }
-        ops
+        (ops, core)
     }
 
     /// A path of straight and curved pieces, each drawn sketchily (rough.js
-    /// `path`, which Excalidraw uses for rounded corners). Quadratic curves
-    /// are turned into cubic ones first, as rough.js does. The path is not
+    /// `path`, which Excalidraw uses for rounded corners). The path is not
     /// closed for you: Excalidraw's paths end where they begin.
-    pub(crate) fn path(&mut self, segments: &[Segment]) -> Vec<Op> {
+    pub(crate) fn path(&mut self, segments: &[Segment]) -> Drawing {
+        let segments = to_cubics(segments);
+        let outline = self.path_ops(&segments);
+        let fill = self.style.fill.map(|fill| {
+            // Polylines along the path, for everything but a solid fill of a
+            // single closed curve.
+            let distance = (1.0 + self.style.roughness) / 2.0;
+            let mut polygons = points_on_path(&segments, distance);
+            match fill {
+                Fill::Solid if polygons.len() == 1 => {
+                    // Sketched once and as one continuous path, a bit rougher.
+                    let roughness = self.style.roughness;
+                    let style = Style {
+                        roughness: if roughness == 0.0 {
+                            0.0
+                        } else {
+                            roughness + FILL_SHAPE_ROUGHNESS_GAIN
+                        },
+                        multi_stroke: false,
+                        ..self.style
+                    };
+                    let mut ops = self.with_style(style, |this| this.path_ops(&segments));
+                    // Keep only the first move: the pieces join up.
+                    let mut index = 0;
+                    ops.retain(|op| {
+                        index += 1;
+                        index == 1 || !matches!(op, Op::Move(_))
+                    });
+                    FillOps::Area(ops)
+                }
+                Fill::Solid => FillOps::Area(self.solid_polygons(&polygons)),
+                Fill::Hatch(hatch) => FillOps::Lines(self.hatch(&mut polygons, hatch)),
+            }
+        });
+        Drawing { fill, outline }
+    }
+
+    /// The strokes along a path without cubic curves left out (rough.js
+    /// `svgPath`).
+    fn path_ops(&mut self, segments: &[Segment]) -> Vec<Op> {
         let mut ops = Vec::new();
         let mut current = (0.0, 0.0);
         for &segment in segments {
@@ -161,23 +264,93 @@ impl Sketcher {
                     self.double_line(current, p, &mut ops);
                     current = p;
                 }
-                Segment::Quad(control, end) => {
-                    let c1 = (
-                        current.0 + 2.0 * (control.0 - current.0) / 3.0,
-                        current.1 + 2.0 * (control.1 - current.1) / 3.0,
-                    );
-                    let c2 = (
-                        end.0 + 2.0 * (control.0 - end.0) / 3.0,
-                        end.1 + 2.0 * (control.1 - end.1) / 3.0,
-                    );
-                    self.bezier_to(c1, c2, end, current, &mut ops);
-                    current = end;
-                }
                 Segment::Cubic(c1, c2, end) => {
                     self.bezier_to(c1, c2, end, current, &mut ops);
                     current = end;
                 }
+                Segment::Quad(..) => unreachable!("to_cubics removes quadratic curves"),
             }
+        }
+        ops
+    }
+
+    /// Runs `draw` with `style` instead of the sketcher's own.
+    fn with_style<T>(&mut self, style: Style, draw: impl FnOnce(&mut Self) -> T) -> T {
+        let saved = std::mem::replace(&mut self.style, style);
+        let result = draw(self);
+        self.style = saved;
+        result
+    }
+
+    // --- Fills --------------------------------------------------------------
+
+    /// The outline of each polygon, every point nudged a little: a fill that
+    /// is drawn solid still looks hand-made (rough.js `solidFillPolygon`).
+    fn solid_polygons(&mut self, polygons: &[Vec<Point>]) -> Vec<Op> {
+        let mut ops = Vec::new();
+        for points in polygons.iter().filter(|points| points.len() > 2) {
+            for (i, &(x, y)) in points.iter().enumerate() {
+                let moved = (x + self.jitter(MAX_OFFSET), y + self.jitter(MAX_OFFSET));
+                ops.push(if i == 0 {
+                    Op::Move(moved)
+                } else {
+                    Op::Line(moved)
+                });
+            }
+        }
+        ops
+    }
+
+    /// Hatching across `polygons` (rough.js `patternFillPolygons`). The
+    /// polygons are turned about the origin and back on the way, see
+    /// [`hachure::hachure_lines`].
+    fn hatch(&mut self, polygons: &mut [Vec<Point>], hatch: Hatch) -> Vec<Op> {
+        let gap = hatch.gap.max(0.1);
+        match hatch.pattern {
+            Pattern::Hachure => {
+                let lines = self.hatch_lines(polygons, gap, HACHURE_ANGLE);
+                self.fill_strokes(&lines)
+            }
+            Pattern::CrossHatch => {
+                let lines = self.hatch_lines(polygons, gap, HACHURE_ANGLE);
+                let mut ops = self.fill_strokes(&lines);
+                let across = self.hatch_lines(polygons, gap, HACHURE_ANGLE + 90.0);
+                ops.extend(self.fill_strokes(&across));
+                ops
+            }
+            Pattern::Zigzag => {
+                let lines = self.hatch_lines(polygons, gap, HACHURE_ANGLE);
+                let angle = PI / 180.0 * HACHURE_ANGLE;
+                let (dx, dy) = (gap * 0.5 * angle.cos(), gap * 0.5 * angle.sin());
+                // Every line becomes two that meet at its end.
+                let mut bent = Vec::new();
+                for [p1, p2] in lines {
+                    if (p1.0 - p2.0).hypot(p1.1 - p2.1) != 0.0 {
+                        bent.push([(p1.0 - dx, p1.1 + dy), p2]);
+                        bent.push([(p1.0 + dx, p1.1 - dy), p2]);
+                    }
+                }
+                self.fill_strokes(&bent)
+            }
+        }
+    }
+
+    /// The hatch lines at `angle` degrees. Rough shapes sometimes skip lines:
+    /// rough.js decides with one random number (rough.js
+    /// `polygonHachureLines`).
+    fn hatch_lines(&mut self, polygons: &mut [Vec<Point>], gap: f64, angle: f64) -> Vec<Line> {
+        let mut step = 1.0;
+        if self.style.roughness >= 1.0 && self.random.next() > 0.7 {
+            step = gap;
+        }
+        hachure::hachure_lines(polygons, gap, angle + 90.0, step)
+    }
+
+    /// Each line, drawn twice, however the outline is drawn.
+    fn fill_strokes(&mut self, lines: &[Line]) -> Vec<Op> {
+        let mut ops = Vec::new();
+        for &[from, to] in lines {
+            self.double_line_with(from, to, true, &mut ops);
         }
         ops
     }
@@ -203,8 +376,12 @@ impl Sketcher {
 
     /// A line drawn once, and once more over it unless multi-stroke is off.
     fn double_line(&mut self, from: Point, to: Point, ops: &mut Vec<Op>) {
+        self.double_line_with(from, to, self.style.multi_stroke, ops);
+    }
+
+    fn double_line_with(&mut self, from: Point, to: Point, twice: bool, ops: &mut Vec<Op>) {
         self.line(from, to, false, ops);
-        if self.style.multi_stroke {
+        if twice {
             self.line(from, to, true, ops);
         }
     }
@@ -297,14 +474,18 @@ impl Sketcher {
         (rx, ry): Point,
         offset: f64,
         overlap: f64,
-    ) -> Vec<Point> {
+    ) -> (Vec<Point>, Vec<Point>) {
         let mut points = Vec::new();
+        // The points on the ellipse itself, without lead-in and lead-out.
+        let mut core = Vec::new();
         if self.style.roughness == 0.0 {
             let increment = increment / 4.0;
             points.push((cx + rx * (-increment).cos(), cy + ry * (-increment).sin()));
             let mut angle = 0.0;
             while angle <= PI * 2.0 {
-                points.push((cx + rx * angle.cos(), cy + ry * angle.sin()));
+                let p = (cx + rx * angle.cos(), cy + ry * angle.sin());
+                core.push(p);
+                points.push(p);
                 angle += increment;
             }
             points.push((cx + rx * 0f64.cos(), cy + ry * 0f64.sin()));
@@ -320,14 +501,16 @@ impl Sketcher {
             let end = PI * 2.0 + start - 0.01;
             let mut angle = start;
             while angle < end {
-                points.push(on_ellipse(self, 1.0, angle));
+                let p = on_ellipse(self, 1.0, angle);
+                core.push(p);
+                points.push(p);
                 angle += increment;
             }
             points.push(on_ellipse(self, 1.0, start + PI * 2.0 + overlap * 0.5));
             points.push(on_ellipse(self, 0.98, start + overlap));
             points.push(on_ellipse(self, 0.9, start + overlap * 0.5));
         }
-        points
+        (points, core)
     }
 }
 

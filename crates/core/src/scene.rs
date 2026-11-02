@@ -63,6 +63,15 @@ pub enum LineStyle {
     Dotted,
 }
 
+/// How the background of a closed Element is filled: its `fillStyle`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FillPattern {
+    Hachure,
+    CrossHatch,
+    Zigzag,
+    Solid,
+}
+
 /// Rounded corners of an Element: its `roundness` property. Elements with
 /// sharp corners have none.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -261,6 +270,26 @@ impl Element<'_> {
             Some("dashed") => LineStyle::Dashed,
             Some("dotted") => LineStyle::Dotted,
             _ => LineStyle::Solid,
+        }
+    }
+
+    /// The background colour as written in the file (a CSS colour, usually
+    /// hex), `transparent` if the Element has none.
+    pub fn background_color(&self) -> &str {
+        self.object
+            .get("backgroundColor")
+            .and_then(Value::as_str)
+            .unwrap_or("transparent")
+    }
+
+    /// How the background is filled. Like rough.js, anything unknown is
+    /// hachure.
+    pub fn fill_pattern(&self) -> FillPattern {
+        match self.object.get("fillStyle").and_then(Value::as_str) {
+            Some("solid") => FillPattern::Solid,
+            Some("cross-hatch") => FillPattern::CrossHatch,
+            Some("zigzag") => FillPattern::Zigzag,
+            _ => FillPattern::Hachure,
         }
     }
 

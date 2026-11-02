@@ -7,7 +7,7 @@
 
 use std::mem::{offset_of, size_of};
 
-use workingtitle_core::{Dash, Geometry, Part, PartKind, StrokeStyle, Verb};
+use workingtitle_core::{Dash, FillRule, FillStyle, Geometry, Part, PartKind, StrokeStyle, Verb};
 
 #[test]
 fn parts_follow_each_other_in_the_shared_buffers() {
@@ -38,7 +38,7 @@ fn parts_follow_each_other_in_the_shared_buffers() {
 
 #[test]
 fn record_layout_is_the_c_layout_clients_read_directly() {
-    assert_eq!(size_of::<Part>(), 44);
+    assert_eq!(size_of::<Part>(), 48);
     assert_eq!(offset_of!(Part, element), 0);
     assert_eq!(offset_of!(Part, version), 4);
     assert_eq!(offset_of!(Part, kind), 8);
@@ -50,6 +50,7 @@ fn record_layout_is_the_c_layout_clients_read_directly() {
     assert_eq!(offset_of!(Part, coord_start), 32);
     assert_eq!(offset_of!(Part, dash_on), 36);
     assert_eq!(offset_of!(Part, dash_off), 40);
+    assert_eq!(offset_of!(Part, fill_rule), 44);
 }
 
 #[test]
@@ -59,6 +60,9 @@ fn verb_and_kind_numbers_are_stable() {
     assert_eq!(Verb::Cubic as u8, 2);
     assert_eq!(Verb::from_byte(3), None);
     assert_eq!(PartKind::Stroke as u32, 0);
+    assert_eq!(PartKind::Fill as u32, 1);
+    assert_eq!(FillRule::NonZero as u32, 0);
+    assert_eq!(FillRule::EvenOdd as u32, 1);
 }
 
 #[test]
@@ -82,4 +86,27 @@ fn a_part_records_its_dash_pattern_and_solid_parts_record_zeros() {
     };
     assert_eq!((a.dash_on, a.dash_off), (0.0, 0.0));
     assert_eq!((b.dash_on, b.dash_off), (8.0, 10.0));
+}
+
+#[test]
+fn a_fill_part_records_its_rule_and_has_no_line_width() {
+    let mut geometry = Geometry::new();
+    let style = FillStyle {
+        color: 0x00ff_00ff,
+        opacity: 0.25,
+        rule: FillRule::EvenOdd,
+    };
+    let mut fill = geometry.fill(4, 2, style);
+    fill.move_to(0.0, 0.0);
+    fill.line_to(10.0, 0.0);
+    fill.line_to(10.0, 10.0);
+
+    let [part] = geometry.parts() else {
+        panic!("one part")
+    };
+    assert_eq!(part.kind, PartKind::Fill as u32);
+    assert_eq!((part.color, part.opacity), (0x00ff_00ff, 0.25));
+    assert_eq!(part.fill_rule, 1);
+    assert_eq!((part.width, part.dash_on, part.dash_off), (0.0, 0.0, 0.0));
+    assert_eq!(part.verb_count, 3);
 }
