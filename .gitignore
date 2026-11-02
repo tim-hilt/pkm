@@ -11,3 +11,7 @@ xcuserdata/
 
 .scratch/
 
+
+# Rust build output and the artefacts `make core-apple` generates
+/target/
+/apple/Generated/

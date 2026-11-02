@@ -1,0 +1,22 @@
+# UniFFI surface of the core. Compiled to a static library that the Apple app
+# links; Swift bindings are generated from it by `make core-apple`.
+[package]
+name = "workingtitle-bindings"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["staticlib", "lib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+required-features = ["bindgen"]
+
+[features]
+# The bindings generator pulls in a CLI stack; the library never needs it.
+bindgen = ["uniffi/cli"]
+
+[dependencies]
+uniffi = "0.32"
+workingtitle-core = { path = "../core" }

@@ -1,0 +1,15 @@
+# Rust core (ADR-0001) and its UniFFI bindings (ADR-0007).
+[workspace]
+resolver = "3"
+members = ["crates/core", "crates/bindings"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Small and fast binaries for the app; the core ships inside it.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

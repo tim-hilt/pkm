@@ -12,7 +12,12 @@ targets:
     type: application
     platform: auto
     supportedDestinations: [iOS, macOS]
-    sources: [WorkingTitle]
+    # Generated/ holds the Rust core's Swift bindings and XCFramework, built by
+    # `make core-apple` (which `make apple-project` depends on).
+    sources: [WorkingTitle, Generated/WorkingTitleCore.swift]
+    dependencies:
+      - framework: Generated/WorkingTitleCoreFFI.xcframework
+        embed: false
     configFiles:
       Debug: Config/Signing.xcconfig
       Release: Config/Signing.xcconfig
