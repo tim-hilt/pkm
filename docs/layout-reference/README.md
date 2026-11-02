@@ -6,7 +6,7 @@ All lengths are CSS px, which map 1:1 to SwiftUI points. Coordinates are `x,y` o
 
 ## Method and provenance
 
-- Live site https://excalidraw.com, driven with `playwright-cli` (Chrome channel, English locale, 2026-11-02). Geometry and computed styles were read from the DOM (`getBoundingClientRect`, `getComputedStyle`, CSS variables); icons are the live `<svg>` elements.
+- Live site https://excalidraw.com, driven with `playwright-cli` (Chrome channel, English locale, 2026-11-02). Geometry and computed styles were read from the DOM (`getBoundingClientRect`, `getComputedStyle`, CSS variables); icons are the live `<svg>` elements. The probe scripts are in `scripts/layout-probe/`; re-measure with them.
 - Breakpoints, option sets, palettes and constants were cross-checked against the upstream source checkout at `../../excalidraw/excalidraw` (commit `8bcdca4`): `packages/common/src/editorInterface.ts`, `colors.ts`, `constants.ts`, `packages/excalidraw/components/{LayerUI,Actions,MobileToolbar,ToolPopover}.tsx`, `css/styles.scss`, `components/Actions.scss`. Items verified only in source are marked _(source)_.
 - Device emulation: Chrome with a custom context per size (`hasTouch`, `isMobile`, iOS user agent, DPR 1 for Mac/iPad, DPR 2 for iPhone). The layout is chosen purely by container size (below), not by user agent, so this is equivalent to Safari on the real devices. Real Safari/iOS additionally applies safe-area insets; the native app must do this itself.
 - Mouse events were used for interaction; excalidraw.com's chrome does not change with pointer type, but its **canvas** selection handles do (see [Canvas overlay](#canvas-overlay-not-chrome-but-touch-relevant)).

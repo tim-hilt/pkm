@@ -1,3 +1,5 @@
 #!/bin/sh
 # Enable with: git config core.hooksPath .githooks
-exec make lint
+set -e
+make lint
+cargo test --workspace --locked -q

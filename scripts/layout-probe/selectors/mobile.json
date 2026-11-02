@@ -1,0 +1,14 @@
+[
+["bottomBar",".App-bottom-bar"],
+["mobileActionsRow",".mobile-shape-actions"],
+["compactItems",".mobile-shape-actions .compact-action-item",1],
+["compactBtns",".mobile-shape-actions button",1],
+["toolbarIsland",".App-bottom-bar .App-toolbar"],
+["mobileToolbar",".mobile-toolbar"],
+["tools",".mobile-toolbar > *",1],
+["topBar",".App-top-bar"],
+["topBarContent",".App-toolbar-content"],
+["menuTrigger",".main-menu-trigger"],
+["libTrigger",".sidebar-trigger"],
+["undoRedoBtns",".mobile-shape-actions .ToolIcon",1]
+]

@@ -1,0 +1,10 @@
+[
+["popover",".color-picker"],
+["popoverWrap",".properties-content, .Popover, .color-picker-popover"],
+["swatches",".color-picker__button.has-outline, .color-picker-content .color-picker__button",1],
+["shadesTitle",".color-picker__heading",1],
+["hex",".color-picker-input"],
+["hexWrap",".color-picker-input-label, .color-input-container"],
+["eyedropper",".excalidraw-eye-dropper-trigger"],
+["help",".color-picker-help-text, .color-picker__help"]
+]

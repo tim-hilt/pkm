@@ -42,8 +42,14 @@ test-ios: apple-project sim
 record-references: apple-project
 	TEST_RUNNER_RECORD_REFERENCES=1 $(XCTEST) -destination 'platform=macOS' ENABLE_APP_SANDBOX=NO
 
+# The pre-commit hook runs this (enable: git config core.hooksPath .githooks).
 lint:
 	swift format lint --strict -r $(SWIFT_SRC)
+	cargo fmt --all --check
+	cargo clippy --workspace --all-targets --locked -q -- -D warnings
+	@# ADR-0009: the core crate has no dependencies.
+	@test "$$(cargo tree -p workingtitle-core -e normal --depth 1 --prefix none --locked | wc -l)" -eq 1 \
+		|| { echo 'error: crates/core must not have dependencies (ADR-0009)'; exit 1; }
 
 fmt:
 	swift format -i -r $(SWIFT_SRC)

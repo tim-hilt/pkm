@@ -1,0 +1,20 @@
+[
+["keybinding",".App-toolbar .ToolIcon__keybinding"],
+["keybindings",".App-toolbar .ToolIcon__keybinding",1],
+["toolChecked",".App-toolbar .ToolIcon--checked"],
+["toolIconChecked",".App-toolbar .ToolIcon--checked .ToolIcon__icon"],
+["colorTop",".color-picker__top-picks-container, .color-picker__top-picks"],
+["colorBtn",".top-picks-dnd__pick",1],
+["colorTrigger",".color-picker__button.active-color",1],
+["colorSep",".color-picker__separator"],
+["rangeWrapper",".range-wrapper"],
+["rangeInput",".range-input"],
+["zeroLabel",".zero-label"],
+["valueBubble",".value-bubble"],
+["legend",".selected-shape-actions legend"],
+["buttonList",".selected-shape-actions .buttonList"],
+["layerBtn",".zIndexButton"],
+["radioIcon",".selected-shape-actions .ToolIcon__icon"],
+["panelContainer",".selected-shape-actions-container"],
+["fixedSide",".FixedSideContainer"]
+]

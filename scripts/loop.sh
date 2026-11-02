@@ -80,6 +80,9 @@ if [[ ! -d $tasks_dir ]]; then
   exit 1
 fi
 
+# Every agent commit goes through the pre-commit guardrail (make lint + Rust tests).
+git config core.hooksPath .githooks
+
 mkdir -p logs
 log_file="logs/$(basename "$(cd "$directory" && pwd)").loop.log"
 
@@ -99,7 +102,7 @@ for task_file in ${tasks[@]+"${tasks[@]}"}; do
   status_set "Implementing $task_file"
 
   run_pi anthropic claude-sonnet-5-5 high \
-    "/skill:tdd implement the task described in @$task_file. Apply software-design best practices during the implementation. Tick off all completed bullet points in $task_file. Set its Status line to in-review when you're finished. Commit all changes using the commit-message 'Implement $task_file'."
+    "/skill:tdd implement the task described in @$task_file. This is a headless run: the seams named in the task and its spec are the confirmed seams. Apply software-design best practices during the implementation. Tick off all completed bullet points in $task_file and set its Status line to in-review when you're finished; edit it in place, since .scratch/ is untracked. Commit the implementation using the commit-message 'Implement $task_file'."
 
   implemented=$((implemented + 1))
   status_stop

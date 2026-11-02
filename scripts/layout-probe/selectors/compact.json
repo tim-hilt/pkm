@@ -1,0 +1,13 @@
+[
+["compactIsland",".compact-shape-actions-island"],
+["compactItems",".compact-action-item",1],
+["compactItemBtn",".compact-action-item button, .compact-action-item .color-picker__button, .compact-action-item .properties-trigger",1],
+["toolbarIsland",".App-toolbar.Island"],
+["tools",".App-toolbar .ToolIcon__icon",1],
+["menuTrigger",".main-menu-trigger"],
+["zoomActions",".zoom-actions"],
+["undoRedo",".undo-redo-buttons"],
+["helpIcon",".help-icon"],
+["sidebarTrigger",".sidebar-trigger__label-element"],
+["hint",".HintViewer"]
+]

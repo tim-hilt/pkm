@@ -1,0 +1,8 @@
+[
+["dropdown",".dropdown-menu"],
+["dropdownContainer",".dropdown-menu-container"],
+["dropdownItem",".dropdown-menu-item"],
+["dropdownItems",".dropdown-menu-item",1],
+["dropdownTitle",".dropdown-menu-group-title"],
+["dropdownSep",".dropdown-menu-item-divider"]
+]
