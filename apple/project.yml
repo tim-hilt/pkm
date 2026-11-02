@@ -1,0 +1,65 @@
+# XcodeGen spec; `make apple-project` generates WorkingTitle.xcodeproj from it.
+# Edit this file, never the generated project.
+name: WorkingTitle
+options:
+  bundleIdPrefix: com.timhilt
+  deploymentTarget:
+    iOS: "26.0"
+    macOS: "27.0"
+targets:
+  # One multiplatform target serves iOS, iPadOS and macOS.
+  WorkingTitle:
+    type: application
+    platform: auto
+    supportedDestinations: [iOS, macOS]
+    sources: [WorkingTitle]
+    configFiles:
+      Debug: Config/Signing.xcconfig
+      Release: Config/Signing.xcconfig
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.timhilt.workingtitle
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: $(inherited)
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: WorkingTitle
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ENABLE_APP_SANDBOX: YES
+        ENABLE_HARDENED_RUNTIME: YES
+        # Apple silicon only: smaller binary, no x86_64 slice.
+        ARCHS: arm64
+        # Ad-hoc sign macOS builds so they run without a development team.
+        "CODE_SIGN_IDENTITY[sdk=macosx*]": "-"
+      configs:
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: -Osize
+          DEAD_CODE_STRIPPING: YES
+    scheme:
+      testTargets: [WorkingTitleTests]
+  WorkingTitleTests:
+    type: bundle.unit-test
+    platform: auto
+    supportedDestinations: [iOS, macOS]
+    sources: [WorkingTitleTests]
+    configFiles:
+      Debug: Config/Signing.xcconfig
+      Release: Config/Signing.xcconfig
+    dependencies:
+      - target: WorkingTitle
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "6.0"
+        ARCHS: arm64
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: $(inherited)
+        "CODE_SIGN_IDENTITY[sdk=macosx*]": "-"
+        # macOS app bundles keep the executable under Contents/MacOS.
+        "TEST_HOST[sdk=macosx*]": "$(BUILT_PRODUCTS_DIR)/WorkingTitle.app/Contents/MacOS/WorkingTitle"
+        "BUNDLE_LOADER[sdk=macosx*]": "$(TEST_HOST)"
