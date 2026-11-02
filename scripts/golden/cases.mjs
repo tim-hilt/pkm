@@ -30,6 +30,7 @@ export function scenes(upstream) {
     { name: "shapes", elements: shapes(upstream) },
     { name: "fills", elements: fills(upstream) },
     { name: "lines-arrows", elements: linesAndArrows(upstream) },
+    { name: "arrowhead-turns", elements: arrowheadTurns(upstream) },
     { name: "freedraw", elements: freedraw(upstream) },
   ];
 }
@@ -133,6 +134,39 @@ function linesAndArrows(upstream) {
   for (const head of ["arrow", "circle", "triangle_outline", "cardinality_zero_or_many"]) {
     elements.push(make("arrow", `arrow-dotted-end-${head}`, straight, { endArrowhead: head, strokeStyle: "dotted" }));
     elements.push(make("arrow", `arrow-thick-end-${head}`, straight, { endArrowhead: head, strokeWidth: 4 }));
+  }
+  // Curved loops are filled along their curve, not along their corners.
+  const curvedLoop = [[0, 0], [60, -20], [100, 30], [50, 80], [0, 50], [0, 0]];
+  for (const fillStyle of ["hachure", "solid"]) {
+    elements.push(make("line", `line-curved-loop-${fillStyle}`, curvedLoop, {
+      backgroundColor: PINK, fillStyle, roundness: PROPORTIONAL_RADIUS,
+    }));
+  }
+  return elements;
+}
+
+// --- arrowheads on short, turning last segments ------------------------------
+
+function arrowheadTurns(upstream) {
+  const place = new Placer(6, 220, 140);
+  const make = (id, points, opts) => {
+    const [width, height] = extent(points);
+    return element(upstream, place, "arrow", id, { points, width, height, ...opts });
+  };
+
+  const elements = [];
+  // Arrowheads shrink on a short last segment and keep clear of the segment
+  // before it, which turns away; start and end alike, sharp and curved.
+  const turnAtEnd = [[0, 0], [100, 0], [108, 14]];
+  const turnAtStart = [[0, 0], [8, 14], [108, 14]];
+  const curvedTurn = [[0, 0], [60, 40], [100, 10], [110, 20]];
+  for (const head of ARROWHEADS) {
+    elements.push(make(`arrow-turn-end-${head}`, turnAtEnd, { endArrowhead: head }));
+    elements.push(make(`arrow-turn-start-${head}`, turnAtStart, { startArrowhead: head, endArrowhead: null }));
+  }
+  for (const head of ["arrow", "bar", "circle", "triangle", "diamond", "cardinality_one", "cardinality_zero_or_many"]) {
+    elements.push(make(`arrow-turn-thick-end-${head}`, turnAtEnd, { endArrowhead: head, strokeWidth: 4 }));
+    elements.push(make(`arrow-turn-curved-end-${head}`, curvedTurn, { endArrowhead: head, roundness: PROPORTIONAL_RADIUS }));
   }
   return elements;
 }

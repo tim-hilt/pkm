@@ -14,6 +14,7 @@ Each fixture `<name>` is a pair:
 | `shapes`       | rectangle, diamond, ellipse x roughness 0/1/2 x solid/dashed/dotted x sharp/round; tiny and narrow Elements (roughness reduction) |
 | `fills`        | hachure, cross-hatch, zigzag, solid on every closed shape at each roughness; rounded shapes; stroke widths |
 | `lines-arrows` | lines and arrows: straight, multi-point, curved, closed (filled) loops; every arrowhead at start and end; dashed, dotted, thick |
+| `arrowhead-turns` | every arrowhead at the start and end of arrows whose last segment is short and turns away; thick and curved variants |
 | `freedraw`     | simulated and real (stylus) pressure; thick, precise, dot, short, closed and filled strokes |
 
 ## `.golden.json`

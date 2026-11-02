@@ -17,7 +17,7 @@
 use std::f64::consts::PI;
 
 use crate::hachure::{self, Line};
-use crate::path::{Point, Segment, points_on_path, to_cubics};
+use crate::path::{Point, Segment, curve_polyline, points_on_path, to_cubics};
 
 /// One drawing operation, in the coordinate frame of the shape.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -137,6 +137,7 @@ const FILL_SHAPE_ROUGHNESS_GAIN: f64 = 0.8;
 /// the other continue the same random sequence.
 #[derive(Debug, Clone)]
 pub(crate) struct Sketcher {
+    seed: f64,
     random: Random,
     style: Style,
 }
@@ -144,8 +145,103 @@ pub(crate) struct Sketcher {
 impl Sketcher {
     pub(crate) fn new(seed: f64, style: Style) -> Self {
         Self {
+            seed,
             random: Random::new(seed),
             style,
+        }
+    }
+
+    /// Straight pieces from point to point, each drawn sketchily (rough.js
+    /// `linearPath`; also its `line`, which is one piece). Nothing is drawn
+    /// for fewer than two points.
+    pub(crate) fn linear_path(&mut self, points: &[Point]) -> Drawing {
+        let mut outline = Vec::new();
+        for pair in points.windows(2) {
+            self.double_line(pair[0], pair[1], &mut outline);
+        }
+        Drawing {
+            fill: None,
+            outline,
+        }
+    }
+
+    /// A smooth curve through `points`, which are at least two for anything
+    /// to be drawn; a curve of three or more is filled like a polygon along
+    /// the curve, if the style has a fill (rough.js `curve`).
+    pub(crate) fn curve(&mut self, points: &[Point]) -> Drawing {
+        let roughness = self.style.roughness;
+        let mut outline = self.curve_stroke(points, 1.0 + roughness * 0.2);
+        if self.style.multi_stroke {
+            // The second stroke has a random sequence of its own, from the
+            // next seed (rough.js `cloneOptionsAlterSeed`).
+            let seed = if self.seed == 0.0 {
+                0.0
+            } else {
+                self.seed + 1.0
+            };
+            let first = std::mem::replace(&mut self.random, Random::new(seed));
+            let second = self.curve_stroke(points, 1.5 * (1.0 + roughness * 0.22));
+            self.random = first;
+            outline.extend(second);
+        }
+
+        let fill = match self.style.fill {
+            Some(fill) if points.len() >= 3 => Some(match fill {
+                Fill::Solid => {
+                    // One continuous, rougher stroke; the sequence goes on
+                    // where the outline's first stroke left it.
+                    let style = Style {
+                        roughness: if roughness == 0.0 {
+                            0.0
+                        } else {
+                            roughness + FILL_SHAPE_ROUGHNESS_GAIN
+                        },
+                        multi_stroke: false,
+                        ..self.style
+                    };
+                    let ops = self.with_style(style, |this| {
+                        this.curve_stroke(points, 1.0 + style.roughness * 0.2)
+                    });
+                    FillOps::Area(join_pieces(ops))
+                }
+                Fill::Hatch(hatch) => {
+                    let mut polygon = vec![curve_polyline(points, 10.0, (1.0 + roughness) / 2.0)];
+                    FillOps::Lines(self.hatch(&mut polygon, hatch))
+                }
+            }),
+            _ => None,
+        };
+        Drawing { fill, outline }
+    }
+
+    /// One pass along a curve, every point nudged by up to `offset` (rough.js
+    /// `_curveWithOffset`).
+    fn curve_stroke(&mut self, points: &[Point], offset: f64) -> Vec<Op> {
+        let mut nudged = Vec::with_capacity(points.len() + 2);
+        let nudge = |this: &mut Self, (x, y): Point| {
+            let x = x + this.jitter(offset);
+            (x, y + this.jitter(offset))
+        };
+        // The first and last points are doubled, so that the curve runs
+        // through them.
+        if let (Some(&first), Some(&last)) = (points.first(), points.last()) {
+            nudged.push(nudge(self, first));
+            nudged.push(nudge(self, first));
+            for (i, &point) in points.iter().enumerate().skip(1) {
+                nudged.push(nudge(self, point));
+                if i == points.len() - 1 {
+                    nudged.push(nudge(self, last));
+                }
+            }
+        }
+        match nudged[..] {
+            [a, b] => {
+                let mut ops = Vec::new();
+                self.double_line(a, b, &mut ops);
+                ops
+            }
+            _ if nudged.len() > 3 => curve(&nudged),
+            _ => Vec::new(),
         }
     }
 
@@ -236,14 +332,8 @@ impl Sketcher {
                         multi_stroke: false,
                         ..self.style
                     };
-                    let mut ops = self.with_style(style, |this| this.path_ops(&segments));
-                    // Keep only the first move: the pieces join up.
-                    let mut index = 0;
-                    ops.retain(|op| {
-                        index += 1;
-                        index == 1 || !matches!(op, Op::Move(_))
-                    });
-                    FillOps::Area(ops)
+                    let ops = self.with_style(style, |this| this.path_ops(&segments));
+                    FillOps::Area(join_pieces(ops))
                 }
                 Fill::Solid => FillOps::Area(self.solid_polygons(&polygons)),
                 Fill::Hatch(hatch) => FillOps::Lines(self.hatch(&mut polygons, hatch)),
@@ -512,6 +602,17 @@ impl Sketcher {
         }
         (points, core)
     }
+}
+
+/// Keeps only the first move: the pieces of the shape join up (rough.js
+/// `_mergedShape`).
+pub(crate) fn join_pieces(mut ops: Vec<Op>) -> Vec<Op> {
+    let mut index = 0;
+    ops.retain(|op| {
+        index += 1;
+        index == 1 || !matches!(op, Op::Move(_))
+    });
+    ops
 }
 
 /// A smooth curve through `points`, drawn as one cubic per interior pair

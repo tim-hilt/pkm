@@ -72,6 +72,52 @@ pub enum FillPattern {
     Solid,
 }
 
+/// What is drawn at an end of an arrow: its `startArrowhead` or
+/// `endArrowhead`. An arrow without one has `None` instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Arrowhead {
+    Arrow,
+    Bar,
+    Circle,
+    CircleOutline,
+    Triangle,
+    TriangleOutline,
+    Diamond,
+    DiamondOutline,
+    CardinalityOne,
+    CardinalityMany,
+    CardinalityOneOrMany,
+    CardinalityExactlyOne,
+    CardinalityZeroOrOne,
+    CardinalityZeroOrMany,
+    /// A name this version does not know; drawn as a small open arrowhead.
+    Other,
+}
+
+impl Arrowhead {
+    /// The arrowhead named in a file. Excalidraw's older names are
+    /// translated, as its `normalizeArrowhead` does.
+    fn from_name(name: &str) -> Arrowhead {
+        match name {
+            "arrow" => Arrowhead::Arrow,
+            "bar" => Arrowhead::Bar,
+            "circle" | "dot" => Arrowhead::Circle,
+            "circle_outline" => Arrowhead::CircleOutline,
+            "triangle" => Arrowhead::Triangle,
+            "triangle_outline" => Arrowhead::TriangleOutline,
+            "diamond" => Arrowhead::Diamond,
+            "diamond_outline" => Arrowhead::DiamondOutline,
+            "cardinality_one" | "crowfoot_one" => Arrowhead::CardinalityOne,
+            "cardinality_many" | "crowfoot_many" => Arrowhead::CardinalityMany,
+            "cardinality_one_or_many" | "crowfoot_one_or_many" => Arrowhead::CardinalityOneOrMany,
+            "cardinality_exactly_one" => Arrowhead::CardinalityExactlyOne,
+            "cardinality_zero_or_one" => Arrowhead::CardinalityZeroOrOne,
+            "cardinality_zero_or_many" => Arrowhead::CardinalityZeroOrMany,
+            _ => Arrowhead::Other,
+        }
+    }
+}
+
 /// Rounded corners of an Element: its `roundness` property. Elements with
 /// sharp corners have none.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -183,6 +229,17 @@ impl Scene {
                     object,
                 })
             })
+    }
+
+    /// The colour of the Canvas as written in the file (a CSS colour), white
+    /// if the file has none.
+    pub fn view_background_color(&self) -> &str {
+        self.root
+            .get("appState")
+            .and_then(Value::as_object)
+            .and_then(|app_state| app_state.get("viewBackgroundColor"))
+            .and_then(Value::as_str)
+            .unwrap_or("#ffffff")
     }
 
     fn element_values(&self) -> &[Value] {
@@ -310,6 +367,69 @@ impl Element<'_> {
             },
             _ => Roundness::Other,
         })
+    }
+
+    /// The points of a line or arrow in the Element's own frame, which starts
+    /// at its `x` and `y`. Points that are not number pairs are left out; a
+    /// line without two valid points goes from the origin to
+    /// `(width, height)`, as Excalidraw restores it. Empty for other types.
+    pub fn points(&self) -> Vec<(f64, f64)> {
+        if !self.kind.is_linear() {
+            return Vec::new();
+        }
+        let valid: Vec<_> = self
+            .object
+            .get("points")
+            .and_then(Value::as_array)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|point| {
+                let [x, y] = point.as_array()? else {
+                    return None;
+                };
+                Some((x.as_f64()?, y.as_f64()?))
+            })
+            .filter(|(x, y)| x.is_finite() && y.is_finite())
+            .collect();
+        if valid.len() >= 2 {
+            valid
+        } else {
+            vec![(0.0, 0.0), (self.width(), self.height())]
+        }
+    }
+
+    /// What an arrow has at its first point; `None` for lines and arrows
+    /// without.
+    pub fn start_arrowhead(&self) -> Option<Arrowhead> {
+        if self.kind != ElementType::Arrow {
+            return None;
+        }
+        self.arrowhead("startArrowhead", None)
+    }
+
+    /// What an arrow has at its last point. Arrows from old files that do not
+    /// say have an arrow, as Excalidraw restores them.
+    pub fn end_arrowhead(&self) -> Option<Arrowhead> {
+        if self.kind != ElementType::Arrow {
+            return None;
+        }
+        self.arrowhead("endArrowhead", Some(Arrowhead::Arrow))
+    }
+
+    fn arrowhead(&self, key: &str, missing: Option<Arrowhead>) -> Option<Arrowhead> {
+        match self.object.get(key) {
+            None => missing,
+            Some(Value::String(name)) => Some(Arrowhead::from_name(name)),
+            Some(_) => None,
+        }
+    }
+
+    /// Whether the Element is an arrow that Excalidraw routes at right angles.
+    /// The core keeps its points as they are in the file and draws them
+    /// without routing.
+    pub fn is_elbow_arrow(&self) -> bool {
+        self.kind == ElementType::Arrow
+            && self.object.get("elbowed").and_then(Value::as_bool) == Some(true)
     }
 
     /// `0.0` (invisible) to `1.0`.

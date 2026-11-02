@@ -9,110 +9,11 @@
 
 mod common;
 
-use common::{Fixture, Op, OpSet, Shape, editor_with_element, editor_with_fixture, ops};
-use workingtitle_core::json::Value;
-use workingtitle_core::{Geometry, Part, PartKind, Verb};
-
-/// Largest allowed difference between a coordinate and rough.js' double. The
-/// geometry is `f32`, whose resolution at the fixtures' coordinates is ~1e-4.
-const TOLERANCE: f64 = 1e-3;
-
-const NON_ZERO: u32 = 0;
-const EVEN_ODD: u32 = 1;
-
-fn num(value: &Value, key: &str) -> f64 {
-    value.get(key).and_then(Value::as_f64).unwrap()
-}
-
-fn text<'a>(value: &'a Value, key: &str) -> &'a str {
-    value.get(key).and_then(Value::as_str).unwrap()
-}
-
-/// `0xRRGGBBAA` of an opaque `#rrggbb` colour.
-fn opaque(hex: &str) -> u32 {
-    (u32::from_str_radix(hex.strip_prefix('#').unwrap(), 16).unwrap() << 8) | 0xff
-}
-
-/// The parts drawn for the Element with `handle`, in drawing order.
-fn parts_of(geometry: &Geometry, handle: usize) -> Vec<Part> {
-    geometry
-        .parts()
-        .iter()
-        .copied()
-        .filter(|p| p.element as usize == handle)
-        .collect()
-}
-
-fn golden_to_verb(op: &Op) -> (Verb, Vec<f64>) {
-    match *op {
-        Op::Move(p) => (Verb::Move, p.to_vec()),
-        Op::LineTo(p) => (Verb::Line, p.to_vec()),
-        Op::BCurveTo(p) => (Verb::Cubic, p.to_vec()),
-    }
-}
-
-/// rough.js' canvas renderer fills `curve`, `polygon` and `path` shapes with
-/// the even-odd rule and everything else (rectangle, ellipse) with non-zero.
-fn golden_fill_rule(shape: &str) -> u32 {
-    match shape {
-        "curve" | "polygon" | "path" => EVEN_ODD,
-        _ => NON_ZERO,
-    }
-}
-
-/// Checks that `part` is what rough.js drew for `set` of the Element at
-/// `(x, y)`: same kind, ops, colour and line width.
-fn assert_part_matches_set(
-    geometry: &Geometry,
-    part: &Part,
-    set: &OpSet,
-    (shape, options): (&str, &Value),
-    (x, y): (f64, f64),
-    id: &str,
-) {
-    let expected_ops: Vec<_> = set.ops.iter().map(golden_to_verb).collect();
-    let actual = ops(geometry, part);
-    assert_eq!(
-        actual.iter().map(|(verb, _)| *verb).collect::<Vec<_>>(),
-        expected_ops
-            .iter()
-            .map(|(verb, _)| *verb)
-            .collect::<Vec<_>>(),
-        "{id} {}: verbs",
-        set.kind
-    );
-    for (i, ((_, got), (_, want))) in actual.iter().zip(&expected_ops).enumerate() {
-        for (k, (g, w)) in got.iter().zip(want).enumerate() {
-            let w = w + if k % 2 == 0 { x } else { y };
-            assert!(
-                (f64::from(*g) - w).abs() < TOLERANCE,
-                "{id} {}: op {i} operand {k}: {g} vs {w}",
-                set.kind
-            );
-        }
-    }
-
-    match set.kind.as_str() {
-        "path" => {
-            assert_eq!(part.kind, PartKind::Stroke as u32, "{id}: outline");
-            assert_eq!(f64::from(part.width), num(options, "strokeWidth"), "{id}");
-        }
-        "fillSketch" => {
-            // Hachure lines are stroked in the fill colour, as thick as
-            // rough.js' fill weight, and never dashed.
-            assert_eq!(part.kind, PartKind::Stroke as u32, "{id}: hachure");
-            assert_eq!(part.color, opaque(text(options, "fill")), "{id}");
-            assert_eq!(f64::from(part.width), num(options, "fillWeight"), "{id}");
-            assert_eq!((part.dash_on, part.dash_off), (0.0, 0.0), "{id}: dash");
-        }
-        "fillPath" => {
-            assert_eq!(part.kind, PartKind::Fill as u32, "{id}: solid");
-            assert_eq!(part.color, opaque(text(options, "fill")), "{id}");
-            assert_eq!(part.fill_rule, golden_fill_rule(shape), "{id}: fill rule");
-        }
-        other => panic!("{id}: unknown set type {other}"),
-    }
-}
+use common::{
+    Fixture, Shape, assert_part_matches_set, editor_with_element, editor_with_fixture, num, ops,
+    parts_of, text,
+};
+use workingtitle_core::{Geometry, PartKind, Verb};
 
 /// Checks every Element of the `fills` fixture against rough.js: one part per
 /// op set, in rough.js' order. Returns how many Elements were checked.

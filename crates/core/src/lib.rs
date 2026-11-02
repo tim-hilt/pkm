@@ -2,11 +2,13 @@
 //!
 //! Clients drive everything through [`Editor`].
 
+mod arrowhead;
 mod editor;
 pub mod geometry;
 mod hachure;
 pub mod input;
 pub mod json;
+mod linear;
 mod navigation;
 mod path;
 mod restore;

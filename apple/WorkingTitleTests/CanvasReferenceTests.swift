@@ -51,4 +51,10 @@ import Testing
     @Test func fillRules() throws {
         expectMatchesReference(try render(Viewport(), of: TestScenes.fillRules(), size: 400), named: "fill-rules")
     }
+
+    /// Straight, multi-point, curved, closed, rotated and dashed lines and arrows, and arrowheads.
+    @Test func linesAndArrows() throws {
+        expectMatchesReference(
+            try render(Viewport(), of: TestScenes.linesAndArrows(), size: 520), named: "lines-and-arrows")
+    }
 }

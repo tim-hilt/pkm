@@ -103,6 +103,46 @@ pub(crate) fn points_on_path(segments: &[Segment], distance: f64) -> Vec<Vec<Poi
         .collect()
 }
 
+/// A polyline along the smooth curve through at least three `points`: the
+/// curve is cut into chords within `tolerance` of it, then the polyline is
+/// simplified to within `distance` of itself (points-on-curve
+/// `pointsOnBezierCurves(curveToBezier(points), tolerance, distance)`).
+pub(crate) fn curve_polyline(points: &[Point], tolerance: f64, distance: f64) -> Vec<Point> {
+    let polyline = points_on_bezier_curves(&curve_to_bezier(points), tolerance);
+    if distance > 0.0 {
+        simplify(&polyline, distance)
+    } else {
+        polyline
+    }
+}
+
+/// The Bézier chain of a Catmull-Rom spline through `points` (at least
+/// three): start point, then two control points and an end point per curve.
+fn curve_to_bezier(points: &[Point]) -> Vec<Point> {
+    if let [a, b, c] = *points {
+        return vec![a, b, c, c];
+    }
+    // The ends are doubled, so that the curve runs through them.
+    let mut padded = vec![points[0], points[0]];
+    padded.extend_from_slice(&points[1..]);
+    padded.push(points[points.len() - 1]);
+
+    let mut chain = vec![padded[0]];
+    for i in 1..padded.len() - 2 {
+        let (before, here, next, after) = (padded[i - 1], padded[i], padded[i + 1], padded[i + 2]);
+        chain.push((
+            here.0 + (next.0 - before.0) / 6.0,
+            here.1 + (next.1 - before.1) / 6.0,
+        ));
+        chain.push((
+            next.0 + (here.0 - after.0) / 6.0,
+            next.1 + (here.1 - after.1) / 6.0,
+        ));
+        chain.push(next);
+    }
+    chain
+}
+
 /// Points on the chain of cubic Béziers through `points` (start point, then
 /// two control points and an end point per curve), by subdividing until each
 /// piece is flat to within `tolerance`.

@@ -67,14 +67,16 @@ impl Editor {
 
     /// The paths to draw for the Scene, in z-order.
     ///
-    /// Rectangles, diamonds and ellipses are drawn hand-drawn like on
-    /// excalidraw.com, with their background filled by hachure, cross-hatch,
-    /// zigzag or solid (see [`crate::shape`]). The other types are drawn as a
-    /// plain box around their bounds until their generators land.
+    /// Rectangles, diamonds, ellipses, lines and arrows are drawn hand-drawn
+    /// like on excalidraw.com, with the background of closed ones filled by
+    /// hachure, cross-hatch, zigzag or solid (see [`crate::shape`]). The other
+    /// types are drawn as a plain box around their bounds until their
+    /// generators land.
     pub fn geometry(&self) -> Geometry {
         let mut geometry = Geometry::with_generation(self.generation);
+        let background = self.scene.view_background_color();
         for element in self.shown() {
-            if !shape::draw(&element, &mut geometry) {
+            if !shape::draw(&element, background, &mut geometry) {
                 draw_bounds(&element, &mut geometry);
             }
         }

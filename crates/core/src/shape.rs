@@ -3,15 +3,30 @@
 //! into a fill and strokes (ADR-0004), placed in the Scene.
 
 use crate::geometry::{Dash, FillRule, FillStyle, Geometry, PartWriter, StrokeStyle};
+use crate::linear;
 use crate::path::{Point, Segment};
-use crate::rough::{Fill, FillOps, Hatch, Op, Pattern, Sketcher, Style};
+use crate::rough::{Drawing, Fill, FillOps, Hatch, Op, Pattern, Sketcher, Style};
 use crate::scene::{Element, ElementType, FillPattern, LineStyle, Roundness};
 
-/// Adds the fill and the strokes of `element` to `geometry`. Returns `false`,
-/// adding nothing, for Element types that have no generator yet.
-pub(crate) fn draw(element: &Element, geometry: &mut Geometry) -> bool {
+/// Adds the fill and the strokes of `element` to `geometry`. `background` is
+/// the colour of the Canvas, which some arrowheads are filled with. Returns
+/// `false`, adding nothing, for Element types that have no generator yet.
+pub(crate) fn draw(element: &Element, background: &str, geometry: &mut Geometry) -> bool {
+    match element.kind() {
+        ElementType::Rectangle | ElementType::Diamond | ElementType::Ellipse => {
+            draw_closed(element, geometry);
+        }
+        ElementType::Line | ElementType::Arrow => {
+            linear::draw(element, parse_color(background), geometry);
+        }
+        _ => return false,
+    }
+    true
+}
+
+fn draw_closed(element: &Element, geometry: &mut Geometry) {
     let (width, height) = (element.width(), element.height());
-    let mut sketcher = Sketcher::new(element.seed(), style_of(element));
+    let mut sketcher = Sketcher::new(element.seed(), style_of(element, (width, height)));
     // rough.js fills rectangles and ellipses by the non-zero rule, and the
     // shapes it makes with a polygon or a path by the even-odd rule.
     let (drawing, rule) = match element.kind() {
@@ -35,71 +50,105 @@ pub(crate) fn draw(element: &Element, geometry: &mut Geometry) -> bool {
                 FillRule::EvenOdd,
             ),
         },
-        ElementType::Ellipse => (
+        _ => (
             sketcher.ellipse(width / 2.0, height / 2.0, width, height),
             FillRule::NonZero,
         ),
-        _ => return false,
     };
 
-    let placement = Placement::of(element);
-    let (handle, version, opacity) = (
-        element.handle(),
-        element.version(),
-        element.opacity() as f32,
-    );
-
-    if let Some(fill) = drawing.fill {
-        let color = parse_color(element.background_color());
-        match fill {
-            FillOps::Area(ops) => {
-                let style = FillStyle {
-                    color,
-                    opacity,
-                    rule,
-                };
-                write_all(&mut geometry.fill(handle, version, style), ops, &placement);
-            }
-            FillOps::Lines(ops) => {
-                let style = StrokeStyle {
-                    color,
-                    width: fill_weight(element) as f32,
-                    opacity,
-                    dash: None,
-                };
-                write_all(
-                    &mut geometry.stroke(handle, version, style),
-                    ops,
-                    &placement,
-                );
-            }
-        }
-    }
-    let stroke = StrokeStyle {
-        color: parse_color(element.stroke_color()),
-        width: stroke_width(element) as f32,
-        opacity,
-        dash: dash_of(element),
+    let paint = Paint {
+        stroke: StrokeStyle {
+            color: parse_color(element.stroke_color()),
+            width: stroke_width(element) as f32,
+            opacity: element.opacity() as f32,
+            dash: dash_of(element),
+        },
+        fill_color: parse_color(element.background_color()),
+        fill_rule: rule,
+        hatch_width: fill_weight(element) as f32,
     };
-    write_all(
-        &mut geometry.stroke(handle, version, stroke),
-        drawing.outline,
-        &placement,
+    emit(
+        geometry,
+        &Target::of(element, Placement::of(element)),
+        &drawing,
+        &paint,
     );
-    true
 }
 
-fn write_all(path: &mut PartWriter, ops: Vec<Op>, placement: &Placement) {
-    for op in ops {
+/// How the parts of one drawable (one rough.js `Drawable`) are painted.
+pub(crate) struct Paint {
+    /// The outline.
+    pub stroke: StrokeStyle,
+    /// The colour of the fill, however it is filled.
+    pub fill_color: u32,
+    pub fill_rule: FillRule,
+    /// Hatching is stroked, this wide.
+    pub hatch_width: f32,
+}
+
+/// Where the parts of an Element go.
+pub(crate) struct Target {
+    handle: u32,
+    version: u32,
+    placement: Placement,
+}
+
+impl Target {
+    pub(crate) fn of(element: &Element, placement: Placement) -> Self {
+        Self {
+            handle: element.handle(),
+            version: element.version(),
+            placement,
+        }
+    }
+}
+
+/// Adds the parts for `drawing` to `geometry`: its fill, then its outline.
+pub(crate) fn emit(geometry: &mut Geometry, target: &Target, drawing: &Drawing, paint: &Paint) {
+    let Target {
+        handle,
+        version,
+        ref placement,
+    } = *target;
+    let opacity = paint.stroke.opacity;
+    match &drawing.fill {
+        None => {}
+        Some(FillOps::Area(ops)) => {
+            let style = FillStyle {
+                color: paint.fill_color,
+                opacity,
+                rule: paint.fill_rule,
+            };
+            write_all(&mut geometry.fill(handle, version, style), ops, placement);
+        }
+        Some(FillOps::Lines(ops)) => {
+            let style = StrokeStyle {
+                color: paint.fill_color,
+                width: paint.hatch_width,
+                opacity,
+                dash: None,
+            };
+            write_all(&mut geometry.stroke(handle, version, style), ops, placement);
+        }
+    }
+    write_all(
+        &mut geometry.stroke(handle, version, paint.stroke),
+        &drawing.outline,
+        placement,
+    );
+}
+
+fn write_all(path: &mut PartWriter, ops: &[Op], placement: &Placement) {
+    for &op in ops {
         write(path, op, placement);
     }
 }
 
 // --- Options (generateRoughOptions) --------------------------------------
 
-fn style_of(element: &Element) -> Style {
+pub(crate) fn style_of(element: &Element, size: (f64, f64)) -> Style {
     Style {
-        roughness: adjusted_roughness(element),
+        roughness: adjusted_roughness(element, size),
         // Rounded corners are one continuous path, which must stay connected;
         // otherwise only the cartoonist level jitters the corners.
         preserve_vertices: element.roundness().is_some() && is_path_shape(element)
@@ -116,7 +165,7 @@ fn style_of(element: &Element) -> Style {
 }
 
 /// How the background is filled; `None` for a transparent one.
-fn fill_of(element: &Element) -> Option<Fill> {
+pub(crate) fn fill_of(element: &Element) -> Option<Fill> {
     if parse_color(element.background_color()) & 0xff == 0 {
         return None;
     }
@@ -137,7 +186,7 @@ fn fill_of(element: &Element) -> Option<Fill> {
 }
 
 /// Hatch lines are half as thick as the stroke, dashes or not.
-fn fill_weight(element: &Element) -> f64 {
+pub(crate) fn fill_weight(element: &Element) -> f64 {
     element.stroke_width() / 2.0
 }
 
@@ -150,14 +199,15 @@ fn is_path_shape(element: &Element) -> bool {
 }
 
 /// Small shapes get less jitter, or the sketch would swallow them.
-fn adjusted_roughness(element: &Element) -> f64 {
+fn adjusted_roughness(element: &Element, (width, height): (f64, f64)) -> f64 {
     let roughness = element.roughness();
-    let (width, height) = (element.width(), element.height());
     let (max_size, min_size) = (width.max(height), width.min(height));
     let can_round = is_path_shape(element);
 
     if (min_size >= 20.0 && max_size >= 50.0)
         || (min_size >= 15.0 && element.roundness().is_some() && can_round)
+        // Relatively long lines and arrows.
+        || (element.kind().is_linear() && max_size >= 50.0)
     {
         return roughness;
     }
@@ -166,14 +216,14 @@ fn adjusted_roughness(element: &Element) -> f64 {
 
 /// Dashes and dots are drawn a bit wider to look as heavy as solid lines,
 /// which are drawn twice.
-fn stroke_width(element: &Element) -> f64 {
+pub(crate) fn stroke_width(element: &Element) -> f64 {
     match element.line_style() {
         LineStyle::Solid => element.stroke_width(),
         LineStyle::Dashed | LineStyle::Dotted => element.stroke_width() + 0.5,
     }
 }
 
-fn dash_of(element: &Element) -> Option<Dash> {
+pub(crate) fn dash_of(element: &Element) -> Option<Dash> {
     let width = element.stroke_width();
     match element.line_style() {
         LineStyle::Solid => None,
@@ -262,23 +312,32 @@ fn rounded_diamond(w: f64, h: f64, roundness: Roundness) -> [Segment; 9] {
 // --- Placement -----------------------------------------------------------
 
 /// Moves points from the Element's own frame into the Scene: by the Element's
-/// position, turned about its centre by its angle.
-struct Placement {
+/// position, turned about a centre by its angle.
+pub(crate) struct Placement {
     origin: Point,
     centre: Point,
     sin_cos: Option<(f64, f64)>,
 }
 
 impl Placement {
+    /// For Elements that turn about the middle of their box.
     fn of(element: &Element) -> Self {
         let origin = (element.x(), element.y());
-        let angle = element.angle();
-        Self {
-            origin,
-            centre: (
+        Self::about(
+            element,
+            (
                 origin.0 + element.width() / 2.0,
                 origin.1 + element.height() / 2.0,
             ),
+        )
+    }
+
+    /// For Elements that turn about `centre`, given in the Scene.
+    pub(crate) fn about(element: &Element, centre: Point) -> Self {
+        let angle = element.angle();
+        Self {
+            origin: (element.x(), element.y()),
+            centre,
             sin_cos: (angle != 0.0).then(|| angle.sin_cos()),
         }
     }
@@ -320,7 +379,7 @@ fn write(path: &mut PartWriter, op: Op, placement: &Placement) {
 /// `0xRRGGBBAA` for a CSS colour. Understands hex notation (3, 4, 6 or 8
 /// digits) and `transparent`; Excalidraw's own palette is hex. Anything else
 /// is drawn in Excalidraw's default ink.
-fn parse_color(css: &str) -> u32 {
+pub(crate) fn parse_color(css: &str) -> u32 {
     const DEFAULT: u32 = 0x1e1e_1eff;
     if css == "transparent" {
         return 0;

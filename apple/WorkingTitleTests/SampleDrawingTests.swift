@@ -11,7 +11,8 @@ import Testing
 
         // 8 of the file's 10 Elements: one is deleted, one has an unknown type.
         #expect(editor.elementCount() == 8)
-        #expect(editor.geometry().partCount() == 8)
+        // The arrow is three parts: its line and the two strokes of its head.
+        #expect(editor.geometry().partCount() == 10)
     }
 
     @Test func savesBackExactlyWhatWasBundled() throws {

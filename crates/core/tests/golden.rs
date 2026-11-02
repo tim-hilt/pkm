@@ -12,7 +12,13 @@ mod common;
 use common::{Fixture, Op, Shape};
 use workingtitle_core::json::Value;
 
-const FIXTURES: [&str; 4] = ["shapes", "fills", "lines-arrows", "freedraw"];
+const FIXTURES: [&str; 5] = [
+    "shapes",
+    "fills",
+    "lines-arrows",
+    "arrowhead-turns",
+    "freedraw",
+];
 
 fn str_prop<'a>(element: &'a Value, key: &str) -> &'a str {
     element.get(key).and_then(Value::as_str).unwrap_or("")
