@@ -16,7 +16,10 @@ final class CanvasMetalView: MTKView {
     /// Receives all input. Set before input arrives; setting it shows the
     /// editor's current viewport.
     var editor: Editor? {
-        didSet { syncViewport() }
+        didSet {
+            reportViewSize()
+            syncViewport()
+        }
     }
 
     init() {
@@ -39,6 +42,34 @@ final class CanvasMetalView: MTKView {
 
     @available(*, unavailable)
     required init(coder: NSCoder) { fatalError("CanvasMetalView is created in code") }
+
+    // MARK: Commands
+
+    /// Runs a command on the editor (zoom, Tool change, ...) and shows the
+    /// resulting viewport.
+    func perform(_ command: (Editor) -> Void) {
+        guard let editor else { return }
+        command(editor)
+        syncViewport()
+    }
+
+    /// The core's zoom commands act around the middle of the view, so it must
+    /// know the view's size.
+    private func reportViewSize() {
+        editor?.setViewSize(width: bounds.width, height: bounds.height)
+    }
+
+    #if os(macOS)
+        override func layout() {
+            super.layout()
+            reportViewSize()
+        }
+    #else
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            reportViewSize()
+        }
+    #endif
 
     // MARK: Input
 
@@ -140,6 +171,7 @@ final class CanvasMetalView: MTKView {
 struct CanvasView {
     let editor: Editor
     let geometry: Geometry
+    let controller: CanvasController
 
     @MainActor private func makeCanvas() -> CanvasMetalView {
         let canvas = CanvasMetalView()
@@ -150,6 +182,7 @@ struct CanvasView {
     @MainActor private func update(_ canvas: CanvasMetalView) {
         canvas.editor = editor
         canvas.renderer?.setGeometry(geometry)
+        controller.canvas = canvas
     }
 }
 
@@ -164,3 +197,16 @@ struct CanvasView {
         func updateUIView(_ canvas: CanvasMetalView, context: Context) { update(canvas) }
     }
 #endif
+
+/// Lets chrome outside the Canvas (toolbar, buttons) command it. Commands
+/// reach the core's `Editor` and the Canvas shows the result.
+@MainActor
+final class CanvasController {
+    weak var canvas: CanvasMetalView?
+
+    func zoomIn() { canvas?.perform { $0.zoomIn() } }
+    func zoomOut() { canvas?.perform { $0.zoomOut() } }
+    func resetZoom() { canvas?.perform { $0.resetZoom() } }
+    func zoomToFit() { canvas?.perform { $0.zoomToFit() } }
+    func setTool(_ tool: Tool) { canvas?.perform { $0.setTool(tool: tool) } }
+}

@@ -1,7 +1,8 @@
 use crate::geometry::{Geometry, StrokeStyle};
 use crate::input::{MagnifyEvent, PointerEvent, ScrollEvent};
-use crate::navigation::Navigation;
+use crate::navigation::{Bounds, Navigation};
 use crate::scene::{Element, LoadError, Scene};
+use crate::tool::Tool;
 use crate::viewport::Viewport;
 
 /// The core's public interface: owns the open Scene and everything that edits
@@ -11,6 +12,7 @@ use crate::viewport::Viewport;
 pub struct Editor {
     scene: Scene,
     navigation: Navigation,
+    tool: Tool,
 }
 
 impl Default for Editor {
@@ -25,6 +27,7 @@ impl Editor {
         Self {
             scene: Scene::empty(),
             navigation: Navigation::default(),
+            tool: Tool::default(),
         }
     }
 
@@ -61,11 +64,11 @@ impl Editor {
             };
             let [first, rest @ ..] = bounds_outline(&element);
             let mut path = geometry.stroke(element.handle(), element.version(), style);
-            path.move_to(first.0, first.1);
+            path.move_to(first.0 as f32, first.1 as f32);
             for (x, y) in rest {
-                path.line_to(x, y);
+                path.line_to(x as f32, y as f32);
             }
-            path.line_to(first.0, first.1);
+            path.line_to(first.0 as f32, first.1 as f32);
         }
         geometry
     }
@@ -77,10 +80,54 @@ impl Editor {
         self.navigation.viewport()
     }
 
+    /// Tells the core how big the Canvas is, in points. Clients report it on
+    /// start and whenever it changes; zoom commands act around its middle.
+    pub fn set_view_size(&mut self, width: f64, height: f64) {
+        self.navigation.set_view_size(width, height);
+    }
+
+    /// Zooms in one step (10 percentage points) around the middle of the view.
+    pub fn zoom_in(&mut self) {
+        self.navigation.zoom_in();
+    }
+
+    /// Zooms out one step (10 percentage points) around the middle of the view.
+    pub fn zoom_out(&mut self) {
+        self.navigation.zoom_out();
+    }
+
+    /// Goes back to 100 % around the middle of the view.
+    pub fn reset_zoom(&mut self) {
+        self.navigation.reset_zoom();
+    }
+
+    /// Frames all shown Elements; see [`crate::navigation`]. Does nothing
+    /// for an empty Scene.
+    pub fn zoom_to_fit(&mut self) {
+        if let Some(bounds) = self.scene_bounds() {
+            self.navigation.fit(bounds);
+        }
+    }
+
+    /// The active Tool.
+    pub fn tool(&self) -> Tool {
+        self.tool
+    }
+
+    /// Makes `tool` the active Tool; whatever the previous one was doing
+    /// with a pointer still down stops.
+    pub fn set_tool(&mut self, tool: Tool) {
+        if tool != self.tool {
+            self.navigation.cancel_drag();
+            self.tool = tool;
+        }
+    }
+
     /// A step of a finger, Pencil or mouse. Two fingers pan and zoom the
-    /// viewport (see [`crate::navigation`]).
+    /// viewport, and so does one pointer with the hand Tool (see
+    /// [`crate::navigation`]).
     pub fn pointer(&mut self, event: PointerEvent) {
-        self.navigation.pointer(event);
+        self.navigation.pointer(event, self.tool == Tool::Hand);
     }
 
     /// A scroll wheel or trackpad scroll (Mac): pans, or zooms with ctrl/cmd.
@@ -93,6 +140,29 @@ impl Editor {
         self.navigation.magnify(event);
     }
 
+    /// The smallest rectangle containing every shown Element, or `None` if
+    /// there is none.
+    fn scene_bounds(&self) -> Option<Bounds> {
+        self.shown()
+            .flat_map(|element| bounds_outline(&element))
+            .fold(None, |bounds, (x, y)| {
+                Some(match bounds {
+                    None => Bounds {
+                        min_x: x,
+                        min_y: y,
+                        max_x: x,
+                        max_y: y,
+                    },
+                    Some(b) => Bounds {
+                        min_x: b.min_x.min(x),
+                        min_y: b.min_y.min(y),
+                        max_x: b.max_x.max(x),
+                        max_y: b.max_y.max(y),
+                    },
+                })
+            })
+    }
+
     fn shown(&self) -> impl Iterator<Item = Element<'_>> {
         self.scene.elements().filter(|e| !e.is_deleted())
     }
@@ -100,7 +170,7 @@ impl Editor {
 
 /// The corners of the Element's bounds, clockwise from the top left, turned
 /// by its angle about its centre.
-fn bounds_outline(element: &Element) -> [(f32, f32); 4] {
+fn bounds_outline(element: &Element) -> [(f64, f64); 4] {
     // Excalidraw normalises negative sizes on load; do not rely on it.
     let (x0, x1) = ordered(element.x(), element.x() + element.width());
     let (y0, y1) = ordered(element.y(), element.y() + element.height());
@@ -108,10 +178,7 @@ fn bounds_outline(element: &Element) -> [(f32, f32); 4] {
     let (sin, cos) = element.angle().sin_cos();
     [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].map(|(x, y)| {
         let (dx, dy) = (x - cx, y - cy);
-        (
-            (cx + dx * cos - dy * sin) as f32,
-            (cy + dx * sin + dy * cos) as f32,
-        )
+        (cx + dx * cos - dy * sin, cy + dx * sin + dy * cos)
     })
 }
 

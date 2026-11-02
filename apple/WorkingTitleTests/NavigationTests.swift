@@ -66,4 +66,29 @@ import Testing
         #expect(renderer.viewport != Viewport())
         #expect(renderer.geometry === geometry)
     }
+
+    @Test func zoomCommandsReachTheRenderer() throws {
+        let (canvas, renderer, _) = try makeCanvas()
+        canvas.frame = CGRect(x: 0, y: 0, width: 400, height: 200)
+        let controller = CanvasController()
+        controller.canvas = canvas
+
+        controller.zoomIn()
+        #expect(abs(renderer.viewport.zoom - 1.1) < 1e-6)
+
+        controller.resetZoom()
+        #expect(renderer.viewport.zoom == 1)
+    }
+
+    @Test func theHandToolPansWithOneFinger() throws {
+        let (canvas, renderer, _) = try makeCanvas()
+        let controller = CanvasController()
+        controller.canvas = canvas
+
+        controller.setTool(.hand)
+        canvas.send(finger(1, .down, 100, 100))
+        canvas.send(finger(1, .move, 130, 110))
+
+        #expect(renderer.viewport == Viewport(origin: [-30, -10], zoom: 1))
+    }
 }

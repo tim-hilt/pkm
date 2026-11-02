@@ -5,7 +5,7 @@ use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use workingtitle_core::{
-    MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase, ScrollEvent,
+    MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase, ScrollEvent, Tool,
 };
 
 uniffi::setup_scaffolding!("WorkingTitleCore");
@@ -85,6 +85,12 @@ pub struct MagnifyEvent {
     pub magnification: f64,
 }
 
+#[uniffi::remote(Enum)]
+pub enum Tool {
+    Selection,
+    Hand,
+}
+
 /// What the Canvas shows; see [`workingtitle_core::Viewport`]. Small and
 /// cheap enough to read after every input event.
 #[derive(uniffi::Record)]
@@ -153,6 +159,40 @@ impl Editor {
     /// input; it never changes the geometry, which clients keep.
     pub fn viewport(&self) -> ViewportState {
         self.editor().viewport().into()
+    }
+
+    /// Reports the Canvas size in points; call on start and on every resize.
+    pub fn set_view_size(&self, width: f64, height: f64) {
+        self.editor().set_view_size(width, height);
+    }
+
+    /// One zoom step in around the middle of the view.
+    pub fn zoom_in(&self) {
+        self.editor().zoom_in();
+    }
+
+    /// One zoom step out around the middle of the view.
+    pub fn zoom_out(&self) {
+        self.editor().zoom_out();
+    }
+
+    /// Back to 100 % around the middle of the view.
+    pub fn reset_zoom(&self) {
+        self.editor().reset_zoom();
+    }
+
+    /// Frames all shown Elements.
+    pub fn zoom_to_fit(&self) {
+        self.editor().zoom_to_fit();
+    }
+
+    /// The active Tool.
+    pub fn tool(&self) -> Tool {
+        self.editor().tool()
+    }
+
+    pub fn set_tool(&self, tool: Tool) {
+        self.editor().set_tool(tool);
     }
 
     /// A step of a finger, Pencil or mouse; see
@@ -278,6 +318,32 @@ mod tests {
         let viewport = editor.viewport();
         assert_eq!((viewport.origin_x, viewport.origin_y), (-10.0, -20.0));
         assert_eq!(viewport.zoom, 1.0);
+    }
+
+    #[test]
+    fn zoom_commands_and_the_hand_tool_work_through_the_bindings() {
+        let editor = Editor::new();
+        editor.set_view_size(400.0, 200.0);
+        editor.zoom_in();
+        assert!((editor.viewport().zoom - 1.1).abs() < 1e-9);
+        editor.reset_zoom();
+        assert_eq!(editor.viewport().zoom, 1.0);
+
+        editor.set_tool(Tool::Hand);
+        assert_eq!(editor.tool(), Tool::Hand);
+        let touch = |phase, x| PointerEvent {
+            id: 1,
+            phase,
+            x,
+            y: 0.0,
+            kind: PointerKind::Finger,
+            pressure: 0.5,
+            timestamp: 0.0,
+            modifiers: Modifiers::default(),
+        };
+        editor.pointer(touch(PointerPhase::Down, 10.0));
+        editor.pointer(touch(PointerPhase::Move, 30.0));
+        assert_eq!(editor.viewport().origin_x, -20.0);
     }
 
     #[test]
