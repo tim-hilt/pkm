@@ -11,7 +11,7 @@ SIM ?= $(SIM_IPHONE)
 CORE_XCFRAMEWORK := apple/Generated/WorkingTitleCoreFFI.xcframework
 CORE_SOURCES := Cargo.toml Cargo.lock scripts/build-core-apple.sh $(shell find crates -type f)
 
-.PHONY: core-apple apple-project build test test-ios lint fmt sim run clean
+.PHONY: core-apple apple-project build test test-ios lint fmt sim run clean golden-fixtures
 
 # Rust core -> XCFramework + Swift bindings in apple/Generated (rebuilt only
 # when the Rust sources change).
@@ -52,6 +52,11 @@ run: apple-project sim
 	xcrun simctl boot '$(SIM)' 2>/dev/null || true
 	xcrun simctl install '$(SIM)' apple/build/Build/Products/Debug-iphonesimulator/WorkingTitle.app
 	xcrun simctl launch --terminate-running-process '$(SIM)' com.timhilt.workingtitle
+
+# Regenerates the committed golden fixtures from the pinned Excalidraw checkout
+# (see scripts/golden/README.md). Needs Node; `make test` does not.
+golden-fixtures:
+	cd scripts/golden && npm ci --no-audit --no-fund && node generate.mjs
 
 clean:
 	rm -rf apple/WorkingTitle.xcodeproj apple/build apple/Generated target

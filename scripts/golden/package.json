@@ -1,0 +1,20 @@
+{
+  "name": "golden-fixtures",
+  "private": true,
+  "type": "module",
+  "description": "Generates golden fixtures from Excalidraw, rough.js and perfect-freehand. See README.md.",
+  "scripts": {
+    "generate": "node generate.mjs"
+  },
+  "dependencies": {
+    "@braintree/sanitize-url": "6.0.2",
+    "es6-promise-pool": "2.5.0",
+    "esbuild": "0.25.0",
+    "lodash.throttle": "4.1.1",
+    "nanoid": "3.3.3",
+    "perfect-freehand": "1.2.0",
+    "points-on-curve": "1.0.1",
+    "roughjs": "4.6.4",
+    "tinycolor2": "1.6.0"
+  }
+}
