@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct ContentView: View {
-    @State private var geometry = Editor().geometry()
+    /// An unreadable sample leaves an empty Canvas rather than a crash.
+    @State private var geometry = ((try? SampleDrawing.makeEditor()) ?? Editor()).geometry()
 
     var body: some View {
         CanvasView(geometry: geometry)

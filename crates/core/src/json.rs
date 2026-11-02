@@ -81,6 +81,20 @@ impl Value {
         }
     }
 
+    pub fn as_array_mut(&mut self) -> Option<&mut Vec<Value>> {
+        match self {
+            Value::Array(items) => Some(items),
+            _ => None,
+        }
+    }
+
+    pub fn as_object_mut(&mut self) -> Option<&mut Object> {
+        match self {
+            Value::Object(object) => Some(object),
+            _ => None,
+        }
+    }
+
     /// Compact serialization, like `JSON.stringify(value)`.
     pub fn to_json(&self) -> String {
         let mut out = String::new();
@@ -115,6 +129,13 @@ impl Object {
         self.members.iter().find(|(k, _)| k == key).map(|(_, v)| v)
     }
 
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut Value> {
+        self.members
+            .iter_mut()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v)
+    }
+
     /// Sets `key`. An existing key keeps its position; a new key goes last.
     pub fn insert(&mut self, key: String, value: Value) {
         match self.members.iter_mut().find(|(k, _)| *k == key) {
@@ -134,6 +155,14 @@ impl Object {
 
     pub fn is_empty(&self) -> bool {
         self.members.is_empty()
+    }
+
+    /// Like [`Value::to_json_pretty`], without having to wrap (and so clone)
+    /// the object in a [`Value`].
+    pub fn to_json_pretty(&self) -> String {
+        let mut out = String::new();
+        write_object(&mut out, self, Some("  "), 0);
+        out
     }
 }
 
@@ -470,19 +499,21 @@ fn write_value(out: &mut String, value: &Value, indent: Option<&str>, level: usi
                 write_value(out, &items[i], indent, level + 1);
             })
         }
-        Value::Object(object) => {
-            let members: Vec<_> = object.iter().collect();
-            write_container(out, '{', '}', members.len(), indent, level, |out, i| {
-                let (key, member) = members[i];
-                write_string(out, key);
-                out.push(':');
-                if indent.is_some() {
-                    out.push(' ');
-                }
-                write_value(out, member, indent, level + 1);
-            });
-        }
+        Value::Object(object) => write_object(out, object, indent, level),
     }
+}
+
+fn write_object(out: &mut String, object: &Object, indent: Option<&str>, level: usize) {
+    let members: Vec<_> = object.iter().collect();
+    write_container(out, '{', '}', members.len(), indent, level, |out, i| {
+        let (key, member) = members[i];
+        write_string(out, key);
+        out.push(':');
+        if indent.is_some() {
+            out.push(' ');
+        }
+        write_value(out, member, indent, level + 1);
+    });
 }
 
 /// Shared layout of arrays and objects: delimiters, commas and line breaks.

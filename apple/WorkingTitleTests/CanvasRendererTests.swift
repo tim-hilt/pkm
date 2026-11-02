@@ -3,13 +3,14 @@ import Testing
 
 @testable import WorkingTitle
 
-/// Renders offscreen and probes pixels: the tracer rectangle must really be
+/// Renders offscreen and probes pixels: the rectangle Element's bounds must really be
 /// visible where the core put it, at any zoom.
 @MainActor @Suite struct CanvasRendererTests {
     private func render(
         viewport: Viewport, pixelsPerPoint: Float = 1, size: Int = 400
     ) throws -> (RenderedImage, CanvasRenderer) {
-        try OffscreenRender.render(Editor().geometry(), viewport: viewport, pixelsPerPoint: pixelsPerPoint, size: size)
+        try OffscreenRender.render(
+            TestScenes.rectangle(), viewport: viewport, pixelsPerPoint: pixelsPerPoint, size: size)
     }
 
     @Test func rectangleOutlineIsInkAndEverythingElseIsPaper() throws {
@@ -20,10 +21,10 @@ import Testing
         #expect(frame.red(50, 200) < 60, "left edge")
         #expect(frame.red(330, 200) < 60, "right edge")
         #expect(frame.red(200, 280) < 60, "bottom edge")
-        // ...paper inside, outside and where the rounded corner cuts it off.
+        // ...a square corner, paper inside and outside.
+        #expect(frame.red(50, 100) < 60, "top-left corner")
         #expect(frame.red(200, 190) == 255, "inside")
         #expect(frame.red(20, 20) == 255, "outside")
-        #expect(frame.red(52, 102) == 255, "corner is rounded, not square")
     }
 
     @Test func edgesAreAntiAliased() throws {
@@ -58,7 +59,7 @@ import Testing
         var requests = 0
         renderer.onNeedsDisplay = { requests += 1 }
 
-        renderer.setGeometry(Editor().geometry())
+        renderer.setGeometry(TestScenes.rectangle())
         renderer.viewport = Viewport(origin: [10, 0], zoom: 1)
         renderer.viewport = Viewport(origin: [10, 0], zoom: 1)  // unchanged
 

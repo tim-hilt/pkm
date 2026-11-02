@@ -20,7 +20,7 @@ import Testing
     private func showCanvas() throws -> (CanvasMetalView, CanvasRenderer, AnyObject) {
         let canvas = CanvasMetalView()
         let renderer = try #require(canvas.renderer)
-        renderer.setGeometry(Editor().geometry())
+        renderer.setGeometry(TestScenes.rectangle())
         let frame = CGRect(x: 0, y: 0, width: 300, height: 300)
         canvas.frame = frame
         #if os(macOS)

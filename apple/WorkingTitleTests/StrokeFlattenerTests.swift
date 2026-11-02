@@ -3,12 +3,37 @@ import Testing
 @testable import WorkingTitle
 
 /// Curves are flattened on the client; expected values come from the circle
-/// the tracer rectangle's corners approximate, not from the flattener's maths.
+/// the rounded rectangle's corners approximate, not from the flattener's maths.
+/// The core emits no curves yet, so the buffers are written by hand here.
 @Suite struct StrokeFlattenerTests {
-    /// Flattens the tracer rectangle (50,100)-(330,280) with corner radius 32.
+    /// Flattens a rectangle (50,100)-(330,280) with corner radius 32, built
+    /// the way the core will describe rounded shapes: lines and one cubic per corner.
     private func flattenedRectangle(tolerance: Float) -> [Segment] {
-        Editor().geometry().withBuffers { buffers in
-            StrokeFlattener.segments(of: buffers.parts[0], in: buffers, tolerance: tolerance)
+        let (x, y, right, bottom, r): (Float, Float, Float, Float, Float) = (50, 100, 330, 280, 32)
+        let k = r * 0.552_284_8  // control-point distance of a quarter circle
+        let verbs: [UInt8] = [0, 1, 2, 1, 2, 1, 2, 1, 2]
+        let coords: [Float] = [
+            x + r, y,
+            right - r, y,
+            right - r + k, y, right, y + r - k, right, y + r,
+            right, bottom - r,
+            right, bottom - r + k, right - r + k, bottom, right - r, bottom,
+            x + r, bottom,
+            x + r - k, bottom, x, bottom - r + k, x, bottom - r,
+            x, y + r,
+            x, y + r - k, x + r - k, y, x + r, y,
+        ]
+        let part = GeometryPart(
+            element: 0, version: 1, kind: GeometryPart.strokeKind, color: 0x1e1e_1eff, opacity: 1, width: 2,
+            verbStart: 0, verbCount: UInt32(verbs.count), coordStart: 0)
+        return verbs.withUnsafeBufferPointer { verbs in
+            coords.withUnsafeBufferPointer { coords in
+                withUnsafePointer(to: part) { part in
+                    let buffers = GeometryBuffers(
+                        parts: UnsafeBufferPointer(start: part, count: 1), verbs: verbs, coords: coords)
+                    return StrokeFlattener.segments(of: part.pointee, in: buffers, tolerance: tolerance)
+                }
+            }
         }
     }
 

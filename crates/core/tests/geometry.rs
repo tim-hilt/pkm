@@ -1,71 +1,13 @@
 //! The geometry output format (the contract with clients, ADR-0007/0008),
-//! tested through `Editor::geometry` and the `Geometry` accessors.
+//! tested through the `Geometry` accessors. What the Editor puts into
+//! geometry is tested with the Scene (`scene.rs`).
 //!
 //! Expected values are literals: the layout numbers are what the Swift client
 //! hard-codes on its side, so they must not be derived from the Rust types.
 
 use std::mem::{offset_of, size_of};
 
-use workingtitle_core::{Editor, Geometry, Part, PartKind, Verb};
-
-/// Splits one part's ops into `(verb, coordinates)` pairs.
-fn ops(geometry: &Geometry, part: &Part) -> Vec<(Verb, Vec<f32>)> {
-    let verbs = &geometry.verbs()[part.verb_start as usize..][..part.verb_count as usize];
-    let mut coords = &geometry.coords()[part.coord_start as usize..];
-    verbs
-        .iter()
-        .map(|&byte| {
-            let verb = Verb::from_byte(byte).expect("known verb");
-            let (taken, rest) = coords.split_at(verb.coord_count());
-            coords = rest;
-            (verb, taken.to_vec())
-        })
-        .collect()
-}
-
-#[test]
-fn the_tracer_scene_is_one_stroked_rectangle() {
-    let geometry = Editor::new().geometry();
-
-    let [part] = geometry.parts() else {
-        panic!("expected exactly one part, got {}", geometry.parts().len());
-    };
-    assert_eq!(part.kind, PartKind::Stroke as u32);
-    assert_eq!(
-        part.color, 0x1e1e_1eff,
-        "Excalidraw's default stroke #1e1e1e"
-    );
-    assert_eq!(part.width, 2.0);
-    assert_eq!(part.opacity, 1.0);
-    assert_eq!(part.version, 1);
-}
-
-#[test]
-fn the_rectangle_outline_is_closed_and_has_rounded_corners() {
-    let geometry = Editor::new().geometry();
-    let ops = ops(&geometry, &geometry.parts()[0]);
-
-    // Starts after the top-left corner radius (32) and runs clockwise.
-    assert_eq!(ops[0], (Verb::Move, vec![82.0, 100.0]));
-    assert_eq!(ops[1], (Verb::Line, vec![298.0, 100.0]));
-    let cubics = ops.iter().filter(|(verb, _)| *verb == Verb::Cubic).count();
-    assert_eq!(cubics, 4, "one cubic per corner");
-
-    let (last_verb, last) = ops.last().unwrap();
-    assert_eq!(*last_verb, Verb::Cubic);
-    assert_eq!(last[4..], [82.0, 100.0], "ends where it started");
-}
-
-#[test]
-fn the_rectangle_stays_inside_its_bounds() {
-    let geometry = Editor::new().geometry();
-    // x: 50..330, y: 100..280 in Scene coordinates; Bézier control points of a
-    // rounded corner never leave the bounding box either.
-    for point in geometry.coords().as_chunks::<2>().0 {
-        assert!((50.0..=330.0).contains(&point[0]), "x = {}", point[0]);
-        assert!((100.0..=280.0).contains(&point[1]), "y = {}", point[1]);
-    }
-}
+use workingtitle_core::{Geometry, Part, PartKind, Verb};
 
 #[test]
 fn parts_follow_each_other_in_the_shared_buffers() {
