@@ -8,3 +8,6 @@ xcuserdata/
 /apple/Config/Local.xcconfig
 # Playwright CLI output (may contain credentials)
 .playwright-cli/
+
+.scratch/
+

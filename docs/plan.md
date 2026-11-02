@@ -5,4 +5,6 @@
 - The look and feel should be exactly as on excalidraw.com. Similar font and drawing algorithms
 - Don't just render excalidraw.com in a webview. I want a re-implementation in Swift
 - Explore excalidraw.com for different display sizes using the playwright cli
+- The app should work fully offline
+- All data shall be stored locally
 
