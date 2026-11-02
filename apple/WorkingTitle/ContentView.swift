@@ -1,13 +1,10 @@
 import SwiftUI
 
 struct ContentView: View {
-    @State private var editor = Editor()
+    @State private var geometry = Editor().geometry()
 
     var body: some View {
-        VStack(spacing: 8) {
-            Text("WorkingTitle")
-            Text("Elements: \(editor.elementCount())")
-                .foregroundStyle(.secondary)
-        }
+        CanvasView(geometry: geometry)
+            .ignoresSafeArea()
     }
 }
