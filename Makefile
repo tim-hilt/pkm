@@ -11,7 +11,7 @@ SIM ?= $(SIM_IPHONE)
 CORE_XCFRAMEWORK := apple/Generated/WorkingTitleCoreFFI.xcframework
 CORE_SOURCES := Cargo.toml Cargo.lock scripts/build-core-apple.sh $(shell find crates -type f)
 
-.PHONY: core-apple apple-project build test test-ios lint fmt sim run clean golden-fixtures
+.PHONY: core-apple apple-project build test test-ios record-references lint fmt sim run clean golden-fixtures
 
 # Rust core -> XCFramework + Swift bindings in apple/Generated (rebuilt only
 # when the Rust sources change).
@@ -35,6 +35,12 @@ test: apple-project
 
 test-ios: apple-project sim
 	$(XCTEST) -destination 'platform=iOS Simulator,name=$(SIM)'
+
+# Re-records the renderer reference images that no longer match (and creates
+# missing ones) on macOS; review the diff of apple/WorkingTitleTests/References
+# before committing. See docs/renderer-reference-images.md.
+record-references: apple-project
+	TEST_RUNNER_RECORD_REFERENCES=1 $(XCTEST) -destination 'platform=macOS' ENABLE_APP_SANDBOX=NO
 
 lint:
 	swift format lint --strict -r $(SWIFT_SRC)

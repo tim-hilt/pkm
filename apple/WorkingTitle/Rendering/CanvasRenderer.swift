@@ -114,11 +114,15 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
     /// if given. The target is cleared to the Canvas background first.
     ///
     /// - Parameter pixelsPerPoint: Device pixels per view point (the screen scale).
+    /// - Returns: The submitted work, for callers that read the target back and
+    ///   so must wait for it; nil if there was nothing to render into.
+    @discardableResult
     func renderFrame(into pass: MTLRenderPassDescriptor, pixelsPerPoint: Float, presenting drawable: (any MTLDrawable)?)
+        -> (any MTLCommandBuffer)?
     {
         guard let target = pass.colorAttachments[0].texture,
             let commands = queue.makeCommandBuffer()
-        else { return }
+        else { return nil }
         pass.colorAttachments[0].loadAction = .clear
         pass.colorAttachments[0].clearColor = MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1)
 
@@ -143,6 +147,7 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         if let drawable { commands.present(drawable) }
         commands.commit()
         framesRendered += 1
+        return commands
     }
 
     // MARK: MTKViewDelegate
