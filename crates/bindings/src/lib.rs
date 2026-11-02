@@ -4,6 +4,10 @@
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use workingtitle_core::{
+    MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase, ScrollEvent,
+};
+
 uniffi::setup_scaffolding!("WorkingTitleCore");
 
 /// Why a file could not be opened as a Drawing, in words fit for a user.
@@ -23,6 +27,82 @@ impl From<workingtitle_core::LoadError> for LoadError {
     fn from(error: workingtitle_core::LoadError) -> Self {
         LoadError::Invalid {
             message: error.to_string(),
+        }
+    }
+}
+
+// Input events are plain data: UniFFI mirrors the core's definitions as
+// records and enums, so there is exactly one definition of each.
+
+#[uniffi::remote(Record)]
+pub struct Modifiers {
+    pub shift: bool,
+    pub ctrl: bool,
+    pub alt: bool,
+    pub meta: bool,
+}
+
+#[uniffi::remote(Enum)]
+pub enum PointerKind {
+    Finger,
+    Pencil,
+    Mouse,
+}
+
+#[uniffi::remote(Enum)]
+pub enum PointerPhase {
+    Down,
+    Move,
+    Up,
+    Cancel,
+}
+
+#[uniffi::remote(Record)]
+pub struct PointerEvent {
+    pub id: u64,
+    pub phase: PointerPhase,
+    pub x: f64,
+    pub y: f64,
+    pub kind: PointerKind,
+    pub pressure: f32,
+    pub timestamp: f64,
+    pub modifiers: Modifiers,
+}
+
+#[uniffi::remote(Record)]
+pub struct ScrollEvent {
+    pub x: f64,
+    pub y: f64,
+    pub dx: f64,
+    pub dy: f64,
+    pub modifiers: Modifiers,
+}
+
+#[uniffi::remote(Record)]
+pub struct MagnifyEvent {
+    pub x: f64,
+    pub y: f64,
+    pub magnification: f64,
+}
+
+/// What the Canvas shows; see [`workingtitle_core::Viewport`]. Small and
+/// cheap enough to read after every input event.
+#[derive(uniffi::Record)]
+pub struct ViewportState {
+    /// Scene point at the Canvas's top-left corner.
+    pub origin_x: f64,
+    pub origin_y: f64,
+    /// View points per Scene unit.
+    pub zoom: f64,
+}
+
+impl From<workingtitle_core::Viewport> for ViewportState {
+    fn from(viewport: workingtitle_core::Viewport) -> Self {
+        let (origin_x, origin_y) = viewport.origin();
+        Self {
+            origin_x,
+            origin_y,
+            zoom: viewport.zoom(),
         }
     }
 }
@@ -67,6 +147,28 @@ impl Editor {
     /// Number of Elements shown in the Scene.
     pub fn element_count(&self) -> u64 {
         self.editor().element_count()
+    }
+
+    /// The part of the Scene the Canvas shows. Read it after forwarding
+    /// input; it never changes the geometry, which clients keep.
+    pub fn viewport(&self) -> ViewportState {
+        self.editor().viewport().into()
+    }
+
+    /// A step of a finger, Pencil or mouse; see
+    /// [`workingtitle_core::Editor::pointer`].
+    pub fn pointer(&self, event: PointerEvent) {
+        self.editor().pointer(event);
+    }
+
+    /// A scroll wheel or trackpad scroll (Mac).
+    pub fn scroll(&self, event: ScrollEvent) {
+        self.editor().scroll(event);
+    }
+
+    /// A trackpad pinch (Mac).
+    pub fn magnify(&self, event: MagnifyEvent) {
+        self.editor().magnify(event);
     }
 
     /// The paths to draw for the Scene; see [`workingtitle_core::Editor::geometry`].
@@ -160,6 +262,22 @@ mod tests {
             let coords = geometry.coords_address() as *const f32;
             assert_eq!(*coords, 10.0);
         }
+    }
+
+    #[test]
+    fn input_events_move_the_viewport_reported_back() {
+        let editor = Editor::new();
+        editor.scroll(ScrollEvent {
+            x: 0.0,
+            y: 0.0,
+            dx: 10.0,
+            dy: 20.0,
+            modifiers: Modifiers::default(),
+        });
+
+        let viewport = editor.viewport();
+        assert_eq!((viewport.origin_x, viewport.origin_y), (-10.0, -20.0));
+        assert_eq!(viewport.zoom, 1.0);
     }
 
     #[test]

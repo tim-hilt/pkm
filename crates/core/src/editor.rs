@@ -1,12 +1,16 @@
 use crate::geometry::{Geometry, StrokeStyle};
+use crate::input::{MagnifyEvent, PointerEvent, ScrollEvent};
+use crate::navigation::Navigation;
 use crate::scene::{Element, LoadError, Scene};
+use crate::viewport::Viewport;
 
 /// The core's public interface: owns the open Scene and everything that edits
-/// it. Tools, Selection, history and viewport join as the features that need
-/// them land.
+/// it and the viewport onto it. Tools, Selection and history join as the
+/// features that need them land.
 #[derive(Debug)]
 pub struct Editor {
     scene: Scene,
+    navigation: Navigation,
 }
 
 impl Default for Editor {
@@ -20,6 +24,7 @@ impl Editor {
     pub fn new() -> Self {
         Self {
             scene: Scene::empty(),
+            navigation: Navigation::default(),
         }
     }
 
@@ -63,6 +68,29 @@ impl Editor {
             path.line_to(first.0, first.1);
         }
         geometry
+    }
+
+    /// Which part of the Scene the Canvas shows. Clients read it after
+    /// forwarding input and apply it to the geometry they already have: it
+    /// never changes what [`Editor::geometry`] returns.
+    pub fn viewport(&self) -> Viewport {
+        self.navigation.viewport()
+    }
+
+    /// A step of a finger, Pencil or mouse. Two fingers pan and zoom the
+    /// viewport (see [`crate::navigation`]).
+    pub fn pointer(&mut self, event: PointerEvent) {
+        self.navigation.pointer(event);
+    }
+
+    /// A scroll wheel or trackpad scroll (Mac): pans, or zooms with ctrl/cmd.
+    pub fn scroll(&mut self, event: ScrollEvent) {
+        self.navigation.scroll(event);
+    }
+
+    /// A trackpad pinch (Mac): zooms around the pinch centre.
+    pub fn magnify(&mut self, event: MagnifyEvent) {
+        self.navigation.magnify(event);
     }
 
     fn shown(&self) -> impl Iterator<Item = Element<'_>> {

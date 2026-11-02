@@ -46,7 +46,7 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
     private let pipeline: any MTLRenderPipelineState
     private let device: any MTLDevice
 
-    private var geometry: Geometry?
+    private(set) var geometry: Geometry?
     private var strokes: [StrokeDraw] = []
     /// Power-of-two zoom level `strokes` were flattened for; curves are only
     /// re-flattened when it changes, not on every zoom step.
