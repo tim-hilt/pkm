@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "excalidraw": {
+      "source": "tim-hilt/skills",
+      "sourceType": "github",
+      "skillPath": "skills/excalidraw/SKILL.md",
+      "computedHash": "fbeb360395f2d277950157ad6e247bcbe3f6ec1fc446edeb0c0d66b4aa75dcd4"
+    },
+    "software-design": {
+      "source": "tim-hilt/skills",
+      "sourceType": "github",
+      "skillPath": "skills/software-design/SKILL.md",
+      "computedHash": "321e61700c7f960216aaa95b3276d7450d414cf39c3bbde90009243bf04ad2d3"
+    }
+  }
+}
