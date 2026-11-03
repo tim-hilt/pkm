@@ -16,6 +16,7 @@ mod image;
 pub mod input;
 pub mod json;
 mod linear;
+mod move_selection;
 mod navigation;
 mod overlay;
 mod path;

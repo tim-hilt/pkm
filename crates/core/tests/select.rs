@@ -9,64 +9,10 @@
 //! Expected values (distances, corners) are worked out by hand in the
 //! comments, not computed with the formulas of the code under test.
 
-use workingtitle_core::{
-    Editor, Modifiers, PartKind, PointerEvent, PointerKind, PointerPhase, Tool, Verb,
-};
+use workingtitle_core::{Editor, Modifiers, PartKind, Tool, Verb};
 
 mod common;
-
-/// Feeds a recorded pointer sequence to the editor.
-fn replay(editor: &mut Editor, recording: &str) {
-    for line in recording.lines().filter(|l| !l.trim().is_empty()) {
-        let f: Vec<&str> = line.split_whitespace().collect();
-        let [time, phase, id, kind, x, y] = f[..] else {
-            panic!("bad recorded event: {line}")
-        };
-        editor.pointer(PointerEvent {
-            id: id.parse().unwrap(),
-            phase: match phase {
-                "down" => PointerPhase::Down,
-                "move" => PointerPhase::Move,
-                "up" => PointerPhase::Up,
-                "cancel" => PointerPhase::Cancel,
-                _ => panic!("unknown phase in: {line}"),
-            },
-            x: x.parse().unwrap(),
-            y: y.parse().unwrap(),
-            kind: match kind {
-                "finger" => PointerKind::Finger,
-                "pencil" => PointerKind::Pencil,
-                "mouse" => PointerKind::Mouse,
-                _ => panic!("unknown kind in: {line}"),
-            },
-            pressure: 0.5,
-            timestamp: time.parse().unwrap(),
-            modifiers: Modifiers::default(),
-        });
-    }
-}
-
-/// A quick tap (50 ms) of `kind` at `(x, y)` at time `t`.
-fn tap(editor: &mut Editor, kind: &str, (x, y): (f64, f64), t: f64) {
-    replay(
-        editor,
-        &format!(
-            "{t} down 1 {kind} {x} {y}\n{} up 1 {kind} {x} {y}",
-            t + 0.05
-        ),
-    );
-}
-
-/// An editor whose Scene has the given Elements (JSON objects, bottom first).
-fn editor_with(elements: &[&str]) -> Editor {
-    let mut editor = Editor::new();
-    let drawing = format!(
-        r#"{{"type":"excalidraw","version":2,"elements":[{}]}}"#,
-        elements.join(",")
-    );
-    editor.load(drawing.as_bytes()).unwrap();
-    editor
-}
+use common::{editor_with, replay, tap};
 
 /// A rectangle from (100, 100) to (200, 150) that is `filled` or hollow.
 fn rectangle(id: &str, filled: bool) -> String {

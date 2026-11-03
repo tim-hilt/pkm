@@ -293,14 +293,32 @@ impl Scene {
     }
 
     /// Moves and resizes the Element with `handle`, and makes it a new
-    /// version of itself as Excalidraw does on every change: `version` goes up
-    /// and `versionNonce` becomes `nonce`.
+    /// version of itself, see [`Scene::revise`].
     pub(crate) fn set_frame(
         &mut self,
         handle: u32,
         (x, y, width, height): (f64, f64, f64, f64),
         nonce: f64,
     ) {
+        self.revise(
+            handle,
+            nonce,
+            [("x", x), ("y", y), ("width", width), ("height", height)],
+        );
+    }
+
+    /// Moves the Element with `handle` to `(x, y)`, keeping its size, and
+    /// makes it a new version of itself, see [`Scene::revise`]. Lines and
+    /// freedraw strokes have points relative to their position and move with
+    /// it.
+    pub(crate) fn set_position(&mut self, handle: u32, (x, y): (f64, f64), nonce: f64) {
+        self.revise(handle, nonce, [("x", x), ("y", y)]);
+    }
+
+    /// Sets the numeric `members` of the Element with `handle` and makes it
+    /// a new version of itself as Excalidraw does on every change: `version`
+    /// goes up and `versionNonce` becomes `nonce`.
+    fn revise<const N: usize>(&mut self, handle: u32, nonce: f64, members: [(&str, f64); N]) {
         let Some(element) = self
             .element_values_mut()
             .get_mut(handle as usize)
@@ -312,14 +330,10 @@ impl Scene {
             .get("version")
             .and_then(Value::as_f64)
             .unwrap_or(0.0);
-        for (key, value) in [
-            ("x", x),
-            ("y", y),
-            ("width", width),
-            ("height", height),
-            ("version", version + 1.0),
-            ("versionNonce", nonce),
-        ] {
+        for (key, value) in members
+            .into_iter()
+            .chain([("version", version + 1.0), ("versionNonce", nonce)])
+        {
             element.insert(key.into(), Value::Number(value));
         }
     }

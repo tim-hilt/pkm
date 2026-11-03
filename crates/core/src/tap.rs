@@ -1,6 +1,8 @@
-//! Recognising taps from raw pointer events (ADR-0006).
+//! Recognising taps and drags from raw pointer events (ADR-0006).
 //!
-//! A tap is a press that stays where it went down. How still counts as still
+//! A tap is a press that stays where it went down; a press that does not is
+//! a drag, which the recognizer announces the moment the pointer leaves the
+//! tap's slop and then leaves to whoever acts on it. How still counts as still
 //! depends on the pointer: a finger is bigger and shakier than a mouse or
 //! Pencil. Fingers also tap *quickly*: a finger resting on the Canvas is
 //! more likely a hand being put down or the start of something else than a
@@ -16,6 +18,25 @@ const FINGER_SLOP: f64 = 10.0;
 const PRECISE_SLOP: f64 = 4.0;
 /// The longest a finger may stay down for a tap to be short, in seconds.
 const SHORT_TAP: f64 = 0.3;
+
+/// What a pointer just turned out to be doing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Recognized {
+    /// The pointer lifted without having moved away.
+    Tap(Tap),
+    /// The pointer moved away from where it went down, which is the origin.
+    /// Announced once per press; what follows is the pointer's own events.
+    DragBegan(Origin),
+}
+
+/// Where and with what a press went down.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Origin {
+    /// In view coordinates.
+    pub x: f64,
+    pub y: f64,
+    pub kind: PointerKind,
+}
 
 /// A completed tap.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -60,8 +81,9 @@ impl TapRecognizer {
         self.press = None;
     }
 
-    /// Follows `event`. Returns the tap if the pointer just completed one.
-    pub fn track(&mut self, event: PointerEvent) -> Option<Tap> {
+    /// Follows `event`. Returns what the pointer just turned out to be
+    /// doing, if anything.
+    pub fn track(&mut self, event: PointerEvent) -> Option<Recognized> {
         match event.phase {
             PointerPhase::Down => {
                 // A second pointer joining a press never makes a tap of its
@@ -85,19 +107,27 @@ impl TapRecognizer {
                         PointerKind::Finger => FINGER_SLOP,
                         PointerKind::Pencil | PointerKind::Mouse => PRECISE_SLOP,
                     };
-                    press.moved |= (event.x - press.x).hypot(event.y - press.y) > slop;
+                    let away = (event.x - press.x).hypot(event.y - press.y) > slop;
+                    if away && !press.moved {
+                        press.moved = true;
+                        return Some(Recognized::DragBegan(Origin {
+                            x: press.x,
+                            y: press.y,
+                            kind: press.kind,
+                        }));
+                    }
                 }
                 None
             }
             PointerPhase::Up => {
                 let press = self.press.filter(|p| p.pointer == event.id)?;
                 self.press = None;
-                (!press.moved).then_some(Tap {
+                (!press.moved).then_some(Recognized::Tap(Tap {
                     x: press.x,
                     y: press.y,
                     kind: press.kind,
                     short: event.timestamp - press.at <= SHORT_TAP,
-                })
+                }))
             }
             PointerPhase::Cancel => {
                 if self.press.is_some_and(|p| p.pointer == event.id) {

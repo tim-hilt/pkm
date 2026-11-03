@@ -5,14 +5,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::draw_shape::{Outcome, ShapeGesture};
 use crate::geometry::Geometry;
 use crate::hit_test::{self, Reach};
-use crate::input::{MagnifyEvent, PointerEvent, PointerPhase, ScrollEvent};
+use crate::input::{MagnifyEvent, PointerEvent, PointerKind, PointerPhase, ScrollEvent};
+use crate::move_selection::MoveGesture;
 use crate::navigation::{Bounds, Navigation};
 use crate::overlay;
 use crate::random::Entropy;
 use crate::scene::{Element, ElementType, LoadError, Scene};
 use crate::selection::Selection;
 use crate::style::Style;
-use crate::tap::TapRecognizer;
+use crate::tap::{Origin, Recognized, Tap, TapRecognizer};
 use crate::text::{self, Containers, TextMeasurer};
 use crate::tool::Tool;
 use crate::viewport::Viewport;
@@ -49,6 +50,8 @@ pub struct Editor {
     shape: Option<ShapeGesture>,
     selection: Selection,
     taps: TapRecognizer,
+    /// The Selection being moved, if the pointer of a drag on it is down.
+    moving: Option<MoveGesture>,
     /// Changes whenever the overlay may, see [`Editor::overlay_revision`].
     overlay_revision: u64,
     /// The zoom the overlay was last made for.
@@ -86,6 +89,7 @@ impl Editor {
             shape: None,
             selection: Selection::default(),
             taps: TapRecognizer::default(),
+            moving: None,
             overlay_revision: 0,
             overlay_zoom: 1.0,
             measurer: None,
@@ -100,8 +104,9 @@ impl Editor {
             self.overlay_revision += 1;
         }
         self.taps.cancel();
-        // Whatever was being drawn belonged to the Scene that is gone.
+        // Whatever was being drawn or moved belonged to the Scene that is gone.
         self.shape = None;
+        self.moving = None;
         self.changed(true);
         Ok(())
     }
@@ -221,6 +226,7 @@ impl Editor {
             self.navigation.cancel_drag();
             self.taps.cancel();
             self.drop_shape();
+            self.drop_move();
             self.tool = tool;
         }
     }
@@ -245,7 +251,8 @@ impl Editor {
     /// [`crate::navigation`]). With a shape Tool, one pointer dragging draws
     /// the shape (see [`crate::draw_shape`]), and with the selection Tool a tap
     /// selects the Element it hits or clears the Selection (see
-    /// [`Editor::selection`]).
+    /// [`Editor::selection`]) while a drag on an Element moves the Selection
+    /// (see [`crate::move_selection`]).
     pub fn pointer(&mut self, event: PointerEvent) {
         self.navigation.pointer(event, self.tool == Tool::Hand);
         self.navigated();
@@ -259,28 +266,91 @@ impl Editor {
     }
 
     /// Selects the Element a tap hits, or clears the Selection if the tap
-    /// was a deliberate one on empty Canvas (see [`crate::tap`]).
+    /// was a deliberate one on empty Canvas (see [`crate::tap`]); moves the
+    /// Selection with a drag that began on an Element.
     ///
-    /// Only the selection Tool taps, and never with two fingers down: they
-    /// navigate, and must not disturb the Selection.
+    /// Only the selection Tool taps and drags, and never with two fingers
+    /// down: they navigate, and must not disturb the Selection, nor leave a
+    /// move half done.
     fn select(&mut self, event: PointerEvent) {
         if self.tool != Tool::Selection || self.navigation.is_pinching() {
             self.taps.cancel();
+            self.drop_move();
             return;
         }
-        let Some(tap) = self.taps.track(event) else {
-            return;
-        };
-        let viewport = self.navigation.viewport();
-        let point = viewport.scene_at(tap.x, tap.y);
-        let reach = Reach::new(tap.kind, viewport.zoom());
-        let changed = match hit_test::topmost(&self.scene, &self.selection, point, reach) {
-            Some(element) => self.selection.select_only(element.id()),
+        self.follow_move(event);
+        match self.taps.track(event) {
+            Some(Recognized::Tap(tap)) => self.tap(tap),
+            Some(Recognized::DragBegan(origin)) => self.begin_move(origin, event),
+            None => {}
+        }
+    }
+
+    fn tap(&mut self, tap: Tap) {
+        let hit = self.hit(tap.x, tap.y, tap.kind);
+        let changed = match hit {
+            Some(id) => self.selection.select_only(&id),
             None if tap.is_short() => self.selection.clear(),
             None => false,
         };
         if changed {
             self.overlay_revision += 1;
+        }
+    }
+
+    /// The id of the topmost Element at the view point `(x, y)`, if any.
+    fn hit(&self, x: f64, y: f64, kind: PointerKind) -> Option<String> {
+        let viewport = self.navigation.viewport();
+        let reach = Reach::new(kind, viewport.zoom());
+        let point = viewport.scene_at(x, y);
+        hit_test::topmost(&self.scene, &self.selection, point, reach)
+            .map(|element| element.id().to_owned())
+    }
+
+    /// Starts moving the Selection if the drag began on an Element: on the
+    /// Selection itself, or else on an Element that becomes the Selection.
+    /// `event` is the step that turned the press into a drag.
+    fn begin_move(&mut self, origin: Origin, event: PointerEvent) {
+        let Some(id) = self.hit(origin.x, origin.y, origin.kind) else {
+            return;
+        };
+        if self.selection.select_only(&id) {
+            self.overlay_revision += 1;
+        }
+        let viewport = self.navigation.viewport();
+        let start = viewport.scene_at(origin.x, origin.y);
+        self.moving = Some(MoveGesture::begin(
+            &self.scene,
+            &self.selection,
+            event.id,
+            start,
+        ));
+        self.follow_move(event);
+    }
+
+    /// Takes the Selection along with the pointer that moves it.
+    fn follow_move(&mut self, event: PointerEvent) {
+        let Some(moving) = self.moving.as_mut().filter(|m| m.pointer() == event.id) else {
+            return;
+        };
+        match event.phase {
+            PointerPhase::Down => {}
+            PointerPhase::Move => {
+                let to = self.navigation.viewport().scene_at(event.x, event.y);
+                if moving.drag_to(&mut self.scene, &mut self.entropy, to) {
+                    self.changed(false);
+                }
+            }
+            PointerPhase::Up => self.moving = None,
+            PointerPhase::Cancel => self.drop_move(),
+        }
+    }
+
+    /// Puts the Selection being moved, if any, back where it was.
+    fn drop_move(&mut self) {
+        if let Some(moving) = self.moving.take() {
+            moving.cancel(&mut self.scene, &mut self.entropy);
+            self.changed(false);
         }
     }
 
