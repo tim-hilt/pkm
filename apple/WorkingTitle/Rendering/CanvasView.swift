@@ -8,20 +8,32 @@ import SwiftUI
 ///
 /// Panning and zooming happen in the core, but only as a new `Viewport` that
 /// is handed to the renderer; the geometry stays cached in the renderer and is
-/// never requested again for it (ADR-0007).
+/// never requested again for it (ADR-0007). Input that changes the Scene
+/// (drawing) shows up as a new `Editor.revision`, and only then is the
+/// geometry requested again.
 @MainActor
 final class CanvasMetalView: MTKView {
     let renderer: CanvasRenderer?
 
     /// Receives all input and supplies the image files. Set before input
-    /// arrives; setting it shows the editor's current viewport.
+    /// arrives; setting it shows the editor's current viewport. The renderer
+    /// is expected to show the editor's Scene as it is when this is set (see
+    /// `CanvasRenderer.setGeometry`); changes from then on are picked up here.
     var editor: Editor? {
         didSet {
             renderer?.files = editor
+            shownRevision = editor?.revision()
             reportViewSize()
             syncViewport()
         }
     }
+
+    /// Called after input or a command reached the editor, for chrome that
+    /// shows its state (the active Tool).
+    var onEditorChange: (() -> Void)?
+
+    /// The `Editor.revision` of the Scene the renderer shows.
+    private var shownRevision: UInt64?
 
     init() {
         let device = MTLCreateSystemDefaultDevice()
@@ -52,7 +64,7 @@ final class CanvasMetalView: MTKView {
     func perform(_ command: (Editor) -> Void) {
         guard let editor else { return }
         command(editor)
-        syncViewport()
+        didReachEditor()
     }
 
     /// The core's zoom commands act around the middle of the view, so it must
@@ -77,17 +89,31 @@ final class CanvasMetalView: MTKView {
 
     func send(_ event: PointerEvent) {
         editor?.pointer(event: event)
-        syncViewport()
+        didReachEditor()
     }
 
     func send(_ event: ScrollEvent) {
         editor?.scroll(event: event)
-        syncViewport()
+        didReachEditor()
     }
 
     func send(_ event: MagnifyEvent) {
         editor?.magnify(event: event)
+        didReachEditor()
+    }
+
+    /// Shows whatever the editor did with an input or command.
+    private func didReachEditor() {
+        syncScene()
         syncViewport()
+        onEditorChange?()
+    }
+
+    /// Hands the renderer the Scene's geometry again if the Scene changed.
+    private func syncScene() {
+        guard let editor, editor.revision() != shownRevision else { return }
+        shownRevision = editor.revision()
+        renderer?.setGeometry(editor.geometry())
     }
 
     /// Shows what the core says is in view. Cheap: the renderer ignores an
@@ -172,6 +198,8 @@ final class CanvasMetalView: MTKView {
 /// iOS and macOS except for the representable protocol it adopts.
 struct CanvasView {
     let editor: Editor
+    /// The editor's geometry when it is handed over; the Canvas keeps it up
+    /// to date from then on.
     let geometry: Geometry
     let controller: CanvasController
 
@@ -182,8 +210,13 @@ struct CanvasView {
     }
 
     @MainActor private func update(_ canvas: CanvasMetalView) {
-        canvas.editor = editor
-        canvas.renderer?.setGeometry(geometry)
+        // SwiftUI updates this view for reasons that have nothing to do with
+        // the Scene (a chrome state change); the Canvas must not be reset to
+        // the geometry of the hand-over then.
+        if canvas.editor !== editor {
+            canvas.renderer?.setGeometry(geometry)
+            canvas.editor = editor
+        }
         controller.canvas = canvas
     }
 }
@@ -200,15 +233,33 @@ struct CanvasView {
     }
 #endif
 
-/// Lets chrome outside the Canvas (toolbar, buttons) command it. Commands
-/// reach the core's `Editor` and the Canvas shows the result.
-@MainActor
+/// Lets chrome outside the Canvas (toolbar, buttons) command it, and shows it
+/// the editor's state. Commands reach the core's `Editor` and the Canvas shows
+/// the result.
+@MainActor @Observable
 final class CanvasController {
-    weak var canvas: CanvasMetalView?
+    @ObservationIgnored weak var canvas: CanvasMetalView? {
+        didSet {
+            canvas?.onEditorChange = { [weak self] in self?.refresh() }
+            refresh()
+        }
+    }
+
+    /// The active Tool and whether it is locked, as the editor has them. The
+    /// editor changes the Tool itself, e.g. back to selection after drawing.
+    private(set) var tool = Tool.selection
+    private(set) var toolLock = false
+
+    private func refresh() {
+        guard let editor = canvas?.editor else { return }
+        tool = editor.tool()
+        toolLock = editor.toolLock()
+    }
 
     func zoomIn() { canvas?.perform { $0.zoomIn() } }
     func zoomOut() { canvas?.perform { $0.zoomOut() } }
     func resetZoom() { canvas?.perform { $0.resetZoom() } }
     func zoomToFit() { canvas?.perform { $0.zoomToFit() } }
     func setTool(_ tool: Tool) { canvas?.perform { $0.setTool(tool: tool) } }
+    func setToolLock(_ locked: Bool) { canvas?.perform { $0.setToolLock(locked: locked) } }
 }

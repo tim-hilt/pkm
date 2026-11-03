@@ -128,6 +128,12 @@ impl Navigation {
             .pin(centre, (width / 2.0, height / 2.0), round_zoom(zoom));
     }
 
+    /// Whether two or more fingers are down: they pan and zoom, and no other
+    /// input may act on what they touch.
+    pub fn is_pinching(&self) -> bool {
+        self.pinch.is_some()
+    }
+
     /// Ends a hand Tool drag, e.g. because another Tool was chosen.
     pub fn cancel_drag(&mut self) {
         self.drag = None;

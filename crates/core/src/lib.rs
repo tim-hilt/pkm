@@ -4,6 +4,7 @@
 
 mod arrowhead;
 mod base64;
+mod draw_shape;
 mod editor;
 mod freedraw;
 mod freehand;
@@ -15,10 +16,12 @@ pub mod json;
 mod linear;
 mod navigation;
 mod path;
+mod random;
 mod restore;
 mod rough;
 pub mod scene;
 mod shape;
+mod style;
 mod text;
 mod tool;
 mod viewport;

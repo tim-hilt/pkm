@@ -89,6 +89,9 @@ pub struct MagnifyEvent {
 pub enum Tool {
     Selection,
     Hand,
+    Rectangle,
+    Diamond,
+    Ellipse,
 }
 
 /// What the Canvas shows; see [`workingtitle_core::Viewport`]. Small and
@@ -219,6 +222,22 @@ impl Editor {
 
     pub fn set_tool(&self, tool: Tool) {
         self.editor().set_tool(tool);
+    }
+
+    /// Whether the Tool lock is on: the Tool stays after drawing a shape.
+    pub fn tool_lock(&self) -> bool {
+        self.editor().tool_lock()
+    }
+
+    /// Turns the Tool lock on or off; turning it off returns to selection.
+    pub fn set_tool_lock(&self, locked: bool) {
+        self.editor().set_tool_lock(locked);
+    }
+
+    /// Differs from before whenever the Scene changed; read it after
+    /// forwarding input and ask for [`Editor::geometry`] again if it moved.
+    pub fn revision(&self) -> u64 {
+        self.editor().revision()
     }
 
     /// A step of a finger, Pencil or mouse; see
@@ -505,6 +524,34 @@ mod tests {
         editor.pointer(touch(PointerPhase::Down, 10.0));
         editor.pointer(touch(PointerPhase::Move, 30.0));
         assert_eq!(editor.viewport().origin_x, -20.0);
+    }
+
+    #[test]
+    fn dragging_with_a_shape_tool_draws_a_shape_and_returns_to_selection() {
+        let editor = Editor::new();
+        let revision = editor.revision();
+        editor.set_tool(Tool::Rectangle);
+        let mouse = |phase, x, y| PointerEvent {
+            id: 0,
+            phase,
+            x,
+            y,
+            kind: PointerKind::Mouse,
+            pressure: 0.5,
+            timestamp: 0.0,
+            modifiers: Modifiers::default(),
+        };
+        editor.pointer(mouse(PointerPhase::Down, 10.0, 10.0));
+        editor.pointer(mouse(PointerPhase::Move, 60.0, 40.0));
+        editor.pointer(mouse(PointerPhase::Up, 60.0, 40.0));
+
+        assert_ne!(editor.revision(), revision);
+        assert_eq!(editor.element_count(), 1);
+        assert_eq!(editor.tool(), Tool::Selection);
+        assert!(!editor.tool_lock());
+        editor.set_tool(Tool::Ellipse);
+        editor.set_tool_lock(true);
+        assert!(editor.tool_lock());
     }
 
     #[test]

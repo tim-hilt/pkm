@@ -274,6 +274,65 @@ impl Scene {
             .then(|| base64::decode(payload))?
     }
 
+    /// Adds `element`, an object with all the members of an Element, on top
+    /// of the others. Returns its handle.
+    pub(crate) fn push(&mut self, element: Object) -> u32 {
+        let elements = self.element_values_mut();
+        elements.push(Value::Object(element));
+        // A Scene of four billion Elements is beyond what can be drawn.
+        u32::try_from(elements.len() - 1).unwrap_or(u32::MAX)
+    }
+
+    /// Removes the Element with `handle`. The handles of Elements above it
+    /// change.
+    pub(crate) fn remove(&mut self, handle: u32) {
+        let elements = self.element_values_mut();
+        if (handle as usize) < elements.len() {
+            elements.remove(handle as usize);
+        }
+    }
+
+    /// Moves and resizes the Element with `handle`, and makes it a new
+    /// version of itself as Excalidraw does on every change: `version` goes up
+    /// and `versionNonce` becomes `nonce`.
+    pub(crate) fn set_frame(
+        &mut self,
+        handle: u32,
+        (x, y, width, height): (f64, f64, f64, f64),
+        nonce: f64,
+    ) {
+        let Some(element) = self
+            .element_values_mut()
+            .get_mut(handle as usize)
+            .and_then(Value::as_object_mut)
+        else {
+            return;
+        };
+        let version = element
+            .get("version")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        for (key, value) in [
+            ("x", x),
+            ("y", y),
+            ("width", width),
+            ("height", height),
+            ("version", version + 1.0),
+            ("versionNonce", nonce),
+        ] {
+            element.insert(key.into(), Value::Number(value));
+        }
+    }
+
+    fn element_values_mut(&mut self) -> &mut Vec<Value> {
+        // `from_bytes` and `empty` make sure there is an array of Elements,
+        // and nothing replaces it by anything else.
+        self.root
+            .get_mut("elements")
+            .and_then(Value::as_array_mut)
+            .expect("a Scene's `elements` is an array")
+    }
+
     fn element_values(&self) -> &[Value] {
         self.root
             .get("elements")

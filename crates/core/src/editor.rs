@@ -2,10 +2,13 @@ use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::draw_shape::{Outcome, ShapeGesture};
 use crate::geometry::Geometry;
-use crate::input::{MagnifyEvent, PointerEvent, ScrollEvent};
+use crate::input::{MagnifyEvent, PointerEvent, PointerPhase, ScrollEvent};
 use crate::navigation::{Bounds, Navigation};
+use crate::random::Entropy;
 use crate::scene::{Element, ElementType, LoadError, Scene};
+use crate::style::Style;
 use crate::text::{self, Containers, TextMeasurer};
 use crate::tool::Tool;
 use crate::viewport::Viewport;
@@ -27,8 +30,19 @@ pub struct Editor {
     /// Changes whenever Element handles are reassigned, see
     /// [`Geometry::generation`].
     generation: u64,
+    /// Changes whenever anything shown on the Canvas does, see
+    /// [`Editor::revision`].
+    revision: u64,
     navigation: Navigation,
     tool: Tool,
+    /// Whether the Tool stays after drawing instead of returning to
+    /// selection.
+    tool_lock: bool,
+    /// What new Elements look like.
+    style: Style,
+    entropy: Entropy,
+    /// The shape being drawn, if the pointer of a shape Tool is down.
+    shape: Option<ShapeGesture>,
     measurer: Option<Measurer>,
 }
 
@@ -53,8 +67,13 @@ impl Editor {
         Self {
             scene: Scene::empty(),
             generation: next_generation(),
+            revision: 0,
             navigation: Navigation::default(),
             tool: Tool::default(),
+            tool_lock: false,
+            style: Style::default(),
+            entropy: Entropy::from_system(),
+            shape: None,
             measurer: None,
         }
     }
@@ -63,7 +82,9 @@ impl Editor {
     /// `.excalidraw` file. If the bytes are not a Drawing the Scene is kept.
     pub fn load(&mut self, bytes: &[u8]) -> Result<(), LoadError> {
         self.scene = Scene::from_bytes(bytes)?;
-        self.generation = next_generation();
+        // Whatever was being drawn belonged to the Scene that is gone.
+        self.shape = None;
+        self.changed(true);
         Ok(())
     }
 
@@ -79,7 +100,15 @@ impl Editor {
     pub fn set_text_measurer(&mut self, measurer: Arc<dyn TextMeasurer>) {
         self.measurer = Some(Measurer(measurer));
         // What was drawn for texts may differ now.
-        self.generation = next_generation();
+        self.changed(true);
+    }
+
+    /// Tells whether the Scene changed: it differs after every input or
+    /// command that added, removed or edited an Element, or replaced the
+    /// Scene, and only then. Clients compare it with the one they last drew
+    /// and ask for [`Editor::geometry`] again if it differs.
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// The bytes of the file `id` of the Scene (an image, as stored; see
@@ -164,19 +193,37 @@ impl Editor {
     }
 
     /// Makes `tool` the active Tool; whatever the previous one was doing
-    /// with a pointer still down stops.
+    /// with a pointer still down stops, and a shape it was drawing is gone.
     pub fn set_tool(&mut self, tool: Tool) {
         if tool != self.tool {
             self.navigation.cancel_drag();
+            self.drop_shape();
             self.tool = tool;
         }
     }
 
+    /// Whether the Tool lock is on: the Tool then stays after drawing a shape
+    /// instead of returning to selection.
+    pub fn tool_lock(&self) -> bool {
+        self.tool_lock
+    }
+
+    /// Turns the Tool lock on or off. As on excalidraw.com, turning it off
+    /// also returns to selection: the lock was what kept the Tool.
+    pub fn set_tool_lock(&mut self, locked: bool) {
+        if self.tool_lock && !locked {
+            self.set_tool(Tool::Selection);
+        }
+        self.tool_lock = locked;
+    }
+
     /// A step of a finger, Pencil or mouse. Two fingers pan and zoom the
     /// viewport, and so does one pointer with the hand Tool (see
-    /// [`crate::navigation`]).
+    /// [`crate::navigation`]). With a shape Tool, one pointer dragging draws
+    /// the shape (see [`crate::draw_shape`]).
     pub fn pointer(&mut self, event: PointerEvent) {
         self.navigation.pointer(event, self.tool == Tool::Hand);
+        self.draw_shape(event);
     }
 
     /// A scroll wheel or trackpad scroll (Mac): pans, or zooms with ctrl/cmd.
@@ -187,6 +234,71 @@ impl Editor {
     /// A trackpad pinch (Mac): zooms around the pinch centre.
     pub fn magnify(&mut self, event: MagnifyEvent) {
         self.navigation.magnify(event);
+    }
+
+    /// Follows the pointer with the shape being drawn, or starts one.
+    fn draw_shape(&mut self, event: PointerEvent) {
+        // Two fingers navigate; they never draw, and a drawing one of them
+        // began turns into the gesture.
+        if self.navigation.is_pinching() {
+            self.drop_shape();
+            return;
+        }
+        let drawing_pointer = self.shape.as_ref().map(ShapeGesture::pointer);
+        let at = self.navigation.viewport().scene_at(event.x, event.y);
+        match event.phase {
+            PointerPhase::Down if drawing_pointer.is_none() => {
+                if let Some(kind) = self.tool.shape() {
+                    self.shape = Some(ShapeGesture::begin(
+                        &mut self.scene,
+                        &mut self.entropy,
+                        &self.style,
+                        kind,
+                        event.id,
+                        at,
+                    ));
+                    self.changed(true);
+                }
+            }
+            PointerPhase::Move if drawing_pointer == Some(event.id) => {
+                let square = event.modifiers.shift;
+                let moved = self.shape.as_mut().is_some_and(|shape| {
+                    shape.drag_to(&mut self.scene, &mut self.entropy, at, square)
+                });
+                if moved {
+                    self.changed(false);
+                }
+            }
+            PointerPhase::Up if drawing_pointer == Some(event.id) => {
+                let Some(shape) = self.shape.take() else {
+                    return;
+                };
+                match shape.finish(&mut self.scene) {
+                    Outcome::Drawn if !self.tool_lock => self.tool = Tool::Selection,
+                    Outcome::Drawn => {}
+                    Outcome::Dropped => self.changed(true),
+                }
+            }
+            PointerPhase::Cancel if drawing_pointer == Some(event.id) => self.drop_shape(),
+            _ => {}
+        }
+    }
+
+    /// Takes the shape being drawn, if any, out of the Scene again.
+    fn drop_shape(&mut self) {
+        if let Some(shape) = self.shape.take() {
+            shape.cancel(&mut self.scene);
+            self.changed(true);
+        }
+    }
+
+    /// Records that the Scene changed. `restructured` if Elements were added
+    /// or removed, which may hand their handles to other Elements.
+    fn changed(&mut self, restructured: bool) {
+        self.revision += 1;
+        if restructured {
+            self.generation = next_generation();
+        }
     }
 
     /// The smallest rectangle containing every shown Element, or `None` if

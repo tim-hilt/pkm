@@ -7,7 +7,6 @@ struct ContentView: View {
     /// re-evaluated while navigating.
     @State private var geometry: Geometry
     @State private var controller = CanvasController()
-    @State private var handTool = false
 
     init() {
         // An unreadable sample leaves an empty Canvas rather than a crash.
@@ -19,20 +18,54 @@ struct ContentView: View {
     var body: some View {
         CanvasView(editor: editor, geometry: geometry, controller: controller)
             .ignoresSafeArea()
-            .overlay(alignment: .bottom) { ZoomControls(controller: controller, handTool: $handTool) }
+            .overlay(alignment: .top) { ToolBar(controller: controller) }
+            .overlay(alignment: .bottom) { ZoomControls(controller: controller) }
+    }
+}
+
+/// Minimal Tool controls; their final placement comes with the layout.
+private struct ToolBar: View {
+    let controller: CanvasController
+
+    private static let tools: [(Tool, String, String)] = [
+        (.selection, "Selection", "cursorarrow"),
+        (.hand, "Hand", "hand.raised"),
+        (.rectangle, "Rectangle", "rectangle"),
+        (.diamond, "Diamond", "diamond"),
+        (.ellipse, "Ellipse", "circle"),
+    ]
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ForEach(Self.tools, id: \.0) { tool, name, symbol in
+                Toggle(
+                    isOn: Binding(
+                        get: { controller.tool == tool },
+                        set: { _ in controller.setTool(tool) })
+                ) { Label(name, systemImage: symbol) }
+                .toggleStyle(.button)
+            }
+            Divider().frame(height: 20)
+            Toggle(
+                isOn: Binding(
+                    get: { controller.toolLock },
+                    set: { controller.setToolLock($0) })
+            ) { Label("Keep tool selected", systemImage: controller.toolLock ? "lock" : "lock.open") }
+            .toggleStyle(.button)
+        }
+        .labelStyle(.iconOnly)
+        .padding(10)
+        .background(.regularMaterial, in: Capsule())
+        .padding()
     }
 }
 
 /// Minimal navigation controls; their final placement comes with the layout.
 private struct ZoomControls: View {
     let controller: CanvasController
-    @Binding var handTool: Bool
 
     var body: some View {
         HStack(spacing: 16) {
-            Toggle(isOn: $handTool) { Label("Hand", systemImage: "hand.raised") }
-                .toggleStyle(.button)
-                .onChange(of: handTool) { _, on in controller.setTool(on ? .hand : .selection) }
             Button("Zoom out", systemImage: "minus") { controller.zoomOut() }
             Button("Reset zoom", systemImage: "1.magnifyingglass") { controller.resetZoom() }
             Button("Zoom in", systemImage: "plus") { controller.zoomIn() }
