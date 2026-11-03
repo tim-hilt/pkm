@@ -1,6 +1,27 @@
 //! Base64 (RFC 4648, standard alphabet), the encoding of the files in a
 //! Drawing. Written out here because the core has no dependencies (ADR-0009).
 
+const DIGITS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// `bytes` as padded base64 text.
+pub(crate) fn encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let group = chunk.iter().enumerate().fold(0u32, |group, (i, &byte)| {
+            group | u32::from(byte) << (16 - 8 * i)
+        });
+        // A chunk of n bytes fills n + 1 digits; the rest is padding.
+        for i in 0..4 {
+            out.push(if i <= chunk.len() {
+                DIGITS[(group >> (18 - 6 * i) & 63) as usize] as char
+            } else {
+                '='
+            });
+        }
+    }
+    out
+}
+
 /// The bytes `text` stands for; `None` if it is not valid base64. Padding is
 /// optional, and line breaks and other whitespace are skipped, as browsers do.
 pub(crate) fn decode(text: &str) -> Option<Vec<u8>> {
@@ -41,7 +62,28 @@ pub(crate) fn decode(text: &str) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use super::decode;
+    use super::{decode, encode};
+
+    #[test]
+    fn encodes_the_rfc_4648_test_vectors_with_padding() {
+        for (plain, encoded) in [
+            ("", ""),
+            ("f", "Zg=="),
+            ("fo", "Zm8="),
+            ("foo", "Zm9v"),
+            ("foob", "Zm9vYg=="),
+            ("fooba", "Zm9vYmE="),
+            ("foobar", "Zm9vYmFy"),
+        ] {
+            assert_eq!(encode(plain.as_bytes()), encoded, "{plain}");
+        }
+    }
+
+    #[test]
+    fn every_byte_value_survives_a_round_trip() {
+        let bytes: Vec<u8> = (0..=255).collect();
+        assert_eq!(decode(&encode(&bytes)), Some(bytes));
+    }
 
     #[test]
     fn decodes_the_rfc_4648_test_vectors() {

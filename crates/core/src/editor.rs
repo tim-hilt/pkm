@@ -18,6 +18,7 @@ use crate::group;
 use crate::history::{self, History, Step};
 use crate::hit_test::{self, Reach};
 use crate::input::{MagnifyEvent, PointerEvent, PointerKind, PointerPhase, ScrollEvent};
+use crate::insert_image::{self, ImageFile, Placement};
 use crate::move_selection::MoveGesture;
 use crate::navigation::{Bounds, Navigation};
 use crate::overlay;
@@ -804,6 +805,50 @@ impl Editor {
         }
         self.selection = copies;
         self.sync_editing();
+        self.sync_points();
+        self.history.record(step, &self.scene, &self.selection);
+        self.overlay_revision += 1;
+        self.changed(true);
+    }
+
+    /// Puts the `images` (pasted or dropped; see [`crate::insert_image`]) in
+    /// the middle of the view. See [`Editor::insert_images_at`].
+    pub fn insert_images(&mut self, images: Vec<ImageFile>) {
+        let (width, height) = self.navigation.view_size();
+        self.insert_images_at(images, width / 2.0, height / 2.0);
+    }
+
+    /// Puts the `images` as Elements around the point `(x, y)` of the view
+    /// (where they were dropped): their files are stored in the Drawing,
+    /// they become the Selection and the Tool returns to selection. One undo
+    /// step. Images that have no pixels or bytes are skipped. Does nothing
+    /// while a pointer is drawing or moving.
+    pub fn insert_images_at(&mut self, images: Vec<ImageFile>, x: f64, y: f64) {
+        self.finish_placing();
+        if self.is_gesturing() {
+            return;
+        }
+        let viewport = self.navigation.viewport();
+        let placement = Placement {
+            view_height: self.navigation.view_size().1,
+            zoom: viewport.zoom(),
+            centre: viewport.scene_at(x, y),
+        };
+        let mut step = Step::begin(&self.selection);
+        let ids = insert_image::insert(
+            &mut self.scene,
+            &mut self.entropy,
+            &mut step,
+            &self.style,
+            &placement,
+            &images,
+        );
+        if ids.is_empty() {
+            return;
+        }
+        self.set_tool(Tool::Selection);
+        self.editing_group = None;
+        self.selection.select(ids);
         self.sync_points();
         self.history.record(step, &self.scene, &self.selection);
         self.overlay_revision += 1;

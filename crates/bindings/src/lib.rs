@@ -6,9 +6,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use workingtitle_core::scene::{FillPattern, LineStyle};
 use workingtitle_core::{
-    ActionBar, Edges, FontSize, MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase,
-    Properties, Property, ScrollEvent, Sloppiness, StrokeWidth, TextAlign, TextEditor, Tool,
-    ZOrder,
+    ActionBar, Edges, FontSize, ImageFile, MagnifyEvent, Modifiers, PointerEvent, PointerKind,
+    PointerPhase, Properties, Property, ScrollEvent, Sloppiness, StrokeWidth, TextAlign,
+    TextEditor, Tool, ZOrder,
 };
 
 uniffi::setup_scaffolding!("WorkingTitleCore");
@@ -220,6 +220,16 @@ pub struct ActionBar {
     pub y: f64,
     pub can_group: bool,
     pub can_ungroup: bool,
+}
+
+/// An image to paste or drop; see [`workingtitle_core::ImageFile`].
+#[uniffi::remote(Record)]
+pub struct ImageFile {
+    pub file_id: String,
+    pub mime_type: String,
+    pub bytes: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
 }
 
 /// What the Canvas shows; see [`workingtitle_core::Viewport`]. Small and
@@ -451,6 +461,18 @@ impl Editor {
     /// [`workingtitle_core::Editor::duplicate`].
     pub fn duplicate(&self) {
         self.editor().duplicate();
+    }
+
+    /// Puts pasted images in the middle of the view; see
+    /// [`workingtitle_core::Editor::insert_images`].
+    pub fn insert_images(&self, images: Vec<ImageFile>) {
+        self.editor().insert_images(images);
+    }
+
+    /// Puts dropped images around the point `(x, y)` of the view; see
+    /// [`workingtitle_core::Editor::insert_images_at`].
+    pub fn insert_images_at(&self, images: Vec<ImageFile>, x: f64, y: f64) {
+        self.editor().insert_images_at(images, x, y);
     }
 
     /// Deletes the Selection; see

@@ -92,6 +92,12 @@ impl Navigation {
         self.follow_drag(event, hand_tool);
     }
 
+    /// Width and height of the Canvas in view points; zero until a client
+    /// reports it.
+    pub fn view_size(&self) -> (f64, f64) {
+        self.view_size
+    }
+
     pub fn set_view_size(&mut self, width: f64, height: f64) {
         self.view_size = (width, height);
     }

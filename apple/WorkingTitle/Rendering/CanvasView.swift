@@ -62,6 +62,7 @@ final class CanvasMetalView: MTKView {
         #if !os(macOS)
             isMultipleTouchEnabled = true
         #endif
+        enableImageInput()
     }
 
     @available(*, unavailable)
@@ -223,6 +224,8 @@ final class CanvasMetalView: MTKView {
         /// (the Pencil samples faster than the display refreshes), so that
         /// strokes follow it closely.
         private func send(_ touches: Set<UITouch>, _ phase: PointerPhase, _ event: UIEvent?) {
+            // Keys (⌘V) go to the Canvas, unless a text is being edited.
+            if phase == .down && textOverlay.view == nil { becomeFirstResponder() }
             let modifiers = Modifiers(event?.modifierFlags ?? [])
             for touch in touches {
                 let id = UInt64(UInt(bitPattern: ObjectIdentifier(touch).hashValue))

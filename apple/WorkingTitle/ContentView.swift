@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @State private var editor: Editor
@@ -23,6 +24,9 @@ struct ContentView: View {
             .overlay(alignment: .bottom) { ZoomControls(controller: controller) }
             .overlay(alignment: .bottomLeading) { HistoryControls(controller: controller) }
             .overlay(alignment: .topLeading) { PropertiesPanel(controller: controller) }
+            #if !os(macOS)
+                .overlay(alignment: .bottomTrailing) { PasteImageControl(controller: controller) }
+            #endif
     }
 }
 
@@ -105,3 +109,43 @@ private struct HistoryControls: View {
         .padding()
     }
 }
+
+#if !os(macOS)
+    /// The system's paste button: the one way to paste an image on an iPhone,
+    /// which has no keyboard shortcut or menu to do it. Pasting through it
+    /// needs no permission prompt.
+    private struct PasteImageControl: UIViewRepresentable {
+        let controller: CanvasController
+
+        /// What the button pastes into. The Canvas is not there when the button
+        /// is made, so this hands the paste on to it when it happens.
+        @MainActor final class Target: UIResponder {
+            let controller: CanvasController
+
+            init(_ controller: CanvasController) {
+                self.controller = controller
+                super.init()
+                pasteConfiguration = UIPasteConfiguration(acceptableTypeIdentifiers: [UTType.image.identifier])
+            }
+
+            override func paste(itemProviders: [NSItemProvider]) {
+                controller.canvas?.paste(itemProviders: itemProviders)
+            }
+        }
+
+        func makeCoordinator() -> Target { Target(controller) }
+
+        func makeUIView(context: Context) -> UIPasteControl {
+            let configuration = UIPasteControl.Configuration()
+            configuration.displayMode = .iconOnly
+            configuration.baseBackgroundColor = .secondarySystemBackground
+            configuration.baseForegroundColor = .label
+            configuration.cornerStyle = .capsule
+            let control = UIPasteControl(configuration: configuration)
+            control.target = context.coordinator
+            return control
+        }
+
+        func updateUIView(_ control: UIPasteControl, context: Context) {}
+    }
+#endif

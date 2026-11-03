@@ -342,6 +342,35 @@ impl Scene {
             .then(|| base64::decode(payload))?
     }
 
+    /// Stores `bytes` as the file `id` of the Drawing's `files`, as
+    /// Excalidraw does: a record with the MIME type and a base64 data URL.
+    /// A file that is there already is kept: an id stands for its content.
+    pub(crate) fn add_file(&mut self, id: &str, mime_type: &str, bytes: &[u8], now: f64) {
+        let text = |s: &str| Value::String(s.to_owned());
+        let mut file = Object::new();
+        for (key, value) in [
+            ("mimeType", text(mime_type)),
+            ("id", text(id)),
+            (
+                "dataURL",
+                Value::String(format!("data:{mime_type};base64,{}", base64::encode(bytes))),
+            ),
+            ("created", Value::Number(now)),
+            ("lastRetrieved", Value::Number(now)),
+        ] {
+            file.insert(key.into(), value);
+        }
+        if !matches!(self.root.get("files"), Some(Value::Object(_))) {
+            self.root
+                .insert("files".into(), Value::Object(Object::new()));
+        }
+        if let Some(Value::Object(files)) = self.root.get_mut("files")
+            && files.get(id).is_none()
+        {
+            files.insert(id.to_owned(), Value::Object(file));
+        }
+    }
+
     /// Adds `element`, an object with all the members of an Element, on top
     /// of the others. Returns its handle.
     pub(crate) fn push(&mut self, element: Object) -> u32 {

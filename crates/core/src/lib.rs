@@ -27,6 +27,7 @@ mod hit_test;
 mod image;
 mod index_sync;
 pub mod input;
+mod insert_image;
 pub mod json;
 mod linear;
 mod move_selection;
@@ -59,6 +60,7 @@ pub use geometry::{
     StrokeStyle, TextAlign, TextLine, TextStyle, Verb,
 };
 pub use input::{MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase, ScrollEvent};
+pub use insert_image::ImageFile;
 pub use properties::{Properties, Property};
 pub use scene::LoadError;
 pub use style::{Edges, FontSize, Sloppiness, StrokeWidth};
