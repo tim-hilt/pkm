@@ -262,4 +262,43 @@ import Testing
         #expect(names.isEmpty)
         #expect(gallery.failure != nil)
     }
+
+    // MARK: Export
+
+    @Test func anExportedDrawingIsItsFileWithTheSameBytes() throws {
+        let bytes = try Data(contentsOf: SampleDrawing.url)
+        try store.save(bytes, as: "Flowchart")
+        let gallery = Gallery(store: store)
+
+        let url = try #require(gallery.exportFile(named: "Flowchart"))
+
+        #expect(url.lastPathComponent == "Flowchart.excalidraw")
+        #expect(try Data(contentsOf: url) == bytes)
+    }
+
+    @Test func exportingTheOpenDrawingIncludesChangesNotYetSaved() throws {
+        let gallery = Gallery(store: store)
+        gallery.createDrawing()
+        let drawing = try #require(gallery.open)
+        drawing.editor.setTool(tool: .rectangle)
+        for (phase, x) in [(PointerPhase.down, 10.0), (.move, 90), (.up, 90)] {
+            drawing.editor.pointer(
+                event: PointerEvent(
+                    id: 0, phase: phase, x: x, y: x, kind: .mouse, pressure: 0.5, timestamp: 0,
+                    modifiers: Modifiers(shift: false, ctrl: false, alt: false, meta: false)))
+        }
+
+        let url = try #require(gallery.exportFile(named: drawing.name))
+
+        let exported = Editor()
+        try exported.load(bytes: Data(contentsOf: url))
+        #expect(exported.elementCount() == 1)
+    }
+
+    @Test func exportingAMissingDrawingTellsTheUser() {
+        let gallery = Gallery(store: store)
+
+        #expect(gallery.exportFile(named: "Gone") == nil)
+        #expect(gallery.failure != nil)
+    }
 }

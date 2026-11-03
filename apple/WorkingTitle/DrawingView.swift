@@ -4,6 +4,8 @@ import UniformTypeIdentifiers
 /// A Drawing in the Canvas with its controls, kept saved while it is open.
 struct DrawingView: View {
     let drawing: OpenDrawing
+    /// The Drawing as a `.excalidraw` file for the share sheet.
+    let export: ExportedDrawing
     let onBack: () -> Void
     /// Requested once: panning and zooming move the viewport, never the
     /// geometry, so nothing here depends on the viewport and this view is not
@@ -12,8 +14,9 @@ struct DrawingView: View {
     @State private var controller = CanvasController()
     @Environment(\.scenePhase) private var scenePhase
 
-    init(drawing: OpenDrawing, onBack: @escaping () -> Void) {
+    init(drawing: OpenDrawing, export: ExportedDrawing, onBack: @escaping () -> Void) {
         self.drawing = drawing
+        self.export = export
         self.onBack = onBack
         _geometry = State(initialValue: drawing.editor.geometry())
     }
@@ -28,7 +31,13 @@ struct DrawingView: View {
         .overlay(alignment: .top) { ToolBar(controller: controller) }
         .overlay(alignment: .bottom) {
             VStack(spacing: 0) {
-                BackControl(action: onBack)
+                HStack {
+                    BackControl(action: onBack)
+                    ShareLink(item: export, preview: SharePreview(drawing.name)) {
+                        Label("Export", systemImage: "square.and.arrow.up")
+                    }
+                    .accessibilityIdentifier("export-drawing")
+                }
                 ZoomControls(controller: controller)
             }
         }

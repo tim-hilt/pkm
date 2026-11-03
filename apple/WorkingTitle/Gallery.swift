@@ -1,3 +1,4 @@
+import CoreTransferable
 import Foundation
 import Observation
 import UniformTypeIdentifiers
@@ -81,6 +82,16 @@ final class Gallery {
         return try store.add(contents, named: url.deletingPathExtension().lastPathComponent)
     }
 
+    /// The Drawing's `.excalidraw` file to share, exactly as stored, so it
+    /// opens unchanged on excalidraw.com. The open Drawing is saved first.
+    /// Tells the user and returns `nil` if there is no such file.
+    func exportFile(named name: String) -> URL? {
+        if open?.name == name { open?.saveNow() }
+        var url: URL?
+        attempt("Could not export “\(name)”.") { url = try store.fileURL(for: name) }
+        return url
+    }
+
     /// Gives a Drawing another name; tells the user if that name is taken or
     /// cannot be used.
     func renameDrawing(named name: String, to newName: String) {
@@ -131,6 +142,23 @@ final class Gallery {
         } catch {
             failure = message
         }
+    }
+}
+
+/// A Drawing handed to the share sheet as its `.excalidraw` file, which is
+/// looked up (and the open Drawing saved) only when something is shared.
+struct ExportedDrawing: Transferable {
+    let name: String
+    let gallery: Gallery
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: .excalidraw) { drawing in
+            guard let url = await drawing.gallery.exportFile(named: drawing.name) else {
+                throw CocoaError(.fileNoSuchFile)
+            }
+            return SentTransferredFile(url)
+        }
+        .suggestedFileName { "\($0.name).excalidraw" }
     }
 }
 

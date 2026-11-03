@@ -7,9 +7,12 @@ struct ContentView: View {
     var body: some View {
         Group {
             if let drawing = gallery.open {
-                DrawingView(drawing: drawing, onBack: gallery.close)
-                    // A fresh view per Drawing: its geometry is requested once.
-                    .id(drawing.name)
+                DrawingView(
+                    drawing: drawing, export: ExportedDrawing(name: drawing.name, gallery: gallery),
+                    onBack: gallery.close
+                )
+                // A fresh view per Drawing: its geometry is requested once.
+                .id(drawing.name)
             } else {
                 GalleryView(gallery: gallery)
             }

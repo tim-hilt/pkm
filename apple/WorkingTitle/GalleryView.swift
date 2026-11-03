@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 /// the card comes into view (the grid is lazy) and again after the Drawing
 /// changed, with the name and date below it.
 /// A card's menu (also its context menu) renames, duplicates and deletes the
-/// Drawing; deleting asks first. `.excalidraw` files are imported from Files
+/// Drawing, exports it via the share sheet and deletes it; deleting asks first. `.excalidraw` files are imported from Files
 /// (toolbar) or by dropping them onto the Gallery.
 struct GalleryView: View {
     let gallery: Gallery
@@ -114,6 +114,9 @@ struct GalleryView: View {
         .accessibilityIdentifier("rename")
         Button("Duplicate", systemImage: "plus.square.on.square") { gallery.duplicateDrawing(named: drawing.name) }
             .accessibilityIdentifier("duplicate")
+        ShareLink(item: ExportedDrawing(name: drawing.name, gallery: gallery), preview: SharePreview(drawing.name)) {
+            Label("Export", systemImage: "square.and.arrow.up")
+        }
         Button("Delete", systemImage: "trash", role: .destructive) { deleting = drawing }
             .accessibilityIdentifier("delete")
     }

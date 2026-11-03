@@ -246,6 +246,14 @@ struct DrawingStore: Sendable {
         return idA.isEqual(idB)
     }
 
+    /// The Drawing's `.excalidraw` file itself, to hand to another app (share
+    /// sheet). Throws if there is no such Drawing.
+    func fileURL(for name: String) throws -> URL {
+        let url = try url(for: name)
+        guard FileManager.default.fileExists(atPath: url.path) else { throw CocoaError(.fileNoSuchFile) }
+        return url
+    }
+
     private func url(for name: String) throws -> URL {
         guard !name.isEmpty, !name.contains("/"), !name.hasPrefix(".") else {
             throw InvalidName(name: name)
