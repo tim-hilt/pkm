@@ -254,6 +254,15 @@ fn not_a_drawing(why: &str) -> LoadError {
     LoadError::NotADrawing(why.to_owned())
 }
 
+/// A point of a path: two finite numbers.
+fn finite_pair(point: &Value) -> Option<(f64, f64)> {
+    let [x, y] = point.as_array()? else {
+        return None;
+    };
+    let (x, y) = (x.as_f64()?, y.as_f64()?);
+    (x.is_finite() && y.is_finite()).then_some((x, y))
+}
+
 fn type_of(element: &Object) -> Option<ElementType> {
     ElementType::from_name(element.get("type")?.as_str()?)
 }
@@ -369,33 +378,73 @@ impl Element<'_> {
         })
     }
 
-    /// The points of a line or arrow in the Element's own frame, which starts
-    /// at its `x` and `y`. Points that are not number pairs are left out; a
-    /// line without two valid points goes from the origin to
-    /// `(width, height)`, as Excalidraw restores it. Empty for other types.
+    /// The points of a line, arrow or freedraw stroke in the Element's own
+    /// frame, which starts at its `x` and `y`. Points that are not number
+    /// pairs are left out; a line or arrow without two valid points goes from
+    /// the origin to `(width, height)`, as Excalidraw restores it. Empty for
+    /// other types.
     pub fn points(&self) -> Vec<(f64, f64)> {
-        if !self.kind.is_linear() {
-            return Vec::new();
+        let valid = self.valid_points();
+        match self.kind {
+            ElementType::Freedraw => valid,
+            kind if kind.is_linear() && valid.len() < 2 => {
+                vec![(0.0, 0.0), (self.width(), self.height())]
+            }
+            kind if kind.is_linear() => valid,
+            _ => Vec::new(),
         }
-        let valid: Vec<_> = self
-            .object
+    }
+
+    fn valid_points(&self) -> Vec<(f64, f64)> {
+        self.raw_points().iter().filter_map(finite_pair).collect()
+    }
+
+    fn raw_points(&self) -> &[Value] {
+        self.object
             .get("points")
             .and_then(Value::as_array)
             .unwrap_or_default()
+    }
+
+    /// The pressure of each point of a freedraw stroke, in the order of
+    /// [`Element::points`], as Excalidraw restores them: a point the file
+    /// gives no pressure for has none here (the list is then shorter than
+    /// the points), and a pressure that is not a number is `0.5`.
+    pub(crate) fn pressures(&self) -> Vec<f64> {
+        let given = self
+            .object
+            .get("pressures")
+            .and_then(Value::as_array)
+            .unwrap_or_default();
+        self.raw_points()
             .iter()
-            .filter_map(|point| {
-                let [x, y] = point.as_array()? else {
-                    return None;
-                };
-                Some((x.as_f64()?, y.as_f64()?))
-            })
-            .filter(|(x, y)| x.is_finite() && y.is_finite())
-            .collect();
-        if valid.len() >= 2 {
-            valid
-        } else {
-            vec![(0.0, 0.0), (self.width(), self.height())]
-        }
+            .enumerate()
+            .filter(|(_, point)| finite_pair(point).is_some())
+            .filter_map(|(index, _)| given.get(index))
+            .map(|pressure| pressure.as_f64().filter(|p| p.is_finite()).unwrap_or(0.5))
+            .collect()
+    }
+
+    /// Whether the pressure of a freedraw stroke is made up from the speed
+    /// of the pointer instead of being measured. Excalidraw reads a file
+    /// that does not say as measured.
+    pub(crate) fn simulates_pressure(&self) -> bool {
+        self.object
+            .get("simulatePressure")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }
+
+    /// How much a freedraw stroke smooths out the movement of the pointer,
+    /// `0.0..=1.0`; Excalidraw's `0.5` if the file has no usable value.
+    pub(crate) fn streamline(&self) -> f64 {
+        self.object
+            .get("strokeOptions")
+            .and_then(Value::as_object)
+            .and_then(|options| options.get("streamline"))
+            .and_then(Value::as_f64)
+            .filter(|s| s.is_finite())
+            .unwrap_or(0.5)
     }
 
     /// What an arrow has at its first point; `None` for lines and arrows

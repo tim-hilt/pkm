@@ -4,6 +4,8 @@
 
 mod arrowhead;
 mod editor;
+mod freedraw;
+mod freehand;
 pub mod geometry;
 mod hachure;
 pub mod input;

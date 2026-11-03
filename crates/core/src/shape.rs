@@ -2,6 +2,7 @@
 //! as geometry: the Element's style turned into rough.js options, its shape
 //! into a fill and strokes (ADR-0004), placed in the Scene.
 
+use crate::freedraw;
 use crate::geometry::{Dash, FillRule, FillStyle, Geometry, PartWriter, StrokeStyle};
 use crate::linear;
 use crate::path::{Point, Segment};
@@ -19,6 +20,7 @@ pub(crate) fn draw(element: &Element, background: &str, geometry: &mut Geometry)
         ElementType::Line | ElementType::Arrow => {
             linear::draw(element, parse_color(background), geometry);
         }
+        ElementType::Freedraw => freedraw::draw(element, geometry),
         _ => return false,
     }
     true
@@ -105,6 +107,26 @@ impl Target {
 
 /// Adds the parts for `drawing` to `geometry`: its fill, then its outline.
 pub(crate) fn emit(geometry: &mut Geometry, target: &Target, drawing: &Drawing, paint: &Paint) {
+    emit_fill(geometry, target, drawing, paint);
+    let Target {
+        handle,
+        version,
+        ref placement,
+    } = *target;
+    write_ops(
+        &mut geometry.stroke(handle, version, paint.stroke),
+        &drawing.outline,
+        placement,
+    );
+}
+
+/// Adds the part for the fill of `drawing` to `geometry`, if it has one.
+pub(crate) fn emit_fill(
+    geometry: &mut Geometry,
+    target: &Target,
+    drawing: &Drawing,
+    paint: &Paint,
+) {
     let Target {
         handle,
         version,
@@ -119,7 +141,7 @@ pub(crate) fn emit(geometry: &mut Geometry, target: &Target, drawing: &Drawing, 
                 opacity,
                 rule: paint.fill_rule,
             };
-            write_all(&mut geometry.fill(handle, version, style), ops, placement);
+            write_ops(&mut geometry.fill(handle, version, style), ops, placement);
         }
         Some(FillOps::Lines(ops)) => {
             let style = StrokeStyle {
@@ -128,17 +150,13 @@ pub(crate) fn emit(geometry: &mut Geometry, target: &Target, drawing: &Drawing, 
                 opacity,
                 dash: None,
             };
-            write_all(&mut geometry.stroke(handle, version, style), ops, placement);
+            write_ops(&mut geometry.stroke(handle, version, style), ops, placement);
         }
     }
-    write_all(
-        &mut geometry.stroke(handle, version, paint.stroke),
-        &drawing.outline,
-        placement,
-    );
 }
 
-fn write_all(path: &mut PartWriter, ops: &[Op], placement: &Placement) {
+/// Writes `ops`, placed in the Scene, to `path`.
+pub(crate) fn write_ops(path: &mut PartWriter, ops: &[Op], placement: &Placement) {
     for &op in ops {
         write(path, op, placement);
     }
@@ -313,6 +331,7 @@ fn rounded_diamond(w: f64, h: f64, roundness: Roundness) -> [Segment; 9] {
 
 /// Moves points from the Element's own frame into the Scene: by the Element's
 /// position, turned about a centre by its angle.
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct Placement {
     origin: Point,
     centre: Point,

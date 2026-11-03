@@ -132,6 +132,46 @@ enum TestScenes {
                 """)
     }
 
+    /// A freedraw stroke at (x, y) through `points`, which start at the origin.
+    private static func freedraw(
+        _ x: Int, _ y: Int, _ seed: Int, _ points: [(Double, Double)], pressures: [Double]? = nil,
+        _ extra: String = ""
+    ) -> String {
+        func number(_ value: Double) -> String { String(format: "%.2f", value) }
+        let path = points.map { "[\(number($0.0)),\(number($0.1))]" }.joined(separator: ",")
+        var pressure = #","simulatePressure":true,"pressures":[]"#
+        if let pressures {
+            pressure = #","simulatePressure":false,"pressures":[\#(pressures.map(number).joined(separator: ","))]"#
+        }
+        return """
+            {"id":"freedraw\(seed)","type":"freedraw","x":\(x),"y":\(y),"width":150,"height":60,"seed":\(seed),\
+            "points":[\(path)]\(pressure)\(extra)}
+            """
+    }
+
+    /// Strokes with simulated and with real pressure, thick, translucent,
+    /// rotated, and closed loops with hachure and solid fills.
+    static func freedraw() -> Geometry {
+        let wave = (0..<24).map { (Double($0) * 6, 30 + 25 * sin(Double($0) / 3.5)) }
+        let pressures = (0..<24).map { 0.25 + 0.6 * sin(Double($0) / 23 * .pi) }
+        let loop = (0...24).map { (50 + 45 * cos(Double($0) / 24 * 2 * .pi), 50 + 45 * sin(Double($0) / 24 * 2 * .pi)) }
+        let fill = ##","backgroundColor":"#ffc9c9""##
+        return geometry(
+            of: """
+                {"type":"excalidraw","version":2,"elements":[
+                \([
+                    freedraw(20, 20, 61, wave),
+                    freedraw(20, 100, 62, wave, pressures: pressures),
+                    freedraw(20, 180, 63, wave, #","strokeWidth":4"#),
+                    freedraw(20, 260, 64, wave, pressures: pressures, ##","strokeColor":"#e03131","opacity":50"##),
+                    freedraw(200, 20, 65, wave, #","angle":0.5"#),
+                    freedraw(200, 120, 66, loop, fill + #","fillStyle":"hachure""#),
+                    freedraw(200, 240, 67, loop, pressures: loop.indices.map { _ in 0.5 }, fill + #","fillStyle":"solid""#),
+                ].joined(separator: ","))
+                ]}
+                """)
+    }
+
     /// A concave outline and a pentagram, each by both fill rules.
     static func fillRules() -> HandBuiltGeometry {
         let ell: [SIMD2<Float>] = [[20, 20], [80, 20], [80, 120], [180, 120], [180, 180], [20, 180]]

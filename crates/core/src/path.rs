@@ -205,7 +205,7 @@ fn flatness(&[p1, p2, p3, p4]: &[Point; 4]) -> f64 {
 
 /// Ramer-Douglas-Peucker: drops points that lie within `epsilon` of the line
 /// between their neighbours that are kept.
-fn simplify(points: &[Point], epsilon: f64) -> Vec<Point> {
+pub(crate) fn simplify(points: &[Point], epsilon: f64) -> Vec<Point> {
     let mut out = Vec::new();
     if !points.is_empty() {
         simplify_range(points, 0, points.len(), epsilon, &mut out);
@@ -258,9 +258,40 @@ fn lerp(a: Point, b: Point) -> Point {
     (a.0 + (b.0 - a.0) * 0.5, a.1 + (b.1 - a.1) * 0.5)
 }
 
+/// How close the end of a line must come to its start to close a loop that
+/// can be filled.
+const LOOP_REACH: f64 = 8.0;
+
+/// Whether `points` start and end at (nearly) the same place.
+pub(crate) fn is_loop(points: &[Point]) -> bool {
+    match (points.first(), points.last()) {
+        (Some(first), Some(last)) if points.len() >= 3 => {
+            (first.0 - last.0).hypot(first.1 - last.1) <= LOOP_REACH
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_lines_that_return_to_their_start_are_loops() {
+        assert!(is_loop(&[
+            (0.0, 0.0),
+            (50.0, 0.0),
+            (50.0, 50.0),
+            (3.0, 4.0)
+        ]));
+        assert!(!is_loop(&[
+            (0.0, 0.0),
+            (50.0, 0.0),
+            (50.0, 50.0),
+            (9.0, 0.0)
+        ]));
+        assert!(!is_loop(&[(0.0, 0.0), (0.0, 0.0)]), "needs three points");
+    }
 
     #[test]
     fn quadratic_curves_become_cubics_with_controls_two_thirds_along() {

@@ -69,9 +69,10 @@ impl Editor {
     ///
     /// Rectangles, diamonds, ellipses, lines and arrows are drawn hand-drawn
     /// like on excalidraw.com, with the background of closed ones filled by
-    /// hachure, cross-hatch, zigzag or solid (see [`crate::shape`]). The other
-    /// types are drawn as a plain box around their bounds until their
-    /// generators land.
+    /// hachure, cross-hatch, zigzag or solid (see [`crate::shape`]), and
+    /// freedraw strokes as the filled outline of their pressure-sensitive
+    /// path. The other types are drawn as a plain box around their bounds
+    /// until their generators land.
     pub fn geometry(&self) -> Geometry {
         let mut geometry = Geometry::with_generation(self.generation);
         let background = self.scene.view_background_color();

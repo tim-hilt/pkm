@@ -8,17 +8,13 @@
 
 use crate::arrowhead::{self, Arrow, End, Placed};
 use crate::geometry::{Dash, FillRule, Geometry, StrokeStyle};
-use crate::path::Point;
+use crate::path::{Point, is_loop};
 use crate::rough::{Drawing, FillOps, Op, Sketcher, Style};
 use crate::scene::{Arrowhead, Element, ElementType, LineStyle};
 use crate::shape::{
     Paint, Placement, Target, dash_of, emit, fill_of, fill_weight, parse_color, stroke_width,
     style_of,
 };
-
-/// How close the end of a line must come to its start to close a loop that
-/// can be filled.
-const LOOP_REACH: f64 = 8.0;
 
 /// Adds the strokes of the line or arrow `element` to `geometry`.
 /// `background` is the colour of the Canvas, which some arrowheads are filled
@@ -88,16 +84,6 @@ pub(crate) fn draw(element: &Element, background: u32, geometry: &mut Geometry) 
                 emit(geometry, &target, &piece.drawing, &piece.paint);
             }
         }
-    }
-}
-
-/// Whether `points` start and end at (nearly) the same place.
-fn is_loop(points: &[Point]) -> bool {
-    match (points.first(), points.last()) {
-        (Some(first), Some(last)) if points.len() >= 3 => {
-            (first.0 - last.0).hypot(first.1 - last.1) <= LOOP_REACH
-        }
-        _ => false,
     }
 }
 
@@ -393,22 +379,5 @@ mod tests {
     #[test]
     fn there_is_no_box_around_strokes_without_curves() {
         assert_eq!(curve_bounds(&[Op::Move((1.0, 2.0))]), None);
-    }
-
-    #[test]
-    fn only_lines_that_return_to_their_start_are_loops() {
-        assert!(is_loop(&[
-            (0.0, 0.0),
-            (50.0, 0.0),
-            (50.0, 50.0),
-            (3.0, 4.0)
-        ]));
-        assert!(!is_loop(&[
-            (0.0, 0.0),
-            (50.0, 0.0),
-            (50.0, 50.0),
-            (9.0, 0.0)
-        ]));
-        assert!(!is_loop(&[(0.0, 0.0), (0.0, 0.0)]), "needs three points");
     }
 }

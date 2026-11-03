@@ -57,4 +57,9 @@ import Testing
         expectMatchesReference(
             try render(Viewport(), of: TestScenes.linesAndArrows(), size: 520), named: "lines-and-arrows")
     }
+
+    /// Strokes with simulated and real pressure, thick, translucent, rotated, and filled loops.
+    @Test func freedraw() throws {
+        expectMatchesReference(try render(Viewport(), of: TestScenes.freedraw(), size: 400), named: "freedraw")
+    }
 }

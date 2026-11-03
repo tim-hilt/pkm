@@ -349,7 +349,7 @@ fn deleted_elements_are_not_drawn() {
 #[test]
 fn elements_without_a_generator_yet_are_drawn_as_a_box_around_their_bounds() {
     let editor = editor_with(&drawing_with_element(
-        r#""id":"a","type":"freedraw","x":10,"y":20,"width":30,"height":40"#,
+        r#""id":"a","type":"text","x":10,"y":20,"width":30,"height":40"#,
     ));
     let geometry = editor.geometry();
 
@@ -376,7 +376,7 @@ fn the_box_of_a_rotated_element_turns_about_its_centre() {
     // Centre (25, 40); a quarter turn clockwise (y points down) takes the
     // corner (10, 20) to (45, 25), the next one (40, 20) to (45, 55), ...
     let editor = editor_with(&drawing_with_element(&format!(
-        r#""id":"a","type":"freedraw","x":10,"y":20,"width":30,"height":40,"angle":{}"#,
+        r#""id":"a","type":"text","x":10,"y":20,"width":30,"height":40,"angle":{}"#,
         std::f64::consts::FRAC_PI_2
     )));
     let geometry = editor.geometry();
