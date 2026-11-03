@@ -209,7 +209,7 @@ pub(crate) fn new_element(
 }
 
 /// Milliseconds since 1970, as Excalidraw's `updated` and `created`.
-fn now_ms() -> f64 {
+pub(crate) fn now_ms() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0.0, |since| since.as_millis() as f64)

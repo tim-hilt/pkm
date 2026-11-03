@@ -295,6 +295,19 @@ impl Scene {
         u32::try_from(elements.len() - 1).unwrap_or(u32::MAX)
     }
 
+    /// Puts `element`, an object with all the members of an Element, right
+    /// above the Element `anchor` in z-order (on top if there is no such
+    /// Element). The handles of Elements above it change. Returns its handle.
+    pub(crate) fn insert_after(&mut self, anchor: &str, element: Object) -> u32 {
+        let Some(index) = self.index_of(anchor) else {
+            return self.push(element);
+        };
+        let elements = self.element_values_mut();
+        elements.insert(index + 1, Value::Object(element));
+        // A Scene of four billion Elements is beyond what can be drawn.
+        u32::try_from(index + 1).unwrap_or(u32::MAX)
+    }
+
     /// Removes the Element with `handle`. The handles of Elements above it
     /// change.
     pub(crate) fn remove(&mut self, handle: u32) {

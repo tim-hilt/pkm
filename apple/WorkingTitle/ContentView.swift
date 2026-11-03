@@ -18,6 +18,7 @@ struct ContentView: View {
     var body: some View {
         CanvasView(editor: editor, geometry: geometry, controller: controller)
             .ignoresSafeArea()
+            .overlay { ActionBarView(controller: controller) }
             .overlay(alignment: .top) { ToolBar(controller: controller) }
             .overlay(alignment: .bottom) { ZoomControls(controller: controller) }
             .overlay(alignment: .bottomLeading) { HistoryControls(controller: controller) }

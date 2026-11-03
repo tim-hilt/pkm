@@ -280,6 +280,12 @@ final class CanvasController {
     /// of the next Element if nothing is selected. `nil` until there is an
     /// editor.
     private(set) var properties: Properties?
+    /// Where the Action Bar is shown, in the Canvas's coordinates, or `nil` if
+    /// it is hidden; the core decides, and the position follows the Selection
+    /// through panning and zooming.
+    private(set) var actionBar: ActionBar?
+    /// The size of the Canvas, which keeps the Action Bar inside it.
+    private(set) var viewSize = CGSize.zero
 
     private func refresh() {
         guard let editor = canvas?.editor else { return }
@@ -288,6 +294,8 @@ final class CanvasController {
         canUndo = editor.canUndo()
         canRedo = editor.canRedo()
         properties = editor.properties()
+        actionBar = editor.actionBar()
+        viewSize = canvas?.bounds.size ?? .zero
     }
 
     func zoomIn() { canvas?.perform { $0.zoomIn() } }
@@ -298,5 +306,7 @@ final class CanvasController {
     func redo() { canvas?.perform { $0.redo() } }
     func setTool(_ tool: Tool) { canvas?.perform { $0.setTool(tool: tool) } }
     func setToolLock(_ locked: Bool) { canvas?.perform { $0.setToolLock(locked: locked) } }
+    func duplicate() { canvas?.perform { $0.duplicate() } }
+    func deleteSelection() { canvas?.perform { $0.deleteSelection() } }
     func setProperty(_ property: Property) { canvas?.perform { $0.setProperty(property: property) } }
 }

@@ -2,13 +2,16 @@
 //!
 //! Clients drive everything through [`Editor`].
 
+mod action_bar;
 mod arrowhead;
 mod base64;
 mod binding;
 mod box_select;
+mod delete;
 mod draw_freedraw;
 mod draw_linear;
 mod draw_shape;
+mod duplicate;
 mod edit_points;
 mod editor;
 mod erase;
@@ -44,6 +47,7 @@ mod transform_handles;
 mod viewport;
 mod wrap;
 
+pub use action_bar::ActionBar;
 pub use editor::Editor;
 pub use geometry::{
     Dash, FillRule, FillStyle, Geometry, Image, ImageStatus, Part, PartKind, PartWriter,

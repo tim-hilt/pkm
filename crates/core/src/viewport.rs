@@ -46,6 +46,12 @@ impl Viewport {
         (self.x + x / self.zoom, self.y + y / self.zoom)
     }
 
+    /// Where the Scene point `(x, y)` is shown, in view coordinates: the
+    /// inverse of [`Viewport::scene_at`].
+    pub(crate) fn view_at(&self, (x, y): (f64, f64)) -> (f64, f64) {
+        ((x - self.x) * self.zoom, (y - self.y) * self.zoom)
+    }
+
     /// Shifts the view by `(dx, dy)` view points: the Scene appears to move
     /// by the same amount in the opposite direction.
     pub(crate) fn scroll_by(&mut self, dx: f64, dy: f64) {

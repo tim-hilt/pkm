@@ -2,11 +2,14 @@ use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::action_bar::ActionBar;
 use crate::binding::{self, End};
 use crate::box_select::BoxSelect;
+use crate::delete;
 use crate::draw_freedraw::StrokeDrawing;
 use crate::draw_linear::{LinearDrawing, Update};
 use crate::draw_shape::{Outcome, ShapeGesture};
+use crate::duplicate;
 use crate::edit_points::{self, Grab, PointDrag, PointHandles, PointSelection};
 use crate::erase::Erasing;
 use crate::geometry::Geometry;
@@ -461,6 +464,70 @@ impl Editor {
     /// The ids of the selected Elements, in the order they were selected.
     pub fn selection(&self) -> &[String] {
         self.selection.ids()
+    }
+
+    /// Where the Action Bar is shown, or `None` if it is not: it is shown
+    /// next to a non-empty Selection, except while a pointer is dragging it,
+    /// or drawing, or box-selecting. The anchor is in view coordinates, so it
+    /// follows the Selection through panning and zooming: clients read it
+    /// with the viewport after every input and command. See
+    /// [`crate::action_bar`].
+    pub fn action_bar(&self) -> Option<ActionBar> {
+        if self.is_gesturing() {
+            return None;
+        }
+        ActionBar::of(&self.scene, &self.selection, self.navigation.viewport())
+    }
+
+    /// Duplicates the Selection (the `duplicate` command): each Element gets
+    /// a copy 10 units right and down of it, as on excalidraw.com, and the
+    /// copies become the Selection. One undo step. Does nothing with nothing
+    /// selected, or while a pointer is drawing or moving. See
+    /// [`crate::duplicate`].
+    pub fn duplicate(&mut self) {
+        self.finish_placing();
+        if self.is_gesturing() || self.selection.is_empty() {
+            return;
+        }
+        let mut step = Step::begin(&self.selection);
+        let copies = duplicate::duplicate(
+            &mut self.scene,
+            &mut self.entropy,
+            &mut step,
+            &self.selection,
+        );
+        if copies.is_empty() {
+            return;
+        }
+        self.selection = copies;
+        self.sync_points();
+        self.history.record(step, &self.scene, &self.selection);
+        self.overlay_revision += 1;
+        self.changed(true);
+    }
+
+    /// Deletes the Selection (the `delete` command), and with it the labels
+    /// of its containers; arrows bound to what is deleted are unbound. One
+    /// undo step, which selects what was deleted again. Does nothing with
+    /// nothing selected, or while a pointer is drawing or moving. See
+    /// [`crate::delete`].
+    pub fn delete_selection(&mut self) {
+        self.finish_placing();
+        if self.is_gesturing() || self.selection.is_empty() {
+            return;
+        }
+        let mut step = Step::begin(&self.selection);
+        delete::delete(
+            &mut self.scene,
+            &mut self.entropy,
+            &mut step,
+            &self.selection,
+        );
+        self.selection.clear();
+        self.sync_points();
+        self.history.record(step, &self.scene, &self.selection);
+        self.overlay_revision += 1;
+        self.changed(false);
     }
 
     /// Selects every shown, unlocked Element of the Scene (the `select all`

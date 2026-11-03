@@ -135,7 +135,7 @@ impl Erasing {
 }
 
 /// Deletes the Element `id` as part of `step`, unbinding what was bound to it.
-fn erase(scene: &mut Scene, entropy: &mut Entropy, step: &mut Step, id: &str) {
+pub(crate) fn erase(scene: &mut Scene, entropy: &mut Entropy, step: &mut Step, id: &str) {
     binding::unbind_all(scene, entropy, step, id);
     binding::unbind_from(scene, entropy, step, id);
     step.touch(scene, id);

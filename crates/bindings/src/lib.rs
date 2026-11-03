@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use workingtitle_core::scene::{FillPattern, LineStyle};
 use workingtitle_core::{
-    Edges, MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase, Properties, Property,
-    ScrollEvent, Sloppiness, StrokeWidth, Tool,
+    ActionBar, Edges, MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase, Properties,
+    Property, ScrollEvent, Sloppiness, StrokeWidth, Tool,
 };
 
 uniffi::setup_scaffolding!("WorkingTitleCore");
@@ -160,6 +160,14 @@ pub struct Properties {
     pub sloppiness: Option<Sloppiness>,
     pub edges: Option<Edges>,
     pub opacity: Option<f64>,
+}
+
+/// Where the Action Bar is shown, in view coordinates; see
+/// [`workingtitle_core::ActionBar`].
+#[uniffi::remote(Record)]
+pub struct ActionBar {
+    pub x: f64,
+    pub y: f64,
 }
 
 /// What the Canvas shows; see [`workingtitle_core::Viewport`]. Small and
@@ -346,6 +354,25 @@ impl Editor {
     /// see [`workingtitle_core::Editor::set_property`].
     pub fn set_property(&self, property: Property) {
         self.editor().set_property(property);
+    }
+
+    /// Where the Action Bar is shown, `None` if it is hidden; see
+    /// [`workingtitle_core::Editor::action_bar`]. Read it with the viewport
+    /// after forwarding input or a command.
+    pub fn action_bar(&self) -> Option<ActionBar> {
+        self.editor().action_bar()
+    }
+
+    /// Duplicates the Selection and selects the copies; see
+    /// [`workingtitle_core::Editor::duplicate`].
+    pub fn duplicate(&self) {
+        self.editor().duplicate();
+    }
+
+    /// Deletes the Selection; see
+    /// [`workingtitle_core::Editor::delete_selection`].
+    pub fn delete_selection(&self) {
+        self.editor().delete_selection();
     }
 
     /// The indices of the selected points of the selected line or arrow; see
@@ -733,6 +760,41 @@ mod tests {
         // 20..60 is too small for the handles on its sides, so four corners
         // and the rotation handle are drawn, each a fill and a stroke.
         assert_eq!(editor.overlay().part_count(), 1 + 5 * 2);
+    }
+
+    #[test]
+    fn the_action_bar_commands_work_through_the_bindings() {
+        let editor = Editor::new();
+        editor
+            .load(
+                br##"{"type":"excalidraw","elements":[
+                    {"id":"a","type":"rectangle","x":10,"y":20,"width":30,"height":40,
+                     "backgroundColor":"#ffc9c9"}]}"##
+                    .to_vec(),
+            )
+            .unwrap();
+        assert!(editor.action_bar().is_none());
+        let mouse = |phase| PointerEvent {
+            id: 0,
+            phase,
+            x: 20.0,
+            y: 30.0,
+            kind: PointerKind::Mouse,
+            pressure: 0.5,
+            timestamp: 0.0,
+            modifiers: Modifiers::default(),
+        };
+        editor.pointer(mouse(PointerPhase::Down));
+        editor.pointer(mouse(PointerPhase::Up));
+        // Below the middle of the box 10..40 by 20..60.
+        let bar = editor.action_bar().unwrap();
+        assert_eq!((bar.x, bar.y), (25.0, 92.0));
+
+        editor.duplicate();
+        assert_eq!(editor.element_count(), 2);
+        editor.delete_selection();
+        assert_eq!(editor.element_count(), 1);
+        assert!(editor.action_bar().is_none());
     }
 
     #[test]
