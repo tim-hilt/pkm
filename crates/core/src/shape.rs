@@ -259,7 +259,7 @@ pub(crate) fn dash_of(element: &Element) -> Option<Dash> {
 // --- Shapes --------------------------------------------------------------
 
 /// How far corners are rounded off a side of length `side`.
-fn corner_radius(side: f64, roundness: Roundness) -> f64 {
+pub(crate) fn corner_radius(side: f64, roundness: Roundness) -> f64 {
     const PROPORTION: f64 = 0.25;
     const DEFAULT_RADIUS: f64 = 32.0;
     match roundness {

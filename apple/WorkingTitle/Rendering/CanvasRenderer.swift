@@ -39,6 +39,12 @@ struct Viewport: Equatable {
 /// (cached per glyph, see `Excalifont`) in one fill, so it stays sharp at any
 /// zoom.
 ///
+/// Images are textured quads (see `ImageTextures`): the core describes an
+/// image by file id, box, crop and scale, the renderer decodes the file with
+/// ImageIO once per file id and samples the texture, mirrored, turned and
+/// clipped to rounded corners in the shader. Without pixels for the file
+/// (missing, not an image) an Excalidraw-style placeholder is filled instead.
+///
 /// What is drawn for an Element is cached per Element handle and version (and
 /// flattening level), so a changed Scene only rebuilds the Elements that changed.
 @MainActor
@@ -68,7 +74,23 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
     /// The fill shaders: into the stencil buffer only, and onto the colour target.
     private let fillStencilPipeline: any MTLRenderPipelineState
     private let fillCoverPipeline: any MTLRenderPipelineState
+    private let imagePipeline: any MTLRenderPipelineState
+    private let imageSampler: any MTLSamplerState
     let device: any MTLDevice
+
+    /// Where image files come from. Set it before the geometry is drawn; the
+    /// `CanvasMetalView` does so with its editor.
+    var files: (any ImageFileSource)? {
+        didSet {
+            guard files !== oldValue else { return }
+            textures.forgetFailures()
+            drawsAreStale = true
+            onNeedsDisplay?()
+        }
+    }
+
+    /// The decoded image files, one texture each.
+    let textures: ImageTextures
 
     /// Depth-stencil states for opaque strokes, and for the two passes of
     /// translucent ones.
@@ -116,9 +138,16 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         var rule: GeometryFillRule
     }
 
+    /// An image: the texture of its file and where and how to put it.
+    private struct ImageDraw {
+        var texture: any MTLTexture
+        var uniforms: ImageUniforms
+    }
+
     private enum Draw {
         case stroke(StrokeDraw)
         case fill(FillDraw)
+        case image(ImageDraw)
     }
 
     /// The draws of one Element at the version and flattening level they were built for.
@@ -142,12 +171,33 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         var interiorOnly: Float = 0
     }
 
+    /// Mirrors `ImageUniforms` in StrokeShaders.metal.
+    private struct ImageUniforms {
+        var box: SIMD4<Float>
+        var uv: SIMD4<Float>
+        var scale: SIMD2<Float>
+        var angle: Float
+        var opacity: Float
+        var cornerRadius: Float
+
+        init(_ image: GeometryImage) {
+            box = SIMD4(image.x, image.y, image.width, image.height)
+            uv = SIMD4(image.u0, image.v0, image.u1, image.v1)
+            scale = SIMD2(image.scaleX, image.scaleY)
+            angle = image.angle
+            opacity = image.opacity
+            cornerRadius = image.cornerRadius
+        }
+    }
+
     init?(device: any MTLDevice) {
         guard
             let queue = device.makeCommandQueue(),
             let library = try? device.makeDefaultLibrary(bundle: Bundle(for: CanvasRenderer.self)),
             let vertex = library.makeFunction(name: "stroke_vertex"),
-            let fragment = library.makeFunction(name: "stroke_fragment")
+            let fragment = library.makeFunction(name: "stroke_fragment"),
+            let imageVertex = library.makeFunction(name: "image_vertex"),
+            let imageFragment = library.makeFunction(name: "image_fragment")
         else { return nil }
 
         let descriptor = MTLRenderPipelineDescriptor()
@@ -173,6 +223,20 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         descriptor.vertexFunction = fillVertex
         descriptor.fragmentFunction = fillFragment
         guard let fillCoverPipeline = try? device.makeRenderPipelineState(descriptor: descriptor) else { return nil }
+        descriptor.vertexFunction = imageVertex
+        descriptor.fragmentFunction = imageFragment
+        guard let imagePipeline = try? device.makeRenderPipelineState(descriptor: descriptor) else { return nil }
+        // Pictures are smoothed when scaled and, with their mipmaps, when
+        // shrunk; nothing outside them is ever sampled.
+        let sampling = MTLSamplerDescriptor()
+        sampling.minFilter = .linear
+        sampling.magFilter = .linear
+        sampling.mipFilter = .linear
+        sampling.sAddressMode = .clampToEdge
+        sampling.tAddressMode = .clampToEdge
+        guard let imageSampler = device.makeSamplerState(descriptor: sampling) else { return nil }
+        descriptor.vertexFunction = fillVertex
+        descriptor.fragmentFunction = fillFragment
         color.writeMask = []
         guard let fillStencilPipeline = try? device.makeRenderPipelineState(descriptor: descriptor) else {
             return nil
@@ -211,6 +275,9 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         self.pipeline = pipeline
         self.fillStencilPipeline = fillStencilPipeline
         self.fillCoverPipeline = fillCoverPipeline
+        self.imagePipeline = imagePipeline
+        self.imageSampler = imageSampler
+        self.textures = ImageTextures(device: device, queue: queue)
         self.plain = plain
         self.interior = interior
         self.fringe = fringe
@@ -258,6 +325,7 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
             var frame = FrameUniforms(
                 origin: viewport.origin, viewSize: SIMD2(Float(target.width), Float(target.height)), scale: scale)
             encoder.setVertexBytes(&frame, length: MemoryLayout<FrameUniforms>.stride, index: 1)
+            encoder.setFragmentBytes(&frame, length: MemoryLayout<FrameUniforms>.stride, index: 1)
             // Each translucent stroke marks its pixels with its own stencil
             // value (1...255, then around again; a stale equal value only
             // costs a fringe pixel).
@@ -290,6 +358,9 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
                     drawingStrokes = false
                     draw(fill, clearingMarks: stencilIsMarked, in: encoder)
                     stencilIsMarked = false
+                case .image(let image):
+                    drawingStrokes = false
+                    draw(image, in: encoder)
                 }
             }
             encoder.endEncoding()
@@ -310,6 +381,17 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<PartUniforms>.stride, index: 2)
         encoder.drawPrimitives(
             type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: stroke.segmentCount)
+    }
+
+    private func draw(_ image: ImageDraw, in encoder: any MTLRenderCommandEncoder) {
+        var uniforms = image.uniforms
+        encoder.setRenderPipelineState(imagePipeline)
+        encoder.setDepthStencilState(plain)
+        encoder.setVertexBytes(&uniforms, length: MemoryLayout<ImageUniforms>.stride, index: 2)
+        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<ImageUniforms>.stride, index: 2)
+        encoder.setFragmentTexture(image.texture, index: 0)
+        encoder.setFragmentSamplerState(imageSampler, index: 0)
+        encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
     }
 
     /// Draws `fill` with stencil-then-cover. The stencil is zero again where it
@@ -352,62 +434,112 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
     /// the Elements that changed or were flattened for another power-of-two
     /// zoom level, reuses the others.
     private func refreshDraws(scale: Float) {
+        /// Which of the geometry's three lists supplies the next Element.
+        enum Next { case part, line, image }
         let level = Int(log2(max(scale, .leastNormalMagnitude)).rounded(.up))
         guard drawsAreStale || level != flatteningLevel, let geometry else { return }
         drawsAreStale = false
         flatteningLevel = level
         if geometry.generation() != cacheGeneration {
-            // Element handles may mean other Elements now.
+            // Element handles may mean other Elements now, and a Drawing that
+            // was loaded since may have files that were missing.
             cache.removeAll()
+            textures.forgetFailures()
             cacheGeneration = geometry.generation()
         }
         let tolerance = Self.flatteningTolerancePixels / exp2(Float(level))
 
         var kept: [UInt32: CachedElement] = [:]
         var all: [Draw] = []
+        var referencedFiles = Set<String>()
         geometry.withBuffers { buffers in
-            let (parts, lines) = (buffers.parts, buffers.textLines)
-            var (part, line) = (0, 0)
-            while part < parts.count || line < lines.count {
-                // Lines of text come before the part their index names, and
-                // the parts and lines of one Element follow each other.
-                let (element, version, isLine, end): (UInt32, UInt32, Bool, Int)
-                if line < lines.count, Int(lines[line].partIndex) <= part {
-                    var next = line + 1
-                    while next < lines.count, lines[next].element == lines[line].element,
-                        Int(lines[next].partIndex) <= part
+            let (parts, lines, images) = (buffers.parts, buffers.textLines, buffers.images)
+            var (part, line, image) = (0, 0, 0)
+            while part < parts.count || line < lines.count || image < images.count {
+                // Lines of text and images come before the part their index
+                // names, and the parts, lines and images of one Element follow
+                // each other. If a line and an image are due, the lower Element
+                // handle (the lower in z-order) goes first.
+                let lineDue = line < lines.count && Int(lines[line].partIndex) <= part
+                let imageDue = image < images.count && Int(images[image].partIndex) <= part
+                let (element, version, end): (UInt32, UInt32, Int)
+                let build: () -> [Draw]
+                let next: Next =
+                    imageDue && (!lineDue || images[image].element < lines[line].element)
+                    ? .image : lineDue ? .line : .part
+                switch next {
+                case .image:
+                    let current = images[image]
+                    (element, version, end) = (current.element, current.version, image + 1)
+                    build = { self.makeDraws(for: current, in: buffers, tolerance: tolerance) }
+                case .line:
+                    var last = line + 1
+                    while last < lines.count, lines[last].element == lines[line].element,
+                        Int(lines[last].partIndex) <= part
                     {
-                        next += 1
+                        last += 1
                     }
-                    (element, version, isLine, end) = (lines[line].element, lines[line].version, true, next)
-                } else {
-                    var next = part + 1
-                    while next < parts.count, parts[next].element == parts[part].element,
-                        !(line < lines.count && Int(lines[line].partIndex) == next)
+                    (element, version, end) = (lines[line].element, lines[line].version, last)
+                    let run = line..<last
+                    build = { run.compactMap { self.makeDraw(for: lines[$0], in: buffers, tolerance: tolerance) } }
+                case .part:
+                    var last = part + 1
+                    while last < parts.count, parts[last].element == parts[part].element,
+                        !(line < lines.count && Int(lines[line].partIndex) == last),
+                        !(image < images.count && Int(images[image].partIndex) == last)
                     {
-                        next += 1
+                        last += 1
                     }
-                    (element, version, isLine, end) = (parts[part].element, parts[part].version, false, next)
+                    (element, version, end) = (parts[part].element, parts[part].version, last)
+                    let run = part..<last
+                    build = { run.compactMap { self.makeDraw(for: parts[$0], in: buffers, tolerance: tolerance) } }
                 }
 
                 var entry = cache[element]
                 if entry?.version != version || entry?.level != level {
-                    let draws =
-                        isLine
-                        ? lines[line..<end].compactMap { makeDraw(for: $0, in: buffers, tolerance: tolerance) }
-                        : parts[part..<end].compactMap { makeDraw(for: $0, in: buffers, tolerance: tolerance) }
-                    entry = CachedElement(version: version, level: level, draws: draws)
+                    entry = CachedElement(version: version, level: level, draws: build())
                     elementsBuilt += 1
                 }
                 if let entry {
                     kept[element] = entry
                     all += entry.draws
                 }
-                if isLine { line = end } else { part = end }
+                switch next {
+                case .image:
+                    referencedFiles.insert(buffers.fileID(of: images[image]))
+                    image = end
+                case .line: line = end
+                case .part: part = end
+                }
             }
         }
         cache = kept
         draws = all
+        // Files no image shows any more give up their textures.
+        textures.keepOnly(referencedFiles)
+    }
+
+    /// The draws of an image: its picture, or a placeholder while there are
+    /// no pixels for its file.
+    private func makeDraws(for image: GeometryImage, in buffers: GeometryBuffers, tolerance: Float) -> [Draw] {
+        let id = buffers.fileID(of: image)
+        if !id.isEmpty, let texture = textures.texture(forFile: id, from: files) {
+            return [.image(ImageDraw(texture: texture, uniforms: ImageUniforms(image)))]
+        }
+        let failed = image.imageStatus == .error || textures.isUndecodable(id)
+        return ImagePlaceholder.fills(width: image.width, height: image.height, failed: failed).compactMap { fill in
+            // The placeholder is made in the box's frame; the image's
+            // placement takes it into the Scene.
+            var coords = fill.path.coords
+            for index in stride(from: 0, to: coords.count, by: 2) {
+                let point = image.scenePoint(SIMD2(coords[index], coords[index + 1]))
+                (coords[index], coords[index + 1]) = (point.x, point.y)
+            }
+            guard let mesh = FillMesh.mesh(verbs: fill.path.verbs, coords: coords, tolerance: tolerance)
+            else { return nil }
+            return fillDraw(mesh, color: premultipliedColor(fill.color, opacity: image.opacity), rule: .nonZero)
+                .map(Draw.fill)
+        }
     }
 
     private func makeDraw(for part: GeometryPart, in buffers: GeometryBuffers, tolerance: Float) -> Draw? {

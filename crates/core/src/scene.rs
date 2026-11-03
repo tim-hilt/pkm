@@ -15,7 +15,8 @@
 use std::fmt;
 use std::str::Utf8Error;
 
-use crate::geometry::TextAlign;
+use crate::base64;
+use crate::geometry::{ImageStatus, TextAlign};
 use crate::json::{self, Object, ParseError, Value};
 use crate::restore;
 
@@ -252,6 +253,27 @@ impl Scene {
             .unwrap_or("#ffffff")
     }
 
+    /// The bytes of the file `id` of the Drawing's `files`, exactly as stored:
+    /// the payload of its `dataURL`, base64-decoded. The core never looks at
+    /// the bytes (they are an image for the client to decode, ADR-0003).
+    /// `None` if there is no such file or its `dataURL` is not a base64 data
+    /// URL.
+    pub fn file_bytes(&self, id: &str) -> Option<Vec<u8>> {
+        let data_url = self
+            .root
+            .get("files")?
+            .as_object()?
+            .get(id)?
+            .as_object()?
+            .get("dataURL")?
+            .as_str()?;
+        let (header, payload) = data_url.split_once(',')?;
+        header
+            .strip_prefix("data:")?
+            .ends_with(";base64")
+            .then(|| base64::decode(payload))?
+    }
+
     fn element_values(&self) -> &[Value] {
         self.root
             .get("elements")
@@ -463,6 +485,57 @@ impl Element<'_> {
             .and_then(Value::as_f64)
             .filter(|s| s.is_finite())
             .unwrap_or(0.5)
+    }
+
+    /// The id of the file an image shows, in the Drawing's `files`; `None`
+    /// for an image that has none yet.
+    pub fn file_id(&self) -> Option<&str> {
+        self.str("fileId")
+    }
+
+    pub fn image_status(&self) -> ImageStatus {
+        match self.str("status") {
+            Some("saved") => ImageStatus::Saved,
+            Some("error") => ImageStatus::Error,
+            _ => ImageStatus::Pending,
+        }
+    }
+
+    /// Whether the image is mirrored horizontally (`-1`) or vertically (`-1`),
+    /// as `(x, y)` factors; `(1, 1)` if it is not or the file does not say.
+    pub fn image_scale(&self) -> (f64, f64) {
+        let factor = |value: Option<&Value>| match value.and_then(Value::as_f64) {
+            Some(f) if f.is_finite() && f != 0.0 => f.signum(),
+            _ => 1.0,
+        };
+        match self.object.get("scale").and_then(Value::as_array) {
+            Some([x, y, ..]) => (factor(Some(x)), factor(Some(y))),
+            _ => (1.0, 1.0),
+        }
+    }
+
+    /// The part of the image's file that is shown, in fractions of the file's
+    /// width and height, as `(left, top, right, bottom)`; `None` for an
+    /// uncropped image. A crop of a file without size is no crop.
+    pub fn image_crop(&self) -> Option<(f64, f64, f64, f64)> {
+        let crop = self.object.get("crop")?.as_object()?;
+        let number = |key: &str| {
+            crop.get(key)
+                .and_then(Value::as_f64)
+                .filter(|n| n.is_finite())
+        };
+        let (natural_width, natural_height) = (number("naturalWidth")?, number("naturalHeight")?);
+        if natural_width <= 0.0 || natural_height <= 0.0 {
+            return None;
+        }
+        let (x, y) = (number("x")?, number("y")?);
+        let (width, height) = (number("width")?, number("height")?);
+        Some((
+            x / natural_width,
+            y / natural_height,
+            (x + width) / natural_width,
+            (y + height) / natural_height,
+        ))
     }
 
     /// What an arrow has at its first point; `None` for lines and arrows

@@ -2,14 +2,14 @@ use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::geometry::{Geometry, StrokeStyle};
+use crate::geometry::Geometry;
 use crate::input::{MagnifyEvent, PointerEvent, ScrollEvent};
 use crate::navigation::{Bounds, Navigation};
 use crate::scene::{Element, ElementType, LoadError, Scene};
-use crate::shape;
 use crate::text::{self, Containers, TextMeasurer};
 use crate::tool::Tool;
 use crate::viewport::Viewport;
+use crate::{image, shape};
 
 /// Hands out [`Geometry::generation`]s; unique across all editors.
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -82,6 +82,13 @@ impl Editor {
         self.generation = next_generation();
     }
 
+    /// The bytes of the file `id` of the Scene (an image, as stored; see
+    /// [`Scene::file_bytes`]), for clients to decode when [`Editor::geometry`]
+    /// names it. `None` if the Scene has no such file.
+    pub fn file_bytes(&self, id: &str) -> Option<Vec<u8>> {
+        self.scene.file_bytes(id)
+    }
+
     /// Number of Elements in the Scene that are shown: of a supported type
     /// and not deleted.
     pub fn element_count(&self) -> u64 {
@@ -95,8 +102,9 @@ impl Editor {
     /// hachure, cross-hatch, zigzag or solid (see [`crate::shape`]), and
     /// freedraw strokes as the filled outline of their pressure-sensitive
     /// path. Text is not made of paths but described as lines of text for the
-    /// client to set in Excalifont (see [`crate::text`]). Images are drawn as a
-    /// plain box around their bounds until their generator lands.
+    /// client to set in Excalifont (see [`crate::text`]). Images are described
+    /// by file id, placement, crop and scale for the client to draw (see
+    /// [`crate::image`]).
     pub fn geometry(&self) -> Geometry {
         let mut geometry = Geometry::with_generation(self.generation);
         let background = self.scene.view_background_color();
@@ -105,8 +113,10 @@ impl Editor {
         for element in self.shown() {
             if element.kind() == ElementType::Text {
                 text::draw(&element, &containers, measurer, &mut geometry);
-            } else if !shape::draw(&element, background, &mut geometry) {
-                draw_bounds(&element, &mut geometry);
+            } else if element.kind() == ElementType::Image {
+                image::draw(&element, &mut geometry);
+            } else {
+                shape::draw(&element, background, &mut geometry);
             }
         }
         geometry
@@ -205,23 +215,6 @@ impl Editor {
     fn shown(&self) -> impl Iterator<Item = Element<'_>> {
         self.scene.elements().filter(|e| !e.is_deleted())
     }
-}
-
-/// Draws a box around the Element's bounds.
-fn draw_bounds(element: &Element, geometry: &mut Geometry) {
-    let style = StrokeStyle {
-        color: 0x1e1e_1eff,
-        width: 2.0,
-        opacity: element.opacity() as f32,
-        dash: None,
-    };
-    let [first, rest @ ..] = bounds_outline(element);
-    let mut path = geometry.stroke(element.handle(), element.version(), style);
-    path.move_to(first.0 as f32, first.1 as f32);
-    for (x, y) in rest {
-        path.line_to(x as f32, y as f32);
-    }
-    path.line_to(first.0 as f32, first.1 as f32);
 }
 
 /// The corners of the Element's bounds, clockwise from the top left, turned

@@ -74,6 +74,52 @@ struct GeometryTextLine {
     var alignment: GeometryTextAlign { GeometryTextAlign(rawValue: align) ?? .left }
 }
 
+/// Mirror of the core's `Image` record: one image to draw. Field order and
+/// sizes must match. The box is `width` x `height` with its top-left corner at
+/// `(x, y)`; draw it turned by `angle` about its centre, then mirrored about
+/// its centre by `scaleX`/`scaleY` (each 1 or -1), with the part `(u0, v0)` to
+/// `(u1, v1)` of the file's pixels (as fractions of its size) filling the box.
+struct GeometryImage {
+    /// Core-assigned Element handle; with `version` the cache key.
+    var element: UInt32
+    var version: UInt32
+    /// Number of parts before this image in z-order: draw the image after the
+    /// parts before this index and before the part at it.
+    var partIndex: UInt32
+    /// Range of the file id's UTF-8 bytes in `GeometryBuffers.fileIDs`; empty
+    /// for an image without a file.
+    var fileIDStart: UInt32
+    var fileIDLength: UInt32
+    /// A `GeometryImageStatus` number.
+    var status: UInt32
+    /// Element opacity, 0...1.
+    var opacity: Float
+    var x: Float
+    var y: Float
+    var width: Float
+    var height: Float
+    /// Clockwise rotation in radians about the box's centre.
+    var angle: Float
+    var scaleX: Float
+    var scaleY: Float
+    var u0: Float
+    var v0: Float
+    var u1: Float
+    var v1: Float
+    /// Radius of the box's rounded corners in Scene units; 0 for sharp ones.
+    var cornerRadius: Float
+
+    var imageStatus: GeometryImageStatus { GeometryImageStatus(rawValue: status) ?? .pending }
+}
+
+/// How far an image's file is known to have got, as in the core's `ImageStatus`.
+enum GeometryImageStatus: UInt32 {
+    case pending = 0
+    case saved = 1
+    /// Loading the file failed.
+    case error = 2
+}
+
 /// Where a line of text sits relative to its anchor, as in the core's `TextAlign`.
 enum GeometryTextAlign: UInt32 {
     /// The line starts at the anchor.
@@ -113,6 +159,16 @@ struct GeometryBuffers {
     var textLines = UnsafeBufferPointer<GeometryTextLine>(start: nil, count: 0)
     /// The characters of all lines, as UTF-8.
     var text = UnsafeBufferPointer<UInt8>(start: nil, count: 0)
+    /// Images, interleaved with `parts` in z-order by `partIndex`.
+    var images = UnsafeBufferPointer<GeometryImage>(start: nil, count: 0)
+    /// The file ids of all images, as UTF-8.
+    var fileIDs = UnsafeBufferPointer<UInt8>(start: nil, count: 0)
+
+    /// The id of the file `image` shows; empty if it has none.
+    func fileID(of image: GeometryImage) -> String {
+        let bytes = fileIDs[Int(image.fileIDStart)..<Int(image.fileIDStart + image.fileIDLength)]
+        return String(decoding: bytes, as: UTF8.self)
+    }
 
     /// The characters of `line`.
     func string(of line: GeometryTextLine) -> String {
@@ -154,6 +210,9 @@ extension Geometry {
         precondition(
             MemoryLayout<GeometryTextLine>.stride == Int(textLineStride()),
             "GeometryTextLine no longer mirrors the core's TextLine record")
+        precondition(
+            MemoryLayout<GeometryImage>.stride == Int(imageStride()),
+            "GeometryImage no longer mirrors the core's Image record")
         return try withExtendedLifetime(self) {
             try body(
                 GeometryBuffers(
@@ -161,7 +220,9 @@ extension Geometry {
                     verbs: buffer(at: verbsAddress(), count: verbCount()),
                     coords: buffer(at: coordsAddress(), count: coordCount()),
                     textLines: buffer(at: textLinesAddress(), count: textLineCount()),
-                    text: buffer(at: textAddress(), count: textByteCount())))
+                    text: buffer(at: textAddress(), count: textByteCount()),
+                    images: buffer(at: imagesAddress(), count: imageCount()),
+                    fileIDs: buffer(at: fileIdsAddress(), count: fileIdByteCount())))
         }
     }
 }

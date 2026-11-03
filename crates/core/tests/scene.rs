@@ -7,8 +7,8 @@
 use std::fs;
 use std::path::PathBuf;
 
+use workingtitle_core::Editor;
 use workingtitle_core::json::{Value, parse};
-use workingtitle_core::{Editor, Geometry, Verb};
 
 fn fixture(path: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -54,22 +54,6 @@ fn member<'a>(value: &'a Value, key: &str) -> &'a Value {
 /// Compact JSON of `value[key]`, for comparing whole sub-trees as literals.
 fn json_of(value: &Value, key: &str) -> String {
     member(value, key).to_json()
-}
-
-/// The path ops of a part as `(verb, operands)`.
-fn ops(geometry: &Geometry, part: usize) -> Vec<(Verb, Vec<f32>)> {
-    let part = geometry.parts()[part];
-    let verbs = &geometry.verbs()[part.verb_start as usize..][..part.verb_count as usize];
-    let mut coords = &geometry.coords()[part.coord_start as usize..];
-    verbs
-        .iter()
-        .map(|&byte| {
-            let verb = Verb::from_byte(byte).expect("known verb");
-            let (taken, rest) = coords.split_at(verb.coord_count());
-            coords = rest;
-            (verb, taken.to_vec())
-        })
-        .collect()
 }
 
 // --- Byte stability -------------------------------------------------------
@@ -344,58 +328,7 @@ fn deleted_elements_are_not_drawn() {
     assert_eq!(drawn, [0, 2], "a and c, not b");
 }
 
-// --- Bounds on the Canvas -------------------------------------------------
-
-#[test]
-fn elements_without_a_generator_yet_are_drawn_as_a_box_around_their_bounds() {
-    let editor = editor_with(&drawing_with_element(
-        r#""id":"a","type":"image","x":10,"y":20,"width":30,"height":40"#,
-    ));
-    let geometry = editor.geometry();
-
-    let [part] = geometry.parts() else {
-        panic!("one part per Element")
-    };
-    assert_eq!(part.opacity, 1.0);
-    assert_eq!(part.color, 0x1e1e_1eff);
-    assert_eq!(part.width, 2.0);
-    assert_eq!(
-        ops(&geometry, 0),
-        [
-            (Verb::Move, vec![10.0, 20.0]),
-            (Verb::Line, vec![40.0, 20.0]),
-            (Verb::Line, vec![40.0, 60.0]),
-            (Verb::Line, vec![10.0, 60.0]),
-            (Verb::Line, vec![10.0, 20.0]),
-        ]
-    );
-}
-
-#[test]
-fn the_box_of_a_rotated_element_turns_about_its_centre() {
-    // Centre (25, 40); a quarter turn clockwise (y points down) takes the
-    // corner (10, 20) to (45, 25), the next one (40, 20) to (45, 55), ...
-    let editor = editor_with(&drawing_with_element(&format!(
-        r#""id":"a","type":"image","x":10,"y":20,"width":30,"height":40,"angle":{}"#,
-        std::f64::consts::FRAC_PI_2
-    )));
-    let geometry = editor.geometry();
-
-    let corners: Vec<_> = ops(&geometry, 0)
-        .into_iter()
-        .map(|(_, p)| [p[0].round(), p[1].round()])
-        .collect();
-    assert_eq!(
-        corners,
-        [
-            [45.0, 25.0],
-            [45.0, 55.0],
-            [5.0, 55.0],
-            [5.0, 25.0],
-            [45.0, 25.0]
-        ]
-    );
-}
+// --- Element types ---------------------------------------------------------
 
 #[test]
 fn every_supported_element_type_is_drawn_and_unknown_ones_are_not() {
@@ -421,13 +354,14 @@ fn every_supported_element_type_is_drawn_and_unknown_ones_are_not() {
     ));
 
     // Arrows have more than one part, so count the Elements drawn. Text is
-    // drawn as lines, not as parts.
+    // drawn as lines and images as images, not as parts.
     let geometry = editor.geometry();
     let drawn: std::collections::BTreeSet<_> = geometry
         .parts()
         .iter()
         .map(|part| part.element)
         .chain(geometry.text_lines().iter().map(|line| line.element))
+        .chain(geometry.images().iter().map(|image| image.element))
         .collect();
     assert_eq!(drawn.len(), kinds.len());
     assert_eq!(editor.element_count(), kinds.len() as u64);

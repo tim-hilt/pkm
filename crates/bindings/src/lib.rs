@@ -237,6 +237,13 @@ impl Editor {
         self.editor().magnify(event);
     }
 
+    /// The bytes of the image file `id` as stored in the Drawing, for the
+    /// client to decode; `None` if the Drawing has no such file. Read it
+    /// when [`Geometry`] names a file the client has no texture for yet.
+    pub fn file_bytes(&self, id: String) -> Option<Vec<u8>> {
+        self.editor().file_bytes(&id)
+    }
+
     /// The paths to draw for the Scene; see [`workingtitle_core::Editor::geometry`].
     pub fn geometry(&self) -> Arc<Geometry> {
         Arc::new(Geometry {
@@ -320,6 +327,29 @@ impl Geometry {
     pub fn text_address(&self) -> u64 {
         self.inner.text().as_ptr() as u64
     }
+
+    /// Number of [`workingtitle_core::Image`] records at `images_address`.
+    pub fn image_count(&self) -> u64 {
+        self.inner.images().len() as u64
+    }
+
+    /// Size in bytes of one image record; see `part_stride`.
+    pub fn image_stride(&self) -> u64 {
+        size_of::<workingtitle_core::Image>() as u64
+    }
+
+    pub fn images_address(&self) -> u64 {
+        self.inner.images().as_ptr() as u64
+    }
+
+    /// Number of bytes (UTF-8) at `file_ids_address`.
+    pub fn file_id_byte_count(&self) -> u64 {
+        self.inner.file_ids().len() as u64
+    }
+
+    pub fn file_ids_address(&self) -> u64 {
+        self.inner.file_ids().as_ptr() as u64
+    }
 }
 
 impl Default for Editor {
@@ -402,6 +432,37 @@ mod tests {
             assert_eq!(text, b"cccc");
             assert_eq!(second.font_size, 20.0);
         }
+    }
+
+    #[test]
+    fn images_and_their_files_are_exposed_without_the_core_decoding_anything() {
+        let editor = Editor::new();
+        editor
+            .load(
+                br#"{"type":"excalidraw","elements":[
+                {"id":"i","type":"image","x":1,"y":2,"width":30,"height":40,"fileId":"f1"}],
+                "files":{"f1":{"dataURL":"data:image/png;base64,aGVsbG8="}}}"#
+                    .to_vec(),
+            )
+            .unwrap();
+        let geometry = editor.geometry();
+
+        assert_eq!(geometry.image_count(), 1);
+        assert_eq!(geometry.image_stride(), 76);
+        assert_eq!(geometry.file_id_byte_count(), 2);
+        // SAFETY: the addresses come from `geometry`, which is alive and
+        // whose buffers hold at least the counts reported above.
+        unsafe {
+            let image = *(geometry.images_address() as *const workingtitle_core::Image);
+            assert_eq!((image.x, image.width), (1.0, 30.0));
+            let id = std::slice::from_raw_parts(
+                (geometry.file_ids_address() as *const u8).add(image.file_id_start as usize),
+                image.file_id_len as usize,
+            );
+            assert_eq!(id, b"f1");
+        }
+        assert_eq!(editor.file_bytes("f1".into()), Some(b"hello".to_vec()));
+        assert_eq!(editor.file_bytes("other".into()), None);
     }
 
     #[test]

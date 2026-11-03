@@ -18,6 +18,51 @@ enum TestScenes {
         """
     }
 
+    /// A Drawing with the image `files` (by id) and `elements`, loaded into an
+    /// editor, which is also what the renderer reads the files from.
+    static func scene(withImages files: [String: Data], _ elements: [String]) -> (editor: Editor, geometry: Geometry) {
+        let editor = Editor.withExcalifont()
+        try! editor.load(
+            bytes: Data(
+                """
+                {"type":"excalidraw","version":2,"elements":[\(elements.joined(separator: ","))],\
+                "files":\(TestImages.filesMember(files))}
+                """.utf8))
+        return (editor, editor.geometry())
+    }
+
+    /// An image element showing file `fileId` in the box at (x, y) of `size`;
+    /// `crop` and `scale` are JSON, `extra` more members.
+    static func image(
+        _ id: String, _ x: Int, _ y: Int, _ size: (Int, Int), file fileId: String = "q",
+        scale: String = "[1,1]", crop: String = "null", _ extra: String = ""
+    ) -> String {
+        """
+        {"id":"\(id)","type":"image","x":\(x),"y":\(y),"width":\(size.0),"height":\(size.1),\
+        "fileId":"\(fileId)","status":"saved","scale":\(scale),"crop":\(crop)\(extra)}
+        """
+    }
+
+    /// Images plain, mirrored, turned, cropped, translucent and rounded, and
+    /// the placeholders for a missing file, a failed one and a broken one.
+    static func images() -> (editor: Editor, geometry: Geometry) {
+        scene(
+            withImages: ["q": TestImages.quadrants(), "junk": Data("not an image".utf8)],
+            [
+                image("plain", 20, 20, (120, 120)),
+                image("mirrored", 160, 20, (120, 120), scale: "[-1,1]"),
+                image("turned", 300, 30, (100, 100), #","angle":0.3"#),
+                image(
+                    "cropped", 20, 160, (120, 120),
+                    crop: #"{"x":10,"y":10,"width":20,"height":20,"naturalWidth":40,"naturalHeight":40}"#),
+                image("faded", 160, 160, (120, 120), #","opacity":50"#),
+                image("rounded", 300, 160, (100, 120), #","roundness":{"type":3}"#),
+                image("missing", 20, 300, (120, 80), file: "gone"),
+                image("failed", 160, 300, (120, 80), file: "gone", #","status":"error""#),
+                image("broken", 300, 300, (100, 80), file: "junk", scale: "[-1,1]", #","angle":-0.4"#),
+            ])
+    }
+
     static func geometry(of drawing: String) -> Geometry {
         let editor = Editor.withExcalifont()
         try! editor.load(bytes: Data(drawing.utf8))

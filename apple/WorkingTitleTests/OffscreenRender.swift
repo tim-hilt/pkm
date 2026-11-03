@@ -16,14 +16,16 @@ enum OffscreenRender {
 
     /// Draws `geometry` seen through `viewport` into a `size` x `size` pixel
     /// image, with the production renderer and its 4x MSAA. `pixelsPerPoint`
-    /// is the screen scale being simulated.
+    /// is the screen scale being simulated. `files` supplies the bytes of images.
     ///
     /// - Returns: the finished image and the renderer that drew it, so tests
     ///   can inspect renderer state such as the frame counter.
     static func render(
-        _ geometry: any GeometrySource, viewport: Viewport, pixelsPerPoint: Float = 1, size: Int = 400
+        _ geometry: any GeometrySource, viewport: Viewport, pixelsPerPoint: Float = 1, size: Int = 400,
+        files: (any ImageFileSource)? = nil
     ) throws -> (image: RenderedImage, renderer: CanvasRenderer) {
         let renderer = try makeRenderer()
+        renderer.files = files
         renderer.setGeometry(geometry)
         renderer.viewport = viewport
         return (draw(with: renderer, pixelsPerPoint: pixelsPerPoint, size: size), renderer)

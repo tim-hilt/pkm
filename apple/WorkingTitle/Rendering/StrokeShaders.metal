@@ -1,7 +1,8 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// Keep both structs in sync with CanvasRenderer.swift. Strokes first, fills below.
+// Keep the structs in sync with CanvasRenderer.swift. Strokes first, then
+// fills, then images.
 
 struct FrameUniforms {
     // Scene point at the top-left corner of the view.
@@ -108,4 +109,69 @@ vertex FillVertexOut fill_vertex(
 
 fragment float4 fill_fragment(constant PartUniforms &part [[buffer(2)]]) {
     return part.color;
+}
+
+// Images: one textured quad over the image's box. The box is mirrored and
+// turned about its centre like Excalidraw does (`scale`, then `angle`), and
+// the picture is the part of the texture from `uv.xy` to `uv.zw`.
+struct ImageUniforms {
+    // Top-left corner and size of the box in Scene units.
+    float4 box;
+    // Left, top, right, bottom of the shown part of the texture, 0...1.
+    float4 uv;
+    // 1 or -1 per axis.
+    float2 scale;
+    // Clockwise rotation in radians.
+    float angle;
+    float opacity;
+    // Radius of the box's rounded corners in Scene units; 0 for sharp ones.
+    float cornerRadius;
+};
+
+struct ImageVertexOut {
+    float4 position [[position]];
+    float2 uv;
+    // Position in the box relative to its centre, before mirroring and turning.
+    float2 local;
+};
+
+vertex ImageVertexOut image_vertex(
+    uint vertexId [[vertex_id]],
+    constant FrameUniforms &frame [[buffer(1)]],
+    constant ImageUniforms &image [[buffer(2)]]
+) {
+    // Triangle strip corners: (0,0), (0,1), (1,0), (1,1).
+    float2 corner = float2(vertexId / 2, vertexId % 2);
+    float2 size = image.box.zw;
+    float2 local = (corner - 0.5) * size;
+    float2 offset = local * image.scale;
+    float s = sin(image.angle);
+    float c = cos(image.angle);
+    float2 scene = image.box.xy + size * 0.5 + float2(offset.x * c - offset.y * s, offset.x * s + offset.y * c);
+    float2 pixel = (scene - frame.origin) * frame.scale;
+
+    ImageVertexOut out;
+    out.position = float4(pixel.x / frame.viewSize.x * 2.0 - 1.0, 1.0 - pixel.y / frame.viewSize.y * 2.0, 0.0, 1.0);
+    out.uv = mix(image.uv.xy, image.uv.zw, corner);
+    out.local = local;
+    return out;
+}
+
+fragment float4 image_fragment(
+    ImageVertexOut in [[stage_in]],
+    constant FrameUniforms &frame [[buffer(1)]],
+    constant ImageUniforms &image [[buffer(2)]],
+    texture2d<float> picture [[texture(0)]],
+    sampler pictureSampler [[sampler(0)]]
+) {
+    // The texture holds premultiplied colours.
+    float4 color = picture.sample(pictureSampler, in.uv) * image.opacity;
+    if (image.cornerRadius > 0.0) {
+        // Signed distance to the rounded box, turned into coverage over one
+        // device pixel like the strokes' edges.
+        float2 q = abs(in.local) - (image.box.zw * 0.5 - image.cornerRadius);
+        float distance = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - image.cornerRadius;
+        color *= clamp(0.5 - distance * frame.scale, 0.0, 1.0);
+    }
+    return color;
 }

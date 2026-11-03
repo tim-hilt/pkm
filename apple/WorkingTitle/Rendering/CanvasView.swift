@@ -13,10 +13,11 @@ import SwiftUI
 final class CanvasMetalView: MTKView {
     let renderer: CanvasRenderer?
 
-    /// Receives all input. Set before input arrives; setting it shows the
-    /// editor's current viewport.
+    /// Receives all input and supplies the image files. Set before input
+    /// arrives; setting it shows the editor's current viewport.
     var editor: Editor? {
         didSet {
+            renderer?.files = editor
             reportViewSize()
             syncViewport()
         }

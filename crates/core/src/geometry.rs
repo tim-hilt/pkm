@@ -25,6 +25,16 @@
 //!   z-order by [`TextLine::part_index`].
 //! * [`Geometry::text`]: the characters of all lines back to back, as UTF-8.
 //!
+//! Images are not made of paths either: they are pixels the client decodes
+//! (the core never does, ADR-0003). Two more buffers describe them:
+//!
+//! * [`Geometry::images`]: one fixed-size [`Image`] record per image,
+//!   carrying its placement, crop, scale and style, and the byte range of its
+//!   file id in the last buffer. Images are interleaved with the parts in
+//!   z-order by [`Image::part_index`], just like text lines.
+//! * [`Geometry::file_ids`]: the file ids of all images back to back, as
+//!   UTF-8. The bytes of the file itself come from the editor, by id.
+//!
 //! Records are `#[repr(C)]` with only 4-byte fields, so clients can mirror
 //! them without padding surprises. Numbers are in the host's byte order.
 
@@ -220,7 +230,68 @@ pub struct TextLine {
     pub text_len: u32,
 }
 
-/// Paths and text to draw, in z-order (later ones are drawn over earlier ones).
+/// How far the file of an image is known to have got, from its `status`.
+/// Numbers are part of the client contract.
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageStatus {
+    /// Not stored yet (or the file does not say).
+    Pending = 0,
+    Saved = 1,
+    /// Loading the file failed; clients show the error placeholder instead of
+    /// the image if they have no pixels for it.
+    Error = 2,
+}
+
+/// One image to draw: the part of a file shown in a box, and its style.
+///
+/// The box is `width` x `height` with its top left corner at `(x, y)`. To
+/// draw it, turn it clockwise by `angle` about its centre, then mirror it
+/// about its centre by `scale_x` and `scale_y` (each `1` or `-1`), as
+/// Excalidraw does. The picture fills the box from `(u0, v0)` (top left) to
+/// `(u1, v1)` (bottom right) of the file, in fractions of its width and
+/// height; a mirrored image has the mirrored picture in the same box.
+///
+/// Like parts, images of one Element share `element` and `version`, and
+/// clients key their caches on them. What the image shows besides this
+/// record is the file named by the file id, so a cache of pixels is keyed on
+/// the file id alone.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Image {
+    /// Core-assigned handle of the Element this image belongs to.
+    pub element: u32,
+    pub version: u32,
+    /// The number of parts that come before this image in z-order: draw it
+    /// after the parts before `part_index` and before the part at it.
+    pub part_index: u32,
+    /// Index of the file id's first byte in [`Geometry::file_ids`]. The id is
+    /// empty for an image that has no file.
+    pub file_id_start: u32,
+    /// Number of bytes (UTF-8) of the file id.
+    pub file_id_len: u32,
+    /// An [`ImageStatus`] number.
+    pub status: u32,
+    /// See [`StrokeStyle::opacity`].
+    pub opacity: f32,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    /// Clockwise rotation in radians about the box's centre.
+    pub angle: f32,
+    pub scale_x: f32,
+    pub scale_y: f32,
+    pub u0: f32,
+    pub v0: f32,
+    pub u1: f32,
+    pub v1: f32,
+    /// Radius in Scene units of the box's rounded corners; `0` for sharp ones.
+    /// The picture is cut off outside the rounded box.
+    pub corner_radius: f32,
+}
+
+/// Paths, text and images to draw, in z-order (later ones are drawn over earlier ones).
 #[derive(Debug, Default)]
 pub struct Geometry {
     generation: u64,
@@ -229,6 +300,8 @@ pub struct Geometry {
     coords: Vec<f32>,
     text_lines: Vec<TextLine>,
     text: String,
+    images: Vec<Image>,
+    file_ids: String,
 }
 
 impl Geometry {
@@ -360,6 +433,34 @@ impl Geometry {
     pub fn line_text(&self, line: &TextLine) -> &str {
         let start = line.text_start as usize;
         &self.text[start..start + line.text_len as usize]
+    }
+
+    /// Appends an image of file `file_id` (empty if it has none), drawn
+    /// after the parts added so far. The record's `part_index`,
+    /// `file_id_start` and `file_id_len` are filled in here; pass `0`.
+    pub fn image(&mut self, file_id: &str, image: Image) {
+        self.images.push(Image {
+            part_index: index(self.parts.len()),
+            file_id_start: index(self.file_ids.len()),
+            file_id_len: index(file_id.len()),
+            ..image
+        });
+        self.file_ids.push_str(file_id);
+    }
+
+    pub fn images(&self) -> &[Image] {
+        &self.images
+    }
+
+    /// The ids of the files of all images; see [`Image::file_id_start`].
+    pub fn file_ids(&self) -> &str {
+        &self.file_ids
+    }
+
+    /// The id of the file `image` shows.
+    pub fn image_file_id(&self, image: &Image) -> &str {
+        let start = image.file_id_start as usize;
+        &self.file_ids[start..start + image.file_id_len as usize]
     }
 }
 
