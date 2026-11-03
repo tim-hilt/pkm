@@ -278,7 +278,7 @@ pub(crate) fn corner_radius(side: f64, roundness: Roundness) -> f64 {
 
 /// A rectangle whose corners are quadratic curves, starting after the top
 /// left corner and going clockwise.
-fn rounded_rectangle(w: f64, h: f64, roundness: Roundness) -> [Segment; 9] {
+pub(crate) fn rounded_rectangle(w: f64, h: f64, roundness: Roundness) -> [Segment; 9] {
     let r = corner_radius(w.min(h), roundness);
     [
         Segment::Move((r, 0.0)),
@@ -296,14 +296,14 @@ fn rounded_rectangle(w: f64, h: f64, roundness: Roundness) -> [Segment; 9] {
 /// Top, right, bottom and left corner of a diamond. Excalidraw nudges the
 /// side corners one unit below the middle so that none of rough.js' numbers
 /// is zero.
-fn diamond_corners(w: f64, h: f64) -> [Point; 4] {
+pub(crate) fn diamond_corners(w: f64, h: f64) -> [Point; 4] {
     let top_x = (w / 2.0).floor() + 1.0;
     let side_y = (h / 2.0).floor() + 1.0;
     [(top_x, 0.0), (w, side_y), (top_x, h), (0.0, side_y)]
 }
 
 /// A diamond whose corners are rounded with cubic curves.
-fn rounded_diamond(w: f64, h: f64, roundness: Roundness) -> [Segment; 9] {
+pub(crate) fn rounded_diamond(w: f64, h: f64, roundness: Roundness) -> [Segment; 9] {
     let [
         (top_x, top_y),
         (right_x, right_y),

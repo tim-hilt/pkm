@@ -47,6 +47,10 @@ struct Viewport: Equatable {
 ///
 /// What is drawn for an Element is cached per Element handle and version (and
 /// flattening level), so a changed Scene only rebuilds the Elements that changed.
+///
+/// The overlay (selection frames) is drawn over the Scene in the same frame.
+/// It is a few strokes made for one zoom, so it is rebuilt whenever it or the
+/// flattening level changes, and not cached per Element.
 @MainActor
 final class CanvasRenderer: NSObject, MTKViewDelegate {
     /// Samples per pixel; the render target must be multisampled with this count.
@@ -105,8 +109,14 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
     private let clearStencil: any MTLDepthStencilState
 
     private(set) var geometry: (any GeometrySource)?
+    /// What is drawn over the Scene, see `setOverlay`.
+    private(set) var overlay: (any GeometrySource)?
     /// Everything to draw, in z-order: the cached draws of all Elements.
     private var draws: [Draw] = []
+    /// The draws of `overlay`, and the flattening level they were built for.
+    private var overlayDraws: [Draw] = []
+    private var overlayLevel: Int?
+    private var overlayIsStale = true
     private var cache: [UInt32: CachedElement] = [:]
     /// The `Geometry.generation` the cache belongs to.
     private var cacheGeneration: UInt64?
@@ -298,6 +308,16 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         onNeedsDisplay?()
     }
 
+    /// Replaces what is drawn over the Scene (selection frames, in Scene
+    /// coordinates like the geometry); nil draws nothing. The same object
+    /// again is a no-op.
+    func setOverlay(_ overlay: (any GeometrySource)?) {
+        guard overlay !== self.overlay else { return }
+        self.overlay = overlay
+        overlayIsStale = true
+        onNeedsDisplay?()
+    }
+
     /// Renders one frame into `pass` (whose first colour attachment must be
     /// `sampleCount`-multisampled in `pixelFormat`) and presents `drawable`
     /// if given. The target is cleared to the Canvas background first.
@@ -319,7 +339,9 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         pass.stencilAttachment.storeAction = .dontCare
 
         let scale = viewport.zoom * pixelsPerPoint
-        refreshDraws(scale: scale)
+        let level = Self.flatteningLevel(forScale: scale)
+        refreshDraws(level: level)
+        refreshOverlay(level: level)
 
         if let encoder = commands.makeRenderCommandEncoder(descriptor: pass) {
             var frame = FrameUniforms(
@@ -334,33 +356,36 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
             // count as winding.
             var stencilIsMarked = false
             var drawingStrokes = false
-            for item in draws {
-                switch item {
-                case .stroke(let stroke):
-                    if !drawingStrokes {
-                        encoder.setRenderPipelineState(pipeline)
-                        drawingStrokes = true
+            // The Scene, then the overlay on top; no copy of the (large) draws.
+            for items in [draws, overlayDraws] {
+                for item in items {
+                    switch item {
+                    case .stroke(let stroke):
+                        if !drawingStrokes {
+                            encoder.setRenderPipelineState(pipeline)
+                            drawingStrokes = true
+                        }
+                        encoder.setVertexBuffer(stroke.segments, offset: 0, index: 0)
+                        if stroke.isTranslucent {
+                            encoder.setStencilReferenceValue(UInt32(translucentCount % 255 + 1))
+                            translucentCount += 1
+                            stencilIsMarked = true
+                            var uniforms = stroke.uniforms
+                            uniforms.interiorOnly = 1
+                            draw(stroke, uniforms, with: interior, in: encoder)
+                            uniforms.interiorOnly = 0
+                            draw(stroke, uniforms, with: fringe, in: encoder)
+                        } else {
+                            draw(stroke, stroke.uniforms, with: plain, in: encoder)
+                        }
+                    case .fill(let fill):
+                        drawingStrokes = false
+                        draw(fill, clearingMarks: stencilIsMarked, in: encoder)
+                        stencilIsMarked = false
+                    case .image(let image):
+                        drawingStrokes = false
+                        draw(image, in: encoder)
                     }
-                    encoder.setVertexBuffer(stroke.segments, offset: 0, index: 0)
-                    if stroke.isTranslucent {
-                        encoder.setStencilReferenceValue(UInt32(translucentCount % 255 + 1))
-                        translucentCount += 1
-                        stencilIsMarked = true
-                        var uniforms = stroke.uniforms
-                        uniforms.interiorOnly = 1
-                        draw(stroke, uniforms, with: interior, in: encoder)
-                        uniforms.interiorOnly = 0
-                        draw(stroke, uniforms, with: fringe, in: encoder)
-                    } else {
-                        draw(stroke, stroke.uniforms, with: plain, in: encoder)
-                    }
-                case .fill(let fill):
-                    drawingStrokes = false
-                    draw(fill, clearingMarks: stencilIsMarked, in: encoder)
-                    stencilIsMarked = false
-                case .image(let image):
-                    drawingStrokes = false
-                    draw(image, in: encoder)
                 }
             }
             encoder.endEncoding()
@@ -430,13 +455,30 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
 
     // MARK: Flattening
 
+    /// The power of two that curves are flattened for at `scale` device
+    /// pixels per Scene unit.
+    private static func flatteningLevel(forScale scale: Float) -> Int {
+        Int(log2(max(scale, .leastNormalMagnitude)).rounded(.up))
+    }
+
+    /// Brings `overlayDraws` up to date with the overlay and the flattening level.
+    private func refreshOverlay(level: Int) {
+        guard overlayIsStale || level != overlayLevel else { return }
+        overlayIsStale = false
+        overlayLevel = level
+        let tolerance = Self.flatteningTolerancePixels / exp2(Float(level))
+        overlayDraws =
+            overlay?.withBuffers { buffers in
+                buffers.parts.compactMap { makeDraw(for: $0, in: buffers, tolerance: tolerance) }
+            } ?? []
+    }
+
     /// Brings `draws` up to date with the geometry and the zoom: rebuilds
     /// the Elements that changed or were flattened for another power-of-two
     /// zoom level, reuses the others.
-    private func refreshDraws(scale: Float) {
+    private func refreshDraws(level: Int) {
         /// Which of the geometry's three lists supplies the next Element.
         enum Next { case part, line, image }
-        let level = Int(log2(max(scale, .leastNormalMagnitude)).rounded(.up))
         guard drawsAreStale || level != flatteningLevel, let geometry else { return }
         drawsAreStale = false
         flatteningLevel = level

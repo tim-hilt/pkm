@@ -5,7 +5,7 @@ use crate::scene::ElementType;
 /// Tools join as the features that need them land.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Tool {
-    /// Selects Elements (the default). Needs no input handling yet.
+    /// Selects Elements by tapping them (the default), see [`crate::tap`].
     #[default]
     Selection,
     /// Pans the Canvas with a single pointer drag, whatever the pointer.

@@ -10,7 +10,8 @@ import SwiftUI
 /// is handed to the renderer; the geometry stays cached in the renderer and is
 /// never requested again for it (ADR-0007). Input that changes the Scene
 /// (drawing) shows up as a new `Editor.revision`, and only then is the
-/// geometry requested again.
+/// geometry requested again. Likewise the overlay (selection frames) is
+/// requested again only when `Editor.overlayRevision` changes.
 @MainActor
 final class CanvasMetalView: MTKView {
     let renderer: CanvasRenderer?
@@ -23,8 +24,10 @@ final class CanvasMetalView: MTKView {
         didSet {
             renderer?.files = editor
             shownRevision = editor?.revision()
+            shownOverlayRevision = nil
             reportViewSize()
             syncViewport()
+            syncOverlay()
         }
     }
 
@@ -34,6 +37,8 @@ final class CanvasMetalView: MTKView {
 
     /// The `Editor.revision` of the Scene the renderer shows.
     private var shownRevision: UInt64?
+    /// The `Editor.overlayRevision` of the overlay the renderer shows.
+    private var shownOverlayRevision: UInt64?
 
     init() {
         let device = MTLCreateSystemDefaultDevice()
@@ -106,6 +111,7 @@ final class CanvasMetalView: MTKView {
     private func didReachEditor() {
         syncScene()
         syncViewport()
+        syncOverlay()
         onEditorChange?()
     }
 
@@ -114,6 +120,14 @@ final class CanvasMetalView: MTKView {
         guard let editor, editor.revision() != shownRevision else { return }
         shownRevision = editor.revision()
         renderer?.setGeometry(editor.geometry())
+    }
+
+    /// Hands the renderer the overlay again if it may have changed: with the
+    /// Selection, the Elements selected and the zoom, but not with a pan.
+    private func syncOverlay() {
+        guard let editor, editor.overlayRevision() != shownOverlayRevision else { return }
+        shownOverlayRevision = editor.overlayRevision()
+        renderer?.setOverlay(editor.overlay())
     }
 
     /// Shows what the core says is in view. Cheap: the renderer ignores an

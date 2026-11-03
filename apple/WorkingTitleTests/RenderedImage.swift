@@ -25,6 +25,12 @@ struct RenderedImage: Equatable {
     /// ink from paper in grey drawings.
     func red(_ x: Int, _ y: Int) -> UInt8 { bgra[(y * width + x) * Self.bytesPerPixel + 2] }
 
+    /// The colour channels at device pixel `(x, y)`.
+    func pixel(_ x: Int, _ y: Int) -> (red: UInt8, green: UInt8, blue: UInt8) {
+        let start = (y * width + x) * Self.bytesPerPixel
+        return (bgra[start + 2], bgra[start + 1], bgra[start])
+    }
+
     /// Nil if `data` is not a decodable image.
     init?(pngData data: Data) {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),

@@ -4,11 +4,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::draw_shape::{Outcome, ShapeGesture};
 use crate::geometry::Geometry;
+use crate::hit_test::{self, Reach};
 use crate::input::{MagnifyEvent, PointerEvent, PointerPhase, ScrollEvent};
 use crate::navigation::{Bounds, Navigation};
+use crate::overlay;
 use crate::random::Entropy;
 use crate::scene::{Element, ElementType, LoadError, Scene};
+use crate::selection::Selection;
 use crate::style::Style;
+use crate::tap::TapRecognizer;
 use crate::text::{self, Containers, TextMeasurer};
 use crate::tool::Tool;
 use crate::viewport::Viewport;
@@ -22,8 +26,8 @@ fn next_generation() -> u64 {
 }
 
 /// The core's public interface: owns the open Scene and everything that edits
-/// it and the viewport onto it. Tools, Selection and history join as the
-/// features that need them land.
+/// it, the Selection and the viewport onto it. History joins as the features
+/// that need it land.
 #[derive(Debug)]
 pub struct Editor {
     scene: Scene,
@@ -43,6 +47,12 @@ pub struct Editor {
     entropy: Entropy,
     /// The shape being drawn, if the pointer of a shape Tool is down.
     shape: Option<ShapeGesture>,
+    selection: Selection,
+    taps: TapRecognizer,
+    /// Changes whenever the overlay may, see [`Editor::overlay_revision`].
+    overlay_revision: u64,
+    /// The zoom the overlay was last made for.
+    overlay_zoom: f64,
     measurer: Option<Measurer>,
 }
 
@@ -74,6 +84,10 @@ impl Editor {
             style: Style::default(),
             entropy: Entropy::from_system(),
             shape: None,
+            selection: Selection::default(),
+            taps: TapRecognizer::default(),
+            overlay_revision: 0,
+            overlay_zoom: 1.0,
             measurer: None,
         }
     }
@@ -82,6 +96,10 @@ impl Editor {
     /// `.excalidraw` file. If the bytes are not a Drawing the Scene is kept.
     pub fn load(&mut self, bytes: &[u8]) -> Result<(), LoadError> {
         self.scene = Scene::from_bytes(bytes)?;
+        if self.selection.clear() {
+            self.overlay_revision += 1;
+        }
+        self.taps.cancel();
         // Whatever was being drawn belonged to the Scene that is gone.
         self.shape = None;
         self.changed(true);
@@ -167,16 +185,19 @@ impl Editor {
     /// Zooms in one step (10 percentage points) around the middle of the view.
     pub fn zoom_in(&mut self) {
         self.navigation.zoom_in();
+        self.navigated();
     }
 
     /// Zooms out one step (10 percentage points) around the middle of the view.
     pub fn zoom_out(&mut self) {
         self.navigation.zoom_out();
+        self.navigated();
     }
 
     /// Goes back to 100 % around the middle of the view.
     pub fn reset_zoom(&mut self) {
         self.navigation.reset_zoom();
+        self.navigated();
     }
 
     /// Frames all shown Elements; see [`crate::navigation`]. Does nothing
@@ -184,6 +205,7 @@ impl Editor {
     pub fn zoom_to_fit(&mut self) {
         if let Some(bounds) = self.scene_bounds() {
             self.navigation.fit(bounds);
+            self.navigated();
         }
     }
 
@@ -197,6 +219,7 @@ impl Editor {
     pub fn set_tool(&mut self, tool: Tool) {
         if tool != self.tool {
             self.navigation.cancel_drag();
+            self.taps.cancel();
             self.drop_shape();
             self.tool = tool;
         }
@@ -220,20 +243,86 @@ impl Editor {
     /// A step of a finger, Pencil or mouse. Two fingers pan and zoom the
     /// viewport, and so does one pointer with the hand Tool (see
     /// [`crate::navigation`]). With a shape Tool, one pointer dragging draws
-    /// the shape (see [`crate::draw_shape`]).
+    /// the shape (see [`crate::draw_shape`]), and with the selection Tool a tap
+    /// selects the Element it hits or clears the Selection (see
+    /// [`Editor::selection`]).
     pub fn pointer(&mut self, event: PointerEvent) {
         self.navigation.pointer(event, self.tool == Tool::Hand);
+        self.navigated();
         self.draw_shape(event);
+        self.select(event);
+    }
+
+    /// The ids of the selected Elements, in the order they were selected.
+    pub fn selection(&self) -> &[String] {
+        self.selection.ids()
+    }
+
+    /// Selects the Element a tap hits, or clears the Selection if the tap
+    /// was a deliberate one on empty Canvas (see [`crate::tap`]).
+    ///
+    /// Only the selection Tool taps, and never with two fingers down: they
+    /// navigate, and must not disturb the Selection.
+    fn select(&mut self, event: PointerEvent) {
+        if self.tool != Tool::Selection || self.navigation.is_pinching() {
+            self.taps.cancel();
+            return;
+        }
+        let Some(tap) = self.taps.track(event) else {
+            return;
+        };
+        let viewport = self.navigation.viewport();
+        let point = viewport.scene_at(tap.x, tap.y);
+        let reach = Reach::new(tap.kind, viewport.zoom());
+        let changed = match hit_test::topmost(&self.scene, &self.selection, point, reach) {
+            Some(element) => self.selection.select_only(element.id()),
+            None if tap.is_short() => self.selection.clear(),
+            None => false,
+        };
+        if changed {
+            self.overlay_revision += 1;
+        }
+    }
+
+    /// What clients draw over the Scene: a frame around each selected
+    /// Element, in Scene coordinates, as geometry in the same format as
+    /// [`Editor::geometry`] (strokes only; no text or images). Clients draw
+    /// it after the Scene and do not cache it by Element: its strokes are as
+    /// wide and as far from the Elements as they are because of the zoom it
+    /// was made for.
+    pub fn overlay(&self) -> Geometry {
+        let selected = self.shown().filter(|e| self.selection.contains(e.id()));
+        overlay::selection(selected, self.navigation.viewport().zoom())
+    }
+
+    /// Tells whether [`Editor::overlay`] may differ from before: it changes
+    /// whenever the Selection, a selected Element or the zoom does, and
+    /// never for a pan. Clients compare it with the one they last drew
+    /// with, like [`Editor::revision`].
+    pub fn overlay_revision(&self) -> u64 {
+        self.overlay_revision
+    }
+
+    /// Notes that the viewport may have changed: the overlay depends on its
+    /// zoom.
+    fn navigated(&mut self) {
+        let zoom = self.navigation.viewport().zoom();
+        if zoom != self.overlay_zoom {
+            self.overlay_zoom = zoom;
+            self.overlay_revision += 1;
+        }
     }
 
     /// A scroll wheel or trackpad scroll (Mac): pans, or zooms with ctrl/cmd.
     pub fn scroll(&mut self, event: ScrollEvent) {
         self.navigation.scroll(event);
+        self.navigated();
     }
 
     /// A trackpad pinch (Mac): zooms around the pinch centre.
     pub fn magnify(&mut self, event: MagnifyEvent) {
         self.navigation.magnify(event);
+        self.navigated();
     }
 
     /// Follows the pointer with the shape being drawn, or starts one.
@@ -296,6 +385,10 @@ impl Editor {
     /// or removed, which may hand their handles to other Elements.
     fn changed(&mut self, restructured: bool) {
         self.revision += 1;
+        // Only selected Elements have anything drawn over them.
+        if !self.selection.is_empty() {
+            self.overlay_revision += 1;
+        }
         if restructured {
             self.generation = next_generation();
         }

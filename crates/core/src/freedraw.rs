@@ -84,6 +84,16 @@ fn centre(element: &Element, points: &[Point]) -> Point {
     )
 }
 
+/// How far the ink of a stroke reaches beyond its points at the most.
+pub(crate) fn ink_reach(element: &Element) -> f64 {
+    element.stroke_width() * SIZE_FACTOR
+}
+
+/// The polygon around the stroke of `element`, in the Element's frame.
+pub(crate) fn outline(element: &Element) -> Vec<Point> {
+    stroke_outline(element, &element.points())
+}
+
 /// The polygon around the stroke, in the Element's frame.
 fn stroke_outline(element: &Element, points: &[Point]) -> Vec<Point> {
     let simulate_pressure = element.simulates_pressure();

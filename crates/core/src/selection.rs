@@ -1,0 +1,38 @@
+//! The Selection: the set of Elements currently selected for editing.
+
+/// The ids of the selected Elements, in the order they were selected. Ids
+/// rather than handles, which change when Elements are added or removed.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct Selection {
+    ids: Vec<String>,
+}
+
+impl Selection {
+    pub fn ids(&self) -> &[String] {
+        &self.ids
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty()
+    }
+
+    pub fn contains(&self, id: &str) -> bool {
+        self.ids.iter().any(|selected| selected == id)
+    }
+
+    /// Selects `id` alone. Returns whether the Selection changed.
+    pub fn select_only(&mut self, id: &str) -> bool {
+        if self.ids == [id] {
+            return false;
+        }
+        self.ids = vec![id.to_owned()];
+        true
+    }
+
+    /// Selects nothing. Returns whether the Selection changed.
+    pub fn clear(&mut self) -> bool {
+        let changed = !self.ids.is_empty();
+        self.ids.clear();
+        changed
+    }
+}

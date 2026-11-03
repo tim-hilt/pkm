@@ -392,6 +392,26 @@ impl Element<'_> {
             .unwrap_or(false)
     }
 
+    /// Whether the Element is locked against selection and editing.
+    pub fn is_locked(&self) -> bool {
+        self.object
+            .get("locked")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }
+
+    /// Whether a text is bound to the Element as its label.
+    pub fn has_bound_text(&self) -> bool {
+        self.object
+            .get("boundElements")
+            .and_then(Value::as_array)
+            .is_some_and(|bound| {
+                bound
+                    .iter()
+                    .any(|b| b.get("type").and_then(Value::as_str) == Some("text"))
+            })
+    }
+
     pub fn x(&self) -> f64 {
         self.number("x", 0.0)
     }

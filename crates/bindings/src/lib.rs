@@ -240,6 +240,25 @@ impl Editor {
         self.editor().revision()
     }
 
+    /// The ids of the selected Elements, in the order they were selected.
+    pub fn selection(&self) -> Vec<String> {
+        self.editor().selection().to_vec()
+    }
+
+    /// Differs from before whenever [`Editor::overlay`] may: read it after
+    /// forwarding input and ask for the overlay again if it moved.
+    pub fn overlay_revision(&self) -> u64 {
+        self.editor().overlay_revision()
+    }
+
+    /// The selection frames to draw over the Scene, in Scene coordinates and
+    /// for the current zoom; see [`workingtitle_core::Editor::overlay`].
+    pub fn overlay(&self) -> Arc<Geometry> {
+        Arc::new(Geometry {
+            inner: self.editor().overlay(),
+        })
+    }
+
     /// A step of a finger, Pencil or mouse; see
     /// [`workingtitle_core::Editor::pointer`].
     pub fn pointer(&self, event: PointerEvent) {
@@ -552,6 +571,38 @@ mod tests {
         editor.set_tool(Tool::Ellipse);
         editor.set_tool_lock(true);
         assert!(editor.tool_lock());
+    }
+
+    #[test]
+    fn tapping_an_element_selects_it_and_the_overlay_frames_it() {
+        let editor = Editor::new();
+        editor
+            .load(
+                br##"{"type":"excalidraw","elements":[
+                    {"id":"a","type":"rectangle","x":10,"y":20,"width":30,"height":40,
+                     "backgroundColor":"#ffc9c9"}]}"##
+                    .to_vec(),
+            )
+            .unwrap();
+        assert_eq!(editor.overlay().part_count(), 0);
+        let revision = editor.overlay_revision();
+
+        let mouse = |phase| PointerEvent {
+            id: 0,
+            phase,
+            x: 20.0,
+            y: 30.0,
+            kind: PointerKind::Mouse,
+            pressure: 0.5,
+            timestamp: 0.0,
+            modifiers: Modifiers::default(),
+        };
+        editor.pointer(mouse(PointerPhase::Down));
+        editor.pointer(mouse(PointerPhase::Up));
+
+        assert_eq!(editor.selection(), ["a"]);
+        assert_ne!(editor.overlay_revision(), revision);
+        assert_eq!(editor.overlay().part_count(), 1);
     }
 
     #[test]

@@ -22,27 +22,11 @@ use crate::shape::{
 pub(crate) fn draw(element: &Element, background: u32, geometry: &mut Geometry) {
     let points = element.points();
     let is_arrow = element.kind() == ElementType::Arrow;
-    let curved = element.roundness().is_some() && !element.is_elbow_arrow();
-
-    // Only a line that comes back to its start has an inside to fill.
-    let fill = if element.kind() == ElementType::Line && is_loop(&points) {
-        fill_of(element)
-    } else {
-        None
-    };
-    let style = Style {
-        fill,
-        ..style_of(element, extent(&points))
-    };
-
-    let mut sketcher = Sketcher::new(element.seed(), style);
-    let drawing = if curved {
-        sketcher.curve(&points)
-    } else if fill.is_some() {
-        sketcher.polygon(&points)
-    } else {
-        sketcher.linear_path(&points)
-    };
+    let Sketch {
+        drawing,
+        style,
+        curved,
+    } = sketch(element, &points);
 
     let target = Target::of(element, placement(element, &drawing.outline));
     let stroke = StrokeStyle {
@@ -85,6 +69,52 @@ pub(crate) fn draw(element: &Element, background: u32, geometry: &mut Geometry) 
             }
         }
     }
+}
+
+/// A line or arrow sketched through `points`, its own, as drawn.
+struct Sketch {
+    drawing: Drawing,
+    style: Style,
+    curved: bool,
+}
+
+fn sketch(element: &Element, points: &[Point]) -> Sketch {
+    let curved = element.roundness().is_some() && !element.is_elbow_arrow();
+
+    // Only a line that comes back to its start has an inside to fill.
+    let fill = if element.kind() == ElementType::Line && is_loop(points) {
+        fill_of(element)
+    } else {
+        None
+    };
+    let style = Style {
+        fill,
+        ..style_of(element, extent(points))
+    };
+
+    let mut sketcher = Sketcher::new(element.seed(), style);
+    let drawing = if curved {
+        sketcher.curve(points)
+    } else if fill.is_some() {
+        sketcher.polygon(points)
+    } else {
+        sketcher.linear_path(points)
+    };
+    Sketch {
+        drawing,
+        style,
+        curved,
+    }
+}
+
+/// The corners (top left, bottom right) in the Scene of the box Excalidraw
+/// takes for the line or arrow: around its sketched stroke, jitter included,
+/// but not the arrowheads. `None` if the stroke has no curves.
+pub(crate) fn drawn_bounds(element: &Element) -> Option<(Point, Point)> {
+    let points = element.points();
+    let ((x0, y0), (x1, y1)) = curve_bounds(&sketch(element, &points).drawing.outline)?;
+    let (x, y) = (element.x(), element.y());
+    Some(((x + x0, y + y0), (x + x1, y + y1)))
 }
 
 /// Width and height of the box around `points`.
