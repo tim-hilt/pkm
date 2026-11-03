@@ -122,6 +122,38 @@ struct DrawingStore: Sendable {
         cacheDirectory.appending(path: name, directoryHint: .isDirectory)
     }
 
+    // MARK: Thumbnails
+
+    private static let thumbnailFile = "thumbnail.png"
+
+    /// The cached thumbnail (PNG) of the Drawing as it is listed in `entry`, or
+    /// nil if there is none or the Drawing changed since it was made.
+    ///
+    /// A thumbnail file is stamped with the modification date of the Drawing
+    /// it shows, and is current exactly when that is still the Drawing's date:
+    /// whatever changes the file, here or in Files, makes it stale.
+    func thumbnail(for entry: Entry) -> Data? {
+        let file = cacheDirectory(for: entry.name).appending(path: Self.thumbnailFile, directoryHint: .notDirectory)
+        guard let stamp = try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+            abs(stamp.timeIntervalSince(entry.modified)) < Self.stampTolerance
+        else { return nil }
+        return try? Data(contentsOf: file)
+    }
+
+    /// Caches `png` as the thumbnail of the Drawing as it is listed in `entry`;
+    /// it is stale once the Drawing changes. Not a change of the Drawing.
+    func saveThumbnail(_ png: Data, for entry: Entry) throws {
+        let folder = cacheDirectory(for: entry.name)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appending(path: Self.thumbnailFile, directoryHint: .notDirectory)
+        try png.write(to: file, options: .atomic)
+        // Between the two steps the file is merely stale, never wrong.
+        try FileManager.default.setAttributes([.modificationDate: entry.modified], ofItemAtPath: file.path)
+    }
+
+    /// File dates are stored finer than this; it only absorbs rounding.
+    private static let stampTolerance: TimeInterval = 0.001
+
     /// Caches can be made again, so a failure here costs nothing but time.
     private func moveCache(of name: String, to newName: String) {
         let source = cacheDirectory(for: name)

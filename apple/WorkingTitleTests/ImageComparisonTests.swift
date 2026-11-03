@@ -1,6 +1,8 @@
 import Foundation
 import Testing
 
+@testable import WorkingTitle
+
 /// The comparison is the test oracle for every reference image, so its own
 /// behaviour is pinned down with small synthetic images.
 @Suite struct ImageComparisonTests {

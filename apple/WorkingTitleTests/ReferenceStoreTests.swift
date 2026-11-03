@@ -1,6 +1,8 @@
 import Foundation
 import Testing
 
+@testable import WorkingTitle
+
 /// The store's contract with a developer: what happens on first run, on a
 /// match, on a regression and when deliberately re-recording.
 @Suite struct ReferenceStoreTests {

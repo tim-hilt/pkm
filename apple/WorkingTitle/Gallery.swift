@@ -13,10 +13,14 @@ final class Gallery {
     /// tell the user.
     private(set) var failure: String?
 
+    /// The pictures of the Drawings for their cards.
+    @ObservationIgnored let thumbnails: Thumbnails
+
     @ObservationIgnored private let store: DrawingStore
 
     init(store: DrawingStore) {
         self.store = store
+        thumbnails = Thumbnails(store: store)
         reload()
     }
 

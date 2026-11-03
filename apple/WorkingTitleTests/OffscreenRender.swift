@@ -35,40 +35,6 @@ enum OffscreenRender {
     static func draw(with renderer: CanvasRenderer, pixelsPerPoint: Float = 1, size: Int = 400)
         -> RenderedImage
     {
-        let device = renderer.device
-        func texture(
-            _ format: MTLPixelFormat, samples: Int, usage: MTLTextureUsage, storage: MTLStorageMode
-        ) -> any MTLTexture {
-            let descriptor = MTLTextureDescriptor()
-            descriptor.pixelFormat = format
-            descriptor.width = size
-            descriptor.height = size
-            descriptor.textureType = samples > 1 ? .type2DMultisample : .type2D
-            descriptor.sampleCount = samples
-            descriptor.usage = usage
-            descriptor.storageMode = storage
-            return device.makeTexture(descriptor: descriptor)!
-        }
-        let format = CanvasRenderer.pixelFormat
-        let multisampled = texture(
-            format, samples: CanvasRenderer.sampleCount, usage: .renderTarget, storage: .private)
-        let resolved = texture(format, samples: 1, usage: [.renderTarget, .shaderRead], storage: .shared)
-        let stencil = texture(
-            CanvasRenderer.stencilFormat, samples: CanvasRenderer.sampleCount, usage: .renderTarget,
-            storage: .private)
-        let pass = MTLRenderPassDescriptor()
-        pass.colorAttachments[0].texture = multisampled
-        pass.colorAttachments[0].resolveTexture = resolved
-        pass.colorAttachments[0].storeAction = .multisampleResolve
-        pass.stencilAttachment.texture = stencil
-
-        let commands = renderer.renderFrame(into: pass, pixelsPerPoint: pixelsPerPoint, presenting: nil)
-        commands?.waitUntilCompleted()
-
-        var bgra = [UInt8](repeating: 0, count: size * size * RenderedImage.bytesPerPixel)
-        resolved.getBytes(
-            &bgra, bytesPerRow: size * RenderedImage.bytesPerPixel, from: MTLRegionMake2D(0, 0, size, size),
-            mipmapLevel: 0)
-        return RenderedImage(width: size, height: size, bgra: bgra)
+        renderer.renderOffscreen(width: size, height: size, pixelsPerPoint: pixelsPerPoint)!
     }
 }

@@ -1,7 +1,9 @@
 import SwiftUI
 
 /// The Gallery as a grid of Drawings, last modified first, with a button to
-/// create a new one. Thumbnails come later; a card shows the name for now.
+/// create a new one. A card shows the Drawing's thumbnail, which is made when
+/// the card comes into view (the grid is lazy) and again after the Drawing
+/// changed, with the name and date below it.
 /// A card's menu (also its context menu) renames, duplicates and deletes the
 /// Drawing; deleting asks first.
 struct GalleryView: View {
@@ -22,7 +24,7 @@ struct GalleryView: View {
                         Button {
                             gallery.openDrawing(named: drawing.name)
                         } label: {
-                            Card(drawing: drawing)
+                            Card(drawing: drawing, thumbnails: gallery.thumbnails)
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("drawing-\(drawing.name)")
@@ -108,12 +110,27 @@ struct GalleryView: View {
 
 private struct Card: View {
     let drawing: DrawingStore.Entry
+    let thumbnails: Thumbnails
+    @State private var thumbnail: CGImage?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            // The frame has the thumbnail's shape from the start, so that the
+            // grid does not move while thumbnails arrive.
             RoundedRectangle(cornerRadius: 12)
                 .fill(.quaternary)
                 .aspectRatio(4 / 3, contentMode: .fit)
+                .overlay {
+                    if let thumbnail {
+                        Image(decorative: thumbnail, scale: 1)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary) }
+                // Restarts when the Drawing changed; ends when the card leaves the screen.
+                .task(id: drawing) { thumbnail = await thumbnails.image(for: drawing) }
             Text(drawing.name).font(.subheadline).lineLimit(2)
             Text(drawing.modified, format: .dateTime.day().month().year().hour().minute())
                 .font(.caption).foregroundStyle(.secondary)

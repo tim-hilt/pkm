@@ -326,4 +326,82 @@ import Testing
 
         #expect(!hasCache(copy), "caches are made again for the copy, never borrowed")
     }
+
+    // MARK: Thumbnail cache
+
+    private func entry(_ name: String) throws -> DrawingStore.Entry {
+        try #require(store.list().first { $0.name == name })
+    }
+
+    @Test func aDrawingWithoutAThumbnailHasNoCachedOne() throws {
+        try store.save(Data("a".utf8), as: "a")
+
+        #expect(try store.thumbnail(for: entry("a")) == nil)
+    }
+
+    @Test func aSavedThumbnailIsReturnedWhileTheDrawingIsUnchanged() throws {
+        try store.save(Data("a".utf8), as: "a")
+        try store.saveThumbnail(Data("png".utf8), for: entry("a"))
+
+        #expect(try store.thumbnail(for: entry("a")) == Data("png".utf8))
+    }
+
+    @Test func aThumbnailIsStaleOnceTheDrawingChanged() throws {
+        try store.save(Data("a".utf8), as: "a")
+        try setModified("a", Date(timeIntervalSince1970: 1000))
+        try store.saveThumbnail(Data("png".utf8), for: entry("a"))
+
+        try store.save(Data("changed".utf8), as: "a")
+        try setModified("a", Date(timeIntervalSince1970: 2000))
+
+        #expect(try store.thumbnail(for: entry("a")) == nil)
+    }
+
+    @Test func aThumbnailIsStaleWhenTheDrawingWasReplacedByAnOlderFile() throws {
+        try store.save(Data("a".utf8), as: "a")
+        try setModified("a", Date(timeIntervalSince1970: 2000))
+        try store.saveThumbnail(Data("png".utf8), for: entry("a"))
+
+        try setModified("a", Date(timeIntervalSince1970: 1000))
+
+        #expect(try store.thumbnail(for: entry("a")) == nil)
+    }
+
+    @Test func aNewThumbnailReplacesTheOldOne() throws {
+        try store.save(Data("a".utf8), as: "a")
+        try store.saveThumbnail(Data("one".utf8), for: entry("a"))
+        try store.saveThumbnail(Data("two".utf8), for: entry("a"))
+
+        #expect(try store.thumbnail(for: entry("a")) == Data("two".utf8))
+    }
+
+    @Test func aThumbnailLivesOutsideTheDrawingsFolderAndLeavesTheFileAlone() throws {
+        try store.save(Data("a".utf8), as: "a")
+        let before = try entry("a")
+
+        try store.saveThumbnail(Data("png".utf8), for: before)
+
+        #expect(try fileNames() == ["a.excalidraw"])
+        #expect(try store.open("a") == Data("a".utf8))
+        #expect(try entry("a") == before, "saving a thumbnail is not a change of the Drawing")
+        #expect(hasCache("a"))
+    }
+
+    @Test func aThumbnailFollowsItsRenamedDrawing() throws {
+        try store.save(Data("a".utf8), as: "a")
+        try store.saveThumbnail(Data("png".utf8), for: entry("a"))
+
+        _ = try store.rename("a", to: "b")
+
+        #expect(try store.thumbnail(for: entry("b")) == Data("png".utf8))
+    }
+
+    @Test func aDuplicateStartsWithoutAThumbnail() throws {
+        try store.save(Data("a".utf8), as: "a")
+        try store.saveThumbnail(Data("png".utf8), for: entry("a"))
+
+        let copy = try store.duplicate("a")
+
+        #expect(try store.thumbnail(for: entry(copy)) == nil)
+    }
 }

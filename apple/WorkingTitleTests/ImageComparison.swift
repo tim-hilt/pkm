@@ -1,3 +1,5 @@
+@testable import WorkingTitle
+
 /// Why a rendered image does not match its reference.
 struct ImageMismatch {
     /// One line for the test failure message.

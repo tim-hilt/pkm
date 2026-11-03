@@ -1,6 +1,8 @@
 import Foundation
 import Testing
 
+@testable import WorkingTitle
+
 /// Reference images (PNG files in a directory) that renders are checked against.
 ///
 /// Normal runs only compare. Recording is the one explicit way to change

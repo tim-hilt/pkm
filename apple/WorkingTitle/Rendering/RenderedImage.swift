@@ -36,8 +36,21 @@ struct RenderedImage: Equatable {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
             let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
         else { return nil }
+        self.init(cgImage: image)
+    }
+
+    /// The image as the system draws it, for views.
+    func cgImage() -> CGImage? {
+        var pixels = bgra
+        return pixels.withUnsafeMutableBytes { buffer in
+            Self.context(over: buffer.baseAddress!, width: width, height: height)?.makeImage()
+        }
+    }
+
+    /// Nil if the image cannot be drawn into the pixel layout.
+    init?(cgImage image: CGImage) {
         var bgra = [UInt8](repeating: 0, count: image.width * image.height * Self.bytesPerPixel)
-        let drawn = bgra.withUnsafeMutableBytes { buffer in
+        let drawn: ()? = bgra.withUnsafeMutableBytes { buffer in
             Self.context(over: buffer.baseAddress!, width: image.width, height: image.height)?
                 .draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
         }
