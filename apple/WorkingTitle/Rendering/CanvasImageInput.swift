@@ -7,7 +7,8 @@ import UniformTypeIdentifiers
     import UIKit
 #endif
 
-/// Images that reach the Canvas from outside: pasted from the clipboard and
+/// Images that reach the Canvas from outside (text, which is Excalidraw's
+/// Elements, is `CanvasClipboard`): pasted from the clipboard and
 /// dragged & dropped onto it. Every route ends in `insertImages`, which has
 /// the pictures prepared for the core (`ImageImporter`) and hands them over.
 extension CanvasMetalView {
@@ -36,6 +37,8 @@ extension CanvasMetalView {
 
         /// Edit > Paste (⌘V) while the Canvas has the keyboard.
         @objc func paste(_ sender: Any?) {
+            // Elements first: Excalidraw's clipboard is text.
+            if pasteElementsFromPasteboard() { return }
             let sources = Self.imageSources(in: .general)
             Task { await insertImages(from: sources) }
         }
@@ -72,14 +75,20 @@ extension CanvasMetalView {
         /// Makes the Canvas take drops and pastes of images.
         func enableImageInput() {
             addInteraction(UIDropInteraction(delegate: self))
-            pasteConfiguration = UIPasteConfiguration(acceptableTypeIdentifiers: [UTType.image.identifier])
+            pasteConfiguration = UIPasteConfiguration(acceptableTypeIdentifiers: Self.pasteTypes)
         }
+
+        /// What can be pasted: images, and the text Excalidraw's Elements are.
+        static let pasteTypes = [UTType.image.identifier, UTType.plainText.identifier]
 
         override var canBecomeFirstResponder: Bool { true }
 
         /// A paste: ⌘V with a keyboard, or a paste button (`UIPasteControl`).
         override func paste(itemProviders: [NSItemProvider]) {
-            Task { await insertImages(from: await Self.imageData(of: itemProviders)) }
+            Task {
+                if await pasteElements(from: itemProviders) { return }
+                await insertImages(from: await Self.imageData(of: itemProviders))
+            }
         }
 
         fileprivate static func imageData(of providers: [NSItemProvider]) async -> [Data] {
@@ -99,9 +108,15 @@ extension CanvasMetalView {
 
 #if os(macOS)
     extension CanvasMetalView: NSMenuItemValidation {
-        /// Paste is there when the clipboard has an image.
+        /// Copy and cut are there with a Selection; paste when the clipboard has
+        /// an image or text.
         func validateMenuItem(_ item: NSMenuItem) -> Bool {
-            item.action != #selector(paste(_:)) || !Self.imageSources(in: .general).isEmpty
+            switch item.action {
+            case #selector(copy(_:)), #selector(cut(_:)): canCopy
+            case #selector(paste(_:)):
+                NSPasteboard.general.string(forType: .string) != nil || !Self.imageSources(in: .general).isEmpty
+            default: true
+            }
         }
     }
 #else

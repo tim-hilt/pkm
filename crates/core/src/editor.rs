@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::action_bar::ActionBar;
 use crate::binding::{self, End};
 use crate::box_select::BoxSelect;
+use crate::clipboard;
 use crate::delete;
 use crate::draw_freedraw::StrokeDrawing;
 use crate::draw_linear::{LinearDrawing, Update};
@@ -874,6 +875,63 @@ impl Editor {
         self.history.record(step, &self.scene, &self.selection);
         self.overlay_revision += 1;
         self.changed(true);
+    }
+
+    /// The text to put on the clipboard for copying the Selection: Excalidraw's
+    /// clipboard JSON (`excalidraw/clipboard`), with the labels of selected
+    /// containers and the files of selected images, which excalidraw.com
+    /// pastes. `None` with nothing selected. See [`crate::clipboard`].
+    pub fn copy_selection(&self) -> Option<String> {
+        clipboard::copy(&self.scene, &self.selection)
+    }
+
+    /// Copies the Selection (see [`Editor::copy_selection`]) and deletes it
+    /// (see [`Editor::delete_selection`]), which is one undo step. `None`,
+    /// and nothing deleted, with nothing selected or while a pointer is
+    /// drawing or moving.
+    pub fn cut_selection(&mut self) -> Option<String> {
+        self.finish_placing();
+        if self.is_gesturing() {
+            return None;
+        }
+        let copied = self.copy_selection()?;
+        self.delete_selection();
+        Some(copied)
+    }
+
+    /// Pastes `text` in the middle of the view. See [`Editor::paste_at`].
+    pub fn paste(&mut self, text: &str) -> bool {
+        let (width, height) = self.navigation.view_size();
+        self.paste_at(text, width / 2.0, height / 2.0)
+    }
+
+    /// Pastes `text`, if it is Excalidraw's clipboard JSON (from
+    /// [`Editor::copy_selection`] or excalidraw.com): its Elements are added
+    /// with new ids, with the middle of them at the point `(x, y)` of the
+    /// view. They become the Selection and the Tool returns to selection.
+    /// One undo step. Returns whether anything was pasted: `false` for any
+    /// other text, for the client to treat as it likes, and while a pointer
+    /// is drawing or moving. See [`crate::clipboard`].
+    pub fn paste_at(&mut self, text: &str, x: f64, y: f64) -> bool {
+        self.finish_placing();
+        if self.is_gesturing() {
+            return false;
+        }
+        let centre = self.navigation.viewport().scene_at(x, y);
+        let mut step = Step::begin(&self.selection);
+        let Some(ids) =
+            clipboard::paste(&mut self.scene, &mut self.entropy, &mut step, text, centre)
+        else {
+            return false;
+        };
+        self.set_tool(Tool::Selection);
+        self.editing_group = None;
+        self.selection.select(ids);
+        self.sync_points();
+        self.history.record(step, &self.scene, &self.selection);
+        self.overlay_revision += 1;
+        self.changed(true);
+        true
     }
 
     /// Puts the `images` (pasted or dropped; see [`crate::insert_image`]) in

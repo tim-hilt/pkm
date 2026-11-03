@@ -342,6 +342,11 @@ impl Scene {
             .then(|| base64::decode(payload))?
     }
 
+    /// The record of the file `id` of the Drawing's `files`, as stored.
+    pub(crate) fn file_record(&self, id: &str) -> Option<&Value> {
+        self.root.get("files")?.as_object()?.get(id)
+    }
+
     /// Stores `bytes` as the file `id` of the Drawing's `files`, as
     /// Excalidraw does: a record with the MIME type and a base64 data URL.
     /// A file that is there already is kept: an id stands for its content.
@@ -360,6 +365,12 @@ impl Scene {
         ] {
             file.insert(key.into(), value);
         }
+        self.add_file_record(id, Value::Object(file));
+    }
+
+    /// Stores `record`, a file as another Drawing has it, as the file `id`
+    /// of the Drawing's `files`, unless there is one already.
+    pub(crate) fn add_file_record(&mut self, id: &str, record: Value) {
         if !matches!(self.root.get("files"), Some(Value::Object(_))) {
             self.root
                 .insert("files".into(), Value::Object(Object::new()));
@@ -367,7 +378,7 @@ impl Scene {
         if let Some(Value::Object(files)) = self.root.get_mut("files")
             && files.get(id).is_none()
         {
-            files.insert(id.to_owned(), Value::Object(file));
+            files.insert(id.to_owned(), record);
         }
     }
 

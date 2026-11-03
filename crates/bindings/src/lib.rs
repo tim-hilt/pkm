@@ -500,6 +500,31 @@ impl Editor {
         self.editor().duplicate();
     }
 
+    /// The text to put on the clipboard for copying the Selection, `None`
+    /// with nothing selected; see
+    /// [`workingtitle_core::Editor::copy_selection`].
+    pub fn copy_selection(&self) -> Option<String> {
+        self.editor().copy_selection()
+    }
+
+    /// Copies the Selection and deletes it; see
+    /// [`workingtitle_core::Editor::cut_selection`].
+    pub fn cut_selection(&self) -> Option<String> {
+        self.editor().cut_selection()
+    }
+
+    /// Pastes Excalidraw clipboard JSON in the middle of the view, returns
+    /// whether `text` was one; see [`workingtitle_core::Editor::paste`].
+    pub fn paste(&self, text: String) -> bool {
+        self.editor().paste(&text)
+    }
+
+    /// Pastes Excalidraw clipboard JSON around the point `(x, y)` of the
+    /// view; see [`workingtitle_core::Editor::paste_at`].
+    pub fn paste_at(&self, text: String, x: f64, y: f64) -> bool {
+        self.editor().paste_at(&text, x, y)
+    }
+
     /// Puts pasted images in the middle of the view; see
     /// [`workingtitle_core::Editor::insert_images`].
     pub fn insert_images(&self, images: Vec<ImageFile>) {

@@ -153,7 +153,7 @@ private struct HistoryControls: View {
 }
 
 #if !os(macOS)
-    /// The system's paste button: the one way to paste an image on an iPhone,
+    /// The system's paste button: the one way to paste an image or Elements on an iPhone,
     /// which has no keyboard shortcut or menu to do it. Pasting through it
     /// needs no permission prompt.
     private struct PasteImageControl: UIViewRepresentable {
@@ -167,7 +167,7 @@ private struct HistoryControls: View {
             init(_ controller: CanvasController) {
                 self.controller = controller
                 super.init()
-                pasteConfiguration = UIPasteConfiguration(acceptableTypeIdentifiers: [UTType.image.identifier])
+                pasteConfiguration = UIPasteConfiguration(acceptableTypeIdentifiers: CanvasMetalView.pasteTypes)
             }
 
             override func paste(itemProviders: [NSItemProvider]) {
