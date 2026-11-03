@@ -35,6 +35,7 @@ mod navigation;
 mod outline;
 mod overlay;
 mod path;
+mod pencil_double_tap;
 mod pencil_only;
 mod properties;
 mod random;
@@ -62,6 +63,7 @@ pub use geometry::{
 };
 pub use input::{MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase, ScrollEvent};
 pub use insert_image::ImageFile;
+pub use pencil_double_tap::PencilDoubleTap;
 pub use properties::{Properties, Property};
 pub use scene::LoadError;
 pub use style::{Edges, FontSize, Sloppiness, StrokeWidth};

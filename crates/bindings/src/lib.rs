@@ -6,9 +6,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use workingtitle_core::scene::{FillPattern, LineStyle};
 use workingtitle_core::{
-    ActionBar, Edges, FontSize, ImageFile, MagnifyEvent, Modifiers, PointerEvent, PointerKind,
-    PointerPhase, Properties, Property, ScrollEvent, Sloppiness, StrokeWidth, TextAlign,
-    TextEditor, Tool, ZOrder,
+    ActionBar, Edges, FontSize, ImageFile, MagnifyEvent, Modifiers, PencilDoubleTap, PointerEvent,
+    PointerKind, PointerPhase, Properties, Property, ScrollEvent, Sloppiness, StrokeWidth,
+    TextAlign, TextEditor, Tool, ZOrder,
 };
 
 uniffi::setup_scaffolding!("WorkingTitleCore");
@@ -100,6 +100,13 @@ pub enum Tool {
     Freedraw,
     Eraser,
     Text,
+}
+
+#[uniffi::remote(Enum)]
+pub enum PencilDoubleTap {
+    SwitchEraser,
+    SwitchPrevious,
+    Ignore,
 }
 
 #[uniffi::remote(Enum)]
@@ -360,6 +367,13 @@ impl Editor {
 
     pub fn set_tool(&self, tool: Tool) {
         self.editor().set_tool(tool);
+    }
+
+    /// The Pencil was double-tapped; `action` is what the user set for it in
+    /// the system settings (anything that is not about Tools is `Ignore`).
+    /// Read the Tool afterwards.
+    pub fn pencil_double_tap(&self, action: PencilDoubleTap) {
+        self.editor().pencil_double_tap(action);
     }
 
     /// Whether the Tool lock is on: the Tool stays after drawing a shape.

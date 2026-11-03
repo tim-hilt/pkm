@@ -61,6 +61,7 @@ final class CanvasMetalView: MTKView {
         textOverlay.onEnd = { [weak self] in self?.perform { $0.commitText() } }
         #if !os(macOS)
             isMultipleTouchEnabled = true
+            enablePencilInput()
         #endif
         enableImageInput()
     }

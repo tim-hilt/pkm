@@ -23,6 +23,7 @@ use crate::move_selection::MoveGesture;
 use crate::navigation::{Bounds, Navigation};
 use crate::overlay;
 use crate::path::Point;
+use crate::pencil_double_tap::PencilDoubleTap;
 use crate::pencil_only::PencilOnly;
 use crate::properties::{self, Properties, Property};
 use crate::random::Entropy;
@@ -64,6 +65,8 @@ pub struct Editor {
     revision: u64,
     navigation: Navigation,
     tool: Tool,
+    /// The Tool before the current one, for the Pencil double-tap.
+    previous_tool: Tool,
     /// Whether the Tool stays after drawing instead of returning to
     /// selection.
     tool_lock: bool,
@@ -148,6 +151,7 @@ impl Editor {
             revision: 0,
             navigation: Navigation::default(),
             tool: Tool::default(),
+            previous_tool: Tool::default(),
             tool_lock: false,
             style: Style::default(),
             entropy: Entropy::from_system(),
@@ -338,8 +342,26 @@ impl Editor {
             self.drop_move();
             self.drop_point_drag();
             self.drop_box_select();
-            self.tool = tool;
+            self.assign_tool(tool);
             self.sync_highlight();
+        }
+    }
+
+    /// Makes `tool` the active Tool, remembering the one it replaces.
+    fn assign_tool(&mut self, tool: Tool) {
+        if tool != self.tool {
+            self.previous_tool = self.tool;
+            self.tool = tool;
+        }
+    }
+
+    /// The Pencil was double-tapped; `action` is what the user set for that
+    /// in the system settings (see [`crate::pencil_double_tap`]). Switches
+    /// the Tool like [`Editor::set_tool`] does, so that a stroke in progress
+    /// ends, and the Tool lock stays as it is.
+    pub fn pencil_double_tap(&mut self, action: PencilDoubleTap) {
+        if let Some(tool) = action.target(self.tool, self.previous_tool) {
+            self.set_tool(tool);
         }
     }
 
@@ -528,7 +550,7 @@ impl Editor {
         self.editing_group = None;
         self.sync_points();
         if !self.tool_lock {
-            self.tool = Tool::Selection;
+            self.assign_tool(Tool::Selection);
         }
         self.overlay_revision += 1;
         self.changed(true);
@@ -1695,7 +1717,7 @@ impl Editor {
                     Outcome::Drawn(step) => {
                         self.history.record(step, &self.scene, &self.selection);
                         if !self.tool_lock {
-                            self.tool = Tool::Selection;
+                            self.assign_tool(Tool::Selection);
                         }
                     }
                     Outcome::Dropped => self.changed(true),
@@ -1777,7 +1799,7 @@ impl Editor {
     /// to selection unless locked.
     fn finish_linear(&mut self) {
         if self.end_linear() && !self.tool_lock {
-            self.tool = Tool::Selection;
+            self.assign_tool(Tool::Selection);
         }
     }
 
