@@ -25,7 +25,7 @@ import Testing
     @MainActor private struct Setup {
         let canvas = CanvasMetalView()
         let editor = Editor.withExcalifont()
-        let controller = CanvasController()
+        let controller = CanvasController(settings: .isolated())
         var overlay: TextEditorOverlay { canvas.textOverlay }
     }
 

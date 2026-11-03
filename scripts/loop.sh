@@ -107,6 +107,16 @@ for task_file in ${tasks[@]+"${tasks[@]}"}; do
   implemented=$((implemented + 1))
   status_stop
   log_section "$task_file implemented in $status_elapsed" "$pi_output"
+
+  # Guardrail: the pre-commit hook skips the Apple tests, so gate on them here.
+  status_set "Testing after $task_file"
+  if ! test_output=$(make test 2>&1); then
+    status_stop
+    log_section "make test failed after $task_file" "$test_output"
+    printf 'make test failed after %s; stopping (see %s)\n\n%s\n' "$task_file" "$log_file" "$(tail -n 40 <<<"$test_output")" >&2
+    exit 1
+  fi
+  status_stop
 done
 
 if ((implemented == 0)); then

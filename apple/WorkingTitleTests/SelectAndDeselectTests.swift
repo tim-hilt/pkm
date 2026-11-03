@@ -52,7 +52,8 @@ import Testing
         tap(setup.canvas, 150, 125)
 
         #expect(setup.editor.selection() == ["a"])
-        #expect(overlayPartCount(setup) == 1)
+        // The frame, and a fill and a stroke for each of the 8 handles and the rotation handle.
+        #expect(overlayPartCount(setup) == 1 + 9 * 2)
     }
 
     @Test func aTapOnEmptyCanvasTakesTheFrameAway() throws {
@@ -88,9 +89,9 @@ import Testing
 
         let image = OffscreenRender.draw(with: renderer)
 
-        // Left side of the frame at x = 96.5: all of pixel column 96. Excalidraw's
+        // Left side of the frame at x = 96.5: all of pixel column 96 (at y = 110, clear of the handles). Excalidraw's
         // selection colour is #6965db.
-        let pixel = image.pixel(96, 125)
+        let pixel = image.pixel(96, 110)
         #expect(abs(Int(pixel.red) - 0x69) <= 2)
         #expect(abs(Int(pixel.green) - 0x65) <= 2)
         #expect(abs(Int(pixel.blue) - 0xdb) <= 2)

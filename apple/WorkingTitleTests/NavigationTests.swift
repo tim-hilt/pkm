@@ -70,7 +70,7 @@ import Testing
     @Test func zoomCommandsReachTheRenderer() throws {
         let (canvas, renderer, _) = try makeCanvas()
         canvas.frame = CGRect(x: 0, y: 0, width: 400, height: 200)
-        let controller = CanvasController()
+        let controller = CanvasController(settings: .isolated())
         controller.canvas = canvas
 
         controller.zoomIn()
@@ -82,7 +82,7 @@ import Testing
 
     @Test func theHandToolPansWithOneFinger() throws {
         let (canvas, renderer, _) = try makeCanvas()
-        let controller = CanvasController()
+        let controller = CanvasController(settings: .isolated())
         controller.canvas = canvas
 
         controller.setTool(.hand)

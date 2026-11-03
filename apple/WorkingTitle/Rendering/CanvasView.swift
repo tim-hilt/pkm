@@ -371,7 +371,7 @@ final class CanvasController {
     /// chose, and restored into each editor before it is first read.
     private(set) var pencilOnlyDrawing = false
     @ObservationIgnored private var restoredEditor: Editor?
-    @ObservationIgnored private let settings = UserDefaults.standard
+    @ObservationIgnored private let settings: UserDefaults
     private static let pencilOnlyKey = "pencilOnlyDrawing"
     /// Whether there is something to undo or redo; the buttons are enabled
     /// exactly then.
@@ -387,6 +387,11 @@ final class CanvasController {
     private(set) var actionBar: ActionBar?
     /// The size of the Canvas, which keeps the Action Bar inside it.
     private(set) var viewSize = CGSize.zero
+
+    /// `settings` is where the Pencil-only choice is kept; tests pass their own.
+    init(settings: UserDefaults = .standard) {
+        self.settings = settings
+    }
 
     private func refresh() {
         guard let editor = canvas?.editor else { return }

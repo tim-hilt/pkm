@@ -13,7 +13,7 @@ import Testing
     private func makeCanvas() -> (CanvasMetalView, CanvasController) {
         let canvas = CanvasMetalView()
         canvas.editor = Editor()
-        let controller = CanvasController()
+        let controller = CanvasController(settings: .isolated())
         controller.canvas = canvas
         return (canvas, controller)
     }

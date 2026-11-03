@@ -10,7 +10,7 @@ import Testing
     @MainActor private struct Setup {
         let canvas = CanvasMetalView()
         let editor = Editor()
-        let controller = CanvasController()
+        let controller = CanvasController(settings: .isolated())
         var renderer: CanvasRenderer { canvas.renderer! }
     }
 
