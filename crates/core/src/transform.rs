@@ -14,11 +14,16 @@
 //! an image keeps it anyway and Shift frees it. While a pointer rotates,
 //! Shift snaps the rotation to fifteenths of a turn.
 //!
+//! Arrows bound to the shapes that are transformed follow them, and arrows
+//! that are transformed without the shape they are bound to are unbound from
+//! it (see [`crate::binding`]).
+//!
 //! A line or arrow alone has no transform handles: it is edited at its
 //! points instead (see [`crate::edit_points`]). An arrow routed at right angles is
 //! transformed like any other line here, points and all, where Excalidraw
 //! re-routes it; the core keeps its points as the file has them.
 
+use crate::binding::Attachments;
 use crate::frame::Frame;
 use crate::history::Step;
 use crate::json::{Object, Value};
@@ -97,6 +102,7 @@ pub(crate) struct TransformGesture {
     /// The angle of the last rotation, to tell a pointer that moved from one
     /// that is where it was.
     turned: Option<f64>,
+    attachments: Attachments,
     step: Step,
 }
 
@@ -144,6 +150,10 @@ impl TransformGesture {
                 });
             }
         }
+        let ids = tracked
+            .iter()
+            .filter_map(|t| Some(t.element()?.id().to_owned()))
+            .collect();
         Self {
             pointer,
             handle,
@@ -153,6 +163,7 @@ impl TransformGesture {
             labels,
             applied: None,
             turned: None,
+            attachments: Attachments::begin(&mut step, scene, ids),
             step,
         }
     }
@@ -188,10 +199,14 @@ impl TransformGesture {
             return false;
         }
         self.applied = Some(at);
-        match self.handle {
+        let changed = match self.handle {
             Handle::Rotation => self.rotate(scene, entropy, at, shift),
             _ => self.resize(scene, entropy, at, shift, measurer),
+        };
+        if changed {
+            self.attachments.update(scene, entropy, &mut self.step);
         }
+        changed
     }
 
     /// Whether a font may become this small (Excalidraw's `MIN_FONT_SIZE`).

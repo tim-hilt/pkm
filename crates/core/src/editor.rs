@@ -2,6 +2,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::binding::{self, End};
 use crate::box_select::BoxSelect;
 use crate::draw_linear::{LinearDrawing, Update};
 use crate::draw_shape::{Outcome, ShapeGesture};
@@ -82,6 +83,9 @@ pub struct Editor {
     overlay_revision: u64,
     /// The zoom the overlay was last made for.
     overlay_zoom: f64,
+    /// The shape an arrow end that is being put somewhere is over, which the
+    /// overlay highlights.
+    highlight: Option<String>,
     measurer: Option<Measurer>,
 }
 
@@ -125,6 +129,7 @@ impl Editor {
             last_pointer: PointerKind::Finger,
             overlay_revision: 0,
             overlay_zoom: 1.0,
+            highlight: None,
             measurer: None,
         }
     }
@@ -147,6 +152,7 @@ impl Editor {
         self.points.clear();
         self.box_selecting = None;
         self.history.clear();
+        self.sync_highlight();
         self.changed(true);
         Ok(())
     }
@@ -272,6 +278,7 @@ impl Editor {
             self.drop_point_drag();
             self.drop_box_select();
             self.tool = tool;
+            self.sync_highlight();
         }
     }
 
@@ -302,6 +309,8 @@ impl Editor {
     /// or, for a line or arrow, edits its points (see [`crate::edit_points`]),
     /// and a drag on empty Canvas box-selects (see [`crate::box_select`]).
     /// Shift adds to the Selection, or takes from it, instead of replacing it.
+    /// Arrows bind to the shapes their ends are put on and follow them when
+    /// they move or change (see [`crate::binding`]).
     pub fn pointer(&mut self, event: PointerEvent) {
         self.last_pointer = event.kind;
         let tool = self.tool;
@@ -315,6 +324,7 @@ impl Editor {
             self.select(event);
         }
         self.sync_points();
+        self.sync_highlight();
     }
 
     /// Whether there is something to undo: the buttons for it are enabled
@@ -517,6 +527,7 @@ impl Editor {
             start,
             moving,
             grab,
+            binding::reach(origin.kind, self.navigation.viewport().zoom()),
         ));
         self.follow_point_drag(event);
     }
@@ -584,24 +595,55 @@ impl Editor {
         let mut step = Step::begin(&self.selection);
         step.touch(&self.scene, handles.id());
         let remaining = handles.without(&deleted);
+        let last = handles.points().len() - 1;
         if remaining.len() < 2 {
+            binding::unbind_all(&mut self.scene, &mut self.entropy, &mut step, handles.id());
             self.scene
                 .mark_deleted(handles.id(), self.entropy.integer());
             self.selection.clear();
             self.points.clear();
         } else {
+            // The point next to an end that is deleted becomes the end, and
+            // is not bound to anything.
+            for (index, end) in [(0, End::Start), (last, End::End)] {
+                if deleted.contains(&index) {
+                    binding::unbind(
+                        &mut self.scene,
+                        &mut self.entropy,
+                        &mut step,
+                        handles.id(),
+                        end,
+                    );
+                }
+            }
             edit_points::reshape(
                 &mut self.scene,
                 &mut self.entropy,
                 handles.handle(),
                 &remaining,
             );
+            binding::follow(&mut self.scene, &mut self.entropy, handles.id());
             self.points
                 .select_only(handles.id(), first.saturating_sub(1));
         }
         self.history.record(step, &self.scene, &self.selection);
         self.overlay_revision += 1;
         self.changed(true);
+    }
+
+    /// Makes the highlight the shape an arrow end is over, if one is being put
+    /// somewhere.
+    fn sync_highlight(&mut self) {
+        let current = self
+            .linear
+            .as_ref()
+            .and_then(LinearDrawing::highlight)
+            .or_else(|| self.point_dragging.as_ref().and_then(PointDrag::highlight))
+            .map(str::to_owned);
+        if current != self.highlight {
+            self.highlight = current;
+            self.overlay_revision += 1;
+        }
     }
 
     /// Forgets the selected points that the Selection no longer has.
@@ -813,8 +855,9 @@ impl Editor {
     /// What clients draw over the Scene: a frame around each selected
     /// Element, the transform handles of the Selection (or, while one is
     /// being dragged, the box-select rectangle instead; or, for a line or
-    /// arrow that is alone in the Selection, handles on its points), in Scene
-    /// coordinates,
+    /// arrow that is alone in the Selection, handles on its points), and a
+    /// highlight around the shape an end of an arrow that is being put
+    /// somewhere would bind to, in Scene coordinates,
     /// as geometry in the same format as [`Editor::geometry`] (strokes and the
     /// fills of handles and box; no text or images). Clients draw it after the
     /// Scene and do not cache it by Element: its strokes are as wide and as far
@@ -830,6 +873,13 @@ impl Editor {
         } else if let Some(handles) = self.point_handles(self.last_pointer) {
             let selected = self.points.indices();
             overlay::point_handles(&mut geometry, &handles, selected, self.last_pointer, zoom);
+        }
+        if let Some(outline) = self
+            .highlight
+            .as_deref()
+            .and_then(|id| binding::highlight(&self.scene, id))
+        {
+            overlay::binding_highlight(&mut geometry, &outline, zoom);
         }
         geometry
     }
@@ -947,6 +997,7 @@ impl Editor {
                 event.id,
                 event.kind,
                 at,
+                zoom,
             ));
             self.changed(true);
         }
@@ -995,13 +1046,14 @@ impl Editor {
     fn finish_placing(&mut self) {
         if self.linear.as_ref().is_some_and(LinearDrawing::is_placing) {
             self.finish_linear();
+            self.sync_highlight();
         }
     }
 
     /// Takes the line being drawn, if any, out of the Scene again.
     fn drop_linear(&mut self) {
         if let Some(linear) = self.linear.take() {
-            linear.cancel(&mut self.scene);
+            linear.cancel(&mut self.scene, &mut self.entropy);
             self.changed(true);
         }
     }

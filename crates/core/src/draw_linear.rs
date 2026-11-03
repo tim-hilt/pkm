@@ -16,8 +16,15 @@
 //!
 //! What counts as "on" a point is a zone around it, in view points so that it
 //! feels the same at any zoom, and wider for fingers.
+//!
+//! The ends of an arrow bind to the shapes they are put on (see
+//! [`crate::binding`]): the first where the pointer goes down, the last
+//! wherever the line currently ends. The shape the last point is on is the one
+//! to highlight.
 
+use crate::binding::{self, End};
 use crate::draw_shape::{Outcome, PROPORTIONAL_RADIUS, new_element};
+use crate::edit_points;
 use crate::history::Step;
 use crate::input::{PointerEvent, PointerKind, PointerPhase};
 use crate::json::{Object, Value};
@@ -70,7 +77,16 @@ pub(crate) enum Update {
 #[derive(Debug)]
 pub(crate) struct LinearDrawing {
     handle: u32,
+    id: String,
     kind: ElementType,
+    /// The zoom of the view at the last step, which decides how far from a
+    /// shape an arrow still binds to it.
+    zoom: f64,
+    /// The shape an end of the arrow is put on, if any.
+    highlight: Option<String>,
+    /// Where the last placed point of an arrow is shown, if that is not
+    /// where it was placed: an end bound to a shape stops short of it.
+    placed_end: Option<Point>,
     /// The kind of the pointer that went down last, which decides how
     /// precise the user is.
     pointer_kind: PointerKind,
@@ -83,8 +99,8 @@ pub(crate) struct LinearDrawing {
 }
 
 impl LinearDrawing {
-    /// Starts drawing a `kind` line with `pointer` going down at `origin`, as
-    /// the action of `step`.
+    /// Starts drawing a `kind` line with `pointer` going down at `origin` in a
+    /// view at `zoom`, as the action of `step`.
     #[allow(clippy::too_many_arguments)]
     pub fn begin(
         mut step: Step,
@@ -95,14 +111,34 @@ impl LinearDrawing {
         pointer: u64,
         pointer_kind: PointerKind,
         origin: Point,
+        zoom: f64,
     ) -> Self {
         let element = new_linear(kind, entropy, style, origin);
-        if let Some(id) = element.get("id").and_then(Value::as_str) {
-            step.create(id);
-        }
+        let id = element
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        step.create(&id);
         let handle = scene.push(element);
+        let mut highlight = None;
+        if kind == ElementType::Arrow {
+            highlight = binding::bind_end(
+                scene,
+                entropy,
+                &mut step,
+                &id,
+                End::Start,
+                origin,
+                binding::reach(pointer_kind, zoom),
+            );
+        }
         Self {
             handle,
+            id,
+            zoom,
+            highlight,
+            placed_end: None,
             kind,
             pointer_kind,
             points: vec![origin],
@@ -113,6 +149,11 @@ impl LinearDrawing {
             },
             step,
         }
+    }
+
+    /// The shape an end of the arrow is on, which is highlighted.
+    pub fn highlight(&self) -> Option<&str> {
+        self.highlight.as_deref()
     }
 
     /// Whether the first press is over and the points are being placed one
@@ -151,6 +192,7 @@ impl LinearDrawing {
         if event.phase == PointerPhase::Down {
             self.pointer_kind = event.kind;
         }
+        self.zoom = zoom;
         let update = match self.stage {
             Stage::First { pointer, dragged } => {
                 if event.id != pointer {
@@ -208,7 +250,7 @@ impl LinearDrawing {
             PointerPhase::Down if press.is_some() => Update::Unchanged,
             PointerPhase::Down => {
                 let reach = zone(event.kind) / zoom;
-                let (first, last) = (self.points[0], self.points[self.points.len() - 1]);
+                let (first, last) = (self.points[0], self.last_point());
                 let on_first = self.kind == ElementType::Line && distance(at, first) <= reach;
                 if self.points.len() >= 2 && (on_first || distance(at, last) < reach) {
                     // Pressing the last point finishes the line; pressing
@@ -244,10 +286,16 @@ impl LinearDrawing {
         }
     }
 
+    /// Where the last placed point is shown, which is where the user finds it.
+    fn last_point(&self) -> Point {
+        self.placed_end
+            .unwrap_or(self.points[self.points.len() - 1])
+    }
+
     /// Lets the next point follow the pointer at `at`, once it is outside the
     /// zone of the last one.
     fn aim(&mut self, at: Point, zoom: f64, shift: bool) -> Update {
-        let last = self.points[self.points.len() - 1];
+        let last = self.last_point();
         let target = aimed(last, at, shift);
         let next = (distance(target, last) * zoom >= zone(self.pointer_kind)).then_some(target);
         if next == self.preview {
@@ -264,7 +312,7 @@ impl LinearDrawing {
     pub fn finish(mut self, scene: &mut Scene, entropy: &mut Entropy, zoom: f64) -> Outcome {
         self.preview = None;
         if self.points.len() < 2 {
-            self.cancel(scene);
+            self.cancel(scene, entropy);
             return Outcome::Dropped;
         }
         let closes = self.kind == ElementType::Line
@@ -288,15 +336,17 @@ impl LinearDrawing {
         Outcome::Drawn(self.step)
     }
 
-    /// Ends the drawing without a line.
-    pub fn cancel(self, scene: &mut Scene) {
+    /// Ends the drawing without a line. The shapes it was bound to are not
+    /// bound to it any more.
+    pub fn cancel(mut self, scene: &mut Scene, entropy: &mut Entropy) {
+        binding::unbind_all(scene, entropy, &mut self.step, &self.id);
         scene.remove(self.handle);
     }
 
     /// Makes the Element have the points placed, and the one following the
     /// pointer. The first is the Element's position, and the others are
     /// relative to it.
-    fn write(&self, scene: &mut Scene, entropy: &mut Entropy) {
+    fn write(&mut self, scene: &mut Scene, entropy: &mut Entropy) {
         let all: Vec<Point> = self.points.iter().chain(&self.preview).copied().collect();
         let origin = all[0];
         let relative: Vec<Point> = all
@@ -304,6 +354,33 @@ impl LinearDrawing {
             .map(|&(x, y)| (x - origin.0, y - origin.1))
             .collect();
         scene.set_points(self.handle, origin, &relative, entropy.integer());
+        if self.kind == ElementType::Arrow && all.len() >= 2 {
+            self.bind_last(scene, entropy, all[all.len() - 1]);
+        }
+    }
+
+    /// Binds the end of the arrow, which is at `at`, to the shape that is
+    /// there, or unbinds it, and then puts the bound ends where they belong.
+    /// The first end stays bound as it was when the pointer went down.
+    fn bind_last(&mut self, scene: &mut Scene, entropy: &mut Entropy, at: Point) {
+        let reach = binding::reach(self.pointer_kind, self.zoom);
+        self.highlight = binding::bind_end(
+            scene,
+            entropy,
+            &mut self.step,
+            &self.id,
+            End::End,
+            at,
+            reach,
+        );
+        binding::follow(scene, entropy, &self.id);
+        // The end of the arrow is the last placed point unless a point is
+        // still following the pointer.
+        if self.preview.is_none() {
+            self.placed_end = scene
+                .element_by_id(&self.id)
+                .and_then(|arrow| edit_points::shown_points(&arrow).pop());
+        }
     }
 }
 

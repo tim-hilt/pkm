@@ -5,7 +5,12 @@
 //! so dragging back puts them back. Every step is a new version of each moved
 //! Element, as on excalidraw.com, which is what makes the move part of the
 //! saved Drawing.
+//!
+//! Arrows bound to the Elements that move follow them, and arrows that move
+//! without the shape they are bound to are unbound from it (see
+//! [`crate::binding`]).
 
+use crate::binding::Attachments;
 use crate::history::Step;
 use crate::random::Entropy;
 use crate::scene::{ElementType, Scene};
@@ -21,6 +26,7 @@ pub(crate) struct MoveGesture {
     moving: Vec<(u32, (f64, f64))>,
     /// How far they are from where they started.
     offset: (f64, f64),
+    attachments: Attachments,
     step: Step,
 }
 
@@ -36,6 +42,7 @@ impl MoveGesture {
         origin: (f64, f64),
     ) -> Self {
         let mut moving = Vec::new();
+        let mut ids = Vec::new();
         for e in scene
             .elements()
             .filter(|e| !e.is_deleted() && !e.is_locked())
@@ -46,6 +53,7 @@ impl MoveGesture {
             {
                 step.touch(scene, e.id());
                 moving.push((e.handle(), (e.x(), e.y())));
+                ids.push(e.id().to_owned());
             }
         }
         Self {
@@ -53,6 +61,7 @@ impl MoveGesture {
             origin,
             moving,
             offset: (0.0, 0.0),
+            attachments: Attachments::begin(&mut step, scene, ids),
             step,
         }
     }
@@ -80,17 +89,17 @@ impl MoveGesture {
     /// Puts the Elements back where they started. Returns the Selection from
     /// before the drag, which the drag may have changed by selecting the
     /// Element it began on.
-    pub fn cancel(mut self, scene: &mut Scene, entropy: &mut Entropy) -> Selection {
-        if self.offset != (0.0, 0.0) {
-            self.place(scene, entropy, (0.0, 0.0));
-        }
-        self.step.selection().clone()
+    pub fn cancel(self, scene: &mut Scene, entropy: &mut Entropy) -> Selection {
+        let selection = self.step.selection().clone();
+        self.step.revert(scene, entropy);
+        selection
     }
 
     fn place(&mut self, scene: &mut Scene, entropy: &mut Entropy, offset: (f64, f64)) {
         for &(handle, (x, y)) in &self.moving {
             scene.set_position(handle, (x + offset.0, y + offset.1), entropy.integer());
         }
+        self.attachments.update(scene, entropy, &mut self.step);
         self.offset = offset;
     }
 }

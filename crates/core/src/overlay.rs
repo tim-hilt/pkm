@@ -141,6 +141,36 @@ fn square((cx, cy): Point, half: f64) -> [(f32, f32); 4] {
         .map(|(dx, dy)| ((cx + dx) as f32, (cy + dy) as f32))
 }
 
+/// The colour of the highlight of a shape an arrow would bind to: a blue that
+/// sets it apart from the selection colour (Excalidraw's `#1971c2`).
+const HIGHLIGHT_COLOR: u32 = 0x1971_c2ff;
+/// The line width of the highlight of a shape in view points: thicker than
+/// a selection frame, as it marks where an arrow would bind.
+const HIGHLIGHT_WIDTH: f64 = 3.0;
+const HIGHLIGHT_OPACITY: f32 = 0.6;
+
+/// The highlight of the shape an arrow end would bind to: its `outline`, a
+/// closed polygon in the Scene.
+pub(crate) fn binding_highlight(geometry: &mut Geometry, outline: &[Point], zoom: f64) {
+    let Some(&(x, y)) = outline.first() else {
+        return;
+    };
+    let mut stroke = geometry.stroke(
+        NO_ELEMENT,
+        0,
+        StrokeStyle {
+            color: HIGHLIGHT_COLOR,
+            width: (HIGHLIGHT_WIDTH / zoom) as f32,
+            opacity: HIGHLIGHT_OPACITY,
+            dash: None,
+        },
+    );
+    stroke.move_to(x as f32, y as f32);
+    for &(x, y) in outline.iter().skip(1).chain(outline.first()) {
+        stroke.line_to(x as f32, y as f32);
+    }
+}
+
 /// Excalidraw's box-select fill (`rgba(0, 0, 200, 0.04)`).
 const BOX_FILL: u32 = 0x0000_c8ff;
 const BOX_FILL_OPACITY: f32 = 0.04;

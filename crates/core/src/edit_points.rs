@@ -13,11 +13,17 @@
 //! handles are only in the way of a line that is selected anyway. Elbow
 //! arrows have no point handles, as the core does not route them.
 //!
+//! Dragging the first or last point of an arrow on its own binds it to the
+//! shape it is put on and unbinds it elsewhere, and the bound ends of an arrow
+//! whose points move are kept where their bindings put them (see
+//! [`crate::binding`]).
+//!
 //! Points are stored relative to the Element's position, which is its first
 //! point, and the Element turns about the middle of its box. The handles are
 //! where the points are *shown*, so everything here works in the shown
 //! positions and [`reshape`] turns them back into what is stored.
 
+use crate::binding::{self, End};
 use crate::frame::Frame;
 use crate::history::Step;
 use crate::input::PointerKind;
@@ -25,7 +31,7 @@ use crate::linear;
 use crate::path::Point;
 use crate::random::Entropy;
 use crate::rough::Op;
-use crate::scene::{Element, Scene};
+use crate::scene::{Element, ElementType, Scene};
 use crate::selection::Selection;
 use crate::transform_handles::{Grip, targets};
 
@@ -48,6 +54,7 @@ pub(crate) enum Grab {
 pub(crate) struct PointHandles {
     id: String,
     handle: u32,
+    is_arrow: bool,
     /// Where the points are shown.
     points: Vec<Point>,
     /// For the segments with a handle in their middle: the index a point
@@ -66,7 +73,7 @@ impl PointHandles {
             return None;
         }
         let shown = Shown::of(&element);
-        let points: Vec<Point> = element.points().into_iter().map(|p| shown.at(p)).collect();
+        let points = shown_points(&element);
 
         let curve = linear::exact_curve(&element).map(|ops| cubic_middles(&ops));
         let too_short = MIDDLE_FROM * Grip::of(kind).visual;
@@ -83,6 +90,7 @@ impl PointHandles {
         Some(Self {
             id: element.id().to_owned(),
             handle: element.handle(),
+            is_arrow: element.kind() == ElementType::Arrow,
             points,
             middles,
         })
@@ -122,7 +130,9 @@ impl PointHandles {
 
     /// A drag by `pointer`, which went down at `origin`, that moves the
     /// points `moving` of what is held, as the action of `step`. The drag of
-    /// a middle first adds its point.
+    /// a middle first adds its point. An end of an arrow that is dragged binds
+    /// to shapes within `bind_reach` of it.
+    #[allow(clippy::too_many_arguments)]
     pub fn drag(
         &self,
         mut step: Step,
@@ -131,6 +141,7 @@ impl PointHandles {
         origin: Point,
         moving: Vec<usize>,
         grab: Grab,
+        bind_reach: f64,
     ) -> PointDrag {
         step.touch(scene, &self.id);
         let mut start = self.points.clone();
@@ -141,7 +152,11 @@ impl PointHandles {
         }
         PointDrag {
             pointer,
+            id: self.id.clone(),
             handle: self.handle,
+            is_arrow: self.is_arrow,
+            bind_reach,
+            highlight: None,
             origin,
             start,
             moving,
@@ -237,7 +252,13 @@ impl PointSelection {
 #[derive(Debug)]
 pub(crate) struct PointDrag {
     pointer: u64,
+    id: String,
     handle: u32,
+    is_arrow: bool,
+    /// How far from a shape an end of an arrow is put on it, in the Scene.
+    bind_reach: f64,
+    /// The shape the end of the arrow that is dragged is over, if any.
+    highlight: Option<String>,
     /// Where the pointer went down, in the Scene.
     origin: Point,
     /// Where the points were shown when the drag began, with the added one.
@@ -267,6 +288,12 @@ impl PointDrag {
         true
     }
 
+    /// The shape an end of an arrow that is dragged is over, which is
+    /// highlighted.
+    pub fn highlight(&self) -> Option<&str> {
+        self.highlight.as_deref()
+    }
+
     /// Ends the drag where it is; the step is what undoes it.
     pub fn finish(self) -> Step {
         self.step
@@ -285,7 +312,36 @@ impl PointDrag {
             }
         }
         reshape(scene, entropy, self.handle, &shown);
+        if self.is_arrow {
+            self.bind_dragged_end(scene, entropy, &shown);
+        }
         self.offset = offset;
+    }
+
+    /// Binds the end of the arrow that is dragged, if it is one end and not
+    /// both, to the shape it is over, or unbinds it, and then puts the bound
+    /// ends where they belong: dragging a point may move where an end that is
+    /// not dragged aims.
+    fn bind_dragged_end(&mut self, scene: &mut Scene, entropy: &mut Entropy, shown: &[Point]) {
+        let last = shown.len() - 1;
+        let (first_moves, last_moves) = (self.moving.contains(&0), self.moving.contains(&last));
+        if first_moves != last_moves {
+            let (end, index) = if first_moves {
+                (End::Start, 0)
+            } else {
+                (End::End, last)
+            };
+            self.highlight = binding::bind_end(
+                scene,
+                entropy,
+                &mut self.step,
+                &self.id,
+                end,
+                shown[index],
+                self.bind_reach,
+            );
+        }
+        binding::follow(scene, entropy, &self.id);
     }
 }
 
@@ -340,6 +396,12 @@ pub(crate) fn reshape(scene: &mut Scene, entropy: &mut Entropy, handle: u32, sho
         .map(|&(x, y)| (x - origin.0, y - origin.1))
         .collect();
     scene.set_points(handle, origin, &relative, entropy.integer());
+}
+
+/// Where the points of a line or arrow are shown in the Scene.
+pub(crate) fn shown_points(element: &Element) -> Vec<Point> {
+    let shown = Shown::of(element);
+    element.points().into_iter().map(|p| shown.at(p)).collect()
 }
 
 /// Where the points of an Element are shown: the Element's frame turned by its

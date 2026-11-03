@@ -44,6 +44,10 @@ _Avoid_: Marquee, lasso, rubber band
 The grip on a point of a selected line or arrow (and a smaller one in the middle of each long segment) that is dragged to move the point or, from a middle, to add one; touch-sized for fingers. A tapped point handle selects the point, so that it can be deleted.
 _Avoid_: Vertex, node, anchor
 
+**Binding**:
+The attachment of an arrow's end to a shape: the arrow stops short of the shape and follows it when it moves, resizes or turns. Made by putting an arrow's end on the shape, undone by putting it elsewhere or by moving the arrow without the shape. The shape an end is over is shown with a binding highlight.
+_Avoid_: Connection, glue, snap
+
 **Action Bar**:
 The small floating bar shown next to a non-empty Selection offering actions such as duplicate, delete, z-order and group; replaces a context menu.
 _Avoid_: Context menu, popup

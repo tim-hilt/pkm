@@ -4,6 +4,7 @@
 
 mod arrowhead;
 mod base64;
+mod binding;
 mod box_select;
 mod draw_linear;
 mod draw_shape;
@@ -22,6 +23,7 @@ pub mod json;
 mod linear;
 mod move_selection;
 mod navigation;
+mod outline;
 mod overlay;
 mod path;
 mod random;

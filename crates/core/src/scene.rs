@@ -233,6 +233,11 @@ impl Scene {
         Element::view(handle, value.as_object()?)
     }
 
+    /// The Element with `id`, if there is one, deleted or not.
+    pub(crate) fn element_by_id(&self, id: &str) -> Option<Element<'_>> {
+        self.element(u32::try_from(self.index_of(id)?).ok()?)
+    }
+
     /// The Elements of a type the core understands, deleted ones included, in
     /// z-order (file order).
     pub fn elements(&self) -> impl Iterator<Item = Element<'_>> {
@@ -497,6 +502,12 @@ impl<'a> Element<'a> {
     pub fn id(&self) -> &'a str {
         let id: Option<&'a str> = self.object.get("id").and_then(Value::as_str);
         id.unwrap_or_default()
+    }
+
+    /// The member `key` as the file has it, for what the core reads itself
+    /// instead of through a typed accessor.
+    pub(crate) fn member(&self, key: &str) -> Option<&'a Value> {
+        self.object.get(key)
     }
 }
 

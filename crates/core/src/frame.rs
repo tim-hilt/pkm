@@ -153,6 +153,22 @@ impl Frame {
         )
     }
 
+    /// Where `point` of the Element, not turned, is when it is turned by
+    /// `angle` about the centre of the box: the opposite of
+    /// [`Frame::unturned`].
+    pub fn turned(&self, point: Point, angle: f64) -> Point {
+        if angle == 0.0 {
+            return point;
+        }
+        let (sin, cos) = angle.sin_cos();
+        let centre = self.centre();
+        let (dx, dy) = (point.0 - centre.0, point.1 - centre.1);
+        (
+            centre.0 + dx * cos - dy * sin,
+            centre.1 + dx * sin + dy * cos,
+        )
+    }
+
     /// Whether `point` is in the box turned by `angle`, or at most `margin`
     /// outside it.
     pub fn contains_turned(&self, point: Point, angle: f64, margin: f64) -> bool {
