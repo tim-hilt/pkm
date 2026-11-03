@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Usage: DEVICE=mac|ipad|iphone [OUT=path] scripts/screenshot.sh
+# Builds the app, launches it with the sample Drawing already open
+# (-UITestingOpenSampleDrawing) and saves a screenshot to $OUT
+# (default /tmp/wt-$DEVICE.png). On Mac only the app's window is captured.
+set -euo pipefail
+cd "$(dirname "$0")/../apple"
+
+DEVICE=${DEVICE:-iphone}
+OUT=${OUT:-/tmp/wt-$DEVICE.png}
+DERIVED=build
+case "$DEVICE" in
+mac) ;;
+iphone) SIM='iPhone 15 Pro' ;;
+ipad) SIM='iPad Pro (12.9-inch) (4th generation)' ;;
+*) echo "DEVICE must be mac, ipad or iphone" >&2; exit 2 ;;
+esac
+
+if [ "$DEVICE" = mac ]; then
+    xcodebuild -quiet -scheme WorkingTitle -destination 'platform=macOS' -derivedDataPath "$DERIVED" build
+    app="$DERIVED/Build/Products/Debug/WorkingTitle.app"
+    pkill -x WorkingTitle 2>/dev/null || true
+    open -n "$app" --args -UITestingOpenSampleDrawing
+    sleep 8
+    # Capture just the app's window, so other windows never end up in the file.
+    window=$(osascript -l JavaScript -e '
+        ObjC.import("CoreGraphics");
+        const list = ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo(1, 0)));
+        let id = "";
+        for (const w of Array.from(list)) {
+            if (w.kCGWindowOwnerName === "WorkingTitle" && w.kCGWindowLayer === 0) { id = w.kCGWindowNumber; break; }
+        }
+        id')
+    screencapture -x -o -l "$window" "$OUT"
+    pkill -x WorkingTitle || true
+else
+    xcrun simctl list devices available | grep -qF "    $SIM (" || xcrun simctl create "$SIM" "$SIM" >/dev/null
+    xcodebuild -quiet -scheme WorkingTitle -destination "platform=iOS Simulator,name=$SIM" -derivedDataPath "$DERIVED" build
+    xcrun simctl boot "$SIM" 2>/dev/null || true
+    xcrun simctl bootstatus "$SIM" >/dev/null
+    xcrun simctl install "$SIM" "$DERIVED/Build/Products/Debug-iphonesimulator/WorkingTitle.app"
+    xcrun simctl launch --terminate-running-process "$SIM" com.timhilt.workingtitle -UITestingOpenSampleDrawing >/dev/null
+    sleep 8
+    xcrun simctl io "$SIM" screenshot "$OUT"
+fi
+echo "$OUT"

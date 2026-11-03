@@ -11,7 +11,7 @@ SIM ?= $(SIM_IPHONE)
 CORE_XCFRAMEWORK := apple/Generated/WorkingTitleCoreFFI.xcframework
 CORE_SOURCES := Cargo.toml Cargo.lock scripts/build-core-apple.sh $(shell find crates -type f)
 
-.PHONY: core-apple apple-project build test test-ios test-ui record-references lint fmt sim run clean golden-fixtures bench visual-parity visual-parity-app
+.PHONY: core-apple apple-project build test test-ios test-ui record-references lint fmt sim run clean golden-fixtures bench visual-parity visual-parity-app screenshot
 
 # Rust core -> XCFramework + Swift bindings in apple/Generated (rebuilt only
 # when the Rust sources change).
@@ -92,3 +92,9 @@ bench:
 
 clean:
 	rm -rf apple/WorkingTitle.xcodeproj apple/build apple/Generated target
+
+# Screenshot of the Canvas with the sample Drawing open, for looking at layout:
+# make screenshot DEVICE=mac|ipad|iphone [OUT=/tmp/wt-<device>.png]
+DEVICE ?= iphone
+screenshot: apple-project
+	DEVICE=$(DEVICE) OUT='$(OUT)' scripts/screenshot.sh
