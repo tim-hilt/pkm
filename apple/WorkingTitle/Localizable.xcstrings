@@ -518,6 +518,17 @@
         }
       }
     },
+    "Licences": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Licences"
+          }
+        }
+      }
+    },
     "Light blue": {
       "extractionState": "manual",
       "localizations": {

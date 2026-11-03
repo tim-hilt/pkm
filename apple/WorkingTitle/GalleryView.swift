@@ -7,7 +7,8 @@ import UniformTypeIdentifiers
 /// changed, with the name and date below it.
 /// A card's menu (also its context menu) renames, duplicates and deletes the
 /// Drawing, exports it via the share sheet and deletes it; deleting asks first. `.excalidraw` files are imported from Files
-/// (toolbar) or by dropping them onto the Gallery.
+/// (toolbar) or by dropping them onto the Gallery. The toolbar also opens the
+/// third-party licences.
 struct GalleryView: View {
     let gallery: Gallery
 
@@ -53,6 +54,12 @@ struct GalleryView: View {
             }
             .navigationTitle("Drawings")
             .toolbar {
+                NavigationLink {
+                    LicensesView()
+                } label: {
+                    Label("Licences", systemImage: "info.circle")
+                }
+                .accessibilityIdentifier("licenses")
                 Button("Import", systemImage: "square.and.arrow.down") { isImporting = true }
                     .accessibilityIdentifier("import-drawing")
                 Button("New Drawing", systemImage: "plus") { gallery.createDrawing() }
