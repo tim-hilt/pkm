@@ -173,7 +173,27 @@ final class CanvasMetalView: MTKView {
             send(MagnifyEvent(x: position.x, y: position.y, magnification: event.magnification))
         }
 
-        override func mouseDown(with event: NSEvent) { sendMouse(.down, event) }
+        override var acceptsFirstResponder: Bool { true }
+
+        /// Enter edits the text of the selected shape or text, as on
+        /// excalidraw.com; the core decides what that is.
+        override func keyDown(with event: NSEvent) {
+            switch event.keyCode {
+            case Self.returnKey, Self.keypadEnterKey: perform { $0.editSelectedText() }
+            default: super.keyDown(with: event)
+            }
+        }
+
+        private static let returnKey: UInt16 = 36
+        private static let keypadEnterKey: UInt16 = 76
+
+        override func mouseDown(with event: NSEvent) {
+            // Keys go to the Canvas, unless a text is being edited: the core
+            // commits that on the click.
+            if textOverlay.view == nil { window?.makeFirstResponder(self) }
+            sendMouse(.down, event)
+        }
+
         override func mouseDragged(with event: NSEvent) { sendMouse(.move, event) }
         override func mouseUp(with event: NSEvent) { sendMouse(.up, event) }
 

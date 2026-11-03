@@ -600,7 +600,9 @@ impl TransformGesture {
         scene.update(orig.handle(), entropy.integer(), members);
         // The label's font goes on before the lines wrap to the container it
         // sits in now.
-        let rewrap = aspect || !(self.handle.is_north() || self.handle.is_south());
+        // Only the handles in the middle of the top and bottom sides leave the
+        // width, which the lines wrap to, as it is (`handleBindTextResize`).
+        let rewrap = aspect || !matches!(self.handle, Handle::N | Handle::S);
         self.refit_label(
             scene,
             entropy,

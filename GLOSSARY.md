@@ -64,6 +64,10 @@ _Avoid_: Delete (that is the command for the Selection), rub out
 The native text view shown over the Canvas while a text is created or edited (like Excalidraw's textarea), at the position, size, zoom and style the core reports, so that the system keyboard, autocorrect, dictation and Scribble work. A tap with the text Tool opens it on empty Canvas (or on the text there), a double-tap on a text opens it on that text; committing keeps the text as one undo step, empty text is not kept, and a tap elsewhere commits.
 _Avoid_: Text editor (that is the core's description of the view), textarea, input field
 
+**Label**:
+The text bound to a rectangle, diamond or ellipse (its container), as Excalidraw's bound text: made and edited in the Text view by a double-tap on the shape (or Enter on a selected shape on Mac), wrapped to the width the shape leaves it, centred in it, growing the shape when it does not fit, and moving, resizing, turning and erasing with it. Saved as a text Element with `containerId`, listed in the shape's `boundElements`.
+_Avoid_: Caption, bound text (Excalidraw's name for it)
+
 **Action Bar**:
 The small floating bar shown next to a non-empty Selection offering actions such as duplicate, delete, z-order and group; replaces a context menu.
 _Avoid_: Context menu, popup

@@ -60,6 +60,23 @@ impl<'a> Containers<'a> {
     }
 }
 
+/// Whether a shape of `kind` can have a text created in it by the user.
+/// (Arrows hold text too, but only as files have it.)
+pub(crate) fn takes_label(kind: ElementType) -> bool {
+    matches!(
+        kind,
+        ElementType::Rectangle | ElementType::Diamond | ElementType::Ellipse
+    )
+}
+
+/// The text bound to the container `container_id` as its label, if it has
+/// one that is shown.
+pub(crate) fn label_of<'a>(scene: &'a Scene, container_id: &str) -> Option<Element<'a>> {
+    scene.elements().find(|e| {
+        e.kind() == ElementType::Text && !e.is_deleted() && e.container_id() == Some(container_id)
+    })
+}
+
 /// Where a text is and what it says: its lines in a box.
 struct Block {
     lines: Vec<String>,
@@ -207,7 +224,7 @@ pub(crate) fn label_max_width(kind: ElementType, width: f64) -> f64 {
 }
 
 /// How high a label may be (`getBoundTextMaxHeight`).
-fn bound_max_height(container: &Element) -> f64 {
+pub(crate) fn bound_max_height(container: &Element) -> f64 {
     inscribed(container.kind(), container.height()) - BOUND_TEXT_PADDING * 2.0
 }
 
@@ -447,6 +464,44 @@ pub(crate) fn fit_label(
         width,
         height,
     }
+}
+
+/// The size a container of `kind` needs to hold a label of `dimension` wide
+/// or high (Excalidraw's `computeContainerDimensionForBoundText`).
+fn container_dimension(kind: ElementType, dimension: f64) -> f64 {
+    let dimension = dimension.ceil();
+    let padding = BOUND_TEXT_PADDING * 2.0;
+    match kind {
+        ElementType::Ellipse => ((dimension + padding) / std::f64::consts::SQRT_2 * 2.0).round(),
+        ElementType::Diamond => 2.0 * (dimension + padding),
+        _ => dimension + padding,
+    }
+}
+
+/// How big `container` has to be for its `label` as it is typed
+/// (`redrawTextBoundingBox` and the wysiwyg editor of Excalidraw): it grows
+/// down to hold more lines than fit and shrinks again as lines are taken
+/// away, but not below `original_height`, the height it had when the editing
+/// began; it widens for a line that cannot be broken to fit.
+pub(crate) fn container_size_for(
+    label: &Element,
+    container: &Element,
+    original_height: f64,
+    measurer: &dyn TextMeasurer,
+) -> (f64, f64) {
+    let kind = container.kind();
+    let lines = set_in_lines(label, bound_max_width(container), measurer);
+    let (mut width, mut height) = (container.width(), container.height());
+    let max_height = bound_max_height(container);
+    if lines.height > max_height {
+        height = container_dimension(kind, lines.height);
+    } else if height > original_height && lines.height < max_height {
+        height = container_dimension(kind, lines.height).max(original_height);
+    }
+    if lines.width > bound_max_width(container) {
+        width = container_dimension(kind, lines.width);
+    }
+    (width, height)
 }
 
 /// How small a container of `label` may get: one character wide and one line

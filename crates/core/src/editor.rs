@@ -12,6 +12,7 @@ use crate::draw_shape::{Outcome, ShapeGesture};
 use crate::duplicate;
 use crate::edit_points::{self, Grab, PointDrag, PointHandles, PointSelection};
 use crate::erase::Erasing;
+use crate::frame::Frame;
 use crate::geometry::Geometry;
 use crate::group;
 use crate::history::{self, History, Step};
@@ -355,8 +356,10 @@ impl Editor {
     /// where it is, what it says and how it looks (see
     /// [`crate::text_editing`]). A tap with the text Tool opens it at the tap
     /// (or on the text that is there), and so does a double-tap (a
-    /// double-click) on a text; it closes when the text is committed or
-    /// cancelled, or by a tap elsewhere, which commits. The position is in view
+    /// double-click) on a text; a double-tap on a rectangle, diamond or
+    /// ellipse opens it on the label of the shape, as does
+    /// [`Editor::edit_selected_text`]. It closes when the text is committed
+    /// or cancelled, or by a tap elsewhere, which commits. The position is in view
     /// coordinates: clients read it with the viewport after every input and
     /// command. Needs a [`Editor::set_text_measurer`]: without one no text
     /// can be edited.
@@ -379,7 +382,8 @@ impl Editor {
     }
 
     /// Ends the editing of the text and keeps it: a text that is new, or has
-    /// been changed, is one undo step, and becomes the Selection. A text with
+    /// been changed, is one undo step, and becomes the Selection (for a
+    /// label, its shape does). A text with
     /// nothing in it but blanks is not kept: one that is new is never made,
     /// one that was there is deleted. Does nothing unless a text is being
     /// edited.
@@ -388,14 +392,18 @@ impl Editor {
             return;
         };
         let id = editing.id().to_owned();
+        let container = editing.container_id().map(str::to_owned);
         let step = editing.finish(&mut self.scene, &mut self.entropy);
         let kept = self
             .scene
             .element_by_id(&id)
             .is_some_and(|element| !element.is_deleted());
-        // With the Tool lock the text Tool waits for the next text.
-        if kept && !self.tool_lock {
-            self.selection.select([id]);
+        // The shape of a label is selected after it, kept or not; a text of
+        // its own only if it is kept. With the Tool lock the text Tool waits
+        // for the next text.
+        let selected = container.or_else(|| kept.then_some(id));
+        if let Some(selected) = selected.filter(|_| !self.tool_lock) {
+            self.selection.select([selected]);
         }
         if let Some(step) = step {
             self.history.record(step, &self.scene, &self.selection);
@@ -414,25 +422,81 @@ impl Editor {
         }
     }
 
-    /// Opens the text view on the text `existing`, or on a new text at `at`
-    /// in the Scene. The Selection is empty while a text is edited, and the
-    /// Tool returns to selection unless it is locked.
+    /// Opens the text view on the text `existing` if there is one, else on a
+    /// new text at `at` in the Scene.
     fn begin_text(&mut self, existing: Option<String>, at: Point) {
         let Some(measurer) = self.measurer.as_ref() else {
             return;
         };
+        if let Some(id) = existing.filter(|id| self.scene.element_by_id(id).is_some()) {
+            return self.begin_existing_text(&id);
+        }
+        let editing = TextEditing::begin_new(
+            Step::begin(&self.selection),
+            &mut self.scene,
+            &mut self.entropy,
+            &self.style,
+            at,
+            &*measurer.0,
+        );
+        self.open_text(editing);
+    }
+
+    /// Opens the text view on the text of its own `id`.
+    fn begin_existing_text(&mut self, id: &str) {
+        if self.measurer.is_none() {
+            return;
+        }
+        let Some(element) = self.scene.element_by_id(id) else {
+            return;
+        };
         let step = Step::begin(&self.selection);
-        let editing = match existing.and_then(|id| self.scene.element_by_id(&id)) {
-            Some(element) => TextEditing::begin_existing(step, &self.scene, &element),
-            None => TextEditing::begin_new(
+        let editing = TextEditing::begin_existing(step, &self.scene, &element, None);
+        self.open_text(editing);
+    }
+
+    /// Opens the text view on the label of the shape `container_id`, or on a
+    /// new one if it has none. Does nothing if the shape cannot hold text.
+    fn begin_label(&mut self, container_id: &str) {
+        let Some(measurer) = self.measurer.as_ref() else {
+            return;
+        };
+        let holds_text = self
+            .scene
+            .element_by_id(container_id)
+            .is_some_and(|e| text::takes_label(e.kind()) && !e.is_deleted());
+        if !holds_text {
+            return;
+        }
+        let step = Step::begin(&self.selection);
+        let editing = match text::label_of(&self.scene, container_id) {
+            Some(label) => {
+                let container = self.scene.element_by_id(container_id);
+                Some(TextEditing::begin_existing(
+                    step,
+                    &self.scene,
+                    &label,
+                    container.as_ref(),
+                ))
+            }
+            None => TextEditing::begin_label(
                 step,
                 &mut self.scene,
                 &mut self.entropy,
                 &self.style,
-                at,
+                container_id,
                 &*measurer.0,
             ),
         };
+        if let Some(editing) = editing {
+            self.open_text(editing);
+        }
+    }
+
+    /// Shows the text view for `editing`. The Selection is empty while a
+    /// text is edited, and the Tool returns to selection unless it is
+    /// locked.
+    fn open_text(&mut self, editing: TextEditing) {
         self.text = Some(editing);
         self.selection.clear();
         self.editing_group = None;
@@ -442,6 +506,25 @@ impl Editor {
         }
         self.overlay_revision += 1;
         self.changed(true);
+    }
+
+    /// The command to edit the text of the Selection (Enter on a Mac): the
+    /// text of a selected text, or the label of a selected rectangle,
+    /// diamond or ellipse, which is made if it has none. Does nothing for any
+    /// other Selection, and while a text is edited.
+    pub fn edit_selected_text(&mut self) {
+        if self.text.is_some() || self.is_gesturing() {
+            return;
+        }
+        let [id] = self.selection.ids() else {
+            return;
+        };
+        let id = id.clone();
+        if self.is_free_text(&id) {
+            self.begin_existing_text(&id);
+        } else {
+            self.begin_label(&id);
+        }
     }
 
     /// Whether the Element `id` is a text of its own: one that is not the
@@ -925,15 +1008,27 @@ impl Editor {
         }
     }
 
-    /// Opens the text view on the text a double-tap hit, unless the double-tap
-    /// goes into a group instead. Returns whether it did.
+    /// Opens the text view on what a double-tap hit, unless the double-tap
+    /// goes into a group instead: on a text of its own, or on the label of a
+    /// shape (made if it has none; the inside of a hollow shape counts as the
+    /// shape). Returns whether it did.
     fn edit_text_tapped(&mut self, tap: Tap) -> bool {
-        let Some(id) = self
-            .hit(tap.x, tap.y, tap.kind)
-            .filter(|id| self.is_free_text(id))
-        else {
+        let hit = self.hit(tap.x, tap.y, tap.kind);
+        let target = match hit {
+            Some(id) => Some(id),
+            None => {
+                let at = self.navigation.viewport().scene_at(tap.x, tap.y);
+                self.label_container_at(at)
+            }
+        };
+        let Some(id) = target else {
             return false;
         };
+        let editable = self.is_free_text(&id)
+            || self
+                .scene
+                .element_by_id(&id)
+                .is_some_and(|e| text::takes_label(e.kind()));
         let goes_into_group = group::entered(
             &self.scene,
             &self.selection,
@@ -941,12 +1036,27 @@ impl Editor {
             self.editing_group.as_deref(),
         )
         .is_some();
-        if goes_into_group {
+        if !editable || goes_into_group {
             return false;
         }
-        let at = self.navigation.viewport().scene_at(tap.x, tap.y);
-        self.begin_text(Some(id), at);
+        if self.is_free_text(&id) {
+            self.begin_existing_text(&id);
+        } else {
+            self.begin_label(&id);
+        }
         self.text.is_some()
+    }
+
+    /// The topmost shape that can hold a label with `at` (in the Scene) in
+    /// its box, hollow or not.
+    fn label_container_at(&self, at: Point) -> Option<String> {
+        self.scene
+            .elements()
+            .filter(hit_test::is_selectable)
+            .filter(|e| text::takes_label(e.kind()))
+            .filter(|e| Frame::of(e).contains_turned(at, e.angle(), 0.0))
+            .last()
+            .map(|e| e.id().to_owned())
     }
 
     /// The group that was gone into, if it is one the Element `id` is in:

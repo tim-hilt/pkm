@@ -427,6 +427,13 @@ impl Editor {
         self.editor().commit_text();
     }
 
+    /// Opens the text view on the text of the Selection (Enter on a Mac):
+    /// the label of a selected shape, which is made if it has none, or a
+    /// selected text; see [`workingtitle_core::Editor::edit_selected_text`].
+    pub fn edit_selected_text(&self) {
+        self.editor().edit_selected_text();
+    }
+
     /// Ends the editing of the text and keeps it as it was; see
     /// [`workingtitle_core::Editor::cancel_text`].
     pub fn cancel_text(&self) {
