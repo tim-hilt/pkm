@@ -25,3 +25,33 @@ enum DrawingLayout: Equatable {
         max(0, containerHeight - 166)
     }
 }
+
+extension DrawingLayout {
+    /// The mobile bottom bar (action row over the toolbar): Excalidraw's
+    /// `min(100% − 28, 450)`, centred.
+    static func bottomBarWidth(containerWidth: CGFloat) -> CGFloat {
+        max(0, min(containerWidth - 28, 450))
+    }
+}
+
+/// One button of the mobile toolbar (docs/layout-reference §4.2). The phone
+/// bar has no room for every Tool, so a family of Tools shares a slot: tapping
+/// the slot's armed Tool again offers the others of its family.
+struct MobileToolSlot: Equatable {
+    /// The family, the slot's default Tool first.
+    let tools: [Tool]
+
+    /// Excalidraw's phone order; Insert image and Frame have no v1 Tool.
+    static let all: [MobileToolSlot] = [
+        [.hand], [.selection], [.freedraw], [.eraser],
+        [.rectangle, .diamond, .ellipse], [.arrow, .line], [.text],
+    ].map(MobileToolSlot.init)
+
+    /// What the slot shows: the armed Tool if it is of the family, else the
+    /// family's last chosen one, else its default.
+    func shownTool(current: Tool, last: Tool?) -> Tool {
+        if tools.contains(current) { return current }
+        if let last, tools.contains(last) { return last }
+        return tools[0]
+    }
+}

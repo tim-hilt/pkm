@@ -32,3 +32,36 @@ import Testing
         #expect(DrawingLayout.propertiesMaxHeight(containerHeight: 100) == 0)
     }
 }
+
+/// excalidraw.com's phone chrome (docs/layout-reference §4): a bottom bar
+/// whose toolbar folds Tool families into one slot each.
+@Suite struct MobileLayoutTests {
+    @Test func theBottomBarSpansTheWidthUpTo450() {
+        #expect(DrawingLayout.bottomBarWidth(containerWidth: 393) == 365)
+        #expect(DrawingLayout.bottomBarWidth(containerWidth: 852) == 450)
+    }
+
+    @Test func everyV1ToolHasASlotInTheMobileToolbar() {
+        let tools: [Tool] = [
+            .hand, .selection, .rectangle, .diamond, .ellipse, .arrow, .line, .freedraw, .text, .eraser,
+        ]
+        for tool in tools {
+            #expect(MobileToolSlot.all.contains { $0.tools.contains(tool) })
+        }
+    }
+
+    @Test func theSlotsAreExcalidrawsPhoneOrder() {
+        #expect(
+            MobileToolSlot.all.map(\.tools.first) == [
+                .hand, .selection, .freedraw, .eraser, .rectangle, .arrow, .text,
+            ])
+    }
+
+    @Test func aSlotShowsItsLastChosenToolOfTheFamily() {
+        let shapes = MobileToolSlot.all.first { $0.tools.contains(.diamond) }!
+        #expect(shapes.tools == [.rectangle, .diamond, .ellipse])
+        #expect(shapes.shownTool(current: .diamond, last: .rectangle) == .diamond)
+        #expect(shapes.shownTool(current: .hand, last: .ellipse) == .ellipse)
+        #expect(shapes.shownTool(current: .hand, last: nil) == .rectangle)
+    }
+}

@@ -10,6 +10,8 @@ struct PropertiesPanel: View {
     let controller: CanvasController
     /// The tallest the panel may be; beyond it, it scrolls.
     var maxHeight: CGFloat = .infinity
+    /// Excalidraw's 195 pt; `nil` fills the width offered (the phone sheet).
+    var width: CGFloat? = 195
     @State private var contentHeight: CGFloat = 0
 
     private static let strokeColors = ["#1e1e1e", "#e03131", "#2f9e44", "#1971c2", "#f08c00"]
@@ -86,7 +88,8 @@ struct PropertiesPanel: View {
                 .onGeometryChange(for: CGFloat.self, of: \.size.height) { contentHeight = $0 }
             }
             .scrollBounceBehavior(.basedOnSize)
-            .frame(width: 195, height: min(contentHeight, maxHeight))
+            .frame(width: width, height: min(contentHeight, maxHeight))
+            .frame(maxWidth: width == nil ? .infinity : nil)
             .background(.background, in: RoundedRectangle(cornerRadius: 8))
             .shadow(color: .black.opacity(0.17), radius: 0.5)
             .shadow(color: .black.opacity(0.05), radius: 7, y: 7)

@@ -46,13 +46,18 @@ struct DrawingView: View {
         #endif
     }
 
-    /// Excalidraw's floating controls, placed per `DrawingLayout` for the
-    /// container's current size, so that they follow every resize. The
-    /// mobile placement is refined by its own ticket.
-    private func chrome(in size: CGSize) -> some View {
-        let layout = DrawingLayout(containerSize: size)
-        let margin = DrawingLayout.margin
-        return ZStack {
+    /// Excalidraw's floating controls, laid out per `DrawingLayout` for the
+    /// container's current size, so that they switch on every resize (Split
+    /// View, Stage Manager, window resizing).
+    @ViewBuilder private func chrome(in size: CGSize) -> some View {
+        switch DrawingLayout(containerSize: size) {
+        case .desktop: desktopChrome(in: size)
+        case .mobile: mobileChrome(in: size)
+        }
+    }
+
+    private func desktopChrome(in size: CGSize) -> some View {
+        ZStack {
             HStack(spacing: 8) {
                 BackControl(action: onBack)
                 MainMenu(drawing: drawing, export: export)
@@ -60,41 +65,51 @@ struct DrawingView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
             ToolBar(controller: controller)
-                .frame(
-                    maxWidth: .infinity, maxHeight: .infinity,
-                    alignment: layout == .desktop ? .top : .bottom)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
             if showsProperties {
                 PropertiesPanel(
                     controller: controller,
                     maxHeight: DrawingLayout.propertiesMaxHeight(containerHeight: size.height)
                 )
-                .padding(.top, DrawingLayout.propertiesTop - margin)
+                .padding(.top, DrawingLayout.propertiesTop - DrawingLayout.margin)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
 
-            if layout == .desktop {
-                HStack(spacing: 9.6) {
-                    ZoomControls(controller: controller)
-                    HistoryControls(controller: controller)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-            } else {
-                HStack {
-                    ZoomControls(controller: controller)
-                    Spacer()
-                    HistoryControls(controller: controller)
-                }
-                .padding(.bottom, 60)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            HStack(spacing: 9.6) {
+                ZoomControls(controller: controller)
+                HistoryControls(controller: controller)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
 
             #if !os(macOS)
                 PasteImageControl(controller: controller)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             #endif
         }
-        .padding(margin)
+        .padding(DrawingLayout.margin)
+    }
+
+    /// excalidraw.com's phone layout (docs/layout-reference §4): menu top
+    /// left, everything else in the bottom bar within thumb reach; no zoom
+    /// buttons (pinch), properties in a sheet.
+    private func mobileChrome(in size: CGSize) -> some View {
+        ZStack {
+            HStack(spacing: 8) {
+                BackControl(action: onBack, size: 32)
+                MainMenu(drawing: drawing, export: export, size: 32)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+            VStack(spacing: 4) {
+                MobileActionRow(controller: controller, showsProperties: showsProperties)
+                MobileToolBar(controller: controller)
+            }
+            .frame(width: DrawingLayout.bottomBarWidth(containerWidth: size.width))
+            .padding(.bottom, 10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        }
     }
 
     /// Excalidraw shows no properties for the Tools that make no Elements.
@@ -118,9 +133,9 @@ extension View {
     fileprivate func island() -> some View { modifier(Island()) }
 
     /// Excalidraw's 36 pt control, its hit area grown to Apple's 44 pt.
-    fileprivate func controlButton(width: CGFloat = 36) -> some View {
-        frame(width: width, height: 36)
-            .contentShape(Rectangle().inset(by: -4))
+    fileprivate func controlButton(width: CGFloat = 36, height: CGFloat = 36) -> some View {
+        frame(width: width, height: height)
+            .contentShape(Rectangle().inset(by: -(44 - min(width, height)) / 2))
     }
 }
 
@@ -133,12 +148,14 @@ private let checkedGlyph = Color(red: 3 / 255, green: 0, blue: 0x64 / 255)
 /// Back to the Gallery, in the corner Excalidraw keeps for its main menu.
 private struct BackControl: View {
     let action: () -> Void
+    /// 36 pt on desktop, 32 pt on phones.
+    var size: CGFloat = 36
 
     var body: some View {
         Button("Gallery", systemImage: "chevron.backward", action: action)
             .labelStyle(.iconOnly)
             .buttonStyle(.borderless)
-            .controlButton()
+            .controlButton(width: size, height: size)
             .background(controlFill, in: RoundedRectangle(cornerRadius: 8))
             .accessibilityIdentifier("back-to-gallery")
     }
@@ -148,6 +165,8 @@ private struct BackControl: View {
 private struct MainMenu: View {
     let drawing: OpenDrawing
     let export: ExportedDrawing
+    /// 36 pt on desktop, 32 pt on phones.
+    var size: CGFloat = 36
     @State private var background = true
 
     var body: some View {
@@ -167,7 +186,7 @@ private struct MainMenu: View {
         .labelStyle(.iconOnly)
         .menuIndicator(.hidden)
         .buttonStyle(.borderless)
-        .controlButton()
+        .controlButton(width: size, height: size)
         .background(controlFill, in: RoundedRectangle(cornerRadius: 8))
         .accessibilityIdentifier("main-menu")
     }
@@ -181,6 +200,9 @@ private struct MainMenu: View {
 /// Excalidraw's toolbar island, in its order: Tool lock, then the Tools.
 private struct ToolBar: View {
     let controller: CanvasController
+
+    static func name(_ tool: Tool) -> String { tools.first { $0.0 == tool }!.1 }
+    static func symbol(_ tool: Tool) -> String { tools.first { $0.0 == tool }!.2 }
 
     private static let tools: [(Tool, String, String)] = [
         (.hand, "Hand", "hand.raised"),
@@ -236,6 +258,141 @@ private struct ToolBar: View {
         .buttonStyle(.plain)
         .accessibilityLabel(name)
         .accessibilityAddTraits(checked ? .isSelected : [])
+    }
+}
+
+/// The phone toolbar island (docs/layout-reference §4.2): one slot per Tool
+/// family, spread over the bar's width; tapping a family's armed Tool again
+/// offers the rest of the family. Tool lock and Pencil-only drawing, which
+/// have no slot on excalidraw.com's phone bar, sit in the ⋮ menu.
+private struct MobileToolBar: View {
+    let controller: CanvasController
+    /// Per slot, the Tool of its family last chosen, so the slot keeps showing it.
+    @State private var lastChosen: [Int: Tool] = [:]
+    @State private var familyShown: Int?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(MobileToolSlot.all.indices, id: \.self) { index in
+                slot(index)
+                Spacer(minLength: 0)
+            }
+            moreMenu
+        }
+        .padding(4)
+        .island()
+    }
+
+    private func slot(_ index: Int) -> some View {
+        let slot = MobileToolSlot.all[index]
+        let shown = slot.shownTool(current: controller.tool, last: lastChosen[index])
+        let armed = controller.tool == shown
+        return MobileToolButton(tool: shown, checked: armed) {
+            if armed && slot.tools.count > 1 {
+                familyShown = index
+            } else {
+                controller.setTool(shown)
+            }
+        }
+        .popover(
+            isPresented: Binding(
+                get: { familyShown == index }, set: { if !$0 { familyShown = nil } })
+        ) {
+            HStack(spacing: 4) {
+                ForEach(slot.tools, id: \.self) { tool in
+                    MobileToolButton(tool: tool, checked: controller.tool == tool) {
+                        lastChosen[index] = tool
+                        controller.setTool(tool)
+                        familyShown = nil
+                    }
+                }
+            }
+            .padding(8)
+            .presentationCompactAdaptation(.popover)
+        }
+    }
+
+    private var moreMenu: some View {
+        Menu {
+            Toggle(
+                "Keep tool selected",
+                isOn: Binding(
+                    get: { controller.toolLock }, set: { controller.setToolLock($0) }))
+            #if !os(macOS)
+                Toggle(
+                    "Pencil-only drawing",
+                    isOn: Binding(
+                        get: { controller.pencilOnlyDrawing }, set: { controller.setPencilOnlyDrawing($0) }))
+            #endif
+        } label: {
+            Image(systemName: "ellipsis").rotationEffect(.degrees(90)).controlButton()
+        }
+        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
+        .accessibilityLabel("More tools")
+    }
+}
+
+/// A Tool's 36 pt button in the phone toolbar, radius-4 highlight when armed.
+private struct MobileToolButton: View {
+    let tool: Tool
+    let checked: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: ToolBar.symbol(tool))
+                .font(.system(size: 15))
+                .foregroundStyle(checked ? checkedGlyph : .primary)
+                .controlButton()
+                .background(checked ? checkedFill : .clear, in: RoundedRectangle(cornerRadius: 4))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(ToolBar.name(tool))
+        .accessibilityAddTraits(checked ? .isSelected : [])
+    }
+}
+
+/// The phone action row over the toolbar (docs/layout-reference §4.3):
+/// properties on the left while a Tool or Selection has them, opening in a
+/// sheet (the spec's native adaptation of excalidraw.com's popovers); paste
+/// and undo/redo on the right.
+private struct MobileActionRow: View {
+    let controller: CanvasController
+    let showsProperties: Bool
+    @State private var sheetShown = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if showsProperties {
+                Button("Properties", systemImage: "slider.horizontal.3") { sheetShown = true }
+                    .controlButton(width: 32, height: 32)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                    .accessibilityIdentifier("properties-sheet")
+            }
+            Spacer(minLength: 0)
+            #if !os(macOS)
+                PasteImageControl(controller: controller)
+            #endif
+            Button("Undo", systemImage: "arrow.uturn.backward") { controller.undo() }
+                .controlButton(width: 32, height: 32)
+                .disabled(!controller.canUndo)
+            Button("Redo", systemImage: "arrow.uturn.forward") { controller.redo() }
+                .controlButton(width: 32, height: 32)
+                .disabled(!controller.canRedo)
+        }
+        .labelStyle(.iconOnly)
+        .buttonStyle(.borderless)
+        .frame(height: 43.2)
+        .sheet(
+            isPresented: Binding(
+                get: { sheetShown && showsProperties }, set: { sheetShown = $0 })
+        ) {
+            PropertiesPanel(controller: controller, width: nil)
+                .padding()
+                .presentationDetents([.medium, .large])
+                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+        }
     }
 }
 
