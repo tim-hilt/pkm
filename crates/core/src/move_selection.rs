@@ -6,6 +6,7 @@
 //! Element, as on excalidraw.com, which is what makes the move part of the
 //! saved Drawing.
 
+use crate::history::Step;
 use crate::random::Entropy;
 use crate::scene::{ElementType, Scene};
 use crate::selection::Selection;
@@ -20,29 +21,45 @@ pub(crate) struct MoveGesture {
     moving: Vec<(u32, (f64, f64))>,
     /// How far they are from where they started.
     offset: (f64, f64),
+    step: Step,
 }
 
 impl MoveGesture {
     /// Starts moving the Selection with `pointer`, which went down at
     /// `origin`. The labels of selected Elements move with them, although
-    /// they are not selected themselves.
-    pub fn begin(scene: &Scene, selection: &Selection, pointer: u64, origin: (f64, f64)) -> Self {
-        let moving = scene
+    /// they are not selected themselves. The move is the action of `step`.
+    pub fn begin(
+        mut step: Step,
+        scene: &Scene,
+        selection: &Selection,
+        pointer: u64,
+        origin: (f64, f64),
+    ) -> Self {
+        let mut moving = Vec::new();
+        for e in scene
             .elements()
             .filter(|e| !e.is_deleted() && !e.is_locked())
-            .filter(|e| {
-                selection.contains(e.id())
-                    || (e.kind() == ElementType::Text
-                        && e.container_id().is_some_and(|id| selection.contains(id)))
-            })
-            .map(|e| (e.handle(), (e.x(), e.y())))
-            .collect();
+        {
+            if selection.contains(e.id())
+                || (e.kind() == ElementType::Text
+                    && e.container_id().is_some_and(|id| selection.contains(id)))
+            {
+                step.touch(scene, e.id());
+                moving.push((e.handle(), (e.x(), e.y())));
+            }
+        }
         Self {
             pointer,
             origin,
             moving,
             offset: (0.0, 0.0),
+            step,
         }
+    }
+
+    /// Ends the move where it is; the step is what undoes it.
+    pub fn finish(self) -> Step {
+        self.step
     }
 
     /// The pointer that moves the Selection.

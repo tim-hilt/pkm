@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::draw_shape::{Outcome, ShapeGesture};
 use crate::geometry::Geometry;
+use crate::history::{self, History, Step};
 use crate::hit_test::{self, Reach};
 use crate::input::{MagnifyEvent, PointerEvent, PointerKind, PointerPhase, ScrollEvent};
 use crate::move_selection::MoveGesture;
@@ -27,8 +28,8 @@ fn next_generation() -> u64 {
 }
 
 /// The core's public interface: owns the open Scene and everything that edits
-/// it, the Selection and the viewport onto it. History joins as the features
-/// that need it land.
+/// it, the Selection, the undo history of the session and the viewport onto
+/// it.
 #[derive(Debug)]
 pub struct Editor {
     scene: Scene,
@@ -50,6 +51,8 @@ pub struct Editor {
     shape: Option<ShapeGesture>,
     selection: Selection,
     taps: TapRecognizer,
+    /// What can be undone and redone; never saved (see [`crate::history`]).
+    history: History,
     /// The Selection being moved, if the pointer of a drag on it is down.
     moving: Option<MoveGesture>,
     /// Changes whenever the overlay may, see [`Editor::overlay_revision`].
@@ -89,6 +92,7 @@ impl Editor {
             shape: None,
             selection: Selection::default(),
             taps: TapRecognizer::default(),
+            history: History::default(),
             moving: None,
             overlay_revision: 0,
             overlay_zoom: 1.0,
@@ -104,9 +108,11 @@ impl Editor {
             self.overlay_revision += 1;
         }
         self.taps.cancel();
-        // Whatever was being drawn or moved belonged to the Scene that is gone.
+        // Whatever was being drawn or moved belonged to the Scene that is
+        // gone, and so did what could be undone.
         self.shape = None;
         self.moving = None;
+        self.history.clear();
         self.changed(true);
         Ok(())
     }
@@ -260,6 +266,55 @@ impl Editor {
         self.select(event);
     }
 
+    /// Whether there is something to undo: the buttons for it are enabled
+    /// exactly then. Changes after any input or command, so clients read it
+    /// with the other state of the chrome.
+    pub fn can_undo(&self) -> bool {
+        self.history.can_undo()
+    }
+
+    /// Whether there is something to redo; see [`Editor::can_undo`].
+    pub fn can_redo(&self) -> bool {
+        self.history.can_redo()
+    }
+
+    /// Takes back the latest change to the Scene: a drawn shape, a move. The
+    /// Selection becomes what it was before that change. Does nothing if
+    /// there is nothing to undo, or while a pointer is drawing or moving.
+    pub fn undo(&mut self) {
+        if !self.is_gesturing() {
+            let selection = self.history.undo(&mut self.scene, &mut self.entropy);
+            self.restored(selection);
+        }
+    }
+
+    /// Does again what was last undone, with the Selection it had then.
+    /// Anything new done since undoing has made that history; see
+    /// [`Editor::undo`].
+    pub fn redo(&mut self) {
+        if !self.is_gesturing() {
+            let selection = self.history.redo(&mut self.scene, &mut self.entropy);
+            self.restored(selection);
+        }
+    }
+
+    /// Whether a pointer is down making a change that is not finished.
+    fn is_gesturing(&self) -> bool {
+        self.shape.is_some() || self.moving.is_some()
+    }
+
+    /// Shows the Scene as undo or redo left it, with `selection` selected
+    /// as far as its Elements are still there. Nothing to do for `None`.
+    fn restored(&mut self, selection: Option<Selection>) {
+        let Some(selection) = selection else {
+            return;
+        };
+        self.taps.cancel();
+        self.selection = history::without_gone(selection, &self.scene);
+        self.overlay_revision += 1;
+        self.changed(true);
+    }
+
     /// The ids of the selected Elements, in the order they were selected.
     pub fn selection(&self) -> &[String] {
         self.selection.ids()
@@ -314,12 +369,15 @@ impl Editor {
         let Some(id) = self.hit(origin.x, origin.y, origin.kind) else {
             return;
         };
+        // Undoing the move also undoes the selecting it began with.
+        let step = Step::begin(&self.selection);
         if self.selection.select_only(&id) {
             self.overlay_revision += 1;
         }
         let viewport = self.navigation.viewport();
         let start = viewport.scene_at(origin.x, origin.y);
         self.moving = Some(MoveGesture::begin(
+            step,
             &self.scene,
             &self.selection,
             event.id,
@@ -341,7 +399,12 @@ impl Editor {
                     self.changed(false);
                 }
             }
-            PointerPhase::Up => self.moving = None,
+            PointerPhase::Up => {
+                if let Some(moving) = self.moving.take() {
+                    self.history
+                        .record(moving.finish(), &self.scene, &self.selection);
+                }
+            }
             PointerPhase::Cancel => self.drop_move(),
         }
     }
@@ -409,6 +472,7 @@ impl Editor {
             PointerPhase::Down if drawing_pointer.is_none() => {
                 if let Some(kind) = self.tool.shape() {
                     self.shape = Some(ShapeGesture::begin(
+                        Step::begin(&self.selection),
                         &mut self.scene,
                         &mut self.entropy,
                         &self.style,
@@ -433,8 +497,12 @@ impl Editor {
                     return;
                 };
                 match shape.finish(&mut self.scene) {
-                    Outcome::Drawn if !self.tool_lock => self.tool = Tool::Selection,
-                    Outcome::Drawn => {}
+                    Outcome::Drawn(step) => {
+                        self.history.record(step, &self.scene, &self.selection);
+                        if !self.tool_lock {
+                            self.tool = Tool::Selection;
+                        }
+                    }
                     Outcome::Dropped => self.changed(true),
                 }
             }

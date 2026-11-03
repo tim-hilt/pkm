@@ -240,6 +240,28 @@ impl Editor {
         self.editor().revision()
     }
 
+    /// Whether there is something to undo; the undo button is enabled
+    /// exactly then. Read it after forwarding input or a command.
+    pub fn can_undo(&self) -> bool {
+        self.editor().can_undo()
+    }
+
+    /// Whether there is something to redo; see [`Editor::can_undo`].
+    pub fn can_redo(&self) -> bool {
+        self.editor().can_redo()
+    }
+
+    /// Takes back the latest change to the Scene; see
+    /// [`workingtitle_core::Editor::undo`].
+    pub fn undo(&self) {
+        self.editor().undo();
+    }
+
+    /// Does again what was last undone.
+    pub fn redo(&self) {
+        self.editor().redo();
+    }
+
     /// The ids of the selected Elements, in the order they were selected.
     pub fn selection(&self) -> Vec<String> {
         self.editor().selection().to_vec()

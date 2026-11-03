@@ -263,17 +263,25 @@ final class CanvasController {
     /// editor changes the Tool itself, e.g. back to selection after drawing.
     private(set) var tool = Tool.selection
     private(set) var toolLock = false
+    /// Whether there is something to undo or redo; the buttons are enabled
+    /// exactly then.
+    private(set) var canUndo = false
+    private(set) var canRedo = false
 
     private func refresh() {
         guard let editor = canvas?.editor else { return }
         tool = editor.tool()
         toolLock = editor.toolLock()
+        canUndo = editor.canUndo()
+        canRedo = editor.canRedo()
     }
 
     func zoomIn() { canvas?.perform { $0.zoomIn() } }
     func zoomOut() { canvas?.perform { $0.zoomOut() } }
     func resetZoom() { canvas?.perform { $0.resetZoom() } }
     func zoomToFit() { canvas?.perform { $0.zoomToFit() } }
+    func undo() { canvas?.perform { $0.undo() } }
+    func redo() { canvas?.perform { $0.redo() } }
     func setTool(_ tool: Tool) { canvas?.perform { $0.setTool(tool: tool) } }
     func setToolLock(_ locked: Bool) { canvas?.perform { $0.setToolLock(locked: locked) } }
 }

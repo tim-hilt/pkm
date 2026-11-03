@@ -29,6 +29,11 @@ impl Selection {
         true
     }
 
+    /// Keeps only the selected Elements whose id satisfies `keep`.
+    pub fn retain(&mut self, keep: impl Fn(&str) -> bool) {
+        self.ids.retain(|id| keep(id));
+    }
+
     /// Selects nothing. Returns whether the Selection changed.
     pub fn clear(&mut self) -> bool {
         let changed = !self.ids.is_empty();

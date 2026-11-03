@@ -20,6 +20,7 @@ struct ContentView: View {
             .ignoresSafeArea()
             .overlay(alignment: .top) { ToolBar(controller: controller) }
             .overlay(alignment: .bottom) { ZoomControls(controller: controller) }
+            .overlay(alignment: .bottomLeading) { HistoryControls(controller: controller) }
     }
 }
 
@@ -72,6 +73,24 @@ private struct ZoomControls: View {
             Button("Zoom to fit", systemImage: "arrow.up.left.and.down.right.magnifyingglass") {
                 controller.zoomToFit()
             }
+        }
+        .labelStyle(.iconOnly)
+        .padding(10)
+        .background(.regularMaterial, in: Capsule())
+        .padding()
+    }
+}
+
+/// Minimal undo and redo buttons; their final placement comes with the layout.
+private struct HistoryControls: View {
+    let controller: CanvasController
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Button("Undo", systemImage: "arrow.uturn.backward") { controller.undo() }
+                .disabled(!controller.canUndo)
+            Button("Redo", systemImage: "arrow.uturn.forward") { controller.redo() }
+                .disabled(!controller.canRedo)
         }
         .labelStyle(.iconOnly)
         .padding(10)

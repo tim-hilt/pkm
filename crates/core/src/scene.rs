@@ -292,6 +292,55 @@ impl Scene {
         }
     }
 
+    /// The Element with `id` as it is now, whatever its type, deleted or
+    /// not; `None` if the Scene has no such Element.
+    pub(crate) fn snapshot(&self, id: &str) -> Option<Object> {
+        let index = self.index_of(id)?;
+        self.element_values()[index].as_object().cloned()
+    }
+
+    /// Makes the Element `element` the one of its `id`, in the place of the
+    /// current one (or on top if there is none), as a new version of it, see
+    /// [`Scene::revise`].
+    pub(crate) fn restore(&mut self, mut element: Object, nonce: f64) {
+        let Some(id) = element.get("id").and_then(Value::as_str).map(str::to_owned) else {
+            return;
+        };
+        let Some(index) = self.index_of(&id) else {
+            self.push(element);
+            return;
+        };
+        let current = &mut self.element_values_mut()[index];
+        let version = current
+            .as_object()
+            .and_then(|o| o.get("version"))
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        element.insert("version".into(), Value::Number(version + 1.0));
+        element.insert("versionNonce".into(), Value::Number(nonce));
+        *current = Value::Object(element);
+    }
+
+    /// Marks the Element with `id` deleted, as a new version of itself; it
+    /// stays in the Scene, and in the file, as on excalidraw.com.
+    pub(crate) fn mark_deleted(&mut self, id: &str, nonce: f64) {
+        if let Some(mut element) = self.snapshot(id) {
+            element.insert("isDeleted".into(), Value::Bool(true));
+            self.restore(element, nonce);
+        }
+    }
+
+    /// The position in the file of the Element with `id`.
+    fn index_of(&self, id: &str) -> Option<usize> {
+        self.element_values().iter().position(|value| {
+            value
+                .as_object()
+                .and_then(|o| o.get("id"))
+                .and_then(Value::as_str)
+                == Some(id)
+        })
+    }
+
     /// Moves and resizes the Element with `handle`, and makes it a new
     /// version of itself, see [`Scene::revise`].
     pub(crate) fn set_frame(

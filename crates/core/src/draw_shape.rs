@@ -7,6 +7,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::history::Step;
 use crate::json::{Object, Value};
 use crate::random::Entropy;
 use crate::scene::{ElementType, Scene};
@@ -27,20 +28,23 @@ pub(crate) struct ShapeGesture {
     origin: (f64, f64),
     /// Where the shape is now: `(x, y, width, height)`.
     frame: (f64, f64, f64, f64),
+    step: Step,
 }
 
 /// How a shape gesture ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) enum Outcome {
-    /// There is a new shape in the Scene.
-    Drawn,
+    /// There is a new shape in the Scene; the step is what undoes it.
+    Drawn(Step),
     /// The shape was taken out of the Scene again.
     Dropped,
 }
 
 impl ShapeGesture {
-    /// Starts drawing a `kind` shape with `pointer` going down at `origin`.
+    /// Starts drawing a `kind` shape with `pointer` going down at `origin`,
+    /// as the action of `step`.
     pub fn begin(
+        mut step: Step,
         scene: &mut Scene,
         entropy: &mut Entropy,
         style: &Style,
@@ -48,12 +52,17 @@ impl ShapeGesture {
         pointer: u64,
         origin: (f64, f64),
     ) -> Self {
-        let handle = scene.push(new_shape(kind, entropy, style, origin));
+        let shape = new_shape(kind, entropy, style, origin);
+        if let Some(id) = shape.get("id").and_then(Value::as_str) {
+            step.create(id);
+        }
+        let handle = scene.push(shape);
         Self {
             pointer,
             handle,
             origin,
             frame: (origin.0, origin.1, 0.0, 0.0),
+            step,
         }
     }
 
@@ -88,7 +97,7 @@ impl ShapeGesture {
             self.cancel(scene);
             Outcome::Dropped
         } else {
-            Outcome::Drawn
+            Outcome::Drawn(self.step)
         }
     }
 

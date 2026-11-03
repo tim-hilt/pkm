@@ -11,6 +11,7 @@ mod freedraw;
 mod freehand;
 pub mod geometry;
 mod hachure;
+mod history;
 mod hit_test;
 mod image;
 pub mod input;
