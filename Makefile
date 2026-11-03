@@ -1,5 +1,5 @@
 # Terminal-only build entry points; no Xcode GUI needed.
-SWIFT_SRC := apple/WorkingTitle apple/WorkingTitleTests
+SWIFT_SRC := apple/WorkingTitle apple/WorkingTitleTests apple/WorkingTitleUITests
 XCODEBUILD := cd apple && xcodebuild -quiet -scheme WorkingTitle
 XCTEST := scripts/apple-test.sh
 
@@ -11,7 +11,7 @@ SIM ?= $(SIM_IPHONE)
 CORE_XCFRAMEWORK := apple/Generated/WorkingTitleCoreFFI.xcframework
 CORE_SOURCES := Cargo.toml Cargo.lock scripts/build-core-apple.sh $(shell find crates -type f)
 
-.PHONY: core-apple apple-project build test test-ios record-references lint fmt sim run clean golden-fixtures
+.PHONY: core-apple apple-project build test test-ios test-ui record-references lint fmt sim run clean golden-fixtures
 
 # Rust core -> XCFramework + Swift bindings in apple/Generated (rebuilt only
 # when the Rust sources change).
@@ -35,6 +35,11 @@ test: apple-project
 
 test-ios: apple-project sim
 	$(XCTEST) -destination 'platform=iOS Simulator,name=$(SIM)'
+
+# XCUITests (Gallery → Canvas → back); kept out of `make test`, as UI tests on
+# macOS need the Accessibility permission.
+test-ui: apple-project sim
+	SCHEME=WorkingTitleUITests LOG=/tmp/workingtitle-ui-test.log $(XCTEST) -destination 'platform=iOS Simulator,name=$(SIM)'
 
 # Re-records the renderer reference images that no longer match (and creates
 # missing ones) on macOS; review the diff of apple/WorkingTitleTests/References

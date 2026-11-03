@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Usage: scripts/apple-test.sh <xcodebuild args>, e.g. -destination ... -only-testing:...
-# Runs the WorkingTitle scheme's tests and prints only compile errors and test
+# Runs the SCHEME (default WorkingTitle) scheme's tests and prints only compile errors and test
 # output; the full log stays in $LOG.
 set -uo pipefail
 LOG=${LOG:-/tmp/workingtitle-test.log}
 
 cd "$(dirname "$0")/../apple" || exit 1
-xcodebuild -scheme WorkingTitle test -collect-test-diagnostics never "$@" >"$LOG" 2>&1
+xcodebuild -scheme "${SCHEME:-WorkingTitle}" test -collect-test-diagnostics never "$@" >"$LOG" 2>&1
 status=$?
 
 awk -v zwsp="$(printf '\342\200\213')" '

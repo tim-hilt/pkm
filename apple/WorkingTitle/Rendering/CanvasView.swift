@@ -36,6 +36,10 @@ final class CanvasMetalView: MTKView {
     /// shows its state (the active Tool).
     var onEditorChange: (() -> Void)?
 
+    /// Called when the Scene changed (not for panning, zooming or a Tool
+    /// change), for saving it.
+    var onSceneChange: (() -> Void)?
+
     /// The `Editor.revision` of the Scene the renderer shows.
     private var shownRevision: UInt64?
     /// The `Editor.overlayRevision` of the overlay the renderer shows.
@@ -138,6 +142,7 @@ final class CanvasMetalView: MTKView {
         guard let editor, editor.revision() != shownRevision else { return }
         shownRevision = editor.revision()
         renderer?.setGeometry(editor.geometry())
+        onSceneChange?()
     }
 
     /// Hands the renderer the overlay again if it may have changed: with the
@@ -265,6 +270,8 @@ struct CanvasView {
     /// to date from then on.
     let geometry: Geometry
     let controller: CanvasController
+    /// Called when the Scene changed.
+    var onSceneChange: (() -> Void)?
 
     @MainActor private func makeCanvas() -> CanvasMetalView {
         let canvas = CanvasMetalView()
@@ -280,6 +287,7 @@ struct CanvasView {
             canvas.renderer?.setGeometry(geometry)
             canvas.editor = editor
         }
+        canvas.onSceneChange = onSceneChange
         controller.canvas = canvas
     }
 }

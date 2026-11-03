@@ -21,6 +21,13 @@ targets:
     configFiles:
       Debug: Config/Signing.xcconfig
       Release: Config/Signing.xcconfig
+    info:
+      path: Config/Info.plist
+      properties:
+        # Drawings live in Documents, which Files (iOS) and Finder show.
+        UIFileSharingEnabled: true
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.timhilt.workingtitle
@@ -30,8 +37,10 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "6.0"
         GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_FILE: Config/Info.plist
         INFOPLIST_KEY_CFBundleDisplayName: WorkingTitle
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
         TARGETED_DEVICE_FAMILY: "1,2"
@@ -47,6 +56,26 @@ targets:
           DEAD_CODE_STRIPPING: YES
     scheme:
       testTargets: [WorkingTitleTests]
+  # Run by `make test-ui` (iOS Simulator); not part of the unit-test scheme.
+  WorkingTitleUITests:
+    type: bundle.ui-testing
+    platform: auto
+    supportedDestinations: [iOS, macOS]
+    sources: [WorkingTitleUITests]
+    configFiles:
+      Debug: Config/Signing.xcconfig
+      Release: Config/Signing.xcconfig
+    dependencies:
+      - target: WorkingTitle
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "6.0"
+        ARCHS: arm64
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: $(inherited)
+        "CODE_SIGN_IDENTITY[sdk=macosx*]": "-"
+        TEST_TARGET_NAME: WorkingTitle
   WorkingTitleTests:
     type: bundle.unit-test
     platform: auto
@@ -68,3 +97,10 @@ targets:
         # macOS app bundles keep the executable under Contents/MacOS.
         "TEST_HOST[sdk=macosx*]": "$(BUILT_PRODUCTS_DIR)/WorkingTitle.app/Contents/MacOS/WorkingTitle"
         "BUNDLE_LOADER[sdk=macosx*]": "$(TEST_HOST)"
+schemes:
+  WorkingTitleUITests:
+    build:
+      targets:
+        WorkingTitle: all
+    test:
+      targets: [WorkingTitleUITests]
