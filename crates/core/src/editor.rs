@@ -30,6 +30,7 @@ use crate::tool::Tool;
 use crate::transform::TransformGesture;
 use crate::transform_handles::{Handle, TransformBox};
 use crate::viewport::Viewport;
+use crate::z_order::{self, ZOrder};
 use crate::{image, shape};
 
 /// Hands out [`Geometry::generation`]s; unique across all editors.
@@ -528,6 +529,31 @@ impl Editor {
         self.history.record(step, &self.scene, &self.selection);
         self.overlay_revision += 1;
         self.changed(false);
+    }
+
+    /// Moves the Selection in z-order (the `bring forward`, `send backward`,
+    /// `bring to front` and `send to back` commands), as Excalidraw does: see
+    /// [`crate::z_order`]. One undo step. Does nothing with nothing selected,
+    /// while a pointer is drawing or moving, or if the Selection is already
+    /// as far as it goes.
+    pub fn move_in_z_order(&mut self, how: ZOrder) {
+        self.finish_placing();
+        if self.is_gesturing() || self.selection.is_empty() {
+            return;
+        }
+        let mut step = Step::begin(&self.selection);
+        if !z_order::move_selection(
+            &mut self.scene,
+            &mut self.entropy,
+            &mut step,
+            &self.selection,
+            how,
+        ) {
+            return;
+        }
+        self.history.record(step, &self.scene, &self.selection);
+        // The handles of the Elements now stand for others.
+        self.changed(true);
     }
 
     /// Selects every shown, unlocked Element of the Scene (the `select all`

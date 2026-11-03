@@ -307,6 +307,7 @@ final class CanvasController {
     func setTool(_ tool: Tool) { canvas?.perform { $0.setTool(tool: tool) } }
     func setToolLock(_ locked: Bool) { canvas?.perform { $0.setToolLock(locked: locked) } }
     func duplicate() { canvas?.perform { $0.duplicate() } }
+    func moveInZOrder(_ how: ZOrder) { canvas?.perform { $0.moveInZOrder(how: how) } }
     func deleteSelection() { canvas?.perform { $0.deleteSelection() } }
     func setProperty(_ property: Property) { canvas?.perform { $0.setProperty(property: property) } }
 }

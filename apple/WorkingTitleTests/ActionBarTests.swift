@@ -107,6 +107,26 @@ import Testing
         #expect(setup.controller.actionBar != nil)
     }
 
+    /// Where `id` is in the saved file: later in the text is further up.
+    private func position(of id: String, in setup: Setup) throws -> String.Index {
+        let file = try #require(String(data: setup.editor.save(), encoding: .utf8))
+        return try #require(file.range(of: "\"id\": \"\(id)\"")).lowerBound
+    }
+
+    @Test func zOrderCommandsReachTheCoreAndAreUndoable() throws {
+        let setup = try makeSetup()
+        select(setup)
+        setup.controller.duplicate()
+        // The copy is on top and selected; send it to the back.
+        let copy = try #require(setup.editor.selection().first)
+
+        setup.controller.moveInZOrder(.toBack)
+        #expect(try position(of: copy, in: setup) < position(of: "box", in: setup))
+
+        setup.controller.undo()
+        #expect(try position(of: "box", in: setup) < position(of: copy, in: setup))
+    }
+
     @Test func aLongPressOpensNoContextMenu() throws {
         let setup = try makeSetup()
         select(setup)

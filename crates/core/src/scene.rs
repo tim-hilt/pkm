@@ -254,6 +254,62 @@ impl Scene {
             })
     }
 
+    /// Every Element of the file, whatever its type, deleted ones included,
+    /// in z-order. The position of an Element here is its handle.
+    pub(crate) fn raw_elements(&self) -> impl Iterator<Item = &Object> {
+        self.element_values().iter().filter_map(Value::as_object)
+    }
+
+    /// The id of the Element with `handle`.
+    pub(crate) fn element_id(&self, handle: u32) -> Option<&str> {
+        self.element_values()
+            .get(handle as usize)?
+            .as_object()?
+            .get("id")?
+            .as_str()
+    }
+
+    /// The ids of all Elements in z-order; an Element without one is `""`.
+    pub(crate) fn order(&self) -> Vec<String> {
+        self.raw_elements()
+            .map(|e| {
+                e.get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            })
+            .collect()
+    }
+
+    /// Reorders the Elements: the one that is at `order[place]` now goes to
+    /// `place`. `order` has to be a permutation of the handles.
+    pub(crate) fn permute(&mut self, order: &[usize]) {
+        let elements = self.element_values_mut();
+        debug_assert_eq!(order.len(), elements.len());
+        let mut old: Vec<Option<Value>> = std::mem::take(elements).into_iter().map(Some).collect();
+        *elements = order
+            .iter()
+            .filter_map(|&from| old.get_mut(from)?.take())
+            .collect();
+    }
+
+    /// Puts the Elements with `ids` into the places that they take now, in
+    /// the order of `ids`, leaving the others where they are. Ids that are
+    /// not in the Scene are skipped.
+    pub(crate) fn arrange(&mut self, ids: &[String]) {
+        let positions: Vec<usize> = ids.iter().filter_map(|id| self.index_of(id)).collect();
+        let mut places = positions.clone();
+        places.sort_unstable();
+        let elements = self.element_values_mut();
+        let values: Vec<Value> = positions
+            .iter()
+            .map(|&at| std::mem::replace(&mut elements[at], Value::Null))
+            .collect();
+        for (place, value) in places.into_iter().zip(values) {
+            elements[place] = value;
+        }
+    }
+
     /// The colour of the Canvas as written in the file (a CSS colour), white
     /// if the file has none.
     pub fn view_background_color(&self) -> &str {

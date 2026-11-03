@@ -15,6 +15,7 @@ mod duplicate;
 mod edit_points;
 mod editor;
 mod erase;
+mod fractional_index;
 mod frame;
 mod freedraw;
 mod freehand;
@@ -23,6 +24,7 @@ mod hachure;
 mod history;
 mod hit_test;
 mod image;
+mod index_sync;
 pub mod input;
 pub mod json;
 mod linear;
@@ -46,6 +48,7 @@ mod transform;
 mod transform_handles;
 mod viewport;
 mod wrap;
+mod z_order;
 
 pub use action_bar::ActionBar;
 pub use editor::Editor;
@@ -60,6 +63,7 @@ pub use style::{Edges, Sloppiness, StrokeWidth};
 pub use text::TextMeasurer;
 pub use tool::Tool;
 pub use viewport::{MAX_ZOOM, MIN_ZOOM, Viewport};
+pub use z_order::ZOrder;
 
 #[cfg(test)]
 mod tests {

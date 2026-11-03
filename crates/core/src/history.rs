@@ -38,6 +38,9 @@ pub(crate) struct Step {
     /// Each touched Element's id with how it was before, `None` if it did not
     /// exist.
     before: Vec<(String, Option<Object>)>,
+    /// The ids of all Elements in z-order before the action, if it reorders
+    /// them.
+    order: Option<Vec<String>>,
 }
 
 impl Step {
@@ -46,6 +49,7 @@ impl Step {
         Self {
             selection: selection.clone(),
             before: Vec::new(),
+            order: None,
         }
     }
 
@@ -62,6 +66,12 @@ impl Step {
         }
     }
 
+    /// Notes that the action is about to change the z-order of the Elements
+    /// of the Scene, which is as it was before.
+    pub fn touch_order(&mut self, scene: &Scene) {
+        self.order.get_or_insert_with(|| scene.order());
+    }
+
     /// Notes that the action created the Element `id`.
     pub fn create(&mut self, id: &str) {
         if !self.is_tracking(id) {
@@ -72,6 +82,9 @@ impl Step {
     /// Puts every Element the action touched back as it was before it, as
     /// new versions; for an action that is abandoned.
     pub fn revert(self, scene: &mut Scene, entropy: &mut Entropy) {
+        if let Some(order) = &self.order {
+            scene.arrange(order);
+        }
         for (id, before) in self.before {
             match before {
                 Some(before) => scene.restore(before, entropy.integer()),
@@ -89,6 +102,9 @@ impl Step {
 #[derive(Debug)]
 struct Entry {
     changes: Vec<Change>,
+    /// The Elements whose z-order changed, in the places they took before
+    /// the action and after it.
+    order: Option<(Vec<String>, Vec<String>)>,
     /// The Selection before the action and after it.
     selection: (Selection, Selection),
 }
@@ -116,11 +132,34 @@ impl Entry {
                 Some(Change { id, before, after })
             })
             .collect();
-        (!changes.is_empty()).then(|| Self {
+        let order = step
+            .order
+            .and_then(|before| reordered(before, scene.order()));
+        (!changes.is_empty() || order.is_some()).then(|| Self {
             changes,
+            order,
             selection: (step.selection, selection.clone()),
         })
     }
+}
+
+/// The ids from the first to the last place that holds another Element in
+/// `after` than in `before`, in both orders; `None` if they are the same
+/// order. Elements made or removed in between are not part of it.
+fn reordered(before: Vec<String>, after: Vec<String>) -> Option<(Vec<String>, Vec<String>)> {
+    let kept: HashSet<&str> = after.iter().map(String::as_str).collect();
+    let before: Vec<String> = before
+        .into_iter()
+        .filter(|id| kept.contains(id.as_str()))
+        .collect();
+    let known: HashSet<&str> = before.iter().map(String::as_str).collect();
+    let after: Vec<String> = after
+        .into_iter()
+        .filter(|id| known.contains(id.as_str()))
+        .collect();
+    let first = before.iter().zip(&after).position(|(b, a)| b != a)?;
+    let last = before.iter().zip(&after).rposition(|(b, a)| b != a)?;
+    Some((before[first..=last].to_vec(), after[first..=last].to_vec()))
 }
 
 /// Whether two versions of an Element are the same apart from their version.
@@ -173,6 +212,9 @@ impl History {
                 None => scene.mark_deleted(&change.id, entropy.integer()),
             }
         }
+        if let Some((before, _)) = &entry.order {
+            scene.arrange(before);
+        }
         let selection = entry.selection.0.clone();
         self.redo.push(entry);
         Some(selection)
@@ -184,6 +226,9 @@ impl History {
         let entry = self.redo.pop()?;
         for change in &entry.changes {
             scene.restore(change.after.clone(), entropy.integer());
+        }
+        if let Some((_, after)) = &entry.order {
+            scene.arrange(after);
         }
         let selection = entry.selection.1.clone();
         self.undo.push(entry);

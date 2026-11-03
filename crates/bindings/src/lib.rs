@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use workingtitle_core::scene::{FillPattern, LineStyle};
 use workingtitle_core::{
     ActionBar, Edges, MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase, Properties,
-    Property, ScrollEvent, Sloppiness, StrokeWidth, Tool,
+    Property, ScrollEvent, Sloppiness, StrokeWidth, Tool, ZOrder,
 };
 
 uniffi::setup_scaffolding!("WorkingTitleCore");
@@ -98,6 +98,14 @@ pub enum Tool {
     Arrow,
     Freedraw,
     Eraser,
+}
+
+#[uniffi::remote(Enum)]
+pub enum ZOrder {
+    Forward,
+    Backward,
+    ToFront,
+    ToBack,
 }
 
 // The properties panel's options and values; see
@@ -373,6 +381,12 @@ impl Editor {
     /// [`workingtitle_core::Editor::delete_selection`].
     pub fn delete_selection(&self) {
         self.editor().delete_selection();
+    }
+
+    /// Moves the Selection in z-order; see
+    /// [`workingtitle_core::Editor::move_in_z_order`].
+    pub fn move_in_z_order(&self, how: ZOrder) {
+        self.editor().move_in_z_order(how);
     }
 
     /// The indices of the selected points of the selected line or arrow; see
@@ -792,6 +806,8 @@ mod tests {
 
         editor.duplicate();
         assert_eq!(editor.element_count(), 2);
+        editor.move_in_z_order(ZOrder::ToBack);
+        assert!(editor.can_undo());
         editor.delete_selection();
         assert_eq!(editor.element_count(), 1);
         assert!(editor.action_bar().is_none());
