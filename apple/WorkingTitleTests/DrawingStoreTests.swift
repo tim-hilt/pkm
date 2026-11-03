@@ -493,4 +493,56 @@ import Testing
         #expect(throws: DrawingStore.InvalidName.self) { try store.saveViewport(viewport, for: "../a") }
         #expect(store.viewport(for: "../a") == nil)
     }
+
+    // MARK: Changes from outside
+
+    /// Counts the changes the store reports, from now on.
+    @MainActor private func countChanges() -> (count: Counter, stop: () -> Void) {
+        let count = Counter()
+        let changes = store.changes()  // watching from here on
+        let watching = Task { for await _ in changes { count.increment() } }
+        return (count, { watching.cancel() })
+    }
+
+    @MainActor @Test func aFileAddedFromOutsideIsReported() async throws {
+        let changes = countChanges()
+        defer { changes.stop() }
+
+        try Data("{}".utf8).write(to: directory.appending(path: "dropped.excalidraw"))
+
+        #expect(await eventually { changes.count.count > 0 })
+    }
+
+    @MainActor @Test func aFileRemovedFromOutsideIsReported() async throws {
+        try store.save(Data("a".utf8), as: "a")
+        let changes = countChanges()
+        defer { changes.stop() }
+
+        try FileManager.default.removeItem(at: directory.appending(path: "a.excalidraw"))
+
+        #expect(await eventually { changes.count.count > 0 })
+    }
+
+    @MainActor @Test func aFileRenamedFromOutsideIsReported() async throws {
+        try store.save(Data("a".utf8), as: "a")
+        let changes = countChanges()
+        defer { changes.stop() }
+
+        try FileManager.default.moveItem(
+            at: directory.appending(path: "a.excalidraw"), to: directory.appending(path: "b.excalidraw"))
+
+        #expect(await eventually { changes.count.count > 0 })
+    }
+
+    @MainActor @Test func stopsWatchingWhenNobodyListensAnyMore() async throws {
+        let changes = countChanges()
+        changes.stop()
+        try await Task.sleep(for: .milliseconds(100))
+        let before = changes.count.count
+
+        try Data("{}".utf8).write(to: directory.appending(path: "late.excalidraw"))
+        try await Task.sleep(for: .milliseconds(300))
+
+        #expect(changes.count.count == before)
+    }
 }

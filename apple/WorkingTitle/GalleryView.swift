@@ -82,8 +82,9 @@ struct GalleryView: View {
                 Text("This Drawing will be deleted for good.")
             }
         }
-        // Files and Finder can change the folder while the app is away.
-        .onAppear { gallery.reload() }
+        // Files and Finder change the folder while the app is away or the
+        // Gallery is not shown; while it is shown, the list follows them.
+        .task { await gallery.followChangesFromOutside() }
     }
 
     @ViewBuilder
@@ -111,7 +112,7 @@ struct GalleryView: View {
 private struct Card: View {
     let drawing: DrawingStore.Entry
     let thumbnails: Thumbnails
-    @State private var thumbnail: CGImage?
+    @State private var thumbnail: Thumbnails.Thumbnail?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -121,16 +122,22 @@ private struct Card: View {
                 .fill(.quaternary)
                 .aspectRatio(4 / 3, contentMode: .fit)
                 .overlay {
-                    if let thumbnail {
-                        Image(decorative: thumbnail, scale: 1)
+                    if let image = thumbnail?.image {
+                        Image(decorative: image, scale: 1)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
+                    } else if thumbnail?.isUnreadable == true {
+                        // A malformed file is shown as such; it is left as it is.
+                        Label("Can’t be read", systemImage: "exclamationmark.triangle")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("unreadable-\(drawing.name)")
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary) }
                 // Restarts when the Drawing changed; ends when the card leaves the screen.
-                .task(id: drawing) { thumbnail = await thumbnails.image(for: drawing) }
+                .task(id: drawing) { thumbnail = await thumbnails.thumbnail(for: drawing) }
             Text(drawing.name).font(.subheadline).lineLimit(2)
             Text(drawing.modified, format: .dateTime.day().month().year().hour().minute())
                 .font(.caption).foregroundStyle(.secondary)

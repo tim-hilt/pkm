@@ -143,4 +143,67 @@ import Testing
 
         #expect(gallery.failure == nil)
     }
+
+    // MARK: Files added, renamed and removed outside the app
+
+    private func folder(_ name: String) -> URL { store.directory.appending(path: "\(name).excalidraw") }
+
+    /// Follows the folder while `body` runs, as the Gallery's view does while it is shown.
+    private func following(_ gallery: Gallery, _ body: () async throws -> Void) async rethrows {
+        let following = Task { await gallery.followChangesFromOutside() }
+        defer { following.cancel() }
+        await Task.yield()  // lets it start watching
+        try await body()
+    }
+
+    @Test func aFileAddedFromOutsideAppearsWithoutRestarting() async throws {
+        let gallery = Gallery(store: store)
+
+        try await following(gallery) {
+            try Editor().save().write(to: folder("from Files"))
+
+            #expect(await eventually { gallery.drawings.map(\.name) == ["from Files"] })
+        }
+    }
+
+    @Test func aFileRemovedFromOutsideDisappears() async throws {
+        try store.save(Editor().save(), as: "a")
+        try store.save(Editor().save(), as: "b")
+        let gallery = Gallery(store: store)
+
+        try await following(gallery) {
+            try FileManager.default.removeItem(at: folder("a"))
+
+            #expect(await eventually { gallery.drawings.map(\.name) == ["b"] })
+        }
+    }
+
+    @Test func aFileRenamedFromOutsideIsListedUnderItsNewName() async throws {
+        try store.save(Editor().save(), as: "old")
+        let gallery = Gallery(store: store)
+
+        try await following(gallery) {
+            try FileManager.default.moveItem(at: folder("old"), to: folder("new"))
+
+            #expect(await eventually { gallery.drawings.map(\.name) == ["new"] })
+        }
+    }
+
+    @Test func aMalformedFileFromOutsideIsListedAndNeverOverwritten() async throws {
+        let junk = Data("not json".utf8)
+        let gallery = Gallery(store: store)
+
+        try await following(gallery) {
+            try junk.write(to: folder("broken"))
+            #expect(await eventually { gallery.drawings.map(\.name) == ["broken"] })
+        }
+
+        gallery.openDrawing(named: "broken")
+        gallery.close()
+        #expect(gallery.failure != nil)
+        gallery.duplicateDrawing(named: "broken")
+        gallery.createDrawing()
+        gallery.close()
+        #expect(try store.open("broken") == junk)
+    }
 }

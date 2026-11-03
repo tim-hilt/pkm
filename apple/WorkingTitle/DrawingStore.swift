@@ -52,6 +52,26 @@ struct DrawingStore: Sendable {
         .sorted { ($0.modified, $1.name) > ($1.modified, $0.name) }
     }
 
+    /// Reports (one `()` per burst) that Drawings were added, removed or
+    /// renamed in the folder, by this store or by anyone else, as Files and
+    /// Finder do. Watches while the stream is being iterated.
+    ///
+    /// A file written in place, without its name changing, is not reported;
+    /// whoever shows the Drawings lists them again when it comes to the front.
+    func changes() -> AsyncStream<Void> {
+        AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            let descriptor = Darwin.open(directory.path, O_EVTONLY)
+            guard descriptor >= 0 else { return continuation.finish() }
+            let source = DispatchSource.makeFileSystemObjectSource(
+                fileDescriptor: descriptor, eventMask: [.write, .rename, .delete, .link],
+                queue: .global(qos: .utility))
+            source.setEventHandler { continuation.yield() }
+            source.setCancelHandler { close(descriptor) }
+            continuation.onTermination = { _ in source.cancel() }
+            source.resume()
+        }
+    }
+
     /// Makes a new Drawing named "Untitled <date time>" (made distinct if that
     /// name is taken) holding `contents`, and returns its name.
     func create(at date: Date = .now, in timeZone: TimeZone = .current, contents: Data) throws -> String {

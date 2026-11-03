@@ -25,7 +25,18 @@ final class Gallery {
     }
 
     func reload() {
-        drawings = (try? store.list()) ?? []
+        let listed = (try? store.list()) ?? []
+        if listed != drawings { drawings = listed }
+    }
+
+    /// Lists the Drawings now and again whenever they are added, removed or
+    /// renamed outside the app (Files, Finder), until the calling task is
+    /// cancelled. Meant for as long as the Gallery is shown: the folder is the
+    /// single source of truth.
+    func followChangesFromOutside() async {
+        let changes = store.changes()
+        reload()  // after the watching starts, so that no change falls in between
+        for await _ in changes { reload() }
     }
 
     /// Makes a new empty Drawing and opens it.

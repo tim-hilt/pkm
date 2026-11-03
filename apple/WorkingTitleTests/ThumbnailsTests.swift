@@ -35,7 +35,7 @@ import Testing
         try store.save(sampleBytes(), as: "sample")
         let thumbnails = Thumbnails(store: store)
 
-        let image = try await #require(thumbnails.image(for: entry("sample")))
+        let image = try await #require(thumbnails.thumbnail(for: entry("sample")).image)
 
         #expect(image.width == ThumbnailRenderer.width)
         #expect(image.height == ThumbnailRenderer.height)
@@ -47,7 +47,7 @@ import Testing
         try store.save(sampleBytes(), as: "sample")
         let before = try entry("sample")
 
-        _ = await Thumbnails(store: store).image(for: before)
+        _ = await Thumbnails(store: store).thumbnail(for: before)
 
         let png = try #require(store.thumbnail(for: before))
         #expect(RenderedImage(pngData: png)?.width == ThumbnailRenderer.width)
@@ -58,10 +58,10 @@ import Testing
 
     @Test func aCachedThumbnailIsShownWithoutDrawingItAgain() async throws {
         try store.save(sampleBytes(), as: "sample")
-        _ = try await Thumbnails(store: store).image(for: entry("sample"))
+        _ = try await Thumbnails(store: store).thumbnail(for: entry("sample"))
 
         let later = Thumbnails(store: store)  // as after a restart of the app
-        let image = try await later.image(for: entry("sample"))
+        let image = try await later.thumbnail(for: entry("sample")).image
 
         #expect(image != nil)
         #expect(later.rendered == 0)
@@ -71,8 +71,8 @@ import Testing
         try store.save(sampleBytes(), as: "sample")
         let thumbnails = Thumbnails(store: store)
 
-        let first = try await thumbnails.image(for: entry("sample"))
-        let second = try await thumbnails.image(for: entry("sample"))
+        let first = try await thumbnails.thumbnail(for: entry("sample")).image
+        let second = try await thumbnails.thumbnail(for: entry("sample")).image
 
         #expect(first != nil && first === second)
         #expect(thumbnails.rendered == 1)
@@ -84,24 +84,43 @@ import Testing
             [.modificationDate: Date(timeIntervalSince1970: 1000)],
             ofItemAtPath: directory.appending(path: "a.excalidraw").path)
         let thumbnails = Thumbnails(store: store)
-        let blank = try await #require(thumbnails.image(for: entry("a")))
+        let blank = try await #require(thumbnails.thumbnail(for: entry("a")).image)
         #expect(try !hasInk(blank))
 
         try store.save(sampleBytes(), as: "a")
-        let changed = try await #require(thumbnails.image(for: entry("a")))
+        let changed = try await #require(thumbnails.thumbnail(for: entry("a")).image)
 
         #expect(try hasInk(changed))
         #expect(thumbnails.rendered == 2)
     }
 
-    @Test func aFileThatIsNoDrawingHasNoThumbnail() async throws {
-        try store.save(Data("not json".utf8), as: "broken")
+    @Test func aFileThatIsNoDrawingIsUnreadableAndStaysUntouched() async throws {
+        let junk = Data("{\"elements\": [".utf8)
+        try store.save(junk, as: "broken")
         let thumbnails = Thumbnails(store: store)
-
         let broken = try entry("broken")
-        #expect(await thumbnails.image(for: broken) == nil)
+
+        #expect(await thumbnails.thumbnail(for: broken).isUnreadable)
+        #expect(await thumbnails.thumbnail(for: broken).isUnreadable, "also when asked again")
+        #expect(try store.open("broken") == junk)
+        #expect(try entry("broken") == broken)
         #expect(thumbnails.rendered == 0)
-        #expect(try store.thumbnail(for: entry("broken")) == nil)
+        #expect(store.thumbnail(for: broken) == nil)
+    }
+
+    @Test func aFileThatWasFixedIsNoLongerUnreadable() async throws {
+        try store.save(Data("not json".utf8), as: "a")
+        let thumbnails = Thumbnails(store: store)
+        let broken = try entry("a")
+        #expect(await thumbnails.thumbnail(for: broken).isUnreadable)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 1000)],
+            ofItemAtPath: directory.appending(path: "a.excalidraw").path)
+
+        try store.save(sampleBytes(), as: "a")
+
+        let fixed = try entry("a")
+        #expect(await thumbnails.thumbnail(for: fixed).image != nil)
     }
 
     @Test func aDrawingThatIsGoneHasNoThumbnail() async throws {
@@ -109,7 +128,7 @@ import Testing
         let listed = try entry("gone")
         try store.delete("gone")
 
-        #expect(await Thumbnails(store: store).image(for: listed) == nil)
+        #expect(await Thumbnails(store: store).thumbnail(for: listed).image == nil)
     }
 
     @Test func manyDrawingsWithCachedThumbnailsAreNotDrawnAgain() async throws {
@@ -120,7 +139,7 @@ import Testing
         }
         let thumbnails = Thumbnails(store: store)
 
-        for listed in try store.list() { _ = await thumbnails.image(for: listed) }
+        for listed in try store.list() { _ = await thumbnails.thumbnail(for: listed) }
 
         #expect(thumbnails.rendered == 0)
     }

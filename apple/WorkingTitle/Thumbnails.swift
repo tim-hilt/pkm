@@ -18,6 +18,9 @@ final class Thumbnails {
     private let store: DrawingStore
     /// Pictures already made, dropped by the system when memory is short.
     private let memory = NSCache<NSString, CGImage>()
+    /// The Drawings (as name and date, like the keys of `memory`) found to be no
+    /// valid Drawing; they are not read again until they change.
+    private var unreadable: Set<String> = []
     /// Made when first needed; stays nil without a GPU.
     private var renderer: ThumbnailRenderer?
 
@@ -26,28 +29,54 @@ final class Thumbnails {
         memory.totalCostLimit = 48 << 20
     }
 
+    /// What the Gallery shows for a Drawing.
+    enum Thumbnail {
+        /// The picture of the Drawing.
+        case image(CGImage)
+        /// The file is no valid Drawing (malformed): the Gallery shows an error.
+        /// Nothing is ever written to such a file.
+        case unreadable
+        /// No picture for another reason (the Drawing is gone, no GPU).
+        case unavailable
+
+        var image: CGImage? {
+            if case .image(let image) = self { image } else { nil }
+        }
+
+        var isUnreadable: Bool {
+            if case .unreadable = self { true } else { false }
+        }
+    }
+
     /// Thumbnails drawn so far (not counting those from caches).
     var rendered: Int { renderer?.rendered ?? 0 }
 
-    /// The thumbnail of the Drawing as listed in `entry`; nil if it has none
-    /// (the file is no Drawing, or is gone). Cheap when called again.
-    func image(for entry: DrawingStore.Entry) async -> CGImage? {
-        let key = "\(entry.name)\u{0}\(entry.modified.timeIntervalSinceReferenceDate)" as NSString
-        if let image = memory.object(forKey: key) { return image }
-        var image = await cachedImage(for: entry)
-        if image == nil { image = await render(entry) }
-        if let image {
-            memory.setObject(image, forKey: key, cost: image.bytesPerRow * image.height)
+    /// The thumbnail of the Drawing as listed in `entry`. Cheap when called again.
+    func thumbnail(for entry: DrawingStore.Entry) async -> Thumbnail {
+        let key = "\(entry.name)\u{0}\(entry.modified.timeIntervalSinceReferenceDate)"
+        if let image = memory.object(forKey: key as NSString) { return .image(image) }
+        if unreadable.contains(key) { return .unreadable }
+        let image: CGImage
+        if let cached = await Self.decodeCachedThumbnail(of: entry, in: store) {
+            image = cached
+        } else {
+            switch await Self.prepareScene(of: entry, in: store) {
+            case .gone:
+                return .unavailable
+            case .unreadable:
+                unreadable.insert(key)
+                return .unreadable
+            case .scene(let scene):
+                guard let rendered = await render(scene, for: entry) else { return .unavailable }
+                image = rendered
+            }
         }
-        return image
+        memory.setObject(image, forKey: key as NSString, cost: image.bytesPerRow * image.height)
+        return .image(image)
     }
 
-    private func cachedImage(for entry: DrawingStore.Entry) async -> CGImage? {
-        await Self.decodeCachedThumbnail(of: entry, in: store)
-    }
-
-    private func render(_ entry: DrawingStore.Entry) async -> CGImage? {
-        guard let scene = await Self.prepareScene(of: entry, in: store), !Task.isCancelled else { return nil }
+    private func render(_ scene: ThumbnailScene, for entry: DrawingStore.Entry) async -> CGImage? {
+        guard !Task.isCancelled else { return nil }
         if renderer == nil { renderer = ThumbnailRenderer() }
         guard let rendered = renderer?.render(scene) else { return nil }
         await Self.cache(rendered, for: entry, in: store)
@@ -66,11 +95,17 @@ final class Thumbnails {
             source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
     }
 
-    private nonisolated static func prepareScene(
-        of entry: DrawingStore.Entry, in store: DrawingStore
-    ) async -> ThumbnailScene? {
-        guard let bytes = try? store.open(entry.name) else { return nil }
-        return ThumbnailScene(drawing: bytes)
+    private enum Prepared: Sendable {
+        case scene(ThumbnailScene)
+        case unreadable
+        case gone
+    }
+
+    private nonisolated static func prepareScene(of entry: DrawingStore.Entry, in store: DrawingStore) async -> Prepared
+    {
+        guard let bytes = try? store.open(entry.name) else { return .gone }
+        guard let scene = ThumbnailScene(drawing: bytes) else { return .unreadable }
+        return .scene(scene)
     }
 
     /// Failing to cache costs only the drawing of the thumbnail again.
