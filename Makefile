@@ -11,7 +11,7 @@ SIM ?= $(SIM_IPHONE)
 CORE_XCFRAMEWORK := apple/Generated/WorkingTitleCoreFFI.xcframework
 CORE_SOURCES := Cargo.toml Cargo.lock scripts/build-core-apple.sh $(shell find crates -type f)
 
-.PHONY: core-apple apple-project build test test-ios test-ui record-references lint fmt sim run clean golden-fixtures bench
+.PHONY: core-apple apple-project build test test-ios test-ui record-references lint fmt sim run clean golden-fixtures bench visual-parity visual-parity-app
 
 # Rust core -> XCFramework + Swift bindings in apple/Generated (rebuilt only
 # when the Rust sources change).
@@ -74,6 +74,16 @@ run: apple-project sim
 # (see scripts/golden/README.md). Needs Node; `make test` does not.
 golden-fixtures:
 	cd scripts/golden && npm ci --no-audit --no-fund && node generate.mjs
+
+# Visual parity review (docs/visual-parity.md): regenerates the fixtures and
+# exports them from excalidraw.com (needs network and Google Chrome) and from
+# the app, into docs/visual-parity.
+visual-parity: visual-parity-app
+	cd scripts/visual-parity && npm ci --no-audit --no-fund && node fixtures.mjs && node excalidraw.mjs
+
+visual-parity-app: apple-project
+	TEST_RUNNER_RECORD_VISUAL_PARITY=1 $(XCTEST) -destination 'platform=macOS' ENABLE_APP_SANDBOX=NO \
+		-only-testing:WorkingTitleTests/VisualParityTests
 
 # Measures the core's open time for the 1,000-Element Benchmark Scene.
 # See docs/performance-benchmarks.md for the full procedure.

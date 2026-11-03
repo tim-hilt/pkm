@@ -1,0 +1,9 @@
+{
+  "name": "visual-parity",
+  "private": true,
+  "type": "module",
+  "description": "Visual parity review against excalidraw.com. See docs/visual-parity.md.",
+  "dependencies": {
+    "playwright": "1.56.1"
+  }
+}
