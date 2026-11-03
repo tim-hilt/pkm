@@ -112,7 +112,33 @@ import Testing
         #expect(try store.open(second) == Data("2".utf8))
     }
 
-    // MARK: Open and save
+    // MARK: Import
+
+    @Test func anImportedDrawingKeepsItsNameAndContents() throws {
+        let name = try store.add(Data("x".utf8), named: "Flowchart")
+
+        #expect(name == "Flowchart")
+        #expect(try store.open("Flowchart") == Data("x".utf8))
+    }
+
+    @Test func importingUnderATakenNameGetsADistinctNameAndKeepsTheOther() throws {
+        try store.save(Data("old".utf8), as: "Flowchart")
+
+        let second = try store.add(Data("new".utf8), named: "Flowchart")
+        let third = try store.add(Data("newer".utf8), named: "Flowchart")
+
+        #expect(second == "Flowchart 2")
+        #expect(third == "Flowchart 3")
+        #expect(try store.open("Flowchart") == Data("old".utf8))
+        #expect(try store.open("Flowchart 2") == Data("new".utf8))
+    }
+
+    @Test func importingUnderANameThatIsNotUsableGetsAUsableOne() throws {
+        let name = try store.add(Data("x".utf8), named: ".hidden")
+
+        #expect(try store.open(name) == Data("x".utf8))
+        #expect(try fileNames() == ["\(name).excalidraw"])
+    }
 
     @Test func aSavedDrawingOpensWithTheSameBytes() throws {
         let bytes = Data("{\"type\":\"excalidraw\"}".utf8)

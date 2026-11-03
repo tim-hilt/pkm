@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UniformTypeIdentifiers
 
 /// The Gallery: the Drawings of a `DrawingStore` and which of them is open.
 /// Opening one shows it in the Canvas; going back saves it and lists it again.
@@ -45,6 +46,39 @@ final class Gallery {
             let name = try store.create(contents: Editor().save())
             open = try OpenDrawing(name: name, store: store)
         }
+    }
+
+    /// Makes a new Drawing of each `.excalidraw` file (share sheet, Files,
+    /// drag & drop), named after the file and made distinct if that name is
+    /// taken; the files themselves are left alone. A file that cannot be read
+    /// or is not a valid Drawing is skipped and the user is told. Returns the
+    /// names of the new Drawings.
+    @discardableResult
+    func importDrawings(from urls: [URL]) -> [String] {
+        failure = nil
+        var imported: [String] = []
+        var rejected: [String] = []
+        for url in urls {
+            if let name = try? importDrawing(from: url) {
+                imported.append(name)
+            } else {
+                rejected.append("“\(url.lastPathComponent)”")
+            }
+        }
+        if !rejected.isEmpty {
+            failure = "Could not import \(rejected.joined(separator: ", ")). It is not a valid Excalidraw file."
+        }
+        reload()
+        return imported
+    }
+
+    private func importDrawing(from url: URL) throws -> String {
+        // Files from other apps (open-in, Files picker) need this; others ignore it.
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let contents = try Data(contentsOf: url)
+        try Editor().load(bytes: contents)
+        return try store.add(contents, named: url.deletingPathExtension().lastPathComponent)
     }
 
     /// Gives a Drawing another name; tells the user if that name is taken or
@@ -98,4 +132,9 @@ final class Gallery {
             failure = message
         }
     }
+}
+
+extension UTType {
+    /// A `.excalidraw` file, as declared in the app's Info.plist.
+    static let excalidraw = UTType(importedAs: "com.excalidraw.drawing", conformingTo: .json)
 }

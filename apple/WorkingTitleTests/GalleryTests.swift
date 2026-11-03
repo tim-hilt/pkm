@@ -206,4 +206,60 @@ import Testing
         gallery.close()
         #expect(try store.open("broken") == junk)
     }
+
+    // MARK: Import
+
+    private func file(_ name: String, _ contents: Data) throws -> URL {
+        let folder = FileManager.default.temporaryDirectory
+            .appending(path: "GalleryImport-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = folder.appending(path: name, directoryHint: .notDirectory)
+        try contents.write(to: url)
+        return url
+    }
+
+    @Test func anImportedFileBecomesADrawingNamedAfterIt() throws {
+        let url = try file("Flowchart.excalidraw", Data(contentsOf: SampleDrawing.url))
+        let gallery = Gallery(store: store)
+
+        let names = gallery.importDrawings(from: [url])
+
+        #expect(names == ["Flowchart"])
+        #expect(gallery.drawings.map(\.name) == ["Flowchart"])
+        #expect(try store.open("Flowchart") == Data(contentsOf: url))
+        #expect(FileManager.default.fileExists(atPath: url.path))
+        #expect(gallery.failure == nil)
+    }
+
+    @Test func importingAFileWhoseNameIsTakenKeepsBothDrawings() throws {
+        try store.save(Editor().save(), as: "Flowchart")
+        let url = try file("Flowchart.excalidraw", Data(contentsOf: SampleDrawing.url))
+        let gallery = Gallery(store: store)
+
+        let names = gallery.importDrawings(from: [url])
+
+        #expect(names == ["Flowchart 2"])
+        #expect(Set(gallery.drawings.map(\.name)) == ["Flowchart", "Flowchart 2"])
+    }
+
+    @Test func anInvalidFileIsNotImportedAndTellsTheUser() throws {
+        let bad = try file("Broken.excalidraw", Data("not json".utf8))
+        let good = try file("Good.excalidraw", Editor().save())
+        let gallery = Gallery(store: store)
+
+        let names = gallery.importDrawings(from: [bad, good])
+
+        #expect(names == ["Good"])
+        #expect(gallery.drawings.map(\.name) == ["Good"])
+        #expect(gallery.failure?.contains("“Broken.excalidraw”") == true)
+    }
+
+    @Test func aMissingFileTellsTheUser() {
+        let gallery = Gallery(store: store)
+
+        let names = gallery.importDrawings(from: [URL(filePath: "/nonexistent/Gone.excalidraw")])
+
+        #expect(names.isEmpty)
+        #expect(gallery.failure != nil)
+    }
 }

@@ -75,13 +75,17 @@ struct DrawingStore: Sendable {
     /// Makes a new Drawing named "Untitled <date time>" (made distinct if that
     /// name is taken) holding `contents`, and returns its name.
     func create(at date: Date = .now, in timeZone: TimeZone = .current, contents: Data) throws -> String {
-        let base = "Untitled \(Self.format(date, in: timeZone))"
-        var name = base
-        var number = 2
-        while FileManager.default.fileExists(atPath: try url(for: name).path) {
-            name = "\(base) \(number)"
-            number += 1
-        }
+        try add(contents, named: "Untitled \(Self.format(date, in: timeZone))")
+    }
+
+    /// Makes a new Drawing holding `contents` (an imported file, say) named
+    /// `name`, or "<name> 2", "<name> 3", … if that is taken, and returns the
+    /// name. Never replaces another Drawing. A name that cannot be used
+    /// becomes "Imported".
+    func add(_ contents: Data, named name: String) throws -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = (try? url(for: trimmed)) == nil ? "Imported" : trimmed
+        let name = try distinctName(from: base)
         try save(contents, as: name)
         return name
     }
@@ -120,15 +124,18 @@ struct DrawingStore: Sendable {
     /// 2", …) and returns it. The copy is the newest Drawing.
     func duplicate(_ name: String) throws -> String {
         let contents = try open(name)
-        let base = "\(name) copy"
-        var copy = base
+        return try add(contents, named: "\(name) copy")
+    }
+
+    /// `base`, or the first of "<base> 2", "<base> 3", … no Drawing has.
+    private func distinctName(from base: String) throws -> String {
+        var name = base
         var number = 2
-        while FileManager.default.fileExists(atPath: try url(for: copy).path) {
-            copy = "\(base) \(number)"
+        while FileManager.default.fileExists(atPath: try url(for: name).path) {
+            name = "\(base) \(number)"
             number += 1
         }
-        try save(contents, as: copy)
-        return copy
+        return name
     }
 
     /// Removes the Drawing and its caches. There is no way back.

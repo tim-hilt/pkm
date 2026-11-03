@@ -26,6 +26,20 @@ targets:
       properties:
         # Drawings live in Documents, which Files (iOS) and Finder show.
         UIFileSharingEnabled: true
+        # `.excalidraw` files open in the app (share sheet, open-in, Finder)
+        # and are imported as new Drawings.
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: com.excalidraw.drawing
+            UTTypeDescription: Excalidraw Drawing
+            UTTypeConformsTo: [public.json]
+            UTTypeTagSpecification:
+              public.filename-extension: [excalidraw]
+              public.mime-type: [application/vnd.excalidraw+json]
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Excalidraw Drawing
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [com.excalidraw.drawing]
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
     settings:
