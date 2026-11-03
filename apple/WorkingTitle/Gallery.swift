@@ -9,7 +9,7 @@ final class Gallery {
     private(set) var drawings: [DrawingStore.Entry] = []
     /// The Drawing shown in the Canvas, or `nil` while the Gallery is shown.
     private(set) var open: OpenDrawing?
-    /// What went wrong with the last attempt to create or open a Drawing, to
+    /// What went wrong with the last attempt to change a Drawing, to
     /// tell the user.
     private(set) var failure: String?
 
@@ -32,6 +32,30 @@ final class Gallery {
         }
     }
 
+    /// Gives a Drawing another name; tells the user if that name is taken or
+    /// cannot be used.
+    func renameDrawing(named name: String, to newName: String) {
+        attempt("Could not rename “\(name)”.") {
+            _ = try store.rename(name, to: newName)
+            reload()
+        }
+    }
+
+    func duplicateDrawing(named name: String) {
+        attempt("Could not duplicate “\(name)”.") {
+            _ = try store.duplicate(name)
+            reload()
+        }
+    }
+
+    /// Deletes a Drawing for good; the caller confirms with the user first.
+    func deleteDrawing(named name: String) {
+        attempt("Could not delete “\(name)”.") {
+            try store.delete(name)
+            reload()
+        }
+    }
+
     func openDrawing(named name: String) {
         attempt("Could not open “\(name)”.") {
             open = try OpenDrawing(name: name, store: store)
@@ -51,6 +75,10 @@ final class Gallery {
         do {
             failure = nil
             try work()
+        } catch let taken as DrawingStore.NameTaken {
+            failure = "“\(taken.name)” already exists. Choose another name."
+        } catch is DrawingStore.InvalidName {
+            failure = "That name cannot be used. Choose another name."
         } catch {
             failure = message
         }

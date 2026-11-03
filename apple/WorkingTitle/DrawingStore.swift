@@ -4,10 +4,23 @@ import Foundation
 /// app's Documents folder, so that Files and Finder show them; ADR-0003). The
 /// file name is the Drawing's name. All file I/O lives here; the core only
 /// sees bytes.
+///
+/// Whatever the app derives from a Drawing (viewport, thumbnail) is cached
+/// outside that folder, in one subfolder per Drawing (`cacheDirectory(for:)`),
+/// so that it is neither shown in Files nor synced. A cache follows its Drawing
+/// when that is renamed and goes when it is deleted; it is never copied.
 struct DrawingStore: Sendable {
     static let fileExtension = "excalidraw"
 
     let directory: URL
+    let cacheDirectory: URL
+
+    init(
+        directory: URL, cacheDirectory: URL = .cachesDirectory.appending(path: "Drawings", directoryHint: .isDirectory)
+    ) {
+        self.directory = directory
+        self.cacheDirectory = cacheDirectory
+    }
 
     /// A Drawing as listed in the Gallery.
     struct Entry: Equatable, Identifiable, Sendable {
@@ -19,6 +32,9 @@ struct DrawingStore: Sendable {
     /// A name that is empty or would put the file somewhere else than in the
     /// store's folder.
     struct InvalidName: Error, Equatable { let name: String }
+
+    /// Another Drawing already has the name.
+    struct NameTaken: Error, Equatable { let name: String }
 
     /// The Drawings, last modified first.
     func list() throws -> [Entry] {
@@ -61,8 +77,81 @@ struct DrawingStore: Sendable {
         try contents.write(to: url(for: name), options: .atomic)
     }
 
+    /// Gives the Drawing another name and returns it (the given one without
+    /// surrounding whitespace). Throws `NameTaken` rather than replace another
+    /// Drawing; the same name, or only another case of it, is fine.
+    func rename(_ name: String, to newName: String) throws -> String {
+        let newName = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let source = try url(for: name)
+        let target = try url(for: newName)
+        guard FileManager.default.fileExists(atPath: source.path) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        guard newName != name else { return name }
+        if FileManager.default.fileExists(atPath: target.path), !Self.isSameFile(source, target) {
+            throw NameTaken(name: newName)
+        }
+        try Self.move(source, to: target)
+        moveCache(of: name, to: newName)
+        return newName
+    }
+
+    /// Copies the Drawing under a distinct name ("<name> copy", "<name> copy
+    /// 2", …) and returns it. The copy is the newest Drawing.
+    func duplicate(_ name: String) throws -> String {
+        let contents = try open(name)
+        let base = "\(name) copy"
+        var copy = base
+        var number = 2
+        while FileManager.default.fileExists(atPath: try url(for: copy).path) {
+            copy = "\(base) \(number)"
+            number += 1
+        }
+        try save(contents, as: copy)
+        return copy
+    }
+
+    /// Removes the Drawing and its caches. There is no way back.
+    func delete(_ name: String) throws {
+        try FileManager.default.removeItem(at: url(for: name))
+        try? FileManager.default.removeItem(at: cacheDirectory(for: name))
+    }
+
+    /// Where the caches of the Drawing go. The folder may not exist.
+    func cacheDirectory(for name: String) -> URL {
+        cacheDirectory.appending(path: name, directoryHint: .isDirectory)
+    }
+
+    /// Caches can be made again, so a failure here costs nothing but time.
+    private func moveCache(of name: String, to newName: String) {
+        let source = cacheDirectory(for: name)
+        let target = cacheDirectory(for: newName)
+        guard FileManager.default.fileExists(atPath: source.path) else { return }
+        if !Self.isSameFile(source, target) { try? FileManager.default.removeItem(at: target) }
+        do { try Self.move(source, to: target) } catch { try? FileManager.default.removeItem(at: source) }
+    }
+
+    /// Moves, also when the two names differ only in case on a volume that
+    /// ignores case, where they are the same item.
+    private static func move(_ source: URL, to target: URL) throws {
+        guard isSameFile(source, target) else {
+            return try FileManager.default.moveItem(at: source, to: target)
+        }
+        let aside = source.deletingLastPathComponent().appending(path: UUID().uuidString)
+        try FileManager.default.moveItem(at: source, to: aside)
+        try FileManager.default.moveItem(at: aside, to: target)
+    }
+
+    private static func isSameFile(_ a: URL, _ b: URL) -> Bool {
+        let keys: Set<URLResourceKey> = [.fileResourceIdentifierKey]
+        guard let idA = try? a.resourceValues(forKeys: keys).fileResourceIdentifier,
+            let idB = try? b.resourceValues(forKeys: keys).fileResourceIdentifier
+        else { return false }
+        return idA.isEqual(idB)
+    }
+
     private func url(for name: String) throws -> URL {
-        guard !name.isEmpty, !name.contains("/"), name != ".", name != ".." else {
+        guard !name.isEmpty, !name.contains("/"), !name.hasPrefix(".") else {
             throw InvalidName(name: name)
         }
         return directory.appending(path: "\(name).\(Self.fileExtension)", directoryHint: .notDirectory)

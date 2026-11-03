@@ -75,4 +75,72 @@ import Testing
         #expect(gallery.failure != nil)
         #expect(try store.open("broken") == Data("not json".utf8))
     }
+
+    // MARK: Rename, duplicate, delete
+
+    @Test func aRenamedDrawingIsListedUnderItsNewName() throws {
+        try store.save(Editor().save(), as: "old")
+        let gallery = Gallery(store: store)
+
+        gallery.renameDrawing(named: "old", to: "new")
+
+        #expect(gallery.drawings.map(\.name) == ["new"])
+        #expect(gallery.failure == nil)
+    }
+
+    @Test func renamingToATakenNameTellsTheUserAndChangesNothing() throws {
+        try store.save(Data("a".utf8), as: "a")
+        try store.save(Data("b".utf8), as: "b")
+        let gallery = Gallery(store: store)
+
+        gallery.renameDrawing(named: "a", to: "b")
+
+        #expect(gallery.failure?.contains("“b”") == true)
+        #expect(Set(gallery.drawings.map(\.name)) == ["a", "b"])
+        #expect(try store.open("b") == Data("b".utf8))
+    }
+
+    @Test func renamingToAnEmptyNameTellsTheUser() throws {
+        try store.save(Editor().save(), as: "a")
+        let gallery = Gallery(store: store)
+
+        gallery.renameDrawing(named: "a", to: " ")
+
+        #expect(gallery.failure != nil)
+        #expect(gallery.drawings.map(\.name) == ["a"])
+    }
+
+    @Test func aDuplicateIsListedNextToTheOriginal() throws {
+        try store.save(Editor().save(), as: "plan")
+        let gallery = Gallery(store: store)
+
+        gallery.duplicateDrawing(named: "plan")
+
+        #expect(gallery.drawings.count == 2)
+        #expect(gallery.drawings.map(\.name).contains("plan"))
+        #expect(gallery.open == nil, "the Gallery stays")
+        #expect(gallery.failure == nil)
+    }
+
+    @Test func aDeletedDrawingIsGone() throws {
+        try store.save(Editor().save(), as: "a")
+        try store.save(Editor().save(), as: "b")
+        let gallery = Gallery(store: store)
+
+        gallery.deleteDrawing(named: "a")
+
+        #expect(gallery.drawings.map(\.name) == ["b"])
+        #expect(throws: (any Error).self) { try store.open("a") }
+    }
+
+    @Test func aFailedChangeIsClearedByTheNextSuccessfulOne() throws {
+        try store.save(Editor().save(), as: "a")
+        let gallery = Gallery(store: store)
+        gallery.deleteDrawing(named: "missing")
+        #expect(gallery.failure != nil)
+
+        gallery.duplicateDrawing(named: "a")
+
+        #expect(gallery.failure == nil)
+    }
 }

@@ -8,13 +8,28 @@ import Testing
 /// see what a user would see in Files or Finder.
 @Suite struct DrawingStoreTests {
     private let directory: URL
+    private let cacheDirectory: URL
     private let store: DrawingStore
 
     init() throws {
-        directory = FileManager.default.temporaryDirectory
+        let root = FileManager.default.temporaryDirectory
             .appending(path: "DrawingStoreTests-\(UUID().uuidString)", directoryHint: .isDirectory)
+        directory = root.appending(path: "Documents", directoryHint: .isDirectory)
+        cacheDirectory = root.appending(path: "Caches", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        store = DrawingStore(directory: directory)
+        store = DrawingStore(directory: directory, cacheDirectory: cacheDirectory)
+    }
+
+    /// Puts a cache file (a thumbnail, say) next to the Drawing the way the
+    /// caches of later features will.
+    private func cache(_ name: String, file: String = "thumbnail.png") throws {
+        let folder = store.cacheDirectory(for: name)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data("cached".utf8).write(to: folder.appending(path: file))
+    }
+
+    private func hasCache(_ name: String, file: String = "thumbnail.png") -> Bool {
+        FileManager.default.fileExists(atPath: store.cacheDirectory(for: name).appending(path: file).path)
     }
 
     private func fileNames() throws -> [String] {
@@ -146,5 +161,169 @@ import Testing
 
         #expect(try store.open("sketch") == Data("precious".utf8))
         #expect(try fileNames() == ["sketch.excalidraw"])
+    }
+
+    // MARK: Rename
+
+    @Test func renamingChangesTheFileNameAndKeepsTheContents() throws {
+        try store.save(Data("sketch".utf8), as: "old")
+
+        let name = try store.rename("old", to: "new")
+
+        #expect(name == "new")
+        #expect(try fileNames() == ["new.excalidraw"])
+        #expect(try store.open("new") == Data("sketch".utf8))
+    }
+
+    @Test func renamingKeepsTheCachesOfTheDrawing() throws {
+        try store.save(Data("sketch".utf8), as: "old")
+        try cache("old")
+
+        _ = try store.rename("old", to: "new")
+
+        #expect(hasCache("new"))
+        #expect(!hasCache("old"))
+    }
+
+    @Test func renamingToATakenNameFailsAndChangesNothing() throws {
+        try store.save(Data("a".utf8), as: "a")
+        try store.save(Data("b".utf8), as: "b")
+
+        #expect(throws: DrawingStore.NameTaken(name: "b")) { try store.rename("a", to: "b") }
+
+        #expect(try store.open("a") == Data("a".utf8))
+        #expect(try store.open("b") == Data("b".utf8))
+    }
+
+    @Test func renamingToTheSameNameChangesNothing() throws {
+        try store.save(Data("a".utf8), as: "a")
+
+        #expect(try store.rename("a", to: "a") == "a")
+
+        #expect(try fileNames() == ["a.excalidraw"])
+    }
+
+    @Test func renamingOnlyTheCaseKeepsTheDrawing() throws {
+        try store.save(Data("a".utf8), as: "sketch")
+
+        #expect(try store.rename("sketch", to: "Sketch") == "Sketch")
+
+        #expect(try fileNames() == ["Sketch.excalidraw"])
+        #expect(try store.open("Sketch") == Data("a".utf8))
+    }
+
+    @Test func renamingTrimsSurroundingWhitespace() throws {
+        try store.save(Data("a".utf8), as: "a")
+
+        #expect(try store.rename("a", to: "  spaced \n") == "spaced")
+
+        #expect(try fileNames() == ["spaced.excalidraw"])
+    }
+
+    @Test func renamingToANameThatIsNotUsableFails() throws {
+        try store.save(Data("a".utf8), as: "a")
+
+        for name in ["", "   ", "a/b", "..", ".hidden"] {
+            #expect(throws: DrawingStore.InvalidName.self) { try store.rename("a", to: name) }
+        }
+        #expect(try fileNames() == ["a.excalidraw"])
+    }
+
+    @Test func renamingAMissingDrawingFails() {
+        #expect(throws: (any Error).self) { try store.rename("missing", to: "new") }
+    }
+
+    // MARK: Duplicate
+
+    @Test func aDuplicateIsACopyUnderADistinctName() throws {
+        try store.save(Data("sketch".utf8), as: "plan")
+
+        let copy = try store.duplicate("plan")
+
+        #expect(copy != "plan")
+        #expect(copy.hasPrefix("plan"))
+        #expect(try store.open(copy) == Data("sketch".utf8))
+        #expect(try store.open("plan") == Data("sketch".utf8))
+        #expect(try fileNames().count == 2)
+    }
+
+    @Test func duplicatesOfTheSameDrawingGetDistinctNames() throws {
+        try store.save(Data("sketch".utf8), as: "plan")
+
+        let names = try (0..<3).map { _ in try store.duplicate("plan") }
+
+        #expect(Set(names + ["plan"]).count == 4)
+        #expect(try fileNames().count == 4)
+    }
+
+    @Test func aDuplicateIsTheNewestDrawing() throws {
+        try store.save(Data("a".utf8), as: "plan")
+        try setModified("plan", Date(timeIntervalSince1970: 1000))
+
+        let copy = try store.duplicate("plan")
+
+        #expect(try store.list().map(\.name) == [copy, "plan"])
+    }
+
+    @Test func duplicatingAMissingDrawingFails() {
+        #expect(throws: (any Error).self) { try store.duplicate("missing") }
+    }
+
+    // MARK: Delete
+
+    @Test func deletingRemovesTheFile() throws {
+        try store.save(Data("a".utf8), as: "a")
+        try store.save(Data("b".utf8), as: "b")
+
+        try store.delete("a")
+
+        #expect(try fileNames() == ["b.excalidraw"])
+        #expect(try store.list().map(\.name) == ["b"])
+    }
+
+    @Test func deletingRemovesTheCachesOfTheDrawingOnly() throws {
+        try store.save(Data("a".utf8), as: "a")
+        try store.save(Data("b".utf8), as: "b")
+        try cache("a")
+        try cache("a", file: "viewport.json")
+        try cache("b")
+
+        try store.delete("a")
+
+        #expect(!hasCache("a"))
+        #expect(!hasCache("a", file: "viewport.json"))
+        #expect(hasCache("b"))
+    }
+
+    @Test func deletingADrawingWithoutCachesWorks() throws {
+        try store.save(Data("a".utf8), as: "a")
+
+        try store.delete("a")
+
+        #expect(try fileNames().isEmpty)
+    }
+
+    @Test func aDeletedNameCanBeUsedAgainWithoutOldCaches() throws {
+        try store.save(Data("a".utf8), as: "a")
+        try cache("a")
+        try store.delete("a")
+
+        try store.save(Data("new".utf8), as: "a")
+
+        #expect(!hasCache("a"))
+    }
+
+    @Test func deletingAMissingDrawingFails() {
+        #expect(throws: (any Error).self) { try store.delete("missing") }
+    }
+
+    @Test func aDuplicateDoesNotShareTheCachesOfTheOriginal() throws {
+        try store.save(Data("a".utf8), as: "a")
+        try cache("a")
+
+        let copy = try store.duplicate("a")
+        try store.delete("a")
+
+        #expect(!hasCache(copy), "caches are made again for the copy, never borrowed")
     }
 }
