@@ -2,6 +2,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::box_select::BoxSelect;
 use crate::draw_shape::{Outcome, ShapeGesture};
 use crate::geometry::Geometry;
 use crate::history::{self, History, Step};
@@ -60,6 +61,9 @@ pub struct Editor {
     /// The Selection being resized or rotated, if the pointer of a drag on a
     /// transform handle is down.
     transforming: Option<TransformGesture>,
+    /// The box being dragged over empty Canvas, if the pointer of such a drag
+    /// is down.
+    box_selecting: Option<BoxSelect>,
     /// The kind of the last pointer seen, which the handles of the overlay
     /// are sized for.
     last_pointer: PointerKind,
@@ -103,6 +107,7 @@ impl Editor {
             history: History::default(),
             moving: None,
             transforming: None,
+            box_selecting: None,
             last_pointer: PointerKind::Finger,
             overlay_revision: 0,
             overlay_zoom: 1.0,
@@ -123,6 +128,7 @@ impl Editor {
         self.shape = None;
         self.moving = None;
         self.transforming = None;
+        self.box_selecting = None;
         self.history.clear();
         self.changed(true);
         Ok(())
@@ -244,6 +250,7 @@ impl Editor {
             self.taps.cancel();
             self.drop_shape();
             self.drop_move();
+            self.drop_box_select();
             self.tool = tool;
         }
     }
@@ -269,7 +276,9 @@ impl Editor {
     /// the shape (see [`crate::draw_shape`]), and with the selection Tool a tap
     /// selects the Element it hits or clears the Selection (see
     /// [`Editor::selection`]) while a drag on an Element moves the Selection
-    /// (see [`crate::move_selection`]).
+    /// (see [`crate::move_selection`]) and a drag on empty Canvas box-selects
+    /// (see [`crate::box_select`]). Shift adds to the Selection, or takes from
+    /// it, instead of replacing it.
     pub fn pointer(&mut self, event: PointerEvent) {
         self.last_pointer = event.kind;
         self.navigation.pointer(event, self.tool == Tool::Hand);
@@ -312,7 +321,10 @@ impl Editor {
 
     /// Whether a pointer is down making a change that is not finished.
     fn is_gesturing(&self) -> bool {
-        self.shape.is_some() || self.moving.is_some() || self.transforming.is_some()
+        self.shape.is_some()
+            || self.moving.is_some()
+            || self.transforming.is_some()
+            || self.box_selecting.is_some()
     }
 
     /// Shows the Scene as undo or redo left it, with `selection` selected
@@ -347,7 +359,8 @@ impl Editor {
 
     /// Selects the Element a tap hits, or clears the Selection if the tap
     /// was a deliberate one on empty Canvas (see [`crate::tap`]); moves the
-    /// Selection with a drag that began on an Element.
+    /// Selection with a drag that began on an Element, and box-selects with
+    /// one that began on empty Canvas.
     ///
     /// Only the selection Tool taps and drags, and never with two fingers
     /// down: they navigate, and must not disturb the Selection, nor leave a
@@ -357,30 +370,41 @@ impl Editor {
             self.taps.cancel();
             self.drop_move();
             self.drop_transform();
+            self.drop_box_select();
             return;
         }
         self.follow_move(event);
         self.follow_transform(event);
+        self.follow_box_select(event);
         match self.taps.track(event) {
-            Some(Recognized::Tap(tap)) => self.tap(tap),
-            Some(Recognized::DragBegan(origin)) => self.begin_move(origin, event),
+            Some(Recognized::Tap(tap)) => self.tap(tap, event.modifiers.shift),
+            Some(Recognized::DragBegan(origin)) => self.begin_drag(origin, event),
             None => {}
         }
     }
 
-    fn tap(&mut self, tap: Tap) {
+    /// With `shift`, a tap on an Element adds it to the Selection or, if it
+    /// is in it, takes it out, and a tap on empty Canvas leaves the Selection
+    /// alone.
+    fn tap(&mut self, tap: Tap, shift: bool) {
         // A tap on a transform handle is a grab that never dragged: it
         // neither selects nor clears the Selection.
         if self.grabbed_handle(tap.x, tap.y, tap.kind).is_some() {
             return;
         }
         let hit = self.hit(tap.x, tap.y, tap.kind);
-        let changed = match hit {
-            Some(id) => self.selection.select_only(&id),
-            None if tap.is_short() => self.selection.clear(),
-            None => false,
-        };
-        if changed {
+        let before = self.selection.clone();
+        match hit {
+            Some(id) if shift => self.selection.toggle(&id),
+            Some(id) => {
+                self.selection.select_only(&id);
+            }
+            None if tap.is_short() && !shift => {
+                self.selection.clear();
+            }
+            None => {}
+        }
+        if self.selection != before {
             self.overlay_revision += 1;
         }
     }
@@ -465,20 +489,35 @@ impl Editor {
         }
     }
 
-    /// Starts moving the Selection if the drag began on an Element: on the
-    /// Selection itself, or else on an Element that becomes the Selection.
-    /// `event` is the step that turned the press into a drag.
-    fn begin_move(&mut self, origin: Origin, event: PointerEvent) {
+    /// Starts what a drag of the selection Tool is for, by where it began: on
+    /// a transform handle it resizes or rotates the Selection, on an Element
+    /// it moves, and on empty Canvas it box-selects. `event` is the step that
+    /// turned the press into a drag.
+    fn begin_drag(&mut self, origin: Origin, event: PointerEvent) {
         self.begin_transform(origin, event);
         if self.transforming.is_some() {
             return;
         }
-        let Some(id) = self.hit(origin.x, origin.y, origin.kind) else {
-            return;
-        };
+        match self.hit(origin.x, origin.y, origin.kind) {
+            Some(id) => self.begin_move(&id, origin, event),
+            None => self.begin_box_select(origin, event),
+        }
+    }
+
+    /// Starts moving the Selection by a drag that began on the Element `id`:
+    /// on the Selection itself, or else on an Element that becomes the
+    /// Selection, or with shift joins it.
+    fn begin_move(&mut self, id: &str, origin: Origin, event: PointerEvent) {
         // Undoing the move also undoes the selecting it began with.
         let step = Step::begin(&self.selection);
-        if self.selection.select_only(&id) {
+        let changed = if self.selection.contains(id) {
+            false
+        } else if event.modifiers.shift {
+            self.selection.add(id)
+        } else {
+            self.selection.select_only(id)
+        };
+        if changed {
             self.overlay_revision += 1;
         }
         let viewport = self.navigation.viewport();
@@ -524,18 +563,77 @@ impl Editor {
         }
     }
 
+    /// Starts a box at where the drag began on empty Canvas; with shift it
+    /// adds to the Selection instead of replacing it.
+    fn begin_box_select(&mut self, origin: Origin, event: PointerEvent) {
+        let start = self.navigation.viewport().scene_at(origin.x, origin.y);
+        self.box_selecting = Some(BoxSelect::begin(
+            event.id,
+            start,
+            &self.selection,
+            event.modifiers.shift,
+        ));
+        self.follow_box_select(event);
+    }
+
+    /// Stretches the box to the pointer that draws it, and selects what it
+    /// encloses.
+    fn follow_box_select(&mut self, event: PointerEvent) {
+        let Some(boxing) = self
+            .box_selecting
+            .as_mut()
+            .filter(|b| b.pointer() == event.id)
+        else {
+            return;
+        };
+        match event.phase {
+            PointerPhase::Down => {}
+            PointerPhase::Move => {
+                let to = self.navigation.viewport().scene_at(event.x, event.y);
+                if boxing.drag_to(to) {
+                    let selection = boxing.selection(&self.scene);
+                    self.show_selection(selection);
+                    self.overlay_revision += 1;
+                }
+            }
+            PointerPhase::Up => {
+                self.box_selecting = None;
+                self.overlay_revision += 1;
+            }
+            PointerPhase::Cancel => self.drop_box_select(),
+        }
+    }
+
+    /// Takes the box being dragged, if any, away, and the Selection back to
+    /// what it was before it.
+    fn drop_box_select(&mut self) {
+        if let Some(boxing) = self.box_selecting.take() {
+            self.show_selection(boxing.cancel());
+            self.overlay_revision += 1;
+        }
+    }
+
+    fn show_selection(&mut self, selection: Selection) {
+        if self.selection != selection {
+            self.selection = selection;
+            self.overlay_revision += 1;
+        }
+    }
+
     /// What clients draw over the Scene: a frame around each selected
-    /// Element and the transform handles of the Selection, in Scene
-    /// coordinates, as geometry in the same format as [`Editor::geometry`]
-    /// (strokes and the handles' fills; no text or images). Clients draw it
-    /// after the Scene and do not cache it by Element: its strokes are as
-    /// wide and as far from the Elements as they are because of the zoom it
-    /// was made for.
+    /// Element, the transform handles of the Selection (or, while one is
+    /// being dragged, the box-select rectangle instead), in Scene coordinates,
+    /// as geometry in the same format as [`Editor::geometry`] (strokes and the
+    /// fills of handles and box; no text or images). Clients draw it after the
+    /// Scene and do not cache it by Element: its strokes are as wide and as far
+    /// from the Elements as they are because of the zoom it was made for.
     pub fn overlay(&self) -> Geometry {
         let zoom = self.navigation.viewport().zoom();
         let selected = self.shown().filter(|e| self.selection.contains(e.id()));
         let mut geometry = overlay::selection(selected, zoom);
-        if let Some(transform_box) = TransformBox::of(&self.scene, &self.selection) {
+        if let Some(boxing) = &self.box_selecting {
+            overlay::box_select(&mut geometry, &boxing.bounds(), zoom);
+        } else if let Some(transform_box) = TransformBox::of(&self.scene, &self.selection) {
             overlay::transform_handles(&mut geometry, &transform_box, self.last_pointer, zoom);
         }
         geometry

@@ -4,6 +4,7 @@
 
 mod arrowhead;
 mod base64;
+mod box_select;
 mod draw_shape;
 mod editor;
 mod frame;

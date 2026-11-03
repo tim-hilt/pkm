@@ -7,7 +7,7 @@
 //! changes (see `Editor::overlay_revision`).
 
 use crate::frame::Frame;
-use crate::geometry::{FillRule, FillStyle, Geometry, StrokeStyle};
+use crate::geometry::{FillRule, FillStyle, Geometry, PartWriter, StrokeStyle};
 use crate::input::PointerKind;
 use crate::path::Point;
 use crate::scene::{Element, ElementType};
@@ -39,12 +39,10 @@ pub(crate) fn selection<'a>(selected: impl Iterator<Item = Element<'a>>, zoom: f
             dash: None,
         };
         let corners = corners(&frame, padding, element.angle());
-        let mut path = geometry.stroke(element.handle(), element.version(), style);
-        let [first, rest @ ..] = corners;
-        path.move_to(first.0, first.1);
-        for (x, y) in rest.into_iter().chain([first]) {
-            path.line_to(x, y);
-        }
+        trace(
+            &mut geometry.stroke(element.handle(), element.version(), style),
+            corners,
+        );
     }
     geometry
 }
@@ -52,9 +50,10 @@ pub(crate) fn selection<'a>(selected: impl Iterator<Item = Element<'a>>, zoom: f
 /// Excalidraw's handle colour: white squares with the selection colour
 /// around them.
 const HANDLE_COLOR: u32 = 0xffff_ffff;
-/// What the parts of the transform handles name, in place of an Element:
-/// clients do not cache the overlay by Element (see [`Editor::overlay`]).
-const TRANSFORM: u32 = u32::MAX;
+/// What overlay parts that belong to no Element (transform handles, the
+/// box-select rectangle) name in its place: clients do not cache the overlay
+/// by Element (see [`Editor::overlay`]).
+const NO_ELEMENT: u32 = u32::MAX;
 
 /// The transform handles of a Selection: a white square with the selection
 /// colour around it at every handle's centre, as big as the pointer's grip
@@ -79,7 +78,7 @@ pub(crate) fn transform_handles(
         // stroke around it begins.
         {
             let mut fill = geometry.fill(
-                TRANSFORM,
+                NO_ELEMENT,
                 0,
                 FillStyle {
                     color: HANDLE_COLOR,
@@ -87,14 +86,10 @@ pub(crate) fn transform_handles(
                     rule: FillRule::NonZero,
                 },
             );
-            let [first, rest @ ..] = corners;
-            fill.move_to(first.0, first.1);
-            for (x, y) in rest.into_iter().chain([first]) {
-                fill.line_to(x, y);
-            }
+            trace(&mut fill, corners);
         }
         let mut stroke = geometry.stroke(
-            TRANSFORM,
+            NO_ELEMENT,
             0,
             StrokeStyle {
                 color: SELECTION_COLOR,
@@ -103,11 +98,49 @@ pub(crate) fn transform_handles(
                 dash: None,
             },
         );
-        let [first, rest @ ..] = corners;
-        stroke.move_to(first.0, first.1);
-        for (x, y) in rest.into_iter().chain([first]) {
-            stroke.line_to(x, y);
-        }
+        trace(&mut stroke, corners);
+    }
+}
+
+/// Excalidraw's box-select fill (`rgba(0, 0, 200, 0.04)`).
+const BOX_FILL: u32 = 0x0000_c8ff;
+const BOX_FILL_OPACITY: f32 = 0.04;
+
+/// The rectangle of a box-select drag over `bounds`: faintly filled, framed
+/// in the selection colour, one view point wide at any zoom.
+pub(crate) fn box_select(geometry: &mut Geometry, bounds: &Frame, zoom: f64) {
+    let corners = corners(bounds, 0.0, 0.0);
+    {
+        let mut fill = geometry.fill(
+            NO_ELEMENT,
+            0,
+            FillStyle {
+                color: BOX_FILL,
+                opacity: BOX_FILL_OPACITY,
+                rule: FillRule::NonZero,
+            },
+        );
+        trace(&mut fill, corners);
+    }
+    let mut stroke = geometry.stroke(
+        NO_ELEMENT,
+        0,
+        StrokeStyle {
+            color: SELECTION_COLOR,
+            width: (FRAME_WIDTH / zoom) as f32,
+            opacity: 1.0,
+            dash: None,
+        },
+    );
+    trace(&mut stroke, corners);
+}
+
+/// A closed chain through `corners`.
+fn trace(path: &mut PartWriter, corners: [(f32, f32); 4]) {
+    let [first, rest @ ..] = corners;
+    path.move_to(first.0, first.1);
+    for (x, y) in rest.into_iter().chain([first]) {
+        path.line_to(x, y);
     }
 }
 

@@ -65,7 +65,7 @@ pub(crate) fn topmost<'a>(
 ) -> Option<Element<'a>> {
     // Only the two topmost hits matter.
     let (mut below, mut top) = (None, None);
-    for element in scene.elements().filter(is_hittable) {
+    for element in scene.elements().filter(is_selectable) {
         let threshold = reach.of(&element);
         // The box of a selected Element is part of it, so that a hollow
         // Element does not lose its selection to a tap on its inside.
@@ -91,7 +91,9 @@ pub(crate) fn topmost<'a>(
     }
 }
 
-fn is_hittable(element: &Element) -> bool {
+/// Whether the Element can be selected at all: shown, unlocked, and not a
+/// label, which belongs to its container.
+pub(crate) fn is_selectable(element: &Element) -> bool {
     !element.is_deleted() && !element.is_locked() && element.container_id().is_none()
 }
 

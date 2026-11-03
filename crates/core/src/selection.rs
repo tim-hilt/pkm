@@ -29,6 +29,23 @@ impl Selection {
         true
     }
 
+    /// Adds `id` to the Selection unless it is in it. Returns whether the
+    /// Selection changed.
+    pub fn add(&mut self, id: &str) -> bool {
+        let absent = !self.contains(id);
+        if absent {
+            self.ids.push(id.to_owned());
+        }
+        absent
+    }
+
+    /// Takes `id` out of the Selection if it is in it, else adds it.
+    pub fn toggle(&mut self, id: &str) {
+        if !self.add(id) {
+            self.ids.retain(|selected| selected != id);
+        }
+    }
+
     /// Selects exactly `ids`, once each, in the order given. Returns whether
     /// the Selection changed.
     pub(crate) fn select(&mut self, ids: impl IntoIterator<Item = String>) -> bool {

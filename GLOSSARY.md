@@ -36,6 +36,10 @@ _Avoid_: Mode, brush
 The set of Elements currently selected for editing.
 _Avoid_: Focus, highlight
 
+**Box-select**:
+Selecting by dragging a rectangle over empty Canvas with the selection Tool: the Selection becomes the Elements the rectangle fully encloses (shift: adds them to it).
+_Avoid_: Marquee, lasso, rubber band
+
 **Action Bar**:
 The small floating bar shown next to a non-empty Selection offering actions such as duplicate, delete, z-order and group; replaces a context menu.
 _Avoid_: Context menu, popup
