@@ -87,7 +87,7 @@ struct CanvasCommands: Commands {
         }
     }
 
-    static func title(_ command: Command) -> String {
+    static func title(_ command: Command) -> LocalizedStringResource {
         switch command {
         case .setTool(let tool): ToolBar.name(tool)
         case .toggleToolLock: "Keep Tool Selected"

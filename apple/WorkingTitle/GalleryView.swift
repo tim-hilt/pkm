@@ -31,6 +31,8 @@ struct GalleryView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("drawing-\(drawing.name)")
+                        // VoiceOver reaches the menu's actions from the card itself.
+                        .accessibilityActions { actions(for: drawing) }
                         .overlay(alignment: .topTrailing) {
                             Menu {
                                 actions(for: drawing)

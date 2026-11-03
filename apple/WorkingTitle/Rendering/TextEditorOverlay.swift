@@ -127,7 +127,7 @@ final class TextEditorOverlay: NSObject {
             view.textContainer?.lineFragmentPadding = 0
             view.textContainer?.widthTracksTextView = true
             view.textContainerInset = NSSize(width: Self.caretRoom, height: 0)
-            view.setAccessibilityLabel("Text")
+            view.setAccessibilityLabel(String(localized: "Text"))
         #else
             let view = TextEditorTextView(frame: .zero, textContainer: nil)
             view.delegate = self
@@ -135,7 +135,7 @@ final class TextEditorOverlay: NSObject {
             view.isScrollEnabled = false
             view.textContainer.lineFragmentPadding = 0
             view.textContainerInset = UIEdgeInsets(top: 0, left: Self.caretRoom, bottom: 0, right: Self.caretRoom)
-            view.accessibilityLabel = "Text"
+            view.accessibilityLabel = String(localized: "Text")
         #endif
         self.view = view
         self.text = text

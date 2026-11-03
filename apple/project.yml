@@ -3,6 +3,7 @@
 name: WorkingTitle
 options:
   bundleIdPrefix: com.timhilt
+  developmentLanguage: en
   deploymentTarget:
     iOS: "26.0"
     macOS: "27.0"
@@ -50,6 +51,10 @@ targets:
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "6.0"
+        # User-facing strings live in WorkingTitle/Localizable.xcstrings.
+        SWIFT_EMIT_LOC_STRINGS: YES
+        LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+        STRING_CATALOG_GENERATE_SYMBOLS: NO
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_FILE: Config/Info.plist
         INFOPLIST_KEY_CFBundleDisplayName: WorkingTitle

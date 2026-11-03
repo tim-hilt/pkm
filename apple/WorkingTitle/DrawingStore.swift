@@ -84,7 +84,7 @@ struct DrawingStore: Sendable {
     /// becomes "Imported".
     func add(_ contents: Data, named name: String) throws -> String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let base = (try? url(for: trimmed)) == nil ? "Imported" : trimmed
+        let base = (try? url(for: trimmed)) == nil ? String(localized: "Imported") : trimmed
         let name = try distinctName(from: base)
         try save(contents, as: name)
         return name

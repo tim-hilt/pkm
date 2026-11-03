@@ -27,12 +27,13 @@ struct DrawingView: View {
             onSceneChange: { drawing.editorDidChange() }
         )
         .ignoresSafeArea()
-        .overlay { ActionBarView(controller: controller) }
+        .overlay { ActionBarView(controller: controller).dynamicTypeSize(...Self.largestChromeType) }
         .focusedSceneValue(controller)
         .overlay {
             GeometryReader { container in
                 chrome(in: container.size)
             }
+            .dynamicTypeSize(...Self.largestChromeType)
         }
         // Whatever leaves the Drawing (background, closing the window, quitting)
         // saves it at once.
@@ -46,6 +47,11 @@ struct DrawingView: View {
             }
         #endif
     }
+
+    /// Chrome text and glyphs follow Dynamic Type up to this size; beyond it
+    /// they would outgrow Excalidraw's fixed 36 pt controls. The Canvas keeps
+    /// the Drawing's own font sizes whatever the setting.
+    static let largestChromeType = DynamicTypeSize.accessibility1
 
     /// Excalidraw's floating controls, laid out per `DrawingLayout` for the
     /// container's current size, so that they switch on every resize (Split
@@ -202,10 +208,10 @@ private struct MainMenu: View {
 struct ToolBar: View {
     let controller: CanvasController
 
-    static func name(_ tool: Tool) -> String { tools.first { $0.0 == tool }!.1 }
+    static func name(_ tool: Tool) -> LocalizedStringResource { tools.first { $0.0 == tool }!.1 }
     static func symbol(_ tool: Tool) -> String { tools.first { $0.0 == tool }!.2 }
 
-    private static let tools: [(Tool, String, String)] = [
+    private static let tools: [(Tool, LocalizedStringResource, String)] = [
         (.hand, "Hand", "hand.raised"),
         (.selection, "Selection", "cursorarrow"),
         (.rectangle, "Rectangle", "square"),
@@ -247,17 +253,17 @@ struct ToolBar: View {
     }
 
     private func toolButton(
-        _ name: String, symbol: String, checked: Bool, action: @escaping () -> Void
+        _ name: LocalizedStringResource, symbol: String, checked: Bool, action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 15))
+                .font(.subheadline)
                 .foregroundStyle(checked ? checkedGlyph : .primary)
                 .controlButton()
                 .background(checked ? checkedFill : .clear, in: RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(name)
+        .accessibilityLabel(Text(name))
         .accessibilityAddTraits(checked ? .isSelected : [])
     }
 }
@@ -343,13 +349,13 @@ private struct MobileToolButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: ToolBar.symbol(tool))
-                .font(.system(size: 15))
+                .font(.subheadline)
                 .foregroundStyle(checked ? checkedGlyph : .primary)
                 .controlButton()
                 .background(checked ? checkedFill : .clear, in: RoundedRectangle(cornerRadius: 4))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(ToolBar.name(tool))
+        .accessibilityLabel(Text(ToolBar.name(tool)))
         .accessibilityAddTraits(checked ? .isSelected : [])
     }
 }
