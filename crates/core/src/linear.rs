@@ -107,6 +107,26 @@ fn sketch(element: &Element, points: &[Point]) -> Sketch {
     }
 }
 
+/// The smooth curve through the points of a line or arrow that is rounded
+/// and has three points or more to bend at, in the Element's own frame: a
+/// move to the first point, then a cubic for each segment. Excalidraw gets the
+/// curve from rough.js, without any of its jitter, and so does this. `None`
+/// for Elements that are drawn straight.
+pub(crate) fn exact_curve(element: &Element) -> Option<Vec<Op>> {
+    let points = element.points();
+    if element.roundness().is_none() || element.is_elbow_arrow() || points.len() < 3 {
+        return None;
+    }
+    const EXACT: Style = Style {
+        roughness: 0.0,
+        preserve_vertices: true,
+        multi_stroke: false,
+        curve_fitting: 0.95,
+        fill: None,
+    };
+    Some(Sketcher::new(element.seed(), EXACT).curve(&points).outline)
+}
+
 /// The corners (top left, bottom right) in the Scene of the box Excalidraw
 /// takes for the line or arrow: around its sketched stroke, jitter included,
 /// but not the arrowheads. `None` if the stroke has no curves.

@@ -92,6 +92,8 @@ pub enum Tool {
     Rectangle,
     Diamond,
     Ellipse,
+    Line,
+    Arrow,
 }
 
 /// What the Canvas shows; see [`workingtitle_core::Viewport`]. Small and
@@ -265,6 +267,19 @@ impl Editor {
     /// The ids of the selected Elements, in the order they were selected.
     pub fn selection(&self) -> Vec<String> {
         self.editor().selection().to_vec()
+    }
+
+    /// The indices of the selected points of the selected line or arrow; see
+    /// [`workingtitle_core::Editor::selected_points`].
+    pub fn selected_points(&self) -> Vec<u64> {
+        let points = self.editor().selected_points().to_vec();
+        points.into_iter().map(|i| i as u64).collect()
+    }
+
+    /// Deletes the selected points of the selected line or arrow; see
+    /// [`workingtitle_core::Editor::delete_selected_points`].
+    pub fn delete_selected_points(&self) {
+        self.editor().delete_selected_points();
     }
 
     /// Differs from before whenever [`Editor::overlay`] may: read it after

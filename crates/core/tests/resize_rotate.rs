@@ -489,17 +489,20 @@ const ARROW: &str = r##"{"id":"a","type":"arrow","x":100,"y":100,"width":100,"he
     "points":[[0,0],[100,50]],"version":3,"versionNonce":7}"##;
 
 #[test]
-fn a_line_or_arrow_alone_has_no_handles() {
+fn a_line_or_arrow_alone_has_handles_on_its_points_instead_of_transform_handles() {
     let mut editor = editor_with(&[ARROW]);
     tap(&mut editor, "mouse", (150.0, 125.0), 0.0);
 
-    // A lone line or arrow is edited at its points (a later issue), so it
-    // is framed but carries no handles.
+    // A lone line or arrow is edited at its points (see `edit_points.rs`): a
+    // handle on each of its two points and one in the middle of its segment,
+    // but no eight to resize and one to rotate.
     let overlay = editor.overlay();
-    assert!(
-        overlay.parts().iter().all(|p| p.element != u32::MAX),
-        "no handle parts"
-    );
+    let handles = overlay
+        .parts()
+        .iter()
+        .filter(|p| p.element == u32::MAX && p.kind == PartKind::Fill as u32)
+        .count();
+    assert_eq!(handles, 3);
 }
 
 #[test]

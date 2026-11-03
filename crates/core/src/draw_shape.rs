@@ -17,7 +17,7 @@ use crate::style::Style;
 /// radius (the Element's size permitting), those of the other shapes a
 /// proportion of their size.
 const ADAPTIVE_RADIUS: f64 = 3.0;
-const PROPORTIONAL_RADIUS: f64 = 2.0;
+pub(crate) const PROPORTIONAL_RADIUS: f64 = 2.0;
 
 /// A shape being drawn by one pointer.
 #[derive(Debug)]
@@ -129,21 +129,34 @@ fn spanned(origin: (f64, f64), to: (f64, f64), square: bool) -> (f64, f64, f64, 
     (x, y, width, height)
 }
 
-/// A shape at `origin` without size, with all the members and in the order
-/// of an Element Excalidraw creates (`newElement`), so that excalidraw.com
-/// reads it as its own. The fractional `index` is left for Excalidraw to
-/// assign, which it does for every Element that has none when loading.
+/// A shape at `origin` without size; see [`new_element`].
 fn new_shape(
     kind: ElementType,
     entropy: &mut Entropy,
     style: &Style,
-    (x, y): (f64, f64),
+    origin: (f64, f64),
 ) -> Object {
     let (type_name, roundness) = match kind {
         ElementType::Diamond => ("diamond", PROPORTIONAL_RADIUS),
         ElementType::Ellipse => ("ellipse", PROPORTIONAL_RADIUS),
         _ => ("rectangle", ADAPTIVE_RADIUS),
     };
+    new_element(type_name, roundness, entropy, style, origin)
+}
+
+/// An Element of `type_name` at `origin` without size, with all the members
+/// and in the order of one Excalidraw creates (`newElement`), so that
+/// excalidraw.com reads it as its own: `roundness` is the type of its rounded
+/// corners. Members of the type itself are for the caller to add. The
+/// fractional `index` is left for Excalidraw to assign, which it does for
+/// every Element that has none when loading.
+pub(crate) fn new_element(
+    type_name: &str,
+    roundness: f64,
+    entropy: &mut Entropy,
+    style: &Style,
+    (x, y): (f64, f64),
+) -> Object {
     let text = |s: &str| Value::String(s.to_owned());
     let number = Value::Number;
     let now = now_ms();

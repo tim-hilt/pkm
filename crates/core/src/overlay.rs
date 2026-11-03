@@ -6,6 +6,7 @@
 //! at any zoom, so they are made for one zoom; clients ask again when it
 //! changes (see `Editor::overlay_revision`).
 
+use crate::edit_points::PointHandles;
 use crate::frame::Frame;
 use crate::geometry::{FillRule, FillStyle, Geometry, PartWriter, StrokeStyle};
 use crate::input::PointerKind;
@@ -74,32 +75,70 @@ pub(crate) fn transform_handles(
                     (cy + dx * sin + dy * cos) as f32,
                 )
             });
-        // A writer holds the geometry, so the fill is finished before the
-        // stroke around it begins.
-        {
-            let mut fill = geometry.fill(
-                NO_ELEMENT,
-                0,
-                FillStyle {
-                    color: HANDLE_COLOR,
-                    opacity: 1.0,
-                    rule: FillRule::NonZero,
-                },
-            );
-            trace(&mut fill, corners);
-        }
-        let mut stroke = geometry.stroke(
+        framed(geometry, corners, HANDLE_COLOR, zoom);
+    }
+}
+
+/// `corners` filled with `fill` and framed in the selection colour, one view
+/// point wide at any zoom: what a handle looks like.
+fn framed(geometry: &mut Geometry, corners: [(f32, f32); 4], fill: u32, zoom: f64) {
+    // A writer holds the geometry, so the fill is finished before the stroke
+    // around it begins.
+    {
+        let mut fill = geometry.fill(
             NO_ELEMENT,
             0,
-            StrokeStyle {
-                color: SELECTION_COLOR,
-                width: (FRAME_WIDTH / zoom) as f32,
+            FillStyle {
+                color: fill,
                 opacity: 1.0,
-                dash: None,
+                rule: FillRule::NonZero,
             },
         );
-        trace(&mut stroke, corners);
+        trace(&mut fill, corners);
     }
+    let mut stroke = geometry.stroke(
+        NO_ELEMENT,
+        0,
+        StrokeStyle {
+            color: SELECTION_COLOR,
+            width: (FRAME_WIDTH / zoom) as f32,
+            opacity: 1.0,
+            dash: None,
+        },
+    );
+    trace(&mut stroke, corners);
+}
+
+/// The handles of the points of the line or arrow that is alone in the
+/// Selection: a square on every point, filled with the selection colour for
+/// the `selected` ones, and a smaller one in the middle of segments that are
+/// long enough. As big as the pointer's grip makes them.
+pub(crate) fn point_handles(
+    geometry: &mut Geometry,
+    handles: &PointHandles,
+    selected: &[usize],
+    kind: PointerKind,
+    zoom: f64,
+) {
+    let half = Grip::of(kind).visual / zoom / 2.0;
+    for (index, &at) in handles.points().iter().enumerate() {
+        let fill = if selected.contains(&index) {
+            SELECTION_COLOR
+        } else {
+            HANDLE_COLOR
+        };
+        framed(geometry, square(at, half), fill, zoom);
+    }
+    for at in handles.middles() {
+        framed(geometry, square(at, half / 2.0), HANDLE_COLOR, zoom);
+    }
+}
+
+/// The corners of the square around `centre` that reaches `half` to each
+/// side.
+fn square((cx, cy): Point, half: f64) -> [(f32, f32); 4] {
+    [(-half, -half), (half, -half), (half, half), (-half, half)]
+        .map(|(dx, dy)| ((cx + dx) as f32, (cy + dy) as f32))
 }
 
 /// Excalidraw's box-select fill (`rgba(0, 0, 200, 0.04)`).

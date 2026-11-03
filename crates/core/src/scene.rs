@@ -371,6 +371,42 @@ impl Scene {
         self.revise(handle, nonce, [("x", x), ("y", y)]);
     }
 
+    /// Gives the line or arrow with `handle` the `points`, which are relative
+    /// to its position `(x, y)`, and makes it a new version of itself, see
+    /// [`Scene::revise`]. Its width and height become the extent of the
+    /// points, as in Excalidraw (`getSizeFromPoints`).
+    pub(crate) fn set_points(
+        &mut self,
+        handle: u32,
+        (x, y): (f64, f64),
+        points: &[(f64, f64)],
+        nonce: f64,
+    ) {
+        let extent = |axis: fn(&(f64, f64)) -> f64| {
+            let values = points.iter().map(axis);
+            let max = values.clone().fold(f64::NEG_INFINITY, f64::max);
+            let min = values.fold(f64::INFINITY, f64::min);
+            if points.is_empty() { 0.0 } else { max - min }
+        };
+        let width = extent(|p| p.0);
+        let height = extent(|p| p.1);
+        let points = points
+            .iter()
+            .map(|&(px, py)| Value::Array(vec![Value::Number(px), Value::Number(py)]))
+            .collect();
+        self.update(
+            handle,
+            nonce,
+            [
+                ("x", Value::Number(x)),
+                ("y", Value::Number(y)),
+                ("width", Value::Number(width)),
+                ("height", Value::Number(height)),
+                ("points", Value::Array(points)),
+            ],
+        );
+    }
+
     /// Sets the numeric `members` of the Element with `handle` and makes it
     /// a new version of itself, see [`Scene::update`].
     fn revise<const N: usize>(

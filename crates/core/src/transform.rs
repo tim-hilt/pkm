@@ -15,7 +15,7 @@
 //! Shift snaps the rotation to fifteenths of a turn.
 //!
 //! A line or arrow alone has no transform handles: it is edited at its
-//! points instead (a later issue). An arrow routed at right angles is
+//! points instead (see [`crate::edit_points`]). An arrow routed at right angles is
 //! transformed like any other line here, points and all, where Excalidraw
 //! re-routes it; the core keeps its points as the file has them.
 
@@ -31,7 +31,7 @@ use crate::transform_handles::{Handle, TransformBox};
 
 /// Excalidraw's `SHIFT_LOCKING_ANGLE`: the angle a snapped rotation is a
 /// multiple of.
-const SHIFT_LOCKING_ANGLE: f64 = std::f64::consts::PI / 12.0;
+pub(crate) const SHIFT_LOCKING_ANGLE: f64 = std::f64::consts::PI / 12.0;
 /// Excalidraw's `MIN_FONT_SIZE`: a resize that would make a font smaller
 /// than this does not happen.
 const MIN_FONT_SIZE: f64 = 1.0;

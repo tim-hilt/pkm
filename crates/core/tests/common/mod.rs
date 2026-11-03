@@ -93,6 +93,31 @@ pub fn editor_with_element(element: &str) -> Editor {
     editor
 }
 
+/// The Elements of the saved Drawing, in file order.
+pub fn saved_elements(editor: &Editor) -> Vec<Value> {
+    let saved = String::from_utf8(editor.save()).unwrap();
+    parse(&saved)
+        .unwrap()
+        .get("elements")
+        .and_then(Value::as_array)
+        .unwrap()
+        .to_vec()
+}
+
+/// The `points` of a saved line or arrow.
+pub fn saved_points(element: &Value) -> Vec<(f64, f64)> {
+    element
+        .get("points")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .map(|p| {
+            let p = p.as_array().unwrap();
+            (p[0].as_f64().unwrap(), p[1].as_f64().unwrap())
+        })
+        .collect()
+}
+
 /// The ops of `part` as `(verb, operands)`.
 pub fn ops(geometry: &Geometry, part: &Part) -> Vec<(Verb, Vec<f32>)> {
     let verbs = &geometry.verbs()[part.verb_start as usize..][..part.verb_count as usize];

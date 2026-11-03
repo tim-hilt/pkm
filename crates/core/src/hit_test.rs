@@ -18,8 +18,9 @@ use std::f64::consts::TAU;
 use crate::frame::Frame;
 use crate::freedraw;
 use crate::input::PointerKind;
+use crate::linear;
 use crate::path::{Point, Segment, is_loop, to_cubics};
-use crate::rough::{Op, Sketcher, Style};
+use crate::rough::Op;
 use crate::scene::{Element, ElementType, Scene};
 use crate::selection::Selection;
 use crate::shape::{diamond_corners, parse_color, rounded_diamond, rounded_rectangle};
@@ -177,21 +178,11 @@ fn closed_shape(element: &Element) -> Vec<Point> {
 
 /// The path of a line or arrow in the Element's own frame: through its
 /// points, as the smooth curve it is drawn as if it has roundness (and three
-/// points to bend at). Excalidraw gets the curve from rough.js, without any
-/// of its jitter, and so does this.
+/// points to bend at), see [`linear::exact_curve`].
 fn linear_path(element: &Element) -> Vec<Point> {
-    let points = element.points();
-    if element.roundness().is_none() || element.is_elbow_arrow() || points.len() < 3 {
-        return points;
-    }
-    const EXACT: Style = Style {
-        roughness: 0.0,
-        preserve_vertices: true,
-        multi_stroke: false,
-        curve_fitting: 0.95,
-        fill: None,
+    let Some(ops) = linear::exact_curve(element) else {
+        return element.points();
     };
-    let ops = Sketcher::new(element.seed(), EXACT).curve(&points).outline;
     let segments: Vec<Segment> = ops
         .into_iter()
         .map(|op| match op {

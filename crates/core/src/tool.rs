@@ -16,6 +16,11 @@ pub enum Tool {
     Diamond,
     /// Dragging draws an ellipse.
     Ellipse,
+    /// Dragging draws a line of two points, tapping places the points of a
+    /// longer one, see [`crate::draw_linear`].
+    Line,
+    /// The same, with an arrowhead at the end.
+    Arrow,
 }
 
 impl Tool {
@@ -25,7 +30,17 @@ impl Tool {
             Tool::Rectangle => Some(ElementType::Rectangle),
             Tool::Diamond => Some(ElementType::Diamond),
             Tool::Ellipse => Some(ElementType::Ellipse),
-            Tool::Selection | Tool::Hand => None,
+            Tool::Selection | Tool::Hand | Tool::Line | Tool::Arrow => None,
+        }
+    }
+
+    /// The type of Element drawing with this Tool makes, if it draws lines
+    /// or arrows.
+    pub(crate) fn linear(self) -> Option<ElementType> {
+        match self {
+            Tool::Line => Some(ElementType::Line),
+            Tool::Arrow => Some(ElementType::Arrow),
+            _ => None,
         }
     }
 }

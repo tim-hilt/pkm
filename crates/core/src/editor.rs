@@ -3,7 +3,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::box_select::BoxSelect;
+use crate::draw_linear::{LinearDrawing, Update};
 use crate::draw_shape::{Outcome, ShapeGesture};
+use crate::edit_points::{self, Grab, PointDrag, PointHandles, PointSelection};
 use crate::geometry::Geometry;
 use crate::history::{self, History, Step};
 use crate::hit_test::{self, Reach};
@@ -52,6 +54,9 @@ pub struct Editor {
     entropy: Entropy,
     /// The shape being drawn, if the pointer of a shape Tool is down.
     shape: Option<ShapeGesture>,
+    /// The line or arrow being drawn, from its first press until it is
+    /// finished: with tapping that is longer than a pointer is down.
+    linear: Option<LinearDrawing>,
     selection: Selection,
     taps: TapRecognizer,
     /// What can be undone and redone; never saved (see [`crate::history`]).
@@ -61,6 +66,12 @@ pub struct Editor {
     /// The Selection being resized or rotated, if the pointer of a drag on a
     /// transform handle is down.
     transforming: Option<TransformGesture>,
+    /// The points of the selected line or arrow being moved, if the pointer
+    /// of a drag on one of its handles is down.
+    point_dragging: Option<PointDrag>,
+    /// The points of the selected line or arrow that are selected, see
+    /// [`Editor::selected_points`].
+    points: PointSelection,
     /// The box being dragged over empty Canvas, if the pointer of such a drag
     /// is down.
     box_selecting: Option<BoxSelect>,
@@ -102,11 +113,14 @@ impl Editor {
             style: Style::default(),
             entropy: Entropy::from_system(),
             shape: None,
+            linear: None,
             selection: Selection::default(),
             taps: TapRecognizer::default(),
             history: History::default(),
             moving: None,
             transforming: None,
+            point_dragging: None,
+            points: PointSelection::default(),
             box_selecting: None,
             last_pointer: PointerKind::Finger,
             overlay_revision: 0,
@@ -126,8 +140,11 @@ impl Editor {
         // Whatever was being drawn, moved or transformed belonged to the
         // Scene that is gone, and so did what could be undone.
         self.shape = None;
+        self.linear = None;
         self.moving = None;
         self.transforming = None;
+        self.point_dragging = None;
+        self.points.clear();
         self.box_selecting = None;
         self.history.clear();
         self.changed(true);
@@ -243,13 +260,16 @@ impl Editor {
     }
 
     /// Makes `tool` the active Tool; whatever the previous one was doing
-    /// with a pointer still down stops, and a shape it was drawing is gone.
+    /// with a pointer still down stops, and a shape it was drawing is gone. A
+    /// line or arrow that is waiting for its next point is finished as it is.
     pub fn set_tool(&mut self, tool: Tool) {
         if tool != self.tool {
             self.navigation.cancel_drag();
             self.taps.cancel();
             self.drop_shape();
+            self.end_linear();
             self.drop_move();
+            self.drop_point_drag();
             self.drop_box_select();
             self.tool = tool;
         }
@@ -273,18 +293,28 @@ impl Editor {
     /// A step of a finger, Pencil or mouse. Two fingers pan and zoom the
     /// viewport, and so does one pointer with the hand Tool (see
     /// [`crate::navigation`]). With a shape Tool, one pointer dragging draws
-    /// the shape (see [`crate::draw_shape`]), and with the selection Tool a tap
-    /// selects the Element it hits or clears the Selection (see
-    /// [`Editor::selection`]) while a drag on an Element moves the Selection
-    /// (see [`crate::move_selection`]) and a drag on empty Canvas box-selects
-    /// (see [`crate::box_select`]). Shift adds to the Selection, or takes from
-    /// it, instead of replacing it.
+    /// the shape (see [`crate::draw_shape`]), and with the line or arrow Tool
+    /// it draws a line, by dragging or by tapping its points one by one (see
+    /// [`crate::draw_linear`]). With the selection Tool a tap selects the
+    /// Element it hits or clears the Selection (see [`Editor::selection`])
+    /// while a drag on an Element moves the Selection (see
+    /// [`crate::move_selection`]), a drag on a handle of it resizes, rotates
+    /// or, for a line or arrow, edits its points (see [`crate::edit_points`]),
+    /// and a drag on empty Canvas box-selects (see [`crate::box_select`]).
+    /// Shift adds to the Selection, or takes from it, instead of replacing it.
     pub fn pointer(&mut self, event: PointerEvent) {
         self.last_pointer = event.kind;
+        let tool = self.tool;
         self.navigation.pointer(event, self.tool == Tool::Hand);
         self.navigated();
         self.draw_shape(event);
-        self.select(event);
+        self.draw_linear(event);
+        // An event that finished a drawing, and so went back to selection, was
+        // the drawing's: it is not a tap that selects.
+        if tool == Tool::Selection || self.tool != Tool::Selection {
+            self.select(event);
+        }
+        self.sync_points();
     }
 
     /// Whether there is something to undo: the buttons for it are enabled
@@ -303,6 +333,7 @@ impl Editor {
     /// Selection becomes what it was before that change. Does nothing if
     /// there is nothing to undo, or while a pointer is drawing or moving.
     pub fn undo(&mut self) {
+        self.finish_placing();
         if !self.is_gesturing() {
             let selection = self.history.undo(&mut self.scene, &mut self.entropy);
             self.restored(selection);
@@ -313,6 +344,7 @@ impl Editor {
     /// Anything new done since undoing has made that history; see
     /// [`Editor::undo`].
     pub fn redo(&mut self) {
+        self.finish_placing();
         if !self.is_gesturing() {
             let selection = self.history.redo(&mut self.scene, &mut self.entropy);
             self.restored(selection);
@@ -322,8 +354,10 @@ impl Editor {
     /// Whether a pointer is down making a change that is not finished.
     fn is_gesturing(&self) -> bool {
         self.shape.is_some()
+            || self.linear.as_ref().is_some_and(|l| !l.is_placing())
             || self.moving.is_some()
             || self.transforming.is_some()
+            || self.point_dragging.is_some()
             || self.box_selecting.is_some()
     }
 
@@ -335,6 +369,8 @@ impl Editor {
         };
         self.taps.cancel();
         self.selection = history::without_gone(selection, &self.scene);
+        // The points may have been added or taken away: no index is right.
+        self.points.clear();
         self.overlay_revision += 1;
         self.changed(true);
     }
@@ -355,6 +391,7 @@ impl Editor {
         if self.selection.select(ids) {
             self.overlay_revision += 1;
         }
+        self.sync_points();
     }
 
     /// Selects the Element a tap hits, or clears the Selection if the tap
@@ -370,11 +407,13 @@ impl Editor {
             self.taps.cancel();
             self.drop_move();
             self.drop_transform();
+            self.drop_point_drag();
             self.drop_box_select();
             return;
         }
         self.follow_move(event);
         self.follow_transform(event);
+        self.follow_point_drag(event);
         self.follow_box_select(event);
         match self.taps.track(event) {
             Some(Recognized::Tap(tap)) => self.tap(tap, event.modifiers.shift),
@@ -387,8 +426,19 @@ impl Editor {
     /// is in it, takes it out, and a tap on empty Canvas leaves the Selection
     /// alone.
     fn tap(&mut self, tap: Tap, shift: bool) {
-        // A tap on a transform handle is a grab that never dragged: it
-        // neither selects nor clears the Selection.
+        // A tap on a handle is a grab that never dragged: it neither selects
+        // nor clears the Selection. On a point handle it selects the point.
+        if let Some((handles, grab)) = self.grabbed_point(tap.x, tap.y, tap.kind) {
+            if let Grab::Point(index) = grab {
+                if shift {
+                    self.points.toggle(handles.id(), index);
+                } else {
+                    self.points.select_only(handles.id(), index);
+                }
+                self.overlay_revision += 1;
+            }
+            return;
+        }
         if self.grabbed_handle(tap.x, tap.y, tap.kind).is_some() {
             return;
         }
@@ -425,6 +475,140 @@ impl Editor {
         let transform_box = TransformBox::of(&self.scene, &self.selection)?;
         let handle = transform_box.grab(viewport.scene_at(x, y), kind, viewport.zoom())?;
         Some((transform_box, handle))
+    }
+
+    /// The handles of the points of the selected line or arrow, if there is
+    /// one, for a pointer of `kind`.
+    fn point_handles(&self, kind: PointerKind) -> Option<PointHandles> {
+        let zoom = self.navigation.viewport().zoom();
+        PointHandles::of(&self.scene, &self.selection, kind, zoom)
+    }
+
+    /// The point handles, and which of them, a pointer of `kind` that went
+    /// down at the view point `(x, y)` takes hold of, if any.
+    fn grabbed_point(&self, x: f64, y: f64, kind: PointerKind) -> Option<(PointHandles, Grab)> {
+        let viewport = self.navigation.viewport();
+        let handles = self.point_handles(kind)?;
+        let grab = handles.grab(viewport.scene_at(x, y), kind, viewport.zoom())?;
+        Some((handles, grab))
+    }
+
+    /// Starts moving points of the selected line or arrow if the drag began
+    /// on a handle of one: the point is selected, if it is not yet, and moves
+    /// with the other selected points; the middle of a segment gets a point
+    /// that moves.
+    fn begin_point_drag(&mut self, origin: Origin, event: PointerEvent) {
+        let Some((handles, grab)) = self.grabbed_point(origin.x, origin.y, origin.kind) else {
+            return;
+        };
+        let id = handles.id().to_owned();
+        match grab {
+            Grab::Point(index) if self.points.contains(index) => {}
+            Grab::Point(index) if event.modifiers.shift => self.points.add(&id, index),
+            Grab::Point(index) | Grab::Middle(index) => self.points.select_only(&id, index),
+        }
+        self.overlay_revision += 1;
+        let start = self.navigation.viewport().scene_at(origin.x, origin.y);
+        let moving = self.points.indices().to_vec();
+        self.point_dragging = Some(handles.drag(
+            Step::begin(&self.selection),
+            &self.scene,
+            event.id,
+            start,
+            moving,
+            grab,
+        ));
+        self.follow_point_drag(event);
+    }
+
+    /// Takes the points along with the pointer that moves them.
+    fn follow_point_drag(&mut self, event: PointerEvent) {
+        let Some(dragging) = self
+            .point_dragging
+            .as_mut()
+            .filter(|d| d.pointer() == event.id)
+        else {
+            return;
+        };
+        match event.phase {
+            PointerPhase::Down => {}
+            PointerPhase::Move => {
+                let to = self.navigation.viewport().scene_at(event.x, event.y);
+                if dragging.drag_to(&mut self.scene, &mut self.entropy, to) {
+                    self.changed(false);
+                }
+            }
+            PointerPhase::Up => {
+                if let Some(dragging) = self.point_dragging.take() {
+                    self.history
+                        .record(dragging.finish(), &self.scene, &self.selection);
+                }
+            }
+            PointerPhase::Cancel => self.drop_point_drag(),
+        }
+    }
+
+    /// Puts the points being dragged, if any, back where they were.
+    fn drop_point_drag(&mut self) {
+        if let Some(dragging) = self.point_dragging.take() {
+            dragging.cancel(&mut self.scene, &mut self.entropy);
+            self.changed(false);
+        }
+    }
+
+    /// The indices of the points of the selected line or arrow that are
+    /// selected: tapping a point selects it, shift adds to them, and
+    /// dragging one moves them all. Empty unless a line or arrow is the only
+    /// Element selected.
+    pub fn selected_points(&self) -> &[usize] {
+        self.points.indices()
+    }
+
+    /// Deletes the selected points of the selected line or arrow (the
+    /// `delete` command when points are selected, which then takes the place
+    /// of deleting the Element). A line or arrow keeps at least two points: if
+    /// fewer would be left, it is deleted. The point before the first one
+    /// deleted is selected next. Does nothing if no point is selected.
+    pub fn delete_selected_points(&mut self) {
+        self.finish_placing();
+        if self.is_gesturing() {
+            return;
+        }
+        let Some(handles) = self.point_handles(self.last_pointer) else {
+            return;
+        };
+        let deleted = self.points.indices().to_vec();
+        let Some(&first) = deleted.iter().min() else {
+            return;
+        };
+        let mut step = Step::begin(&self.selection);
+        step.touch(&self.scene, handles.id());
+        let remaining = handles.without(&deleted);
+        if remaining.len() < 2 {
+            self.scene
+                .mark_deleted(handles.id(), self.entropy.integer());
+            self.selection.clear();
+            self.points.clear();
+        } else {
+            edit_points::reshape(
+                &mut self.scene,
+                &mut self.entropy,
+                handles.handle(),
+                &remaining,
+            );
+            self.points
+                .select_only(handles.id(), first.saturating_sub(1));
+        }
+        self.history.record(step, &self.scene, &self.selection);
+        self.overlay_revision += 1;
+        self.changed(true);
+    }
+
+    /// Forgets the selected points that the Selection no longer has.
+    fn sync_points(&mut self) {
+        if self.points.retain_existing(&self.scene, &self.selection) {
+            self.overlay_revision += 1;
+        }
     }
 
     /// Starts resizing or rotating the Selection if the drag began on a
@@ -496,6 +680,10 @@ impl Editor {
     fn begin_drag(&mut self, origin: Origin, event: PointerEvent) {
         self.begin_transform(origin, event);
         if self.transforming.is_some() {
+            return;
+        }
+        self.begin_point_drag(origin, event);
+        if self.point_dragging.is_some() {
             return;
         }
         match self.hit(origin.x, origin.y, origin.kind) {
@@ -624,7 +812,9 @@ impl Editor {
 
     /// What clients draw over the Scene: a frame around each selected
     /// Element, the transform handles of the Selection (or, while one is
-    /// being dragged, the box-select rectangle instead), in Scene coordinates,
+    /// being dragged, the box-select rectangle instead; or, for a line or
+    /// arrow that is alone in the Selection, handles on its points), in Scene
+    /// coordinates,
     /// as geometry in the same format as [`Editor::geometry`] (strokes and the
     /// fills of handles and box; no text or images). Clients draw it after the
     /// Scene and do not cache it by Element: its strokes are as wide and as far
@@ -637,6 +827,9 @@ impl Editor {
             overlay::box_select(&mut geometry, &boxing.bounds(), zoom);
         } else if let Some(transform_box) = TransformBox::of(&self.scene, &self.selection) {
             overlay::transform_handles(&mut geometry, &transform_box, self.last_pointer, zoom);
+        } else if let Some(handles) = self.point_handles(self.last_pointer) {
+            let selected = self.points.indices();
+            overlay::point_handles(&mut geometry, &handles, selected, self.last_pointer, zoom);
         }
         geometry
     }
@@ -721,6 +914,95 @@ impl Editor {
             }
             PointerPhase::Cancel if drawing_pointer == Some(event.id) => self.drop_shape(),
             _ => {}
+        }
+    }
+
+    /// Follows the pointer with the line or arrow being drawn, or starts one
+    /// (see [`crate::draw_linear`]).
+    fn draw_linear(&mut self, event: PointerEvent) {
+        let zoom = self.navigation.viewport().zoom();
+        // Two fingers navigate: they place no points, and a line that one of
+        // them began is gone. A line that is waiting for its next point
+        // waits on.
+        if self.navigation.is_pinching() {
+            if let Some(linear) = self.linear.as_mut() {
+                let update = linear.interrupt(&mut self.scene, &mut self.entropy);
+                self.linear_updated(update);
+            }
+            return;
+        }
+        let at = self.navigation.viewport().scene_at(event.x, event.y);
+        if let Some(linear) = self.linear.as_mut() {
+            let update = linear.follow(&mut self.scene, &mut self.entropy, event, at, zoom);
+            self.linear_updated(update);
+        } else if event.phase == PointerPhase::Down
+            && let Some(kind) = self.tool.linear()
+        {
+            self.linear = Some(LinearDrawing::begin(
+                Step::begin(&self.selection),
+                &mut self.scene,
+                &mut self.entropy,
+                &self.style,
+                kind,
+                event.id,
+                event.kind,
+                at,
+            ));
+            self.changed(true);
+        }
+    }
+
+    /// Does what the line being drawn needs after a step of a pointer.
+    fn linear_updated(&mut self, update: Update) {
+        match update {
+            Update::Unchanged => {}
+            Update::Changed => self.changed(false),
+            Update::Finished => self.finish_linear(),
+            Update::Abandoned => self.drop_linear(),
+        }
+    }
+
+    /// Finishes the line being drawn, if any, with the points it has: it
+    /// stays in the Scene and is the latest thing that can be undone. Nothing
+    /// is left of a line without two points. Returns whether there is a line.
+    fn end_linear(&mut self) -> bool {
+        let Some(linear) = self.linear.take() else {
+            return false;
+        };
+        let zoom = self.navigation.viewport().zoom();
+        match linear.finish(&mut self.scene, &mut self.entropy, zoom) {
+            Outcome::Drawn(step) => {
+                self.history.record(step, &self.scene, &self.selection);
+                self.changed(false);
+                true
+            }
+            Outcome::Dropped => {
+                self.changed(true);
+                false
+            }
+        }
+    }
+
+    /// Finishes the line being drawn, and with it the Tool's work: it returns
+    /// to selection unless locked.
+    fn finish_linear(&mut self) {
+        if self.end_linear() && !self.tool_lock {
+            self.tool = Tool::Selection;
+        }
+    }
+
+    /// Finishes the line being drawn if it is waiting for further points.
+    fn finish_placing(&mut self) {
+        if self.linear.as_ref().is_some_and(LinearDrawing::is_placing) {
+            self.finish_linear();
+        }
+    }
+
+    /// Takes the line being drawn, if any, out of the Scene again.
+    fn drop_linear(&mut self) {
+        if let Some(linear) = self.linear.take() {
+            linear.cancel(&mut self.scene);
+            self.changed(true);
         }
     }
 
