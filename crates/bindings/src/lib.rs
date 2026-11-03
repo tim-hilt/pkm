@@ -372,6 +372,21 @@ impl Editor {
         self.editor().set_tool_lock(locked);
     }
 
+    /// Whether Pencil-only drawing is on: the Pencil uses the current Tool
+    /// while fingers only select, pan and zoom. It turns on by itself with
+    /// the first Pencil input unless [`Editor::set_pencil_only_drawing`] was
+    /// called, so read it after forwarding input and store it when it changes.
+    pub fn pencil_only_drawing(&self) -> bool {
+        self.editor().pencil_only_drawing()
+    }
+
+    /// The user's choice in settings, or the stored setting restored at
+    /// launch (call it only if one is stored). Final: a Pencil no longer turns
+    /// it on by itself afterwards.
+    pub fn set_pencil_only_drawing(&self, on: bool) {
+        self.editor().set_pencil_only_drawing(on);
+    }
+
     /// Differs from before whenever the Scene changed; read it after
     /// forwarding input and ask for [`Editor::geometry`] again if it moved.
     pub fn revision(&self) -> u64 {

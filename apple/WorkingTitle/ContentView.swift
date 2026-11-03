@@ -64,6 +64,14 @@ private struct ToolBar: View {
                     set: { controller.setToolLock($0) })
             ) { Label("Keep tool selected", systemImage: controller.toolLock ? "lock" : "lock.open") }
             .toggleStyle(.button)
+            #if !os(macOS)
+                Toggle(
+                    isOn: Binding(
+                        get: { controller.pencilOnlyDrawing },
+                        set: { controller.setPencilOnlyDrawing($0) })
+                ) { Label("Pencil-only drawing", systemImage: "applepencil") }
+                .toggleStyle(.button)
+            #endif
         }
         .labelStyle(.iconOnly)
         .padding(10)

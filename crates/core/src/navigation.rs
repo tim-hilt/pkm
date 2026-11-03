@@ -7,7 +7,8 @@
 //!   same.
 //! * Hand Tool: one pointer of any kind (finger, Pencil, mouse) drags the
 //!   Canvas. A second finger turns it into the two-finger gesture above.
-//!   Without the hand Tool, Pencil and mouse never navigate.
+//!   Without the hand Tool, Pencil and mouse never navigate. Fingers drag the
+//!   Canvas like the hand Tool does in Pencil-only drawing.
 //! * Zoom commands (in, out, reset, fit) act on the view as a whole, so they
 //!   need to know its size.
 
@@ -80,7 +81,8 @@ impl Navigation {
         self.viewport
     }
 
-    /// `hand_tool` tells whether the hand Tool is active.
+    /// `hand_tool` tells whether this pointer drags the Canvas: the hand Tool
+    /// is active, or it is a finger in Pencil-only drawing.
     pub fn pointer(&mut self, event: PointerEvent, hand_tool: bool) {
         if event.kind == PointerKind::Finger {
             self.track_finger(event);

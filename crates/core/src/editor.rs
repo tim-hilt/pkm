@@ -23,6 +23,7 @@ use crate::move_selection::MoveGesture;
 use crate::navigation::{Bounds, Navigation};
 use crate::overlay;
 use crate::path::Point;
+use crate::pencil_only::PencilOnly;
 use crate::properties::{self, Properties, Property};
 use crate::random::Entropy;
 use crate::scene::{Element, ElementType, LoadError, Scene};
@@ -104,6 +105,9 @@ pub struct Editor {
     /// The box being dragged over empty Canvas, if the pointer of such a drag
     /// is down.
     box_selecting: Option<BoxSelect>,
+    /// Whether fingers are held to selecting, panning and zooming, see
+    /// [`Editor::pencil_only_drawing`].
+    pencil_only: PencilOnly,
     /// The kind of the last pointer seen, which the handles of the overlay
     /// are sized for.
     last_pointer: PointerKind,
@@ -161,6 +165,7 @@ impl Editor {
             point_dragging: None,
             points: PointSelection::default(),
             box_selecting: None,
+            pencil_only: PencilOnly::default(),
             last_pointer: PointerKind::Finger,
             overlay_revision: 0,
             overlay_zoom: 1.0,
@@ -336,6 +341,26 @@ impl Editor {
             self.tool = tool;
             self.sync_highlight();
         }
+    }
+
+    /// Whether Pencil-only drawing is on: the Pencil then uses the current
+    /// Tool while fingers only select (a tap selects, whatever the Tool),
+    /// pan (a one-finger drag, anywhere) and zoom, and never create
+    /// Elements; a Pencil drag on empty Canvas box-selects (with the
+    /// selection Tool). Mouse input is not affected. It turns on by itself
+    /// with the first Pencil input, unless [`Editor::set_pencil_only_drawing`]
+    /// has been called. Clients store it, see [`crate::pencil_only`], and
+    /// read it after every input, which may have turned it on.
+    pub fn pencil_only_drawing(&self) -> bool {
+        self.pencil_only.is_on()
+    }
+
+    /// Switches Pencil-only drawing on or off: what the user chose in
+    /// settings, or the setting stored earlier. Pencil input no longer turns
+    /// it on by itself afterwards. Meant for use between gestures: it does
+    /// not call off a drag that is in progress.
+    pub fn set_pencil_only_drawing(&mut self, on: bool) {
+        self.pencil_only.choose(on);
     }
 
     /// Whether the Tool lock is on: the Tool then stays after drawing a shape
@@ -571,16 +596,24 @@ impl Editor {
     /// and a drag on empty Canvas box-selects (see [`crate::box_select`]).
     /// Shift adds to the Selection, or takes from it, instead of replacing it.
     /// Arrows bind to the shapes their ends are put on and follow them when
-    /// they move or change (see [`crate::binding`]).
+    /// they move or change (see [`crate::binding`]). In Pencil-only drawing
+    /// (see [`Editor::pencil_only_drawing`]) none of this is done by fingers,
+    /// which tap to select and drag to pan.
     pub fn pointer(&mut self, event: PointerEvent) {
         self.last_pointer = event.kind;
+        self.pencil_only.observe(event.kind);
+        // A finger in Pencil-only drawing: it pans, and only selects.
+        let finger = self.pencil_only.restricts(event.kind);
         let tool = self.tool;
-        self.navigation.pointer(event, self.tool == Tool::Hand);
+        self.navigation
+            .pointer(event, self.tool == Tool::Hand || finger);
         self.navigated();
-        self.draw_shape(event);
-        self.draw_linear(event);
-        self.draw_stroke(event);
-        self.erase(event);
+        if !finger {
+            self.draw_shape(event);
+            self.draw_linear(event);
+            self.draw_stroke(event);
+            self.erase(event);
+        }
         // An event that finished a drawing, and so went back to selection, was
         // the drawing's: it is not a tap that selects.
         if tool == Tool::Selection || self.tool != Tool::Selection {
@@ -977,9 +1010,13 @@ impl Editor {
     ///
     /// Only the selection Tool taps and drags, and never with two fingers
     /// down: they navigate, and must not disturb the Selection, nor leave a
-    /// move half done.
+    /// move half done. A finger in Pencil-only drawing taps like the
+    /// selection Tool does whatever the Tool is, but its drags are the
+    /// pan's, see [`crate::pencil_only`].
     fn select(&mut self, event: PointerEvent) {
-        let tapping = matches!(self.tool, Tool::Selection | Tool::Text);
+        let finger = self.pencil_only.restricts(event.kind);
+        let tool = if finger { Tool::Selection } else { self.tool };
+        let tapping = matches!(tool, Tool::Selection | Tool::Text);
         if !tapping || self.navigation.is_pinching() {
             self.taps.cancel();
             self.drop_move();
@@ -988,7 +1025,7 @@ impl Editor {
             self.drop_box_select();
             return;
         }
-        if self.tool == Tool::Text || self.text.is_some() {
+        if tool == Tool::Text || self.text.is_some() {
             self.follow_text_tap(event);
             return;
         }
@@ -998,8 +1035,8 @@ impl Editor {
         self.follow_box_select(event);
         match self.taps.track(event) {
             Some(Recognized::Tap(tap)) => self.tap(tap, event.modifiers.shift),
-            Some(Recognized::DragBegan(origin)) => self.begin_drag(origin, event),
-            None => {}
+            Some(Recognized::DragBegan(origin)) if !finger => self.begin_drag(origin, event),
+            Some(Recognized::DragBegan(_)) | None => {}
         }
     }
 

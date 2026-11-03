@@ -35,6 +35,7 @@ mod navigation;
 mod outline;
 mod overlay;
 mod path;
+mod pencil_only;
 mod properties;
 mod random;
 mod restore;

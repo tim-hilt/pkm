@@ -311,6 +311,13 @@ final class CanvasController {
     /// editor changes the Tool itself, e.g. back to selection after drawing.
     private(set) var tool = Tool.selection
     private(set) var toolLock = false
+    /// Whether Pencil-only drawing is on. The core turns it on with the first
+    /// Pencil input; it is stored in `settings` once it is on or the user
+    /// chose, and restored into each editor before it is first read.
+    private(set) var pencilOnlyDrawing = false
+    @ObservationIgnored private var restoredEditor: Editor?
+    @ObservationIgnored private let settings = UserDefaults.standard
+    private static let pencilOnlyKey = "pencilOnlyDrawing"
     /// Whether there is something to undo or redo; the buttons are enabled
     /// exactly then.
     private(set) var canUndo = false
@@ -330,11 +337,26 @@ final class CanvasController {
         guard let editor = canvas?.editor else { return }
         tool = editor.tool()
         toolLock = editor.toolLock()
+        syncPencilOnlyDrawing(editor)
         canUndo = editor.canUndo()
         canRedo = editor.canRedo()
         properties = editor.properties()
         actionBar = editor.actionBar()
         viewSize = canvas?.bounds.size ?? .zero
+    }
+
+    private func syncPencilOnlyDrawing(_ editor: Editor) {
+        let stored = settings.object(forKey: Self.pencilOnlyKey) as? Bool
+        if restoredEditor !== editor {
+            restoredEditor = editor
+            // Only a stored setting is a decision; without one the core decides.
+            if let stored { editor.setPencilOnlyDrawing(on: stored) }
+        }
+        pencilOnlyDrawing = editor.pencilOnlyDrawing()
+        // The core turned it on by itself: keep that for the next launch.
+        if pencilOnlyDrawing != (stored ?? false) {
+            settings.set(pencilOnlyDrawing, forKey: Self.pencilOnlyKey)
+        }
     }
 
     func zoomIn() { canvas?.perform { $0.zoomIn() } }
@@ -345,6 +367,12 @@ final class CanvasController {
     func redo() { canvas?.perform { $0.redo() } }
     func setTool(_ tool: Tool) { canvas?.perform { $0.setTool(tool: tool) } }
     func setToolLock(_ locked: Bool) { canvas?.perform { $0.setToolLock(locked: locked) } }
+    /// The user's choice in settings; stored even when off, so that a Pencil
+    /// no longer turns it on by itself.
+    func setPencilOnlyDrawing(_ on: Bool) {
+        settings.set(on, forKey: Self.pencilOnlyKey)
+        canvas?.perform { $0.setPencilOnlyDrawing(on: on) }
+    }
     func duplicate() { canvas?.perform { $0.duplicate() } }
     func group() { canvas?.perform { $0.group() } }
     func ungroup() { canvas?.perform { $0.ungroup() } }
