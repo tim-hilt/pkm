@@ -101,7 +101,7 @@ for task_file in ${tasks[@]+"${tasks[@]}"}; do
 
   status_set "Implementing $task_file"
 
-  run_pi anthropic claude-sonnet-5-5 high \
+  run_pi anthropic claude-opus-5-5 low \
     "/skill:tdd implement the task described in @$task_file. This is a headless run: the seams named in the task and its spec are the confirmed seams. Apply software-design best practices during the implementation. Tick off all completed bullet points in $task_file and set its Status line to in-review when you're finished; edit it in place, since .scratch/ is untracked. Commit the implementation using the commit-message 'Implement $task_file'."
 
   implemented=$((implemented + 1))
