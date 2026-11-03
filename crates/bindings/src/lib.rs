@@ -4,8 +4,10 @@
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use workingtitle_core::scene::{FillPattern, LineStyle};
 use workingtitle_core::{
-    MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase, ScrollEvent, Tool,
+    Edges, MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase, Properties, Property,
+    ScrollEvent, Sloppiness, StrokeWidth, Tool,
 };
 
 uniffi::setup_scaffolding!("WorkingTitleCore");
@@ -96,6 +98,68 @@ pub enum Tool {
     Arrow,
     Freedraw,
     Eraser,
+}
+
+// The properties panel's options and values; see
+// [`workingtitle_core::Property`].
+
+#[uniffi::remote(Enum)]
+pub enum FillPattern {
+    Hachure,
+    CrossHatch,
+    Zigzag,
+    Solid,
+}
+
+#[uniffi::remote(Enum)]
+pub enum LineStyle {
+    Solid,
+    Dashed,
+    Dotted,
+}
+
+#[uniffi::remote(Enum)]
+pub enum StrokeWidth {
+    Thin,
+    Medium,
+    Bold,
+}
+
+#[uniffi::remote(Enum)]
+pub enum Sloppiness {
+    Architect,
+    Artist,
+    Cartoonist,
+}
+
+#[uniffi::remote(Enum)]
+pub enum Edges {
+    Sharp,
+    Round,
+}
+
+#[uniffi::remote(Enum)]
+pub enum Property {
+    StrokeColor(String),
+    BackgroundColor(String),
+    FillStyle(FillPattern),
+    StrokeWidth(StrokeWidth),
+    StrokeStyle(LineStyle),
+    Sloppiness(Sloppiness),
+    Edges(Edges),
+    Opacity(f64),
+}
+
+#[uniffi::remote(Record)]
+pub struct Properties {
+    pub stroke_color: Option<String>,
+    pub background_color: Option<String>,
+    pub fill_style: Option<FillPattern>,
+    pub stroke_width: Option<StrokeWidth>,
+    pub stroke_style: Option<LineStyle>,
+    pub sloppiness: Option<Sloppiness>,
+    pub edges: Option<Edges>,
+    pub opacity: Option<f64>,
 }
 
 /// What the Canvas shows; see [`workingtitle_core::Viewport`]. Small and
@@ -269,6 +333,19 @@ impl Editor {
     /// The ids of the selected Elements, in the order they were selected.
     pub fn selection(&self) -> Vec<String> {
         self.editor().selection().to_vec()
+    }
+
+    /// What the properties panel shows; see
+    /// [`workingtitle_core::Editor::properties`]. Read it after forwarding
+    /// input or a command.
+    pub fn properties(&self) -> Properties {
+        self.editor().properties()
+    }
+
+    /// Sets a property on the Selection and as the style of the next Element;
+    /// see [`workingtitle_core::Editor::set_property`].
+    pub fn set_property(&self, property: Property) {
+        self.editor().set_property(property);
     }
 
     /// The indices of the selected points of the selected line or arrow; see
@@ -540,6 +617,17 @@ mod tests {
         }
         assert_eq!(editor.file_bytes("f1".into()), Some(b"hello".to_vec()));
         assert_eq!(editor.file_bytes("other".into()), None);
+    }
+
+    #[test]
+    fn properties_are_set_and_read_through_the_bindings() {
+        let editor = Editor::new();
+        assert_eq!(editor.properties().stroke_width, Some(StrokeWidth::Medium));
+        editor.set_property(Property::StrokeWidth(StrokeWidth::Bold));
+        editor.set_property(Property::StrokeColor("#e03131".into()));
+        let shown = editor.properties();
+        assert_eq!(shown.stroke_width, Some(StrokeWidth::Bold));
+        assert_eq!(shown.stroke_color.as_deref(), Some("#e03131"));
     }
 
     #[test]

@@ -59,3 +59,7 @@ _Avoid_: Delete (that is the command for the Selection), rub out
 **Action Bar**:
 The small floating bar shown next to a non-empty Selection offering actions such as duplicate, delete, z-order and group; replaces a context menu.
 _Avoid_: Context menu, popup
+
+**Properties panel**:
+The panel that sets stroke colour, background colour, fill style, stroke width, stroke style, sloppiness, edges and opacity on the Selection, and, with an empty Selection, as the style of the next Element. It shows the Selection's current values, or none chosen where they are mixed.
+_Avoid_: Inspector, style bar, sidebar

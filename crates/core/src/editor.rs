@@ -16,6 +16,7 @@ use crate::input::{MagnifyEvent, PointerEvent, PointerKind, PointerPhase, Scroll
 use crate::move_selection::MoveGesture;
 use crate::navigation::{Bounds, Navigation};
 use crate::overlay;
+use crate::properties::{self, Properties, Property};
 use crate::random::Entropy;
 use crate::scene::{Element, ElementType, LoadError, Scene};
 use crate::selection::Selection;
@@ -415,6 +416,46 @@ impl Editor {
         self.points.clear();
         self.overlay_revision += 1;
         self.changed(true);
+    }
+
+    /// What the properties panel shows: the values of the Selection's
+    /// Elements (`None` where they differ), or, with nothing selected, the
+    /// style of the next Element. See [`crate::properties`].
+    pub fn properties(&self) -> Properties {
+        if self.selection.is_empty() {
+            return Properties::of_style(&self.style);
+        }
+        let selected: Vec<Element> = self
+            .selection
+            .ids()
+            .iter()
+            .filter_map(|id| self.scene.element_by_id(id))
+            .collect();
+        Properties::of_selection(&selected)
+    }
+
+    /// Sets `property` on every Element of the Selection that has it, as one
+    /// undo step, and makes it the style of the Elements drawn next, as on
+    /// excalidraw.com. With nothing selected it only does the latter. Does
+    /// nothing while a pointer is drawing or moving.
+    pub fn set_property(&mut self, property: Property) {
+        self.finish_placing();
+        if self.is_gesturing() {
+            return;
+        }
+        self.style.set(&property);
+        let mut step = Step::begin(&self.selection);
+        let changed = properties::apply(
+            &mut self.scene,
+            &mut self.entropy,
+            self.selection.ids(),
+            &property,
+            |scene, id| step.touch(scene, id),
+        );
+        if changed {
+            self.history.record(step, &self.scene, &self.selection);
+            self.changed(false);
+        }
     }
 
     /// The ids of the selected Elements, in the order they were selected.

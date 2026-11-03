@@ -28,6 +28,7 @@ mod navigation;
 mod outline;
 mod overlay;
 mod path;
+mod properties;
 mod random;
 mod restore;
 mod rough;
@@ -49,7 +50,9 @@ pub use geometry::{
     StrokeStyle, TextAlign, TextLine, TextStyle, Verb,
 };
 pub use input::{MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase, ScrollEvent};
+pub use properties::{Properties, Property};
 pub use scene::LoadError;
+pub use style::{Edges, Sloppiness, StrokeWidth};
 pub use text::TextMeasurer;
 pub use tool::Tool;
 pub use viewport::{MAX_ZOOM, MIN_ZOOM, Viewport};

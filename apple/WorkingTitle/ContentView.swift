@@ -21,6 +21,7 @@ struct ContentView: View {
             .overlay(alignment: .top) { ToolBar(controller: controller) }
             .overlay(alignment: .bottom) { ZoomControls(controller: controller) }
             .overlay(alignment: .bottomLeading) { HistoryControls(controller: controller) }
+            .overlay(alignment: .topLeading) { PropertiesPanel(controller: controller) }
     }
 }
 

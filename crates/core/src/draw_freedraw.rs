@@ -65,12 +65,6 @@ impl StrokeDrawing {
     ) -> Self {
         let measured = event.kind == PointerKind::Pencil;
         let mut stroke = new_element("freedraw", None, entropy, style, origin);
-        // Excalidraw draws these half as wide as the other Elements for the
-        // same setting.
-        stroke.insert(
-            "strokeWidth".into(),
-            Value::Number(style.stroke_width / 2.0),
-        );
         add_members(&mut stroke, event, measured);
         if let Some(id) = stroke.get("id").and_then(Value::as_str) {
             step.create(id);

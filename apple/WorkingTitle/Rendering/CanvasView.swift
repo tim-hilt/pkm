@@ -276,6 +276,10 @@ final class CanvasController {
     /// exactly then.
     private(set) var canUndo = false
     private(set) var canRedo = false
+    /// What the properties panel shows: the Selection's values, or the style
+    /// of the next Element if nothing is selected. `nil` until there is an
+    /// editor.
+    private(set) var properties: Properties?
 
     private func refresh() {
         guard let editor = canvas?.editor else { return }
@@ -283,6 +287,7 @@ final class CanvasController {
         toolLock = editor.toolLock()
         canUndo = editor.canUndo()
         canRedo = editor.canRedo()
+        properties = editor.properties()
     }
 
     func zoomIn() { canvas?.perform { $0.zoomIn() } }
@@ -293,4 +298,5 @@ final class CanvasController {
     func redo() { canvas?.perform { $0.redo() } }
     func setTool(_ tool: Tool) { canvas?.perform { $0.setTool(tool: tool) } }
     func setToolLock(_ locked: Bool) { canvas?.perform { $0.setToolLock(locked: locked) } }
+    func setProperty(_ property: Property) { canvas?.perform { $0.setProperty(property: property) } }
 }

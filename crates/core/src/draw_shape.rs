@@ -9,14 +9,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::history::Step;
 use crate::json::{Object, Value};
+use crate::properties::{self, takes_edges};
 use crate::random::Entropy;
 use crate::scene::{ElementType, Scene};
-use crate::style::Style;
+use crate::style::{Edges, Style, fill_name, line_name};
 
 /// Excalidraw's `ROUNDNESS`: rounded corners of rectangles take a fixed
 /// radius (the Element's size permitting), those of the other shapes a
 /// proportion of their size.
-const ADAPTIVE_RADIUS: f64 = 3.0;
+pub(crate) const ADAPTIVE_RADIUS: f64 = 3.0;
 pub(crate) const PROPORTIONAL_RADIUS: f64 = 2.0;
 
 /// A shape being drawn by one pointer.
@@ -161,11 +162,16 @@ pub(crate) fn new_element(
     let number = Value::Number;
     let now = now_ms();
 
-    let rounding = roundness.map_or(Value::Null, |roundness| {
-        let mut rounding = Object::new();
-        rounding.insert("type".into(), number(roundness));
-        Value::Object(rounding)
-    });
+    // Only Elements that have rounded or sharp edges are sharp when the
+    // style says so; the others have the roundness of their type.
+    let kind = ElementType::from_name(type_name);
+    let sharp = style.edges == Edges::Sharp && kind.is_some_and(takes_edges);
+    let rounding = roundness
+        .filter(|_| !sharp)
+        .map_or(Value::Null, properties::roundness);
+    let stroke_width = style
+        .stroke_width
+        .of(kind.unwrap_or(ElementType::Rectangle));
 
     let mut shape = Object::new();
     for (key, value) in [
@@ -178,10 +184,10 @@ pub(crate) fn new_element(
         ("angle", number(0.0)),
         ("strokeColor", text(&style.stroke_color)),
         ("backgroundColor", text(&style.background_color)),
-        ("fillStyle", text(style.fill_style)),
-        ("strokeWidth", number(style.stroke_width)),
-        ("strokeStyle", text(style.stroke_style)),
-        ("roughness", number(style.roughness)),
+        ("fillStyle", text(fill_name(style.fill))),
+        ("strokeWidth", number(stroke_width)),
+        ("strokeStyle", text(line_name(style.stroke_style))),
+        ("roughness", number(style.sloppiness.roughness())),
         ("opacity", number(style.opacity)),
         ("groupIds", Value::Array(Vec::new())),
         ("frameId", Value::Null),
