@@ -43,6 +43,47 @@ struct GeometryPart {
     }
 }
 
+/// Mirror of the core's `TextLine` record: one line of text to draw, set in
+/// Excalifont. Field order and sizes must match.
+struct GeometryTextLine {
+    /// Core-assigned Element handle; with `version` the cache key.
+    var element: UInt32
+    var version: UInt32
+    /// Number of parts before this line in z-order: draw the line after the
+    /// parts before this index and before the part at it.
+    var partIndex: UInt32
+    /// `0xRRGGBBAA`.
+    var color: UInt32
+    /// Element opacity, 0...1.
+    var opacity: Float
+    var fontSize: Float
+    /// The Element's font family. Every family is drawn in Excalifont.
+    var fontFamily: UInt32
+    /// A `GeometryTextAlign` number.
+    var align: UInt32
+    /// Where the line is anchored on its baseline, in Scene units, already
+    /// turned by `angle`.
+    var x: Float
+    var y: Float
+    /// Clockwise rotation in radians about `(x, y)`.
+    var angle: Float
+    /// Range of the line's UTF-8 bytes in `GeometryBuffers.text`.
+    var textStart: UInt32
+    var textLength: UInt32
+
+    var alignment: GeometryTextAlign { GeometryTextAlign(rawValue: align) ?? .left }
+}
+
+/// Where a line of text sits relative to its anchor, as in the core's `TextAlign`.
+enum GeometryTextAlign: UInt32 {
+    /// The line starts at the anchor.
+    case left = 0
+    /// The line is centred on the anchor.
+    case center = 1
+    /// The line ends at the anchor.
+    case right = 2
+}
+
 /// Which points a fill covers where its path crosses itself, as in the core's
 /// `FillRule`.
 enum GeometryFillRule: UInt32 {
@@ -62,12 +103,22 @@ enum GeometryVerb: UInt8 {
     case cubic = 2
 }
 
-/// The core's three geometry buffers, borrowed. Only valid inside the
+/// The core's geometry buffers, borrowed. Only valid inside the
 /// `Geometry.withBuffers` call that produced them.
 struct GeometryBuffers {
     let parts: UnsafeBufferPointer<GeometryPart>
     let verbs: UnsafeBufferPointer<UInt8>
     let coords: UnsafeBufferPointer<Float>
+    /// Lines of text, interleaved with `parts` in z-order by `partIndex`.
+    var textLines = UnsafeBufferPointer<GeometryTextLine>(start: nil, count: 0)
+    /// The characters of all lines, as UTF-8.
+    var text = UnsafeBufferPointer<UInt8>(start: nil, count: 0)
+
+    /// The characters of `line`.
+    func string(of line: GeometryTextLine) -> String {
+        let bytes = text[Int(line.textStart)..<Int(line.textStart + line.textLength)]
+        return String(decoding: bytes, as: UTF8.self)
+    }
 
     /// The verbs of `part`.
     func verbs(of part: GeometryPart) -> UnsafeBufferPointer<UInt8> {
@@ -100,12 +151,17 @@ extension Geometry {
         precondition(
             MemoryLayout<GeometryPart>.stride == Int(partStride()),
             "GeometryPart no longer mirrors the core's Part record")
+        precondition(
+            MemoryLayout<GeometryTextLine>.stride == Int(textLineStride()),
+            "GeometryTextLine no longer mirrors the core's TextLine record")
         return try withExtendedLifetime(self) {
             try body(
                 GeometryBuffers(
                     parts: buffer(at: partsAddress(), count: partCount()),
                     verbs: buffer(at: verbsAddress(), count: verbCount()),
-                    coords: buffer(at: coordsAddress(), count: coordCount())))
+                    coords: buffer(at: coordsAddress(), count: coordCount()),
+                    textLines: buffer(at: textLinesAddress(), count: textLineCount()),
+                    text: buffer(at: textAddress(), count: textByteCount())))
         }
     }
 }

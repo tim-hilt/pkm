@@ -20,7 +20,15 @@ enum PathFlattener {
         _ part: GeometryPart, in buffers: GeometryBuffers, tolerance: Float,
         into sink: inout some PathSink
     ) {
-        let coords = buffers.coords(of: part)
+        flatten(verbs: buffers.verbs(of: part), coords: buffers.coords(of: part), tolerance: tolerance, into: &sink)
+    }
+
+    /// Like `flatten(_:in:tolerance:into:)` for a path of its own: `verbs`
+    /// and the operands they consume from `coords`.
+    static func flatten(
+        verbs: UnsafeBufferPointer<UInt8>, coords: UnsafeBufferPointer<Float>, tolerance: Float,
+        into sink: inout some PathSink
+    ) {
         var next = 0
         var current = SIMD2<Float>.zero
 
@@ -29,7 +37,7 @@ enum PathFlattener {
             return SIMD2(coords[next], coords[next + 1])
         }
 
-        for byte in buffers.verbs(of: part) {
+        for byte in verbs {
             switch GeometryVerb(rawValue: byte) {
             case .move:
                 current = point()

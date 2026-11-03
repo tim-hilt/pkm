@@ -62,4 +62,15 @@ import Testing
     @Test func freedraw() throws {
         expectMatchesReference(try render(Viewport(), of: TestScenes.freedraw(), size: 400), named: "freedraw")
     }
+
+    /// Text in every alignment, size and family, rotated and translucent, and labels in shapes.
+    @Test func text() throws {
+        expectMatchesReference(try render(Viewport(), of: TestScenes.text(), size: 520), named: "text")
+    }
+
+    /// The same text four times as large: glyph outlines, not bitmaps.
+    @Test func textZoomed() throws {
+        expectMatchesReference(
+            try render(Viewport(origin: [250, 20], zoom: 3), of: TestScenes.text(), size: 600), named: "text-zoomed")
+    }
 }

@@ -15,9 +15,9 @@ const DEFAULT_CHECKOUT = resolve(here, "../../../../excalidraw/excalidraw");
 const upstream = await loadUpstream(process.argv[2] ?? process.env.EXCALIDRAW_DIR ?? DEFAULT_CHECKOUT);
 
 mkdirSync(OUTPUT_DIR, { recursive: true });
-for (const { name, elements } of scenes(upstream)) {
+for (const { name, elements, golden = true } of scenes(upstream)) {
   writeFileSync(join(OUTPUT_DIR, `${name}.excalidraw`), sceneJson(elements));
-  writeFileSync(join(OUTPUT_DIR, `${name}.golden.json`), goldenJson(upstream, elements));
+  if (golden) writeFileSync(join(OUTPUT_DIR, `${name}.golden.json`), goldenJson(upstream, elements));
   console.log(`${name}: ${elements.length} elements`);
 }
 

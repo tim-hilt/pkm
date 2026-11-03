@@ -17,15 +17,19 @@ mod restore;
 mod rough;
 pub mod scene;
 mod shape;
+mod text;
 mod tool;
 mod viewport;
+mod wrap;
 
 pub use editor::Editor;
 pub use geometry::{
-    Dash, FillRule, FillStyle, Geometry, Part, PartKind, PartWriter, StrokeStyle, Verb,
+    Dash, FillRule, FillStyle, Geometry, Part, PartKind, PartWriter, StrokeStyle, TextAlign,
+    TextLine, TextStyle, Verb,
 };
 pub use input::{MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase, ScrollEvent};
 pub use scene::LoadError;
+pub use text::TextMeasurer;
 pub use tool::Tool;
 pub use viewport::{MAX_ZOOM, MIN_ZOOM, Viewport};
 

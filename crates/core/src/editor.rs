@@ -1,10 +1,13 @@
+use std::fmt;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::geometry::{Geometry, StrokeStyle};
 use crate::input::{MagnifyEvent, PointerEvent, ScrollEvent};
 use crate::navigation::{Bounds, Navigation};
-use crate::scene::{Element, LoadError, Scene};
+use crate::scene::{Element, ElementType, LoadError, Scene};
 use crate::shape;
+use crate::text::{self, Containers, TextMeasurer};
 use crate::tool::Tool;
 use crate::viewport::Viewport;
 
@@ -26,6 +29,16 @@ pub struct Editor {
     generation: u64,
     navigation: Navigation,
     tool: Tool,
+    measurer: Option<Measurer>,
+}
+
+/// The client's [`TextMeasurer`].
+struct Measurer(Arc<dyn TextMeasurer>);
+
+impl fmt::Debug for Measurer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("TextMeasurer")
+    }
 }
 
 impl Default for Editor {
@@ -42,6 +55,7 @@ impl Editor {
             generation: next_generation(),
             navigation: Navigation::default(),
             tool: Tool::default(),
+            measurer: None,
         }
     }
 
@@ -59,25 +73,39 @@ impl Editor {
         self.scene.to_json().into_bytes()
     }
 
+    /// Hands the core the client's way to measure text, which it needs to wrap
+    /// the text of containers. Without one the lines are those Excalidraw saved
+    /// in the file. Replaces any earlier measurer.
+    pub fn set_text_measurer(&mut self, measurer: Arc<dyn TextMeasurer>) {
+        self.measurer = Some(Measurer(measurer));
+        // What was drawn for texts may differ now.
+        self.generation = next_generation();
+    }
+
     /// Number of Elements in the Scene that are shown: of a supported type
     /// and not deleted.
     pub fn element_count(&self) -> u64 {
         self.shown().count() as u64
     }
 
-    /// The paths to draw for the Scene, in z-order.
+    /// The paths and lines of text to draw for the Scene, in z-order.
     ///
     /// Rectangles, diamonds, ellipses, lines and arrows are drawn hand-drawn
     /// like on excalidraw.com, with the background of closed ones filled by
     /// hachure, cross-hatch, zigzag or solid (see [`crate::shape`]), and
     /// freedraw strokes as the filled outline of their pressure-sensitive
-    /// path. The other types are drawn as a plain box around their bounds
-    /// until their generators land.
+    /// path. Text is not made of paths but described as lines of text for the
+    /// client to set in Excalifont (see [`crate::text`]). Images are drawn as a
+    /// plain box around their bounds until their generator lands.
     pub fn geometry(&self) -> Geometry {
         let mut geometry = Geometry::with_generation(self.generation);
         let background = self.scene.view_background_color();
+        let containers = Containers::new(&self.scene);
+        let measurer = self.measurer.as_ref().map(|m| &*m.0);
         for element in self.shown() {
-            if !shape::draw(&element, background, &mut geometry) {
+            if element.kind() == ElementType::Text {
+                text::draw(&element, &containers, measurer, &mut geometry);
+            } else if !shape::draw(&element, background, &mut geometry) {
                 draw_bounds(&element, &mut geometry);
             }
         }

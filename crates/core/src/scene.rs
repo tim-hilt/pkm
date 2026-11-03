@@ -15,6 +15,7 @@
 use std::fmt;
 use std::str::Utf8Error;
 
+use crate::geometry::TextAlign;
 use crate::json::{self, Object, ParseError, Value};
 use crate::restore;
 
@@ -116,6 +117,15 @@ impl Arrowhead {
             _ => Arrowhead::Other,
         }
     }
+}
+
+/// Where a text sits vertically in the box of its container: its
+/// `verticalAlign`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerticalAlign {
+    Top,
+    Middle,
+    Bottom,
 }
 
 /// Rounded corners of an Element: its `roundness` property. Elements with
@@ -273,6 +283,14 @@ pub struct Element<'a> {
     handle: u32,
     kind: ElementType,
     object: &'a Object,
+}
+
+impl<'a> Element<'a> {
+    /// The Element's `id`, empty if the file has none.
+    pub fn id(&self) -> &'a str {
+        let id: Option<&'a str> = self.object.get("id").and_then(Value::as_str);
+        id.unwrap_or_default()
+    }
 }
 
 impl Element<'_> {
@@ -481,6 +499,65 @@ impl Element<'_> {
             && self.object.get("elbowed").and_then(Value::as_bool) == Some(true)
     }
 
+    /// The text of a text Element as shown: wrapped to its container (or
+    /// width) as Excalidraw saved it.
+    pub fn text(&self) -> &str {
+        self.str("text").unwrap_or_default()
+    }
+
+    /// The text as typed, without the line breaks of wrapping.
+    pub fn original_text(&self) -> &str {
+        self.str("originalText").unwrap_or_else(|| self.text())
+    }
+
+    pub fn font_size(&self) -> f64 {
+        self.number("fontSize", 20.0)
+    }
+
+    /// Excalidraw's font family number; 5 is Excalifont, the default.
+    pub fn font_family(&self) -> u32 {
+        // Saturating float-to-int conversion is exactly what is wanted.
+        self.number("fontFamily", 5.0) as u32
+    }
+
+    /// The height of a line of text relative to the font size.
+    pub fn line_height(&self) -> f64 {
+        match self.number("lineHeight", 1.25) {
+            height if height > 0.0 => height,
+            _ => 1.25,
+        }
+    }
+
+    pub fn text_align(&self) -> TextAlign {
+        match self.str("textAlign") {
+            Some("center") => TextAlign::Center,
+            Some("right") => TextAlign::Right,
+            _ => TextAlign::Left,
+        }
+    }
+
+    pub fn vertical_align(&self) -> VerticalAlign {
+        match self.str("verticalAlign") {
+            Some("middle") => VerticalAlign::Middle,
+            Some("bottom") => VerticalAlign::Bottom,
+            _ => VerticalAlign::Top,
+        }
+    }
+
+    /// The `id` of the Element a text is bound to (a label), if any.
+    pub fn container_id(&self) -> Option<&str> {
+        self.str("containerId")
+    }
+
+    /// Whether a text's width follows its content; `false` for texts with a
+    /// width of their own, which wrap to it.
+    pub fn auto_resize(&self) -> bool {
+        self.object
+            .get("autoResize")
+            .and_then(Value::as_bool)
+            .unwrap_or(true)
+    }
+
     /// `0.0` (invisible) to `1.0`.
     pub fn opacity(&self) -> f64 {
         (self.number("opacity", 100.0) / 100.0).clamp(0.0, 1.0)
@@ -490,6 +567,10 @@ impl Element<'_> {
     pub fn version(&self) -> u32 {
         // Saturating float-to-int conversion is exactly what is wanted.
         self.number("version", 0.0) as u32
+    }
+
+    fn str(&self, key: &str) -> Option<&str> {
+        self.object.get(key).and_then(Value::as_str)
     }
 
     fn number(&self, key: &str, default: f64) -> f64 {

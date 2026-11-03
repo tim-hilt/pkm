@@ -113,6 +113,24 @@ impl From<workingtitle_core::Viewport> for ViewportState {
     }
 }
 
+/// Measures text for the core; implemented by clients with their font
+/// machinery. See [`workingtitle_core::TextMeasurer`].
+#[uniffi::export(with_foreign)]
+pub trait TextMeasurer: Send + Sync {
+    /// The advance width in Scene units of `text`, a single line, set in
+    /// Excalifont at `font_size`.
+    fn line_width(&self, text: String, font_size: f64) -> f64;
+}
+
+/// Lets the core call a client's measurer.
+struct Measurer(Arc<dyn TextMeasurer>);
+
+impl workingtitle_core::TextMeasurer for Measurer {
+    fn line_width(&self, text: &str, font_size: f64) -> f64 {
+        self.0.line_width(text.to_owned(), font_size)
+    }
+}
+
 /// Handle to the core's editor; see [`workingtitle_core::Editor`].
 ///
 /// UniFFI objects are shared, so the editor sits behind a lock; clients drive
@@ -153,6 +171,14 @@ impl Editor {
     /// Number of Elements shown in the Scene.
     pub fn element_count(&self) -> u64 {
         self.editor().element_count()
+    }
+
+    /// Hands the core the client's way to measure text; see
+    /// [`workingtitle_core::Editor::set_text_measurer`]. Call it before
+    /// reading geometry that has labels in it.
+    pub fn set_text_measurer(&self, measurer: Arc<dyn TextMeasurer>) {
+        self.editor()
+            .set_text_measurer(Arc::new(Measurer(measurer)));
     }
 
     /// The part of the Scene the Canvas shows. Read it after forwarding
@@ -270,6 +296,30 @@ impl Geometry {
     pub fn coords_address(&self) -> u64 {
         self.inner.coords().as_ptr() as u64
     }
+
+    /// Number of [`workingtitle_core::TextLine`] records at
+    /// `text_lines_address`.
+    pub fn text_line_count(&self) -> u64 {
+        self.inner.text_lines().len() as u64
+    }
+
+    /// Size in bytes of one text line record; see `part_stride`.
+    pub fn text_line_stride(&self) -> u64 {
+        size_of::<workingtitle_core::TextLine>() as u64
+    }
+
+    pub fn text_lines_address(&self) -> u64 {
+        self.inner.text_lines().as_ptr() as u64
+    }
+
+    /// Number of bytes (UTF-8) at `text_address`.
+    pub fn text_byte_count(&self) -> u64 {
+        self.inner.text().len() as u64
+    }
+
+    pub fn text_address(&self) -> u64 {
+        self.inner.text().as_ptr() as u64
+    }
 }
 
 impl Default for Editor {
@@ -309,6 +359,48 @@ mod tests {
             assert_eq!(*verbs, workingtitle_core::Verb::Move as u8);
             let coords = geometry.coords_address() as *const f32;
             assert_eq!(*coords, 10.0);
+        }
+    }
+
+    /// Half a font size per character.
+    struct Monospace;
+
+    impl TextMeasurer for Monospace {
+        fn line_width(&self, text: String, font_size: f64) -> f64 {
+            text.chars().count() as f64 * font_size / 2.0
+        }
+    }
+
+    #[test]
+    fn text_lines_are_exposed_as_buffers_and_labels_wrap_with_the_clients_measurer() {
+        let editor = Editor::new();
+        editor.set_text_measurer(Arc::new(Monospace));
+        editor
+            .load(
+                br#"{"type":"excalidraw","elements":[
+                {"id":"b","type":"rectangle","x":0,"y":0,"width":100,"height":100,
+                 "boundElements":[{"type":"text","id":"t"}]},
+                {"id":"t","type":"text","containerId":"b","fontSize":20,"text":"ab cd ef",
+                 "originalText":"aaaa bbbb cccc","width":10,"height":25}]}"#
+                    .to_vec(),
+            )
+            .unwrap();
+        let geometry = editor.geometry();
+
+        assert_eq!(geometry.text_line_count(), 2);
+        assert_eq!(geometry.text_line_stride(), 52);
+        assert_eq!(geometry.text_byte_count(), "aaaa bbbbcccc".len() as u64);
+        // SAFETY: the addresses come from `geometry`, which is alive and
+        // whose buffers hold at least the counts reported above.
+        unsafe {
+            let lines = geometry.text_lines_address() as *const workingtitle_core::TextLine;
+            let second = *lines.add(1);
+            let text = std::slice::from_raw_parts(
+                (geometry.text_address() as *const u8).add(second.text_start as usize),
+                second.text_len as usize,
+            );
+            assert_eq!(text, b"cccc");
+            assert_eq!(second.font_size, 20.0);
         }
     }
 

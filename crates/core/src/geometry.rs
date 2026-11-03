@@ -7,14 +7,23 @@
 //!
 //! # Zero-copy format
 //!
-//! [`Geometry`] is three flat, contiguous buffers that clients read in place
-//! through raw pointers (ADR-0007); nothing is serialised:
+//! [`Geometry`] is flat, contiguous buffers that clients read in place through
+//! raw pointers (ADR-0007); nothing is serialised:
 //!
 //! * [`Geometry::parts`]: one fixed-size [`Part`] record per drawable path,
 //!   carrying its style and the ranges of its ops in the other two buffers.
 //! * [`Geometry::verbs`]: one byte per op, a [`Verb`] number.
 //! * [`Geometry::coords`]: the `f32` operands of all ops back to back; a verb
 //!   takes [`Verb::coord_count`] of them.
+//!
+//! Text is not made of paths: clients lay out glyphs (ADR-0008). Two more
+//! buffers describe it:
+//!
+//! * [`Geometry::text_lines`]: one fixed-size [`TextLine`] record per line of
+//!   text, carrying its font, colour and position, and the byte range of its
+//!   characters in the last buffer. Lines are interleaved with the parts in
+//!   z-order by [`TextLine::part_index`].
+//! * [`Geometry::text`]: the characters of all lines back to back, as UTF-8.
 //!
 //! Records are `#[repr(C)]` with only 4-byte fields, so clients can mirror
 //! them without padding surprises. Numbers are in the host's byte order.
@@ -145,13 +154,81 @@ pub struct Part {
     pub fill_rule: u32,
 }
 
-/// Paths to draw, in z-order (later parts are drawn over earlier ones).
+/// Where a line of text sits relative to its [`TextLine::x`]. Numbers are
+/// part of the client contract.
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextAlign {
+    /// The line starts at `x`.
+    Left = 0,
+    /// The line is centred on `x`.
+    Center = 1,
+    /// The line ends at `x`.
+    Right = 2,
+}
+
+/// Resolved style of a line of text.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextStyle {
+    /// Colour as `0xRRGGBBAA`.
+    pub color: u32,
+    /// See [`StrokeStyle::opacity`].
+    pub opacity: f32,
+    /// The Element's `fontFamily`. Clients draw every family with Excalifont
+    /// (the only bundled font); the number is carried along so nothing is lost.
+    pub font_family: u32,
+    /// Font size in Scene units.
+    pub font_size: f32,
+    pub align: TextAlign,
+}
+
+/// One line of text to draw, set in Excalifont: its style and where its
+/// characters live in [`Geometry::text`].
+///
+/// Like parts, lines of one Element share `element` and `version`, and
+/// clients key their caches on them.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextLine {
+    /// Core-assigned handle of the Element this line belongs to.
+    pub element: u32,
+    /// Changes whenever the lines of the Element do, which includes changes
+    /// of the container a text is bound to.
+    pub version: u32,
+    /// The number of parts that come before this line in z-order: draw it
+    /// after the parts before `part_index` and before the part at it.
+    pub part_index: u32,
+    /// Colour as `0xRRGGBBAA`.
+    pub color: u32,
+    /// See [`StrokeStyle::opacity`].
+    pub opacity: f32,
+    /// Font size in Scene units; glyphs scale with it from their design size.
+    pub font_size: f32,
+    /// The Element's `fontFamily`; see [`TextStyle::font_family`].
+    pub font_family: u32,
+    /// A [`TextAlign`] number.
+    pub align: u32,
+    /// Where the line is anchored on its baseline, in Scene coordinates
+    /// (already turned by `angle`): at its start, middle or end, see `align`.
+    pub x: f32,
+    pub y: f32,
+    /// Clockwise rotation in radians about `(x, y)`.
+    pub angle: f32,
+    /// Index of the line's first byte in [`Geometry::text`].
+    pub text_start: u32,
+    /// Number of bytes (UTF-8) of the line, which has no line breaks.
+    pub text_len: u32,
+}
+
+/// Paths and text to draw, in z-order (later ones are drawn over earlier ones).
 #[derive(Debug, Default)]
 pub struct Geometry {
     generation: u64,
     parts: Vec<Part>,
     verbs: Vec<u8>,
     coords: Vec<f32>,
+    text_lines: Vec<TextLine>,
+    text: String,
 }
 
 impl Geometry {
@@ -238,6 +315,51 @@ impl Geometry {
 
     pub fn coords(&self) -> &[f32] {
         &self.coords
+    }
+
+    /// Appends a line of text for `element` at `version`, anchored at
+    /// `(x, y)` on its baseline and turned by `angle` about that point.
+    pub fn text_line(
+        &mut self,
+        element: u32,
+        version: u32,
+        style: TextStyle,
+        line: &str,
+        (x, y): (f32, f32),
+        angle: f32,
+    ) {
+        let text_start = index(self.text.len());
+        self.text.push_str(line);
+        self.text_lines.push(TextLine {
+            element,
+            version,
+            part_index: index(self.parts.len()),
+            color: style.color,
+            opacity: style.opacity,
+            font_size: style.font_size,
+            font_family: style.font_family,
+            align: style.align as u32,
+            x,
+            y,
+            angle,
+            text_start,
+            text_len: index(line.len()),
+        });
+    }
+
+    pub fn text_lines(&self) -> &[TextLine] {
+        &self.text_lines
+    }
+
+    /// The characters of all lines; see [`TextLine::text_start`].
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// The characters of `line`.
+    pub fn line_text(&self, line: &TextLine) -> &str {
+        let start = line.text_start as usize;
+        &self.text[start..start + line.text_len as usize]
     }
 }
 

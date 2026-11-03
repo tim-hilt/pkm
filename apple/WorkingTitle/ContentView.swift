@@ -11,7 +11,7 @@ struct ContentView: View {
 
     init() {
         // An unreadable sample leaves an empty Canvas rather than a crash.
-        let editor = (try? SampleDrawing.makeEditor()) ?? Editor()
+        let editor = (try? SampleDrawing.makeEditor()) ?? Editor.withExcalifont()
         _editor = State(initialValue: editor)
         _geometry = State(initialValue: editor.geometry())
     }

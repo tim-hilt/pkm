@@ -18,6 +18,18 @@ struct FillMesh {
         return builder.finish()
     }
 
+    /// The mesh of the path of `verbs` and `coords`, in the format of the
+    /// core's geometry, or nil if it encloses no area.
+    static func mesh(verbs: [UInt8], coords: [Float], tolerance: Float) -> FillMesh? {
+        var builder = Builder()
+        verbs.withUnsafeBufferPointer { verbs in
+            coords.withUnsafeBufferPointer { coords in
+                PathFlattener.flatten(verbs: verbs, coords: coords, tolerance: tolerance, into: &builder)
+            }
+        }
+        return builder.finish()
+    }
+
     private struct Builder: PathSink {
         var mesh = FillMesh()
         var lower = SIMD2<Float>(repeating: .infinity)

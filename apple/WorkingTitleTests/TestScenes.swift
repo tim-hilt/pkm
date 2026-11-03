@@ -19,7 +19,7 @@ enum TestScenes {
     }
 
     static func geometry(of drawing: String) -> Geometry {
-        let editor = Editor()
+        let editor = Editor.withExcalifont()
         try! editor.load(bytes: Data(drawing.utf8))
         return editor.geometry()
     }
@@ -168,6 +168,58 @@ enum TestScenes {
                     freedraw(200, 120, 66, loop, fill + #","fillStyle":"hachure""#),
                     freedraw(200, 240, 67, loop, pressures: loop.indices.map { _ in 0.5 }, fill + #","fillStyle":"solid""#),
                 ].joined(separator: ","))
+                ]}
+                """)
+    }
+
+    /// A text Element at (x, y) with the given saved size; `extra` adds members.
+    static func text(
+        _ id: String, _ x: Int, _ y: Int, _ size: (Int, Int), _ text: String, _ extra: String = ""
+    ) -> String {
+        """
+        {"id":"\(id)","type":"text","x":\(x),"y":\(y),"width":\(size.0),"height":\(size.1),\
+        "text":"\(text)","originalText":"\(text)","fontSize":20,"fontFamily":5,"lineHeight":1.25\(extra)}
+        """
+    }
+
+    /// A shape with the label `text` bound to it.
+    private static func labelled(
+        _ type: String, _ x: Int, _ y: Int, _ size: (Int, Int), _ text: String, _ extra: String = ""
+    ) -> [String] {
+        [
+            """
+            {"id":"\(type)","type":"\(type)","x":\(x),"y":\(y),"width":\(size.0),"height":\(size.1),\
+            "roughness":0,"boundElements":[{"type":"text","id":"\(type)-label"}]}
+            """,
+            Self.text(
+                "\(type)-label", x, y, (10, 25), text,
+                #","containerId":"\#(type)","textAlign":"center","verticalAlign":"middle"\#(extra)"#),
+        ]
+    }
+
+    /// Text in every alignment, size and font family, rotated, translucent,
+    /// and labels wrapped to a rectangle, an ellipse and a diamond.
+    static func text() -> Geometry {
+        let label = "A label that wraps to its container"
+        return geometry(
+            of: """
+                {"type":"excalidraw","version":2,"elements":[
+                \((
+                    [
+                        text("left", 20, 20, (220, 25), "Left aligned", #","textAlign":"left""#),
+                        text("centre", 20, 60, (220, 25), "Centred", #","textAlign":"center""#),
+                        text("right", 20, 100, (220, 25), "Right aligned", #","textAlign":"right""#),
+                        text("lines", 20, 140, (120, 60), "Two\\nlines", #","fontSize":24,"lineHeight":1.25"#),
+                        text("family", 20, 220, (200, 23), "Another family", #","fontFamily":2,"lineHeight":1.15"#),
+                        text(
+                            "red", 20, 260, (220, 25), "Red, translucent",
+                            ##","strokeColor":"#e03131","opacity":50"##),
+                        text("turned", 40, 340, (160, 25), "Turned about its middle", #","angle":-0.3"#),
+                    ]
+                        + labelled("rectangle", 260, 20, (220, 110), label)
+                        + labelled("ellipse", 260, 160, (220, 140), label)
+                        + labelled("diamond", 260, 330, (220, 160), "A diamond label")
+                ).joined(separator: ","))
                 ]}
                 """)
     }

@@ -349,7 +349,7 @@ fn deleted_elements_are_not_drawn() {
 #[test]
 fn elements_without_a_generator_yet_are_drawn_as_a_box_around_their_bounds() {
     let editor = editor_with(&drawing_with_element(
-        r#""id":"a","type":"text","x":10,"y":20,"width":30,"height":40"#,
+        r#""id":"a","type":"image","x":10,"y":20,"width":30,"height":40"#,
     ));
     let geometry = editor.geometry();
 
@@ -376,7 +376,7 @@ fn the_box_of_a_rotated_element_turns_about_its_centre() {
     // Centre (25, 40); a quarter turn clockwise (y points down) takes the
     // corner (10, 20) to (45, 25), the next one (40, 20) to (45, 55), ...
     let editor = editor_with(&drawing_with_element(&format!(
-        r#""id":"a","type":"text","x":10,"y":20,"width":30,"height":40,"angle":{}"#,
+        r#""id":"a","type":"image","x":10,"y":20,"width":30,"height":40,"angle":{}"#,
         std::f64::consts::FRAC_PI_2
     )));
     let geometry = editor.geometry();
@@ -413,18 +413,21 @@ fn every_supported_element_type_is_drawn_and_unknown_ones_are_not() {
         .iter()
         .map(|kind| format!(r#"{{"id":"{kind}","type":"{kind}","width":5,"height":5}}"#))
         .chain([r#"{"id":"u","type":"frame","width":5,"height":5}"#.to_owned()])
+        .map(|element| element.replace(r#""width":5,"#, r#""text":"x","width":5,"#))
         .collect();
     let editor = editor_with(&format!(
         r#"{{"type":"excalidraw","version":2,"elements":[{}]}}"#,
         elements.join(",")
     ));
 
-    // Arrows have more than one part, so count the Elements drawn.
-    let drawn: std::collections::BTreeSet<_> = editor
-        .geometry()
+    // Arrows have more than one part, so count the Elements drawn. Text is
+    // drawn as lines, not as parts.
+    let geometry = editor.geometry();
+    let drawn: std::collections::BTreeSet<_> = geometry
         .parts()
         .iter()
         .map(|part| part.element)
+        .chain(geometry.text_lines().iter().map(|line| line.element))
         .collect();
     assert_eq!(drawn.len(), kinds.len());
     assert_eq!(editor.element_count(), kinds.len() as u64);

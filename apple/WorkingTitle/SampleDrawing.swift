@@ -10,7 +10,7 @@ enum SampleDrawing {
 
     /// An `Editor` with the sample loaded.
     static func makeEditor() throws -> Editor {
-        let editor = Editor()
+        let editor = Editor.withExcalifont()
         try editor.load(bytes: Data(contentsOf: url))
         return editor
     }

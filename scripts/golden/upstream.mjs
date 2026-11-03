@@ -31,6 +31,16 @@ const RENDER_CONFIG = {
 const ENTRY = `
   export { newElement, newLinearElement, newArrowElement, newFreeDrawElement } from "@excalidraw/element/newElement";
   export { ShapeCache, getFreedrawOutlinePoints } from "@excalidraw/element/shape";
+  export { newTextElement } from "@excalidraw/element/newElement";
+  export { wrapText } from "@excalidraw/element/textWrapping";
+  export { measureText, setCustomTextMetricsProvider } from "@excalidraw/element/textMeasurements";
+  export {
+    computeBoundTextPosition,
+    computeContainerDimensionForBoundText,
+    getBoundTextMaxHeight,
+    getBoundTextMaxWidth,
+  } from "@excalidraw/element/textElement";
+  export { getFontString } from "@excalidraw/common";
 `;
 
 /**
@@ -59,8 +69,51 @@ export async function loadUpstream(checkoutDir) {
     freedraw: upstream.newFreeDrawElement,
   };
 
+  // Text is measured with the fixed character widths of the core's fake
+  // `TextMeasurer`: every character is half as wide as the font is high.
+  upstream.setCustomTextMetricsProvider({
+    getLineWidth: (text, font) => Array.from(text).length * (parseFloat(font) / 2),
+  });
+
   return {
     version,
+    /**
+     * A text Element as Excalidraw lays it out. With `container`, a label
+     * wrapped to it and placed in it (growing the container if it must, as
+     * Excalidraw does); with `width`, a text of fixed width wrapped to that;
+     * else a text that is as wide as its longest line. Returns
+     * `[text, container]`, where `container` is the changed container.
+     */
+    newText({ text, container, width, ...opts }) {
+      const fontFamily = opts.fontFamily ?? 5;
+      const fontSize = opts.fontSize ?? 20;
+      const font = upstream.getFontString({ fontFamily, fontSize });
+      const make = (wrapped, extra) =>
+        upstream.newTextElement({ ...opts, text: wrapped, originalText: text, ...extra });
+
+      if (container) {
+        const maxWidth = upstream.getBoundTextMaxWidth(container, null);
+        let label = make(upstream.wrapText(text, font, maxWidth), {
+          containerId: container.id,
+          verticalAlign: opts.verticalAlign ?? "middle",
+          textAlign: opts.textAlign ?? "center",
+          x: 0,
+          y: 0,
+        });
+        const grown = { ...container, boundElements: [{ type: "text", id: label.id }] };
+        if (label.height > upstream.getBoundTextMaxHeight(container, label)) {
+          grown.height = upstream.computeContainerDimensionForBoundText(label.height, container.type);
+        }
+        label = { ...label, angle: grown.angle, ...upstream.computeBoundTextPosition(grown, label, new Map()) };
+        return [label, grown];
+      }
+      if (width !== undefined) {
+        const label = make(upstream.wrapText(text, font, width), { autoResize: false });
+        const { height } = upstream.measureText(label.text, font, label.lineHeight);
+        return [{ ...label, width, height }];
+      }
+      return [make(text, {})];
+    },
     newElement(type, opts) {
       const construct = constructors[type];
       if (!construct) throw new Error(`unsupported element type ${type}`);

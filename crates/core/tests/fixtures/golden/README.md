@@ -16,6 +16,16 @@ Each fixture `<name>` is a pair:
 | `lines-arrows` | lines and arrows: straight, multi-point, curved, closed (filled) loops; every arrowhead at start and end; dashed, dotted, thick |
 | `arrowhead-turns` | every arrowhead at the start and end of arrows whose last segment is short and turns away; thick and curved variants |
 | `freedraw`     | simulated and real (stylus) pressure; thick, precise, dot, short, closed and filled strokes |
+| `text`         | text Elements laid out by Excalidraw itself (see below): alignments, rotation, font families, fixed-width wrapping (hyphens, spaces, long words, CJK), labels in rectangles, ellipses and diamonds |
+
+## `text.excalidraw`
+
+Has no `.golden.json`: the file is its own golden. Excalidraw's `wrapText`,
+`measureText` and `computeBoundTextPosition` laid every text out with a fake
+measurer in which each character is half as wide as the font is high, and saved
+the result: wrapped `text`, `originalText`, and the position and size of each
+text and of its container. The core, given the same fake `TextMeasurer`, must
+wrap `originalText` into the saved lines at the saved positions.
 
 ## `.golden.json`
 

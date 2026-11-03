@@ -35,6 +35,10 @@ struct Viewport: Equatable {
 /// stencil. That is exact for concave and self-intersecting outlines and,
 /// per sample, anti-aliased by the 4x MSAA.
 ///
+/// Text is filled too: each line of text becomes the outlines of its glyphs
+/// (cached per glyph, see `Excalifont`) in one fill, so it stays sharp at any
+/// zoom.
+///
 /// What is drawn for an Element is cached per Element handle and version (and
 /// flattening level), so a changed Scene only rebuilds the Elements that changed.
 @MainActor
@@ -91,6 +95,8 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
     /// Elements whose draws were built (flattened and uploaded) so far; a
     /// cache hit does not count. Tests use it to see what was rebuilt.
     private(set) var elementsBuilt = 0
+    /// Draws the lines of text; nil if the font is missing, which leaves text out.
+    private let font = Excalifont.shared
 
     /// A stroked part's segments on the GPU plus how to draw them.
     private struct StrokeDraw {
@@ -360,26 +366,44 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         var kept: [UInt32: CachedElement] = [:]
         var all: [Draw] = []
         geometry.withBuffers { buffers in
-            var first = 0
-            while first < buffers.parts.count {
-                // The parts of one Element follow each other.
-                let (element, version) = (buffers.parts[first].element, buffers.parts[first].version)
-                var end = first + 1
-                while end < buffers.parts.count, buffers.parts[end].element == element { end += 1 }
+            let (parts, lines) = (buffers.parts, buffers.textLines)
+            var (part, line) = (0, 0)
+            while part < parts.count || line < lines.count {
+                // Lines of text come before the part their index names, and
+                // the parts and lines of one Element follow each other.
+                let (element, version, isLine, end): (UInt32, UInt32, Bool, Int)
+                if line < lines.count, Int(lines[line].partIndex) <= part {
+                    var next = line + 1
+                    while next < lines.count, lines[next].element == lines[line].element,
+                        Int(lines[next].partIndex) <= part
+                    {
+                        next += 1
+                    }
+                    (element, version, isLine, end) = (lines[line].element, lines[line].version, true, next)
+                } else {
+                    var next = part + 1
+                    while next < parts.count, parts[next].element == parts[part].element,
+                        !(line < lines.count && Int(lines[line].partIndex) == next)
+                    {
+                        next += 1
+                    }
+                    (element, version, isLine, end) = (parts[part].element, parts[part].version, false, next)
+                }
 
                 var entry = cache[element]
                 if entry?.version != version || entry?.level != level {
-                    let parts = buffers.parts[first..<end]
-                    entry = CachedElement(
-                        version: version, level: level,
-                        draws: parts.compactMap { makeDraw(for: $0, in: buffers, tolerance: tolerance) })
+                    let draws =
+                        isLine
+                        ? lines[line..<end].compactMap { makeDraw(for: $0, in: buffers, tolerance: tolerance) }
+                        : parts[part..<end].compactMap { makeDraw(for: $0, in: buffers, tolerance: tolerance) }
+                    entry = CachedElement(version: version, level: level, draws: draws)
                     elementsBuilt += 1
                 }
                 if let entry {
                     kept[element] = entry
                     all += entry.draws
                 }
-                first = end
+                if isLine { line = end } else { part = end }
             }
         }
         cache = kept
@@ -410,10 +434,25 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
             uniforms: PartUniforms(color: color, width: part.width), isTranslucent: color.w < 1)
     }
 
+    private func makeDraw(for line: GeometryTextLine, in buffers: GeometryBuffers, tolerance: Float) -> Draw? {
+        guard let font else { return nil }
+        let path = TextLineOutline.path(of: line, text: buffers.string(of: line), font: font)
+        guard let mesh = FillMesh.mesh(verbs: path.verbs, coords: path.coords, tolerance: tolerance) else {
+            return nil
+        }
+        return fillDraw(
+            mesh, color: premultipliedColor(line.color, opacity: line.opacity), rule: .nonZero
+        ).map(Draw.fill)
+    }
+
     private func fillDraw(for part: GeometryPart, in buffers: GeometryBuffers, tolerance: Float) -> FillDraw? {
         guard let rule = part.rule,
             let mesh = FillMesh.mesh(of: part, in: buffers, tolerance: tolerance)
         else { return nil }
+        return fillDraw(mesh, color: premultipliedColor(of: part), rule: rule)
+    }
+
+    private func fillDraw(_ mesh: FillMesh, color: SIMD4<Float>, rule: GeometryFillRule) -> FillDraw? {
         let vertices = mesh.triangles + mesh.cover
         guard
             let buffer = vertices.withUnsafeBytes({
@@ -422,12 +461,16 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         else { return nil }
         return FillDraw(
             vertices: buffer, fanVertexCount: mesh.triangles.count,
-            uniforms: PartUniforms(color: premultipliedColor(of: part), width: 0), rule: rule)
+            uniforms: PartUniforms(color: color, width: 0), rule: rule)
     }
 
     private func premultipliedColor(of part: GeometryPart) -> SIMD4<Float> {
-        func channel(_ shift: UInt32) -> Float { Float((part.color >> shift) & 0xff) / 255 }
-        let alpha = channel(0) * part.opacity
+        premultipliedColor(part.color, opacity: part.opacity)
+    }
+
+    private func premultipliedColor(_ color: UInt32, opacity: Float) -> SIMD4<Float> {
+        func channel(_ shift: UInt32) -> Float { Float((color >> shift) & 0xff) / 255 }
+        let alpha = channel(0) * opacity
         return SIMD4(channel(24) * alpha, channel(16) * alpha, channel(8) * alpha, alpha)
     }
 }

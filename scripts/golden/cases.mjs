@@ -32,6 +32,8 @@ export function scenes(upstream) {
     { name: "lines-arrows", elements: linesAndArrows(upstream) },
     { name: "arrowhead-turns", elements: arrowheadTurns(upstream) },
     { name: "freedraw", elements: freedraw(upstream) },
+    // Excalidraw's own layout is the expected output: the file is its own golden.
+    { name: "text", elements: texts(upstream), golden: false },
   ];
 }
 
@@ -204,6 +206,78 @@ function freedraw(upstream) {
     make("freedraw-simulated-loop-filled", circle, { simulatePressure: true, pressures: [], backgroundColor: PINK, fillStyle: "hachure" }),
     make("freedraw-real-loop-filled", circle, { simulatePressure: false, pressures: circlePressures, backgroundColor: PINK, fillStyle: "solid" }),
   ];
+}
+
+// --- text: alignment, wrapping, labels in containers -------------------------
+
+const LOREM = "The quick brown fox jumps over the lazy dog";
+
+function texts(upstream) {
+  const place = new Placer(4, 260, 200);
+  const elements = [];
+  /**
+   * Adds the text `id`; `container` is `[type, extra Element options]` for a
+   * label. Both take the next free cell and the next fractional indexes.
+   */
+  const add = (id, text, { container, ...opts } = {}) => {
+    const cell = place.next();
+    const base = { x: cell.x, y: cell.y, created: 1730380000000 };
+    const box =
+      container &&
+      element(upstream, { next: () => cell }, container[0], `${id}-box`, {
+        ...closedSize(container[0]),
+        width: 160,
+        height: 90,
+        ...container[1],
+      });
+    const [label, grown] = upstream.newText({
+      text,
+      id,
+      seed: seedFor(id),
+      ...base,
+      ...opts,
+      container: box,
+    });
+    for (const el of grown ? [grown, label] : [label]) {
+      el.updated = 1730380000000;
+      el.index = fractionalIndex(elements.length);
+      elements.push(el);
+    }
+  };
+
+  // Free text: each alignment, several lines and sizes, other font families.
+  for (const textAlign of ["left", "center", "right"]) {
+    add(`text-${textAlign}`, "Hello\nWorld, a longer line\n\nlast", { textAlign });
+  }
+  add("text-large", "Big", { fontSize: 36 });
+  add("text-virgil", "Virgil family", { fontFamily: 1 });
+  add("text-helvetica", "Helvetica family", { fontFamily: 2 });
+  add("text-red", "Red and translucent", { strokeColor: "#e03131", opacity: 60 });
+  add("text-rotated", "Turned about\nits middle", { angle: 0.5 });
+
+  // Fixed width: wraps to its own width.
+  add("text-fixed", LOREM, { width: 140 });
+  add("text-fixed-right", LOREM, { width: 140, textAlign: "right" });
+
+  // Wrapping rules: hyphens, spaces, words longer than the line, CJK.
+  add("text-hyphens", "well-known state-of-the-art long-winded", { width: 120 });
+  add("text-spaces", "a    b    c    d    e    f    g", { width: 100 });
+  add("text-long-word", "Supercalifragilisticexpialidocious!", { width: 100 });
+  add("text-cjk", "日本語のテキストは文字ごとに折り返されます", { width: 100 });
+  add("text-trailing", "ends with spaces   \nnext", { width: 120 });
+
+  // Labels: every container shape, alignment and rotation.
+  add("label-rectangle", LOREM, { container: ["rectangle", {}] });
+  add("label-ellipse", LOREM, { container: ["ellipse", { width: 200, height: 120 }] });
+  add("label-diamond", LOREM, { container: ["diamond", { width: 260, height: 160 }] });
+  add("label-top-left", LOREM, { container: ["rectangle", {}], verticalAlign: "top", textAlign: "left" });
+  add("label-bottom-right", LOREM, { container: ["rectangle", {}], verticalAlign: "bottom", textAlign: "right" });
+  add("label-short", "Hi", { container: ["rectangle", {}] });
+  add("label-rotated", LOREM, { container: ["rectangle", { angle: 0.6 }] });
+  add("label-grows", `${LOREM}. ${LOREM}`, { container: ["rectangle", { height: 40 }] });
+  add("label-big-font", "Big label", { container: ["ellipse", {}], fontSize: 28 });
+  add("label-multiline", "one\ntwo\nthree", { container: ["diamond", { width: 200, height: 140 }] });
+  return elements;
 }
 
 // --- helpers ----------------------------------------------------------------
