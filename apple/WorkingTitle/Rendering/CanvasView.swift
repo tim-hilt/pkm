@@ -83,6 +83,21 @@ final class CanvasMetalView: MTKView {
         didReachEditor()
     }
 
+    /// A key pressed while the Canvas has the keyboard: performs the Command
+    /// the core binds to it (`shortcuts()`) and tells whether there was one.
+    /// Most keys arrive as menu shortcuts instead (`CanvasCommands`); this
+    /// catches the others a Command has. `key` as in `Shortcut.key`.
+    func pressKey(_ key: String, _ modifiers: Modifiers) -> Bool {
+        guard textOverlay.view == nil, let command = MenuShortcut.command(for: key, modifiers) else {
+            return false
+        }
+        perform { $0.perform(command: command) }
+        return true
+    }
+
+    /// Edit > Select All (⌘A) while the Canvas has the keyboard.
+    override func selectAll(_ sender: Any?) { perform { $0.perform(command: .selectAll) } }
+
     /// The core's zoom commands act around the middle of the view, so it must
     /// know the view's size.
     private func reportViewSize() {
@@ -187,9 +202,19 @@ final class CanvasMetalView: MTKView {
         override func keyDown(with event: NSEvent) {
             switch event.keyCode {
             case Self.returnKey, Self.keypadEnterKey: perform { $0.editSelectedText() }
-            default: super.keyDown(with: event)
+            default:
+                let key =
+                    switch event.keyCode {
+                    case Self.backspaceKey: "backspace"
+                    case Self.forwardDeleteKey: "delete"
+                    default: event.charactersIgnoringModifiers?.lowercased() ?? ""
+                    }
+                if !pressKey(key, Modifiers(event.modifierFlags)) { super.keyDown(with: event) }
             }
         }
+
+        private static let backspaceKey: UInt16 = 51
+        private static let forwardDeleteKey: UInt16 = 117
 
         private static let returnKey: UInt16 = 36
         private static let keypadEnterKey: UInt16 = 76
@@ -218,6 +243,25 @@ final class CanvasMetalView: MTKView {
                     pressure: 0.5, timestamp: event.timestamp, modifiers: Modifiers(event.modifierFlags)))
         }
     #else
+        /// Keys the menus do not list (see `pressKey`).
+        override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+            var unhandled = Set<UIPress>()
+            for press in presses {
+                guard let key = press.key else {
+                    unhandled.insert(press)
+                    continue
+                }
+                let name =
+                    switch key.keyCode {
+                    case .keyboardDeleteOrBackspace: "backspace"
+                    case .keyboardDeleteForward: "delete"
+                    default: key.charactersIgnoringModifiers.lowercased()
+                    }
+                if !pressKey(name, Modifiers(key.modifierFlags)) { unhandled.insert(press) }
+            }
+            if !unhandled.isEmpty { super.pressesBegan(unhandled, with: event) }
+        }
+
         override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) { send(touches, .down, event) }
         override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) { send(touches, .move, event) }
         override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) { send(touches, .up, event) }
@@ -320,6 +364,8 @@ final class CanvasController {
     /// editor changes the Tool itself, e.g. back to selection after drawing.
     private(set) var tool = Tool.selection
     private(set) var toolLock = false
+    /// Whether a text is being edited: keys then type into it.
+    private(set) var isEditingText = false
     /// Whether Pencil-only drawing is on. The core turns it on with the first
     /// Pencil input; it is stored in `settings` once it is on or the user
     /// chose, and restored into each editor before it is first read.
@@ -346,6 +392,7 @@ final class CanvasController {
         guard let editor = canvas?.editor else { return }
         tool = editor.tool()
         toolLock = editor.toolLock()
+        isEditingText = editor.textEditor() != nil
         syncPencilOnlyDrawing(editor)
         canUndo = editor.canUndo()
         canRedo = editor.canRedo()
@@ -382,6 +429,7 @@ final class CanvasController {
         settings.set(on, forKey: Self.pencilOnlyKey)
         canvas?.perform { $0.setPencilOnlyDrawing(on: on) }
     }
+    func perform(_ command: Command) { canvas?.perform { $0.perform(command: command) } }
     func duplicate() { canvas?.perform { $0.duplicate() } }
     func group() { canvas?.perform { $0.group() } }
     func ungroup() { canvas?.perform { $0.ungroup() } }

@@ -30,6 +30,7 @@ use crate::properties::{self, Properties, Property};
 use crate::random::Entropy;
 use crate::scene::{Element, ElementType, LoadError, Scene};
 use crate::selection::Selection;
+use crate::shortcut::Command;
 use crate::style::Style;
 use crate::tap::{Origin, Recognized, Tap, TapRecognizer};
 use crate::text::{self, Containers, TextMeasurer};
@@ -1123,6 +1124,27 @@ impl Editor {
         }
         self.history.record(step, &self.scene, &self.selection);
         self.changed(false);
+    }
+
+    /// Carries out `command`, e.g. from a keyboard shortcut (see
+    /// [`crate::shortcuts`]), exactly as the matching method does.
+    pub fn perform(&mut self, command: Command) {
+        match command {
+            Command::SetTool(tool) => self.set_tool(tool),
+            Command::ToggleToolLock => self.set_tool_lock(!self.tool_lock),
+            Command::Undo => self.undo(),
+            Command::Redo => self.redo(),
+            Command::Duplicate => self.duplicate(),
+            Command::Delete => self.delete_selection(),
+            Command::Group => self.group(),
+            Command::Ungroup => self.ungroup(),
+            Command::MoveInZOrder(how) => self.move_in_z_order(how),
+            Command::SelectAll => self.select_all(),
+            Command::ZoomIn => self.zoom_in(),
+            Command::ZoomOut => self.zoom_out(),
+            Command::ResetZoom => self.reset_zoom(),
+            Command::ZoomToFit => self.zoom_to_fit(),
+        }
     }
 
     /// Selects every shown, unlocked Element of the Scene (the `select all`

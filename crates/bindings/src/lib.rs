@@ -6,9 +6,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use workingtitle_core::scene::{FillPattern, LineStyle};
 use workingtitle_core::{
-    ActionBar, Edges, ExportScope, FontSize, ImageFile, MagnifyEvent, Modifiers, PencilDoubleTap,
-    PointerEvent, PointerKind, PointerPhase, Properties, Property, ScrollEvent, Sloppiness,
-    StrokeWidth, TextAlign, TextEditor, Tool, ZOrder,
+    ActionBar, Command, Edges, ExportScope, FontSize, ImageFile, MagnifyEvent, Modifiers,
+    PencilDoubleTap, PointerEvent, PointerKind, PointerPhase, Properties, Property, ScrollEvent,
+    Shortcut, Sloppiness, StrokeWidth, TextAlign, TextEditor, Tool, ZOrder,
 };
 
 uniffi::setup_scaffolding!("WorkingTitleCore");
@@ -200,6 +200,37 @@ pub enum Property {
     Opacity(f64),
     FontSize(FontSize),
     TextAlign(TextAlign),
+}
+
+#[uniffi::remote(Enum)]
+pub enum Command {
+    SetTool(Tool),
+    ToggleToolLock,
+    Undo,
+    Redo,
+    Duplicate,
+    Delete,
+    Group,
+    Ungroup,
+    MoveInZOrder(ZOrder),
+    SelectAll,
+    ZoomIn,
+    ZoomOut,
+    ResetZoom,
+    ZoomToFit,
+}
+
+#[uniffi::remote(Record)]
+pub struct Shortcut {
+    pub key: String,
+    pub modifiers: Modifiers,
+    pub command: Command,
+}
+
+/// Every keyboard shortcut; see [`workingtitle_core::shortcuts`].
+#[uniffi::export]
+pub fn shortcuts() -> Vec<Shortcut> {
+    workingtitle_core::shortcuts()
 }
 
 #[uniffi::remote(Record)]
@@ -570,6 +601,11 @@ impl Editor {
     /// [`workingtitle_core::Editor::ungroup`].
     pub fn ungroup(&self) {
         self.editor().ungroup();
+    }
+
+    /// Carries out `command`; see [`workingtitle_core::Editor::perform`].
+    pub fn perform(&self, command: Command) {
+        self.editor().perform(command);
     }
 
     /// Moves the Selection in z-order; see

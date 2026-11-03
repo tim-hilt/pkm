@@ -28,6 +28,7 @@ struct DrawingView: View {
         )
         .ignoresSafeArea()
         .overlay { ActionBarView(controller: controller) }
+        .focusedSceneValue(controller)
         .overlay {
             GeometryReader { container in
                 chrome(in: container.size)
@@ -198,7 +199,7 @@ private struct MainMenu: View {
 }
 
 /// Excalidraw's toolbar island, in its order: Tool lock, then the Tools.
-private struct ToolBar: View {
+struct ToolBar: View {
     let controller: CanvasController
 
     static func name(_ tool: Tool) -> String { tools.first { $0.0 == tool }!.1 }

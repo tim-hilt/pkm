@@ -1,0 +1,111 @@
+import SwiftUI
+
+/// A Command as the menus show it: the first of the core's shortcuts for it
+/// (`shortcuts()`), as a SwiftUI keyboard shortcut. The menus make the
+/// shortcuts discoverable (Mac menu bar, iPad keyboard shortcut overlay);
+/// the other keys of a Command reach the core through
+/// `CanvasMetalView.pressKey`.
+struct MenuShortcut {
+    let command: Command
+    let key: KeyEquivalent
+    let modifiers: EventModifiers
+
+    /// One per Command, in the core's order.
+    static let all: [MenuShortcut] = {
+        var seen: [Command] = []
+        return shortcuts().compactMap { shortcut in
+            guard !seen.contains(shortcut.command) else { return nil }
+            seen.append(shortcut.command)
+            return MenuShortcut(shortcut)
+        }
+    }()
+
+    private init(_ shortcut: Shortcut) {
+        command = shortcut.command
+        key =
+            switch shortcut.key {
+            case "backspace": .delete
+            case "delete": .deleteForward
+            default: KeyEquivalent(Character(shortcut.key))
+            }
+        var modifiers: EventModifiers = []
+        if shortcut.modifiers.meta { modifiers.insert(.command) }
+        if shortcut.modifiers.shift { modifiers.insert(.shift) }
+        if shortcut.modifiers.alt { modifiers.insert(.option) }
+        if shortcut.modifiers.ctrl { modifiers.insert(.control) }
+        self.modifiers = modifiers
+    }
+
+    /// The Command bound to `key` (see `Shortcut.key`) with `modifiers`.
+    static func command(for key: String, _ modifiers: Modifiers) -> Command? {
+        bindings.first { $0.key == key && $0.modifiers == modifiers }?.command
+    }
+
+    private static let bindings = shortcuts()
+}
+
+/// The Canvas's Commands in the app's menus, for the Drawing in front.
+struct CanvasCommands: Commands {
+    @FocusedValue(CanvasController.self) private var controller
+
+    var body: some Commands {
+        CommandGroup(replacing: .undoRedo) {
+            items(for: [.undo, .redo])
+        }
+        CommandGroup(after: .pasteboard) {
+            Divider()
+            items(for: [.duplicate, .delete])
+        }
+        CommandGroup(after: .toolbar) {
+            items(for: [.zoomIn, .zoomOut, .resetZoom, .zoomToFit])
+        }
+        CommandMenu("Tools") {
+            items { if case .setTool = $0 { true } else { false } }
+            Divider()
+            items(for: [.toggleToolLock])
+        }
+        CommandMenu("Arrange") {
+            items(for: [.group, .ungroup])
+            Divider()
+            items { if case .moveInZOrder = $0 { true } else { false } }
+        }
+    }
+
+    private func items(for commands: [Command]) -> some View {
+        items { commands.contains($0) }
+    }
+
+    /// Select All stays the platform's own Edit item, see `CanvasMetalView.selectAll`.
+    private func items(where included: @escaping (Command) -> Bool) -> some View {
+        ForEach(Array(MenuShortcut.all.enumerated()), id: \.offset) { _, entry in
+            if included(entry.command) && entry.command != .selectAll {
+                Button(Self.title(entry.command)) { controller?.perform(entry.command) }
+                    .keyboardShortcut(entry.key, modifiers: entry.modifiers)
+                    // Keys type into a text that is being edited.
+                    .disabled(controller == nil || controller?.isEditingText == true)
+            }
+        }
+    }
+
+    static func title(_ command: Command) -> String {
+        switch command {
+        case .setTool(let tool): ToolBar.name(tool)
+        case .toggleToolLock: "Keep Tool Selected"
+        case .undo: "Undo"
+        case .redo: "Redo"
+        case .duplicate: "Duplicate"
+        case .delete: "Delete"
+        case .group: "Group Selection"
+        case .ungroup: "Ungroup Selection"
+        case .moveInZOrder(.forward): "Bring Forward"
+        case .moveInZOrder(.backward): "Send Backward"
+        case .moveInZOrder(.toFront): "Bring to Front"
+        case .moveInZOrder(.toBack): "Send to Back"
+        case .selectAll: "Select All"
+        case .zoomIn: "Zoom In"
+        case .zoomOut: "Zoom Out"
+        case .resetZoom: "Reset Zoom"
+        case .zoomToFit: "Zoom to Fit"
+        }
+    }
+}
