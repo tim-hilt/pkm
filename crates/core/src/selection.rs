@@ -29,6 +29,22 @@ impl Selection {
         true
     }
 
+    /// Selects exactly `ids`, once each, in the order given. Returns whether
+    /// the Selection changed.
+    pub(crate) fn select(&mut self, ids: impl IntoIterator<Item = String>) -> bool {
+        let mut selected: Vec<String> = Vec::new();
+        for id in ids {
+            if !selected.contains(&id) {
+                selected.push(id);
+            }
+        }
+        if self.ids == selected {
+            return false;
+        }
+        self.ids = selected;
+        true
+    }
+
     /// Keeps only the selected Elements whose id satisfies `keep`.
     pub fn retain(&mut self, keep: impl Fn(&str) -> bool) {
         self.ids.retain(|id| keep(id));

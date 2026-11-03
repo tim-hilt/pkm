@@ -624,7 +624,10 @@ mod tests {
 
         assert_eq!(editor.selection(), ["a"]);
         assert_ne!(editor.overlay_revision(), revision);
-        assert_eq!(editor.overlay().part_count(), 1);
+        // The frame and the handles of the Selection: the box 10..40 by
+        // 20..60 is too small for the handles on its sides, so four corners
+        // and the rotation handle are drawn, each a fill and a stroke.
+        assert_eq!(editor.overlay().part_count(), 1 + 5 * 2);
     }
 
     #[test]

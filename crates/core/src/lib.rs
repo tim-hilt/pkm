@@ -31,6 +31,8 @@ mod style;
 mod tap;
 mod text;
 mod tool;
+mod transform;
+mod transform_handles;
 mod viewport;
 mod wrap;
 

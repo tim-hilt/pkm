@@ -626,12 +626,18 @@ fn the_inside_of_a_selected_hollow_element_keeps_it_selected() {
 const SELECTION_COLOR: u32 = 0x6965_dbff;
 
 /// The corners of the one frame the overlay draws: a closed chain of four
-/// lines, as `(x, y)`, and the width of its stroke.
+/// lines, as `(x, y)`, and the width of its stroke. The transform handles
+/// (see `resize_rotate.rs`) are parts of their own, named for no Element.
 #[track_caller]
 fn frame_of(editor: &Editor) -> (Vec<(f32, f32)>, f32) {
     let overlay = editor.overlay();
-    assert_eq!(overlay.parts().len(), 1, "one frame");
-    let part = overlay.parts()[0];
+    let frames: Vec<_> = overlay
+        .parts()
+        .iter()
+        .filter(|p| p.element != u32::MAX)
+        .collect();
+    assert_eq!(frames.len(), 1, "one frame");
+    let part = *frames[0];
     assert_eq!(part.kind, PartKind::Stroke as u32);
     assert_eq!(part.color, SELECTION_COLOR);
     assert_eq!(part.opacity, 1.0);

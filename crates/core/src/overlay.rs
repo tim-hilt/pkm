@@ -7,9 +7,11 @@
 //! changes (see `Editor::overlay_revision`).
 
 use crate::frame::Frame;
-use crate::geometry::{Geometry, StrokeStyle};
+use crate::geometry::{FillRule, FillStyle, Geometry, StrokeStyle};
+use crate::input::PointerKind;
 use crate::path::Point;
 use crate::scene::{Element, ElementType};
+use crate::transform_handles::{Grip, TransformBox};
 
 /// Excalidraw's selection colour (`--color-selection`), opaque.
 const SELECTION_COLOR: u32 = 0x6965_dbff;
@@ -45,6 +47,68 @@ pub(crate) fn selection<'a>(selected: impl Iterator<Item = Element<'a>>, zoom: f
         }
     }
     geometry
+}
+
+/// Excalidraw's handle colour: white squares with the selection colour
+/// around them.
+const HANDLE_COLOR: u32 = 0xffff_ffff;
+/// What the parts of the transform handles name, in place of an Element:
+/// clients do not cache the overlay by Element (see [`Editor::overlay`]).
+const TRANSFORM: u32 = u32::MAX;
+
+/// The transform handles of a Selection: a white square with the selection
+/// colour around it at every handle's centre, as big as the pointer's grip
+/// makes it, turned with the box (Excalidraw's transform handles).
+pub(crate) fn transform_handles(
+    geometry: &mut Geometry,
+    transform_box: &TransformBox,
+    kind: PointerKind,
+    zoom: f64,
+) {
+    let half = Grip::of(kind).visual / zoom / 2.0;
+    let (sin, cos) = transform_box.angle().sin_cos();
+    for (_, (cx, cy)) in transform_box.handles(zoom) {
+        let corners =
+            [(-half, -half), (half, -half), (half, half), (-half, half)].map(|(dx, dy)| {
+                (
+                    (cx + dx * cos - dy * sin) as f32,
+                    (cy + dx * sin + dy * cos) as f32,
+                )
+            });
+        // A writer holds the geometry, so the fill is finished before the
+        // stroke around it begins.
+        {
+            let mut fill = geometry.fill(
+                TRANSFORM,
+                0,
+                FillStyle {
+                    color: HANDLE_COLOR,
+                    opacity: 1.0,
+                    rule: FillRule::NonZero,
+                },
+            );
+            let [first, rest @ ..] = corners;
+            fill.move_to(first.0, first.1);
+            for (x, y) in rest.into_iter().chain([first]) {
+                fill.line_to(x, y);
+            }
+        }
+        let mut stroke = geometry.stroke(
+            TRANSFORM,
+            0,
+            StrokeStyle {
+                color: SELECTION_COLOR,
+                width: (FRAME_WIDTH / zoom) as f32,
+                opacity: 1.0,
+                dash: None,
+            },
+        );
+        let [first, rest @ ..] = corners;
+        stroke.move_to(first.0, first.1);
+        for (x, y) in rest.into_iter().chain([first]) {
+            stroke.line_to(x, y);
+        }
+    }
 }
 
 /// The corners of `frame` grown by `padding`, clockwise from the top left,

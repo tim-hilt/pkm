@@ -24,16 +24,24 @@ pub fn editor_with_fixture(name: &str) -> Editor {
 
 // --- Recorded pointer input ---------------------------------------------------
 
-/// Feeds a recorded pointer sequence to the editor.
+/// Feeds a recorded pointer sequence to the editor. An event may end with
+/// `shift` for the Shift key held while it happened.
 pub fn replay(editor: &mut Editor, recording: &str) {
     for line in recording.lines().filter(|l| !l.trim().is_empty()) {
         let f: Vec<&str> = line.split_whitespace().collect();
-        let [time, phase, id, kind, x, y] = f[..] else {
+        let [time, phase, id, kind, x, y, rest @ ..] = &f[..] else {
             panic!("bad recorded event: {line}")
         };
+        let mut modifiers = Modifiers::default();
+        for flag in rest {
+            match *flag {
+                "shift" => modifiers.shift = true,
+                _ => panic!("unknown modifier in: {line}"),
+            }
+        }
         editor.pointer(PointerEvent {
             id: id.parse().unwrap(),
-            phase: match phase {
+            phase: match *phase {
                 "down" => PointerPhase::Down,
                 "move" => PointerPhase::Move,
                 "up" => PointerPhase::Up,
@@ -42,7 +50,7 @@ pub fn replay(editor: &mut Editor, recording: &str) {
             },
             x: x.parse().unwrap(),
             y: y.parse().unwrap(),
-            kind: match kind {
+            kind: match *kind {
                 "finger" => PointerKind::Finger,
                 "pencil" => PointerKind::Pencil,
                 "mouse" => PointerKind::Mouse,
@@ -50,7 +58,7 @@ pub fn replay(editor: &mut Editor, recording: &str) {
             },
             pressure: 0.5,
             timestamp: time.parse().unwrap(),
-            modifiers: Modifiers::default(),
+            modifiers,
         });
     }
 }

@@ -64,6 +64,17 @@ impl Step {
         }
     }
 
+    /// Puts every Element the action touched back as it was before it, as
+    /// new versions; for an action that is abandoned.
+    pub fn revert(self, scene: &mut Scene, entropy: &mut Entropy) {
+        for (id, before) in self.before {
+            match before {
+                Some(before) => scene.restore(before, entropy.integer()),
+                None => scene.mark_deleted(&id, entropy.integer()),
+            }
+        }
+    }
+
     fn is_tracking(&self, id: &str) -> bool {
         self.before.iter().any(|(tracked, _)| tracked == id)
     }

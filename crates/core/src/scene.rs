@@ -226,6 +226,13 @@ impl Scene {
         self.root.to_json_pretty()
     }
 
+    /// The Element with `handle`, if there is one (see
+    /// [`Element::handle`]).
+    pub(crate) fn element(&self, handle: u32) -> Option<Element<'_>> {
+        let value = self.element_values().get(handle as usize)?;
+        Element::view(handle, value.as_object()?)
+    }
+
     /// The Elements of a type the core understands, deleted ones included, in
     /// z-order (file order).
     pub fn elements(&self) -> impl Iterator<Item = Element<'_>> {
@@ -365,9 +372,29 @@ impl Scene {
     }
 
     /// Sets the numeric `members` of the Element with `handle` and makes it
-    /// a new version of itself as Excalidraw does on every change: `version`
-    /// goes up and `versionNonce` becomes `nonce`.
-    fn revise<const N: usize>(&mut self, handle: u32, nonce: f64, members: [(&str, f64); N]) {
+    /// a new version of itself, see [`Scene::update`].
+    fn revise<const N: usize>(
+        &mut self,
+        handle: u32,
+        nonce: f64,
+        members: [(&'static str, f64); N],
+    ) {
+        self.update(
+            handle,
+            nonce,
+            members.map(|(key, value)| (key, Value::Number(value))),
+        );
+    }
+
+    /// Sets `members` of the Element with `handle` and makes it a new
+    /// version of itself as Excalidraw does on every change: `version` goes
+    /// up and `versionNonce` becomes `nonce`.
+    pub(crate) fn update(
+        &mut self,
+        handle: u32,
+        nonce: f64,
+        members: impl IntoIterator<Item = (&'static str, Value)>,
+    ) {
         let Some(element) = self
             .element_values_mut()
             .get_mut(handle as usize)
@@ -379,11 +406,11 @@ impl Scene {
             .get("version")
             .and_then(Value::as_f64)
             .unwrap_or(0.0);
-        for (key, value) in members
-            .into_iter()
-            .chain([("version", version + 1.0), ("versionNonce", nonce)])
-        {
-            element.insert(key.into(), Value::Number(value));
+        for (key, value) in members.into_iter().chain([
+            ("version", Value::Number(version + 1.0)),
+            ("versionNonce", Value::Number(nonce)),
+        ]) {
+            element.insert(key.into(), value);
         }
     }
 
@@ -434,6 +461,18 @@ impl<'a> Element<'a> {
     pub fn id(&self) -> &'a str {
         let id: Option<&'a str> = self.object.get("id").and_then(Value::as_str);
         id.unwrap_or_default()
+    }
+}
+
+impl<'a> Element<'a> {
+    /// A view of `object`, which may be a snapshot taken earlier (see
+    /// [`Scene::snapshot`]), as the Element with `handle`.
+    pub(crate) fn view(handle: u32, object: &'a Object) -> Option<Self> {
+        Some(Self {
+            handle,
+            kind: type_of(object)?,
+            object,
+        })
     }
 }
 

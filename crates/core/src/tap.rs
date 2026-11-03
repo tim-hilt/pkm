@@ -19,6 +19,15 @@ const PRECISE_SLOP: f64 = 4.0;
 /// The longest a finger may stay down for a tap to be short, in seconds.
 const SHORT_TAP: f64 = 0.3;
 
+/// How far a pointer of `kind` may wander from where it went down, in view
+/// points, and still be pressing in place rather than dragging.
+pub(crate) fn slop(kind: PointerKind) -> f64 {
+    match kind {
+        PointerKind::Finger => FINGER_SLOP,
+        PointerKind::Pencil | PointerKind::Mouse => PRECISE_SLOP,
+    }
+}
+
 /// What a pointer just turned out to be doing.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Recognized {
@@ -103,11 +112,7 @@ impl TapRecognizer {
             }
             PointerPhase::Move => {
                 if let Some(press) = self.press.as_mut().filter(|p| p.pointer == event.id) {
-                    let slop = match press.kind {
-                        PointerKind::Finger => FINGER_SLOP,
-                        PointerKind::Pencil | PointerKind::Mouse => PRECISE_SLOP,
-                    };
-                    let away = (event.x - press.x).hypot(event.y - press.y) > slop;
+                    let away = (event.x - press.x).hypot(event.y - press.y) > slop(press.kind);
                     if away && !press.moved {
                         press.moved = true;
                         return Some(Recognized::DragBegan(Origin {

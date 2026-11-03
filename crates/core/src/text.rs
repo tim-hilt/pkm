@@ -197,7 +197,12 @@ fn layout(
 /// How wide the lines of a label may be (`getBoundTextMaxWidth`): the width
 /// of the rectangle that fits in the container, less padding.
 fn bound_max_width(container: &Element) -> f64 {
-    inscribed(container.kind(), container.width()) - BOUND_TEXT_PADDING * 2.0
+    label_max_width(container.kind(), container.width())
+}
+
+/// How wide the lines of a label may be in a container of `kind` and `width`.
+pub(crate) fn label_max_width(kind: ElementType, width: f64) -> f64 {
+    inscribed(kind, width) - BOUND_TEXT_PADDING * 2.0
 }
 
 /// How high a label may be (`getBoundTextMaxHeight`).
@@ -262,6 +267,91 @@ fn bound_position(text: &Element, container: &Element, (width, height): (f64, f6
         pivot.0 + dx * cos - dy * sin - width / 2.0,
         pivot.1 + dx * sin + dy * cos - height / 2.0,
     )
+}
+
+/// A text set in lines.
+pub(crate) struct Lines {
+    /// The lines joined by `\n`, as a text Element saves them.
+    pub text: String,
+    /// The width of the widest line.
+    pub width: f64,
+    pub height: f64,
+}
+
+/// The text of `element` as typed, set in lines at most `max_width` wide.
+pub(crate) fn set_in_lines(
+    element: &Element,
+    max_width: f64,
+    measurer: &dyn TextMeasurer,
+) -> Lines {
+    let font_size = element.font_size();
+    let lines = wrap::wrap_text(
+        &normalized(element.original_text()),
+        font_size,
+        max_width,
+        measurer,
+    );
+    Lines {
+        width: wrap::widest(&lines, font_size, measurer),
+        height: lines.len() as f64 * font_size * element.line_height(),
+        text: lines.join("\n"),
+    }
+}
+
+/// The members a label has to save to sit in its container as the container
+/// is now (Excalidraw's `handleBindTextResize`).
+pub(crate) struct LabelFit {
+    /// The wrapped text, if the lines were laid out again.
+    pub text: Option<String>,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// Where `label` sits in the shape `container`, and how big it is there. With
+/// a `measurer` the text is wrapped to the container again; without, the
+/// label keeps the size it was saved with.
+pub(crate) fn fit_label(
+    label: &Element,
+    container: &Element,
+    measurer: Option<&dyn TextMeasurer>,
+) -> LabelFit {
+    let (text, width, height) = match measurer {
+        Some(measurer) => {
+            let lines = set_in_lines(label, bound_max_width(container), measurer);
+            (Some(lines.text), lines.width, lines.height)
+        }
+        None => (None, label.width(), label.height()),
+    };
+    let (x, y) = bound_position(label, container, (width, height));
+    LabelFit {
+        text,
+        x,
+        y,
+        width,
+        height,
+    }
+}
+
+/// How small a container of `label` may get: one character wide and one line
+/// high (Excalidraw's `getApproxMinLineWidth` and `getApproxMinLineHeight`).
+pub(crate) fn min_container_size(label: &Element, measurer: &dyn TextMeasurer) -> (f64, f64) {
+    let font_size = label.font_size();
+    let widest_char = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        .chars()
+        .map(|c| measurer.line_width(c.encode_utf8(&mut [0; 4]), font_size))
+        .fold(0.0, f64::max);
+    (
+        widest_char + BOUND_TEXT_PADDING * 2.0,
+        font_size * label.line_height() + BOUND_TEXT_PADDING * 2.0,
+    )
+}
+
+/// How narrow a text of fixed width may be made (Excalidraw's
+/// `getMinTextElementWidth`).
+pub(crate) fn min_text_width(font_size: f64, measurer: &dyn TextMeasurer) -> f64 {
+    measurer.line_width(" ", font_size) + BOUND_TEXT_PADDING * 2.0
 }
 
 /// Line breaks as `\n`, and tabs as the eight spaces Excalidraw shows them as.

@@ -50,6 +50,87 @@ impl Frame {
         Self::of(element)
     }
 
+    /// The point the Element turns about: the middle of its box, which for
+    /// lines and arrows is that of their sketched stroke (see
+    /// [`Frame::drawn`]).
+    pub fn pivot(element: &Element) -> Point {
+        Self::drawn(element).centre()
+    }
+
+    /// The smallest box around the Element as it is shown, that is turned by
+    /// its angle (Excalidraw's `getElementBounds`).
+    pub fn shown(element: &Element) -> Self {
+        let frame = Self::of(element);
+        let angle = element.angle();
+        if angle == 0.0 {
+            return frame;
+        }
+        let pivot = Self::pivot(element);
+        let (sin, cos) = angle.sin_cos();
+        let turn = |(x, y): Point| {
+            let (dx, dy) = (x - pivot.0, y - pivot.1);
+            (pivot.0 + dx * cos - dy * sin, pivot.1 + dx * sin + dy * cos)
+        };
+        let (centre, half) = (frame.centre(), frame.half_size());
+        let around: Vec<Point> = match element.kind() {
+            // The extremes of a turned ellipse are not those of its box.
+            ElementType::Ellipse => {
+                let reach = (half.0 * cos).hypot(half.1 * sin);
+                let rise = (half.0 * sin).hypot(half.1 * cos);
+                let centre = turn(centre);
+                return Frame {
+                    min: (centre.0 - reach, centre.1 - rise),
+                    max: (centre.0 + reach, centre.1 + rise),
+                };
+            }
+            ElementType::Diamond => vec![
+                (centre.0, frame.min.1),
+                (frame.max.0, centre.1),
+                (centre.0, frame.max.1),
+                (frame.min.0, centre.1),
+            ],
+            kind if kind.is_linear() || kind == ElementType::Freedraw => element
+                .points()
+                .into_iter()
+                .map(|(x, y)| (element.x() + x, element.y() + y))
+                .collect(),
+            _ => vec![
+                frame.min,
+                (frame.max.0, frame.min.1),
+                frame.max,
+                (frame.min.0, frame.max.1),
+            ],
+        };
+        around
+            .into_iter()
+            .map(|p| {
+                let p = turn(p);
+                Frame { min: p, max: p }
+            })
+            .reduce(Frame::union)
+            .unwrap_or(frame)
+    }
+
+    /// The smallest box around both.
+    pub fn union(self, other: Frame) -> Frame {
+        Frame {
+            min: (self.min.0.min(other.min.0), self.min.1.min(other.min.1)),
+            max: (self.max.0.max(other.max.0), self.max.1.max(other.max.1)),
+        }
+    }
+
+    pub fn width(&self) -> f64 {
+        self.max.0 - self.min.0
+    }
+
+    pub fn height(&self) -> f64 {
+        self.max.1 - self.min.1
+    }
+
+    fn half_size(&self) -> (f64, f64) {
+        (self.width() / 2.0, self.height() / 2.0)
+    }
+
     pub fn centre(&self) -> Point {
         (
             (self.min.0 + self.max.0) / 2.0,

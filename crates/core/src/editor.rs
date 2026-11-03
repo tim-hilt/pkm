@@ -17,6 +17,8 @@ use crate::style::Style;
 use crate::tap::{Origin, Recognized, Tap, TapRecognizer};
 use crate::text::{self, Containers, TextMeasurer};
 use crate::tool::Tool;
+use crate::transform::TransformGesture;
+use crate::transform_handles::{Handle, TransformBox};
 use crate::viewport::Viewport;
 use crate::{image, shape};
 
@@ -55,6 +57,12 @@ pub struct Editor {
     history: History,
     /// The Selection being moved, if the pointer of a drag on it is down.
     moving: Option<MoveGesture>,
+    /// The Selection being resized or rotated, if the pointer of a drag on a
+    /// transform handle is down.
+    transforming: Option<TransformGesture>,
+    /// The kind of the last pointer seen, which the handles of the overlay
+    /// are sized for.
+    last_pointer: PointerKind,
     /// Changes whenever the overlay may, see [`Editor::overlay_revision`].
     overlay_revision: u64,
     /// The zoom the overlay was last made for.
@@ -94,6 +102,8 @@ impl Editor {
             taps: TapRecognizer::default(),
             history: History::default(),
             moving: None,
+            transforming: None,
+            last_pointer: PointerKind::Finger,
             overlay_revision: 0,
             overlay_zoom: 1.0,
             measurer: None,
@@ -108,10 +118,11 @@ impl Editor {
             self.overlay_revision += 1;
         }
         self.taps.cancel();
-        // Whatever was being drawn or moved belonged to the Scene that is
-        // gone, and so did what could be undone.
+        // Whatever was being drawn, moved or transformed belonged to the
+        // Scene that is gone, and so did what could be undone.
         self.shape = None;
         self.moving = None;
+        self.transforming = None;
         self.history.clear();
         self.changed(true);
         Ok(())
@@ -260,6 +271,7 @@ impl Editor {
     /// [`Editor::selection`]) while a drag on an Element moves the Selection
     /// (see [`crate::move_selection`]).
     pub fn pointer(&mut self, event: PointerEvent) {
+        self.last_pointer = event.kind;
         self.navigation.pointer(event, self.tool == Tool::Hand);
         self.navigated();
         self.draw_shape(event);
@@ -300,7 +312,7 @@ impl Editor {
 
     /// Whether a pointer is down making a change that is not finished.
     fn is_gesturing(&self) -> bool {
-        self.shape.is_some() || self.moving.is_some()
+        self.shape.is_some() || self.moving.is_some() || self.transforming.is_some()
     }
 
     /// Shows the Scene as undo or redo left it, with `selection` selected
@@ -320,6 +332,19 @@ impl Editor {
         self.selection.ids()
     }
 
+    /// Selects every shown, unlocked Element of the Scene (the `select all`
+    /// command).
+    pub fn select_all(&mut self) {
+        let ids: Vec<String> = self
+            .shown()
+            .filter(|e| !e.is_locked())
+            .map(|e| e.id().to_owned())
+            .collect();
+        if self.selection.select(ids) {
+            self.overlay_revision += 1;
+        }
+    }
+
     /// Selects the Element a tap hits, or clears the Selection if the tap
     /// was a deliberate one on empty Canvas (see [`crate::tap`]); moves the
     /// Selection with a drag that began on an Element.
@@ -331,9 +356,11 @@ impl Editor {
         if self.tool != Tool::Selection || self.navigation.is_pinching() {
             self.taps.cancel();
             self.drop_move();
+            self.drop_transform();
             return;
         }
         self.follow_move(event);
+        self.follow_transform(event);
         match self.taps.track(event) {
             Some(Recognized::Tap(tap)) => self.tap(tap),
             Some(Recognized::DragBegan(origin)) => self.begin_move(origin, event),
@@ -342,6 +369,11 @@ impl Editor {
     }
 
     fn tap(&mut self, tap: Tap) {
+        // A tap on a transform handle is a grab that never dragged: it
+        // neither selects nor clears the Selection.
+        if self.grabbed_handle(tap.x, tap.y, tap.kind).is_some() {
+            return;
+        }
         let hit = self.hit(tap.x, tap.y, tap.kind);
         let changed = match hit {
             Some(id) => self.selection.select_only(&id),
@@ -362,10 +394,85 @@ impl Editor {
             .map(|element| element.id().to_owned())
     }
 
+    /// The transform handle a pointer of `kind` that went down at the view
+    /// point `(x, y)` takes hold of, if any.
+    fn grabbed_handle(&self, x: f64, y: f64, kind: PointerKind) -> Option<(TransformBox, Handle)> {
+        let viewport = self.navigation.viewport();
+        let transform_box = TransformBox::of(&self.scene, &self.selection)?;
+        let handle = transform_box.grab(viewport.scene_at(x, y), kind, viewport.zoom())?;
+        Some((transform_box, handle))
+    }
+
+    /// Starts resizing or rotating the Selection if the drag began on a
+    /// transform handle of it.
+    fn begin_transform(&mut self, origin: Origin, event: PointerEvent) {
+        let Some((transform_box, handle)) = self.grabbed_handle(origin.x, origin.y, origin.kind)
+        else {
+            return;
+        };
+        let viewport = self.navigation.viewport();
+        let start = viewport.scene_at(origin.x, origin.y);
+        self.transforming = Some(TransformGesture::begin(
+            Step::begin(&self.selection),
+            &self.scene,
+            &self.selection,
+            event.id,
+            transform_box,
+            handle,
+            start,
+        ));
+        self.follow_transform(event);
+    }
+
+    /// Takes the Selection along with the handle its pointer holds.
+    fn follow_transform(&mut self, event: PointerEvent) {
+        let Some(transforming) = self
+            .transforming
+            .as_mut()
+            .filter(|t| t.pointer() == event.id)
+        else {
+            return;
+        };
+        match event.phase {
+            PointerPhase::Down => {}
+            PointerPhase::Move => {
+                let to = self.navigation.viewport().scene_at(event.x, event.y);
+                if transforming.drag_to(
+                    &mut self.scene,
+                    &mut self.entropy,
+                    to,
+                    event.modifiers.shift,
+                    self.measurer.as_ref().map(|m| m.0.as_ref()),
+                ) {
+                    self.changed(false);
+                }
+            }
+            PointerPhase::Up => {
+                if let Some(transforming) = self.transforming.take() {
+                    self.history
+                        .record(transforming.finish(), &self.scene, &self.selection);
+                }
+            }
+            PointerPhase::Cancel => self.drop_transform(),
+        }
+    }
+
+    /// Puts the Selection being transformed, if any, back as it was.
+    fn drop_transform(&mut self) {
+        if let Some(transforming) = self.transforming.take() {
+            transforming.cancel(&mut self.scene, &mut self.entropy);
+            self.changed(false);
+        }
+    }
+
     /// Starts moving the Selection if the drag began on an Element: on the
     /// Selection itself, or else on an Element that becomes the Selection.
     /// `event` is the step that turned the press into a drag.
     fn begin_move(&mut self, origin: Origin, event: PointerEvent) {
+        self.begin_transform(origin, event);
+        if self.transforming.is_some() {
+            return;
+        }
         let Some(id) = self.hit(origin.x, origin.y, origin.kind) else {
             return;
         };
@@ -418,14 +525,20 @@ impl Editor {
     }
 
     /// What clients draw over the Scene: a frame around each selected
-    /// Element, in Scene coordinates, as geometry in the same format as
-    /// [`Editor::geometry`] (strokes only; no text or images). Clients draw
-    /// it after the Scene and do not cache it by Element: its strokes are as
+    /// Element and the transform handles of the Selection, in Scene
+    /// coordinates, as geometry in the same format as [`Editor::geometry`]
+    /// (strokes and the handles' fills; no text or images). Clients draw it
+    /// after the Scene and do not cache it by Element: its strokes are as
     /// wide and as far from the Elements as they are because of the zoom it
     /// was made for.
     pub fn overlay(&self) -> Geometry {
+        let zoom = self.navigation.viewport().zoom();
         let selected = self.shown().filter(|e| self.selection.contains(e.id()));
-        overlay::selection(selected, self.navigation.viewport().zoom())
+        let mut geometry = overlay::selection(selected, zoom);
+        if let Some(transform_box) = TransformBox::of(&self.scene, &self.selection) {
+            overlay::transform_handles(&mut geometry, &transform_box, self.last_pointer, zoom);
+        }
+        geometry
     }
 
     /// Tells whether [`Editor::overlay`] may differ from before: it changes
