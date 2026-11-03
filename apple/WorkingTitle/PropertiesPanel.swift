@@ -1,12 +1,16 @@
 import SwiftUI
 
-/// Minimal properties panel; its final placement (a left panel, or a sheet on
-/// iPhone) comes with the layout. It sets the properties of the Selection, or
+/// The properties panel: Excalidraw's 195 pt island, as tall as its content
+/// and scrolling beyond the height its container offers; the layout places
+/// it. It sets the properties of the Selection, or
 /// of the next Element if nothing is selected, and shows what the core says
 /// they are; a value the Selection's Elements do not share shows no option
 /// chosen. The option sets are Excalidraw's.
 struct PropertiesPanel: View {
     let controller: CanvasController
+    /// The tallest the panel may be; beyond it, it scrolls.
+    var maxHeight: CGFloat = .infinity
+    @State private var contentHeight: CGFloat = 0
 
     private static let strokeColors = ["#1e1e1e", "#e03131", "#2f9e44", "#1971c2", "#f08c00"]
     private static let backgroundColors = [
@@ -16,7 +20,7 @@ struct PropertiesPanel: View {
     var body: some View {
         if let shown = controller.properties {
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
                     section("Stroke") {
                         swatches(Self.strokeColors, selected: shown.strokeColor) {
                             .strokeColor($0)
@@ -78,14 +82,14 @@ struct PropertiesPanel: View {
                             in: 0...100, step: 10)
                     }
                 }
-                .padding()
+                .padding(12)
+                .onGeometryChange(for: CGFloat.self, of: \.size.height) { contentHeight = $0 }
             }
-            .frame(width: 220)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxHeight: 520)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-            .padding(.leading)
-            .padding(.top, 72)
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(width: 195, height: min(contentHeight, maxHeight))
+            .background(.background, in: RoundedRectangle(cornerRadius: 8))
+            .shadow(color: .black.opacity(0.17), radius: 0.5)
+            .shadow(color: .black.opacity(0.05), radius: 7, y: 7)
         }
     }
 

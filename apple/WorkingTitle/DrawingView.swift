@@ -28,25 +28,11 @@ struct DrawingView: View {
         )
         .ignoresSafeArea()
         .overlay { ActionBarView(controller: controller) }
-        .overlay(alignment: .top) { ToolBar(controller: controller) }
-        .overlay(alignment: .bottom) {
-            VStack(spacing: 0) {
-                HStack {
-                    BackControl(action: onBack)
-                    ShareLink(item: export, preview: SharePreview(drawing.name)) {
-                        Label("Export", systemImage: "square.and.arrow.up")
-                    }
-                    .accessibilityIdentifier("export-drawing")
-                    PNGExportMenu(drawing: drawing)
-                }
-                ZoomControls(controller: controller)
+        .overlay {
+            GeometryReader { container in
+                chrome(in: container.size)
             }
         }
-        .overlay(alignment: .bottomLeading) { HistoryControls(controller: controller) }
-        .overlay(alignment: .topLeading) { PropertiesPanel(controller: controller) }
-        #if !os(macOS)
-            .overlay(alignment: .bottomTrailing) { PasteImageControl(controller: controller) }
-        #endif
         // Whatever leaves the Drawing (background, closing the window, quitting)
         // saves it at once.
         .onChange(of: scenePhase) { _, phase in
@@ -59,129 +45,242 @@ struct DrawingView: View {
             }
         #endif
     }
+
+    /// Excalidraw's floating controls, placed per `DrawingLayout` for the
+    /// container's current size, so that they follow every resize. The
+    /// mobile placement is refined by its own ticket.
+    private func chrome(in size: CGSize) -> some View {
+        let layout = DrawingLayout(containerSize: size)
+        let margin = DrawingLayout.margin
+        return ZStack {
+            HStack(spacing: 8) {
+                BackControl(action: onBack)
+                MainMenu(drawing: drawing, export: export)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+            ToolBar(controller: controller)
+                .frame(
+                    maxWidth: .infinity, maxHeight: .infinity,
+                    alignment: layout == .desktop ? .top : .bottom)
+
+            if showsProperties {
+                PropertiesPanel(
+                    controller: controller,
+                    maxHeight: DrawingLayout.propertiesMaxHeight(containerHeight: size.height)
+                )
+                .padding(.top, DrawingLayout.propertiesTop - margin)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+
+            if layout == .desktop {
+                HStack(spacing: 9.6) {
+                    ZoomControls(controller: controller)
+                    HistoryControls(controller: controller)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            } else {
+                HStack {
+                    ZoomControls(controller: controller)
+                    Spacer()
+                    HistoryControls(controller: controller)
+                }
+                .padding(.bottom, 60)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            }
+
+            #if !os(macOS)
+                PasteImageControl(controller: controller)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            #endif
+        }
+        .padding(margin)
+    }
+
+    /// Excalidraw shows no properties for the Tools that make no Elements.
+    private var showsProperties: Bool {
+        controller.properties != nil && controller.tool != .hand && controller.tool != .eraser
+    }
 }
 
-/// Back to the Gallery; its final placement comes with the layout.
+/// Excalidraw's island: white, radius 8, its soft shadow.
+private struct Island: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .background(.background, in: RoundedRectangle(cornerRadius: 8))
+            .shadow(color: .black.opacity(0.17), radius: 0.5)
+            .shadow(color: .black.opacity(0.08), radius: 1.5)
+            .shadow(color: .black.opacity(0.05), radius: 7, y: 7)
+    }
+}
+
+extension View {
+    fileprivate func island() -> some View { modifier(Island()) }
+
+    /// Excalidraw's 36 pt control, its hit area grown to Apple's 44 pt.
+    fileprivate func controlButton(width: CGFloat = 36) -> some View {
+        frame(width: width, height: 36)
+            .contentShape(Rectangle().inset(by: -4))
+    }
+}
+
+/// Excalidraw's grey control group fill, `#ececf4`.
+private let controlFill = Color(red: 0xEC / 255, green: 0xEC / 255, blue: 0xF4 / 255)
+/// Excalidraw's checked-tool fill `#e0dfff` and glyph `#030064`.
+private let checkedFill = Color(red: 0xE0 / 255, green: 0xDF / 255, blue: 1)
+private let checkedGlyph = Color(red: 3 / 255, green: 0, blue: 0x64 / 255)
+
+/// Back to the Gallery, in the corner Excalidraw keeps for its main menu.
 private struct BackControl: View {
     let action: () -> Void
 
     var body: some View {
         Button("Gallery", systemImage: "chevron.backward", action: action)
+            .labelStyle(.iconOnly)
+            .buttonStyle(.borderless)
+            .controlButton()
+            .background(controlFill, in: RoundedRectangle(cornerRadius: 8))
             .accessibilityIdentifier("back-to-gallery")
-            .padding(10)
-            .background(.regularMaterial, in: Capsule())
-            .padding(.horizontal)
     }
 }
 
-/// Exports the Scene or the Selection as PNG through the share sheet, with
-/// or without background; its final placement comes with the layout.
-private struct PNGExportMenu: View {
+/// Excalidraw's main menu (hamburger): exports the Drawing.
+private struct MainMenu: View {
     let drawing: OpenDrawing
+    let export: ExportedDrawing
     @State private var background = true
 
     var body: some View {
         Menu {
-            Toggle("Background", isOn: $background)
-            share("Export Scene as PNG", scope: .scene)
-            share("Export Selection as PNG", scope: .selection)
+            ShareLink(item: export, preview: SharePreview(drawing.name)) {
+                Label("Export", systemImage: "square.and.arrow.up")
+            }
+            .accessibilityIdentifier("export-drawing")
+            Section("Export PNG") {
+                Toggle("Background", isOn: $background)
+                share("Export Scene as PNG", scope: .scene)
+                share("Export Selection as PNG", scope: .selection)
+            }
         } label: {
-            Label("Export PNG", systemImage: "photo")
+            Label("Menu", systemImage: "line.3.horizontal")
         }
-        .accessibilityIdentifier("export-png")
+        .labelStyle(.iconOnly)
+        .menuIndicator(.hidden)
+        .buttonStyle(.borderless)
+        .controlButton()
+        .background(controlFill, in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityIdentifier("main-menu")
     }
 
     private func share(_ title: LocalizedStringKey, scope: ExportScope) -> some View {
         let png = ExportedPNG(name: drawing.name, editor: drawing.editor, scope: scope, background: background)
-        return ShareLink(item: png, preview: SharePreview(drawing.name)) { Text(title) }
+        return ShareLink(item: png, preview: SharePreview(drawing.name)) { Label(title, systemImage: "photo") }
     }
 }
 
-/// Minimal Tool controls; their final placement comes with the layout.
+/// Excalidraw's toolbar island, in its order: Tool lock, then the Tools.
 private struct ToolBar: View {
     let controller: CanvasController
 
     private static let tools: [(Tool, String, String)] = [
-        (.selection, "Selection", "cursorarrow"),
         (.hand, "Hand", "hand.raised"),
-        (.rectangle, "Rectangle", "rectangle"),
+        (.selection, "Selection", "cursorarrow"),
+        (.rectangle, "Rectangle", "square"),
         (.diamond, "Diamond", "diamond"),
         (.ellipse, "Ellipse", "circle"),
+        (.arrow, "Arrow", "arrow.right"),
         (.line, "Line", "line.diagonal"),
-        (.arrow, "Arrow", "arrow.up.right"),
-        (.freedraw, "Draw", "pencil.tip"),
-        (.text, "Text", "textformat"),
+        (.freedraw, "Draw", "pencil"),
+        (.text, "Text", "textformat.alt"),
         (.eraser, "Eraser", "eraser"),
     ]
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 4) {
+            toolButton(
+                "Keep tool selected", symbol: controller.toolLock ? "lock" : "lock.open",
+                checked: controller.toolLock
+            ) { controller.setToolLock(!controller.toolLock) }
+            divider
             ForEach(Self.tools, id: \.0) { tool, name, symbol in
-                Toggle(
-                    isOn: Binding(
-                        get: { controller.tool == tool },
-                        set: { _ in controller.setTool(tool) })
-                ) { Label(name, systemImage: symbol) }
-                .toggleStyle(.button)
+                toolButton(name, symbol: symbol, checked: controller.tool == tool) {
+                    controller.setTool(tool)
+                }
             }
-            Divider().frame(height: 20)
-            Toggle(
-                isOn: Binding(
-                    get: { controller.toolLock },
-                    set: { controller.setToolLock($0) })
-            ) { Label("Keep tool selected", systemImage: controller.toolLock ? "lock" : "lock.open") }
-            .toggleStyle(.button)
             #if !os(macOS)
-                Toggle(
-                    isOn: Binding(
-                        get: { controller.pencilOnlyDrawing },
-                        set: { controller.setPencilOnlyDrawing($0) })
-                ) { Label("Pencil-only drawing", systemImage: "applepencil") }
-                .toggleStyle(.button)
+                divider
+                toolButton(
+                    "Pencil-only drawing", symbol: "applepencil", checked: controller.pencilOnlyDrawing
+                ) { controller.setPencilOnlyDrawing(!controller.pencilOnlyDrawing) }
             #endif
         }
-        .labelStyle(.iconOnly)
-        .padding(10)
-        .background(.regularMaterial, in: Capsule())
-        .padding()
+        .padding(4)
+        .island()
+    }
+
+    private var divider: some View {
+        Rectangle().fill(Color(red: 0xF1 / 255, green: 0xF0 / 255, blue: 1))
+            .frame(width: 1, height: 24).padding(.horizontal, 4)
+    }
+
+    private func toolButton(
+        _ name: String, symbol: String, checked: Bool, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 15))
+                .foregroundStyle(checked ? checkedGlyph : .primary)
+                .controlButton()
+                .background(checked ? checkedFill : .clear, in: RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(name)
+        .accessibilityAddTraits(checked ? .isSelected : [])
     }
 }
 
-/// Minimal navigation controls; their final placement comes with the layout.
+/// Excalidraw's zoom group: out, reset, in; plus zoom to fit (ticket 09).
 private struct ZoomControls: View {
     let controller: CanvasController
 
     var body: some View {
-        HStack(spacing: 16) {
-            Button("Zoom out", systemImage: "minus") { controller.zoomOut() }
+        HStack(spacing: 0) {
+            Button("Zoom out", systemImage: "minus") { controller.zoomOut() }.controlButton()
             Button("Reset zoom", systemImage: "1.magnifyingglass") { controller.resetZoom() }
-            Button("Zoom in", systemImage: "plus") { controller.zoomIn() }
+                .controlButton(width: 44)
+            Button("Zoom in", systemImage: "plus") { controller.zoomIn() }.controlButton()
             Button("Zoom to fit", systemImage: "arrow.up.left.and.down.right.magnifyingglass") {
                 controller.zoomToFit()
             }
+            .controlButton()
         }
-        .labelStyle(.iconOnly)
-        .padding(10)
-        .background(.regularMaterial, in: Capsule())
-        .padding()
+        .controlGroup()
     }
 }
 
-/// Minimal undo and redo buttons; their final placement comes with the layout.
+/// Excalidraw's undo/redo group, enabled as the history allows.
 private struct HistoryControls: View {
     let controller: CanvasController
 
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 0) {
             Button("Undo", systemImage: "arrow.uturn.backward") { controller.undo() }
+                .controlButton()
                 .disabled(!controller.canUndo)
             Button("Redo", systemImage: "arrow.uturn.forward") { controller.redo() }
+                .controlButton()
                 .disabled(!controller.canRedo)
         }
-        .labelStyle(.iconOnly)
-        .padding(10)
-        .background(.regularMaterial, in: Capsule())
-        .padding()
+        .controlGroup()
+    }
+}
+
+extension View {
+    /// Excalidraw's grey bottom-left button groups.
+    fileprivate func controlGroup() -> some View {
+        labelStyle(.iconOnly)
+            .buttonStyle(.borderless)
+            .background(controlFill, in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
