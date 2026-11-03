@@ -11,7 +11,7 @@ SIM ?= $(SIM_IPHONE)
 CORE_XCFRAMEWORK := apple/Generated/WorkingTitleCoreFFI.xcframework
 CORE_SOURCES := Cargo.toml Cargo.lock scripts/build-core-apple.sh $(shell find crates -type f)
 
-.PHONY: core-apple apple-project build test test-ios test-ui record-references lint fmt sim run clean golden-fixtures
+.PHONY: core-apple apple-project build test test-ios test-ui record-references lint fmt sim run clean golden-fixtures bench
 
 # Rust core -> XCFramework + Swift bindings in apple/Generated (rebuilt only
 # when the Rust sources change).
@@ -74,6 +74,11 @@ run: apple-project sim
 # (see scripts/golden/README.md). Needs Node; `make test` does not.
 golden-fixtures:
 	cd scripts/golden && npm ci --no-audit --no-fund && node generate.mjs
+
+# Measures the core's open time for the 1,000-Element Benchmark Scene.
+# See docs/performance-benchmarks.md for the full procedure.
+bench:
+	cargo test --release --locked -q -p workingtitle-core --test benchmarks -- --ignored --nocapture
 
 clean:
 	rm -rf apple/WorkingTitle.xcodeproj apple/build apple/Generated target

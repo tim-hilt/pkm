@@ -14,6 +14,10 @@ _Avoid_: Board, document, canvas, file, sketch
 The Elements (and their attached files such as images) making up the open Drawing.
 _Avoid_: Page, board
 
+**Benchmark Scene**:
+A generated Scene committed under `benchmarks/` that is used to measure the performance targets.
+_Avoid_: Stress test, test drawing
+
 **Element**:
 A single shape, line, arrow, freedraw stroke, text or image within a Scene.
 _Avoid_: Object, item, node, shape (when meaning any Element)
