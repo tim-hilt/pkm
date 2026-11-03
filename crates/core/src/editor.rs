@@ -555,10 +555,12 @@ impl Editor {
         }
     }
 
-    /// Puts the Selection being moved, if any, back where it was.
+    /// Puts the Selection being moved, if any, back where it was, and selects
+    /// again what was selected before the drag began.
     fn drop_move(&mut self) {
         if let Some(moving) = self.moving.take() {
-            moving.cancel(&mut self.scene, &mut self.entropy);
+            let selection = moving.cancel(&mut self.scene, &mut self.entropy);
+            self.show_selection(selection);
             self.changed(false);
         }
     }

@@ -77,11 +77,14 @@ impl MoveGesture {
         true
     }
 
-    /// Puts the Elements back where they started.
-    pub fn cancel(mut self, scene: &mut Scene, entropy: &mut Entropy) {
+    /// Puts the Elements back where they started. Returns the Selection from
+    /// before the drag, which the drag may have changed by selecting the
+    /// Element it began on.
+    pub fn cancel(mut self, scene: &mut Scene, entropy: &mut Entropy) -> Selection {
         if self.offset != (0.0, 0.0) {
             self.place(scene, entropy, (0.0, 0.0));
         }
+        self.step.selection().clone()
     }
 
     fn place(&mut self, scene: &mut Scene, entropy: &mut Entropy, offset: (f64, f64)) {

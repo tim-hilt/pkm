@@ -49,6 +49,11 @@ impl Step {
         }
     }
 
+    /// The Selection before the action began.
+    pub fn selection(&self) -> &Selection {
+        &self.selection
+    }
+
     /// Notes that the action is about to change the Element `id` of the
     /// Scene, which is as it was before.
     pub fn touch(&mut self, scene: &Scene, id: &str) {
