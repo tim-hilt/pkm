@@ -412,6 +412,35 @@ impl Scene {
         );
     }
 
+    /// Adds `point`, relative to the position of the freedraw stroke with
+    /// `handle`, to its points, and `pressure` to its pressures if it has
+    /// one, and makes the stroke a new version of itself, see
+    /// [`Scene::revise`]. Its width and height become `size`, the extent of
+    /// all its points. Unlike [`Scene::set_points`] this does not touch the
+    /// points that are there, so that a stroke of any length grows in
+    /// constant time.
+    pub(crate) fn push_stroke_point(
+        &mut self,
+        handle: u32,
+        (px, py): (f64, f64),
+        pressure: Option<f64>,
+        (width, height): (f64, f64),
+        nonce: f64,
+    ) {
+        let Some(stroke) = self.element_object_mut(handle) else {
+            return;
+        };
+        if let Some(points) = stroke.get_mut("points").and_then(Value::as_array_mut) {
+            points.push(Value::Array(vec![Value::Number(px), Value::Number(py)]));
+        }
+        if let Some(pressure) = pressure
+            && let Some(pressures) = stroke.get_mut("pressures").and_then(Value::as_array_mut)
+        {
+            pressures.push(Value::Number(pressure));
+        }
+        self.revise(handle, nonce, [("width", width), ("height", height)]);
+    }
+
     /// Sets the numeric `members` of the Element with `handle` and makes it
     /// a new version of itself, see [`Scene::update`].
     fn revise<const N: usize>(
@@ -436,11 +465,7 @@ impl Scene {
         nonce: f64,
         members: impl IntoIterator<Item = (&'static str, Value)>,
     ) {
-        let Some(element) = self
-            .element_values_mut()
-            .get_mut(handle as usize)
-            .and_then(Value::as_object_mut)
-        else {
+        let Some(element) = self.element_object_mut(handle) else {
             return;
         };
         let version = element
@@ -453,6 +478,12 @@ impl Scene {
         ]) {
             element.insert(key.into(), value);
         }
+    }
+
+    fn element_object_mut(&mut self, handle: u32) -> Option<&mut Object> {
+        self.element_values_mut()
+            .get_mut(handle as usize)
+            .and_then(Value::as_object_mut)
     }
 
     fn element_values_mut(&mut self) -> &mut Vec<Value> {

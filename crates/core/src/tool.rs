@@ -21,6 +21,9 @@ pub enum Tool {
     Line,
     /// The same, with an arrowhead at the end.
     Arrow,
+    /// Dragging draws a freehand stroke, see [`crate::draw_freedraw`]. The
+    /// Tool stays after each stroke.
+    Freedraw,
 }
 
 impl Tool {
@@ -30,7 +33,7 @@ impl Tool {
             Tool::Rectangle => Some(ElementType::Rectangle),
             Tool::Diamond => Some(ElementType::Diamond),
             Tool::Ellipse => Some(ElementType::Ellipse),
-            Tool::Selection | Tool::Hand | Tool::Line | Tool::Arrow => None,
+            Tool::Selection | Tool::Hand | Tool::Line | Tool::Arrow | Tool::Freedraw => None,
         }
     }
 

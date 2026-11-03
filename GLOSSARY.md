@@ -48,6 +48,10 @@ _Avoid_: Vertex, node, anchor
 The attachment of an arrow's end to a shape: the arrow stops short of the shape and follows it when it moves, resizes or turns. Made by putting an arrow's end on the shape, undone by putting it elsewhere or by moving the arrow without the shape. The shape an end is over is shown with a binding highlight.
 _Avoid_: Connection, glue, snap
 
+**Stroke**:
+What the freedraw Tool draws from pointer down to pointer up: a freedraw Element that grows with the pointer and is drawn while it grows. A Pencil's stroke keeps its pressure; the stroke of a finger or mouse gets pressure made up from the speed of the pointer (simulated pressure). The Tool stays active after each stroke.
+_Avoid_: Scribble (that is handwriting recognition), path, line (a different Element)
+
 **Action Bar**:
 The small floating bar shown next to a non-empty Selection offering actions such as duplicate, delete, z-order and group; replaces a context menu.
 _Avoid_: Context menu, popup

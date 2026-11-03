@@ -182,18 +182,27 @@ final class CanvasMetalView: MTKView {
             send(touches, .cancel, event)
         }
 
+        /// Forwards the touches, and shows what the editor did once. A moving
+        /// touch is forwarded with every sample the system coalesced into it
+        /// (the Pencil samples faster than the display refreshes), so that
+        /// strokes follow it closely.
         private func send(_ touches: Set<UITouch>, _ phase: PointerPhase, _ event: UIEvent?) {
+            let modifiers = Modifiers(event?.modifierFlags ?? [])
             for touch in touches {
-                let position = touch.location(in: self)
-                send(
-                    PointerEvent(
-                        id: UInt64(UInt(bitPattern: ObjectIdentifier(touch).hashValue)), phase: phase,
-                        x: position.x, y: position.y, kind: PointerKind(touch.type),
-                        pressure: touch.maximumPossibleForce > 0
-                            ? Float(touch.force / touch.maximumPossibleForce) : 0.5,
-                        timestamp: touch.timestamp,
-                        modifiers: Modifiers(event?.modifierFlags ?? [])))
+                let id = UInt64(UInt(bitPattern: ObjectIdentifier(touch).hashValue))
+                let samples = phase == .move ? event?.coalescedTouches(for: touch) ?? [touch] : [touch]
+                for sample in samples {
+                    let position = sample.location(in: self)
+                    editor?.pointer(
+                        event: PointerEvent(
+                            id: id, phase: phase, x: position.x, y: position.y,
+                            kind: PointerKind(sample.type),
+                            pressure: sample.maximumPossibleForce > 0
+                                ? Float(sample.force / sample.maximumPossibleForce) : 0.5,
+                            timestamp: sample.timestamp, modifiers: modifiers))
+                }
             }
+            didReachEditor()
         }
     #endif
 

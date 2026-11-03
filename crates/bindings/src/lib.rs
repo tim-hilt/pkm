@@ -94,6 +94,7 @@ pub enum Tool {
     Ellipse,
     Line,
     Arrow,
+    Freedraw,
 }
 
 /// What the Canvas shows; see [`workingtitle_core::Viewport`]. Small and

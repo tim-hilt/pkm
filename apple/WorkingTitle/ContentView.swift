@@ -36,6 +36,7 @@ private struct ToolBar: View {
         (.ellipse, "Ellipse", "circle"),
         (.line, "Line", "line.diagonal"),
         (.arrow, "Arrow", "arrow.up.right"),
+        (.freedraw, "Draw", "pencil.tip"),
     ]
 
     var body: some View {

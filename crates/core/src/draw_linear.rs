@@ -414,7 +414,7 @@ fn new_linear(kind: ElementType, entropy: &mut Entropy, style: &Style, origin: P
     let is_arrow = kind == ElementType::Arrow;
     let mut element = new_element(
         if is_arrow { "arrow" } else { "line" },
-        PROPORTIONAL_RADIUS,
+        Some(PROPORTIONAL_RADIUS),
         entropy,
         style,
         origin,

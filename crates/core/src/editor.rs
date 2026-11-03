@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::binding::{self, End};
 use crate::box_select::BoxSelect;
+use crate::draw_freedraw::StrokeDrawing;
 use crate::draw_linear::{LinearDrawing, Update};
 use crate::draw_shape::{Outcome, ShapeGesture};
 use crate::edit_points::{self, Grab, PointDrag, PointHandles, PointSelection};
@@ -58,6 +59,9 @@ pub struct Editor {
     /// The line or arrow being drawn, from its first press until it is
     /// finished: with tapping that is longer than a pointer is down.
     linear: Option<LinearDrawing>,
+    /// The freehand stroke being drawn, if the pointer of the freedraw Tool is
+    /// down.
+    stroke: Option<StrokeDrawing>,
     selection: Selection,
     taps: TapRecognizer,
     /// What can be undone and redone; never saved (see [`crate::history`]).
@@ -118,6 +122,7 @@ impl Editor {
             entropy: Entropy::from_system(),
             shape: None,
             linear: None,
+            stroke: None,
             selection: Selection::default(),
             taps: TapRecognizer::default(),
             history: History::default(),
@@ -146,6 +151,7 @@ impl Editor {
         // Scene that is gone, and so did what could be undone.
         self.shape = None;
         self.linear = None;
+        self.stroke = None;
         self.moving = None;
         self.transforming = None;
         self.point_dragging = None;
@@ -273,6 +279,7 @@ impl Editor {
             self.navigation.cancel_drag();
             self.taps.cancel();
             self.drop_shape();
+            self.drop_stroke();
             self.end_linear();
             self.drop_move();
             self.drop_point_drag();
@@ -302,7 +309,8 @@ impl Editor {
     /// [`crate::navigation`]). With a shape Tool, one pointer dragging draws
     /// the shape (see [`crate::draw_shape`]), and with the line or arrow Tool
     /// it draws a line, by dragging or by tapping its points one by one (see
-    /// [`crate::draw_linear`]). With the selection Tool a tap selects the
+    /// [`crate::draw_linear`]), and with the freedraw Tool it draws a stroke
+    /// through the points the pointer passes (see [`crate::draw_freedraw`]). With the selection Tool a tap selects the
     /// Element it hits or clears the Selection (see [`Editor::selection`])
     /// while a drag on an Element moves the Selection (see
     /// [`crate::move_selection`]), a drag on a handle of it resizes, rotates
@@ -318,6 +326,7 @@ impl Editor {
         self.navigated();
         self.draw_shape(event);
         self.draw_linear(event);
+        self.draw_stroke(event);
         // An event that finished a drawing, and so went back to selection, was
         // the drawing's: it is not a tap that selects.
         if tool == Tool::Selection || self.tool != Tool::Selection {
@@ -364,6 +373,7 @@ impl Editor {
     /// Whether a pointer is down making a change that is not finished.
     fn is_gesturing(&self) -> bool {
         self.shape.is_some()
+            || self.stroke.is_some()
             || self.linear.as_ref().is_some_and(|l| !l.is_placing())
             || self.moving.is_some()
             || self.transforming.is_some()
@@ -1054,6 +1064,66 @@ impl Editor {
     fn drop_linear(&mut self) {
         if let Some(linear) = self.linear.take() {
             linear.cancel(&mut self.scene, &mut self.entropy);
+            self.changed(true);
+        }
+    }
+
+    /// Follows the pointer with the stroke being drawn, or starts one (see
+    /// [`crate::draw_freedraw`]). The Tool stays after the stroke whatever the
+    /// Tool lock says.
+    fn draw_stroke(&mut self, event: PointerEvent) {
+        // Two fingers navigate, and a stroke one of them began ends: a short
+        // one was only the finger landing, a longer one is kept as drawn.
+        if self.navigation.is_pinching() {
+            if let Some(stroke) = self.stroke.take() {
+                if stroke.is_spike() {
+                    stroke.cancel(&mut self.scene);
+                    self.changed(true);
+                } else {
+                    self.history
+                        .record(stroke.finish(), &self.scene, &self.selection);
+                }
+            }
+            return;
+        }
+        let drawing_pointer = self.stroke.as_ref().map(StrokeDrawing::pointer);
+        let at = self.navigation.viewport().scene_at(event.x, event.y);
+        match event.phase {
+            PointerPhase::Down if drawing_pointer.is_none() && self.tool == Tool::Freedraw => {
+                self.stroke = Some(StrokeDrawing::begin(
+                    Step::begin(&self.selection),
+                    &mut self.scene,
+                    &mut self.entropy,
+                    &self.style,
+                    event,
+                    at,
+                ));
+                self.changed(true);
+            }
+            PointerPhase::Move if drawing_pointer == Some(event.id) => {
+                let moved = self.stroke.as_mut().is_some_and(|stroke| {
+                    stroke.extend(&mut self.scene, &mut self.entropy, event, at)
+                });
+                if moved {
+                    self.changed(false);
+                }
+            }
+            PointerPhase::Up if drawing_pointer == Some(event.id) => {
+                if let Some(stroke) = self.stroke.take() {
+                    let step = stroke.lift(&mut self.scene, &mut self.entropy, event, at);
+                    self.history.record(step, &self.scene, &self.selection);
+                    self.changed(false);
+                }
+            }
+            PointerPhase::Cancel if drawing_pointer == Some(event.id) => self.drop_stroke(),
+            _ => {}
+        }
+    }
+
+    /// Takes the stroke being drawn, if any, out of the Scene again.
+    fn drop_stroke(&mut self) {
+        if let Some(stroke) = self.stroke.take() {
+            stroke.cancel(&mut self.scene);
             self.changed(true);
         }
     }

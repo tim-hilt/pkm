@@ -6,6 +6,7 @@ mod arrowhead;
 mod base64;
 mod binding;
 mod box_select;
+mod draw_freedraw;
 mod draw_linear;
 mod draw_shape;
 mod edit_points;

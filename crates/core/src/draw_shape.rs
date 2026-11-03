@@ -141,18 +141,18 @@ fn new_shape(
         ElementType::Ellipse => ("ellipse", PROPORTIONAL_RADIUS),
         _ => ("rectangle", ADAPTIVE_RADIUS),
     };
-    new_element(type_name, roundness, entropy, style, origin)
+    new_element(type_name, Some(roundness), entropy, style, origin)
 }
 
 /// An Element of `type_name` at `origin` without size, with all the members
 /// and in the order of one Excalidraw creates (`newElement`), so that
 /// excalidraw.com reads it as its own: `roundness` is the type of its rounded
-/// corners. Members of the type itself are for the caller to add. The
+/// corners, if it has any. Members of the type itself are for the caller to add. The
 /// fractional `index` is left for Excalidraw to assign, which it does for
 /// every Element that has none when loading.
 pub(crate) fn new_element(
     type_name: &str,
-    roundness: f64,
+    roundness: Option<f64>,
     entropy: &mut Entropy,
     style: &Style,
     (x, y): (f64, f64),
@@ -161,8 +161,11 @@ pub(crate) fn new_element(
     let number = Value::Number;
     let now = now_ms();
 
-    let mut rounding = Object::new();
-    rounding.insert("type".into(), number(roundness));
+    let rounding = roundness.map_or(Value::Null, |roundness| {
+        let mut rounding = Object::new();
+        rounding.insert("type".into(), number(roundness));
+        Value::Object(rounding)
+    });
 
     let mut shape = Object::new();
     for (key, value) in [
@@ -183,7 +186,7 @@ pub(crate) fn new_element(
         ("groupIds", Value::Array(Vec::new())),
         ("frameId", Value::Null),
         ("index", Value::Null),
-        ("roundness", Value::Object(rounding)),
+        ("roundness", rounding),
         ("seed", number(entropy.integer())),
         ("version", number(1.0)),
         ("versionNonce", number(entropy.integer())),
