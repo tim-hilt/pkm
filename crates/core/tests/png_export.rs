@@ -54,3 +54,51 @@ fn nothing_to_export_gives_none() {
     assert!(Editor::new().export(ExportScope::Scene).is_none());
     assert!(two_rectangles().export(ExportScope::Selection).is_none());
 }
+
+#[test]
+fn a_freedraw_stroke_is_framed_by_its_points() {
+    let editor = editor_with(&[r#"{"id":"f","type":"freedraw","x":100,"y":100,
+        "width":50,"height":40,"points":[[0,0],[-20,-30],[30,10]],
+        "pressures":[],"simulatePressure":true}"#]);
+
+    let export = editor.export(ExportScope::Scene).unwrap();
+
+    assert_eq!((export.x, export.y), (70.0, 60.0));
+    assert_eq!((export.width, export.height), (70.0, 60.0));
+}
+
+#[test]
+fn a_line_with_negative_points_is_framed_by_its_points() {
+    let editor = editor_with(&[r#"{"id":"l","type":"line","x":100,"y":100,
+        "width":50,"height":40,"points":[[0,0],[-50,-40]],
+        "roughness":0,"roundness":null}"#]);
+
+    let export = editor.export(ExportScope::Scene).unwrap();
+
+    assert_eq!((export.x, export.y), (40.0, 50.0));
+    assert_eq!((export.width, export.height), (70.0, 60.0));
+}
+
+/// The PNG size, at scale 2, Excalidraw exports a visual parity fixture at.
+fn exported_png_size(fixture: &str) -> (f64, f64) {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../scripts/visual-parity/fixtures/"
+    );
+    let mut editor = Editor::new();
+    editor
+        .load(&std::fs::read(format!("{path}{fixture}.excalidraw")).unwrap())
+        .unwrap();
+    let export = editor.export(ExportScope::Scene).unwrap();
+    ((export.width * 2.0).round(), (export.height * 2.0).round())
+}
+
+#[test]
+fn freedraw_strokes_export_at_excalidraws_size() {
+    assert_eq!(exported_png_size("freedraw"), (700.0, 700.0));
+}
+
+#[test]
+fn lines_and_arrows_are_framed_by_their_sketched_stroke_like_excalidraw() {
+    assert_eq!(exported_png_size("lines"), (1163.0, 1001.0));
+}

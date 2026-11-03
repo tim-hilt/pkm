@@ -131,10 +131,24 @@ pub(crate) fn exact_curve(element: &Element) -> Option<Vec<Op>> {
 /// takes for the line or arrow: around its sketched stroke, jitter included,
 /// but not the arrowheads. `None` if the stroke has no curves.
 pub(crate) fn drawn_bounds(element: &Element) -> Option<(Point, Point)> {
-    let points = element.points();
-    let ((x0, y0), (x1, y1)) = curve_bounds(&sketch(element, &points).drawing.outline)?;
+    turned_bounds(element, (0.0, 0.0), 0.0)
+}
+
+/// The corners in the Scene of the smallest box around the line's or arrow's
+/// sketched stroke turned by `angle` about `pivot` (Excalidraw's
+/// `getLinearElementRotatedBounds`): jitter included, arrowheads not. `None`
+/// if the stroke has no curves.
+pub(crate) fn turned_bounds(element: &Element, pivot: Point, angle: f64) -> Option<(Point, Point)> {
     let (x, y) = (element.x(), element.y());
-    Some(((x + x0, y + y0), (x + x1, y + y1)))
+    let (sin, cos) = angle.sin_cos();
+    curve_bounds(&sketched_outline(element), |(px, py)| {
+        let (dx, dy) = (x + px - pivot.0, y + py - pivot.1);
+        (pivot.0 + dx * cos - dy * sin, pivot.1 + dx * sin + dy * cos)
+    })
+}
+
+fn sketched_outline(element: &Element) -> Vec<Op> {
+    sketch(element, &element.points()).drawing.outline
 }
 
 /// Width and height of the box around `points`.
@@ -153,7 +167,7 @@ fn extent(points: &[Point]) -> (f64, f64) {
 /// Lines and arrows turn about the middle of the box around their sketched
 /// stroke (jitter included), not around the box of their points.
 fn placement(element: &Element, outline: &[Op]) -> Placement {
-    let centre = match curve_bounds(outline) {
+    let centre = match curve_bounds(outline, |p| p) {
         Some(((x0, y0), (x1, y1))) => ((x0 + x1) / 2.0, (y0 + y1) / 2.0),
         None => (element.width() / 2.0, element.height() / 2.0),
     };
@@ -162,7 +176,7 @@ fn placement(element: &Element, outline: &[Op]) -> Placement {
 
 /// The corners of the box around the curves of `ops`; straight ops are not
 /// part of it, as in Excalidraw (the strokes of lines are curves).
-fn curve_bounds(ops: &[Op]) -> Option<(Point, Point)> {
+fn curve_bounds(ops: &[Op], place: impl Fn(Point) -> Point) -> Option<(Point, Point)> {
     let mut current = (0.0, 0.0);
     let mut bounds: Option<(Point, Point)> = None;
     for &op in ops {
@@ -170,7 +184,7 @@ fn curve_bounds(ops: &[Op]) -> Option<(Point, Point)> {
             Op::Move(p) => current = p,
             Op::Line(_) => {}
             Op::Cubic(c1, c2, end) => {
-                let (min, max) = cubic_bounds([current, c1, c2, end]);
+                let (min, max) = cubic_bounds([current, c1, c2, end].map(&place));
                 bounds = Some(match bounds {
                     None => (min, max),
                     Some((lo, hi)) => (
@@ -423,11 +437,11 @@ mod tests {
             Op::Cubic((0.0, 100.0), (100.0, 100.0), (100.0, 0.0)),
         ];
 
-        assert_eq!(curve_bounds(&ops), Some(((0.0, 0.0), (100.0, 75.0))));
+        assert_eq!(curve_bounds(&ops, |p| p), Some(((0.0, 0.0), (100.0, 75.0))));
     }
 
     #[test]
     fn there_is_no_box_around_strokes_without_curves() {
-        assert_eq!(curve_bounds(&[Op::Move((1.0, 2.0))]), None);
+        assert_eq!(curve_bounds(&[Op::Move((1.0, 2.0))], |p| p), None);
     }
 }

@@ -60,8 +60,13 @@ impl Frame {
     /// The smallest box around the Element as it is shown, that is turned by
     /// its angle (Excalidraw's `getElementBounds`).
     pub fn shown(element: &Element) -> Self {
-        let frame = Self::of(element);
         let angle = element.angle();
+        if element.kind().is_linear()
+            && let Some((min, max)) = linear::turned_bounds(element, Self::pivot(element), angle)
+        {
+            return Frame { min, max };
+        }
+        let frame = Self::of(element);
         if angle == 0.0 {
             return frame;
         }

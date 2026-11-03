@@ -2100,42 +2100,16 @@ impl Editor {
     }
 }
 
-/// The smallest rectangle containing `elements`, or `None` if there are none.
+/// The smallest rectangle containing `elements` as they are shown (see
+/// [`Frame::shown`]), or `None` if there are none.
 fn bounds_of<'a>(elements: impl Iterator<Item = Element<'a>>) -> Option<Bounds> {
     elements
-        .flat_map(|element| bounds_outline(&element))
-        .fold(None, |bounds, (x, y)| {
-            Some(match bounds {
-                None => Bounds {
-                    min_x: x,
-                    min_y: y,
-                    max_x: x,
-                    max_y: y,
-                },
-                Some(b) => Bounds {
-                    min_x: b.min_x.min(x),
-                    min_y: b.min_y.min(y),
-                    max_x: b.max_x.max(x),
-                    max_y: b.max_y.max(y),
-                },
-            })
+        .map(|element| Frame::shown(&element))
+        .reduce(Frame::union)
+        .map(|frame| Bounds {
+            min_x: frame.min.0,
+            min_y: frame.min.1,
+            max_x: frame.max.0,
+            max_y: frame.max.1,
         })
-}
-
-/// The corners of the Element's bounds, clockwise from the top left, turned
-/// by its angle about its centre.
-fn bounds_outline(element: &Element) -> [(f64, f64); 4] {
-    // Excalidraw normalises negative sizes on load; do not rely on it.
-    let (x0, x1) = ordered(element.x(), element.x() + element.width());
-    let (y0, y1) = ordered(element.y(), element.y() + element.height());
-    let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
-    let (sin, cos) = element.angle().sin_cos();
-    [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].map(|(x, y)| {
-        let (dx, dy) = (x - cx, y - cy);
-        (cx + dx * cos - dy * sin, cy + dx * sin + dy * cos)
-    })
-}
-
-fn ordered(a: f64, b: f64) -> (f64, f64) {
-    if a <= b { (a, b) } else { (b, a) }
 }
