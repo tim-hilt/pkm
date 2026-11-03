@@ -20,6 +20,7 @@ mod frame;
 mod freedraw;
 mod freehand;
 pub mod geometry;
+mod group;
 mod hachure;
 mod history;
 mod hit_test;

@@ -21,11 +21,7 @@ pub(crate) fn delete(
     // In z-order, so that what is done does not depend on the Selection's.
     let doomed: Vec<String> = scene
         .elements()
-        .filter(|e| {
-            !e.is_deleted()
-                && (selection.contains(e.id())
-                    || e.container_id().is_some_and(|c| selection.contains(c)))
-        })
+        .filter(|e| !e.is_deleted() && selection.covers(e))
         .map(|e| e.id().to_owned())
         .collect();
     for id in &doomed {

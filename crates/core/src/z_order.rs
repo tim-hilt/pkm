@@ -8,10 +8,15 @@
 //! indices that fit their new place (see [`crate::index_sync`]), so that a
 //! file reordered here is ordered the same on excalidraw.com, which sorts by
 //! them.
+//!
+//! Grouping also moves Elements: [`gather`] brings them together.
 
 mod stack;
 
+use std::collections::HashSet;
+
 use crate::history::Step;
+use crate::index_sync;
 use crate::json::{Object, Value};
 use crate::random::Entropy;
 use crate::scene::Scene;
@@ -63,27 +68,75 @@ pub(crate) fn move_selection(
         return false;
     };
 
+    apply(scene, entropy, step, &outcome.order, outcome.indices);
+    true
+}
+
+/// Brings the Elements with the handles `together` next to each other, at
+/// the place of the highest of them and in the order they have, as grouping
+/// does (`actionGroup`): the Elements in between that are not among them
+/// go below. The moved Elements get indices that fit their new places.
+pub(crate) fn gather(
+    scene: &mut Scene,
+    entropy: &mut Entropy,
+    step: &mut Step,
+    together: &HashSet<usize>,
+) {
+    let Some(&top) = together.iter().max() else {
+        return;
+    };
+    let count = scene.raw_elements().count();
+    let order: Vec<usize> = (0..top)
+        .filter(|place| !together.contains(place))
+        .chain((0..=top).filter(|place| together.contains(place)))
+        .chain(top + 1..count)
+        .collect();
+    let indices: Vec<Option<String>> = scene.raw_elements().map(|e| text(e, "index")).collect();
+    let by_place: Vec<Option<&str>> = order.iter().map(|&at| indices[at].as_deref()).collect();
+    let moved: Vec<bool> = order.iter().map(|at| together.contains(at)).collect();
+    let new_indices = index_sync::sync_moved(&by_place, &moved)
+        .into_iter()
+        .map(|(place, index)| (order[place], index))
+        .collect();
+    apply(scene, entropy, step, &order, new_indices);
+}
+
+/// Puts the Elements in `order` (the positions they have now, bottom first)
+/// and gives the Elements at the positions in `indices` their new index, as
+/// part of `step`.
+fn apply(
+    scene: &mut Scene,
+    entropy: &mut Entropy,
+    step: &mut Step,
+    order: &[usize],
+    indices: Vec<(usize, String)>,
+) {
+    if indices.is_empty() && order.iter().enumerate().all(|(place, &at)| place == at) {
+        return;
+    }
     step.touch_order(scene);
     // By position, which is the handle, before the Elements are moved.
-    for (handle, index) in outcome.indices {
+    for (handle, index) in indices {
         let handle = handle as u32;
         if let Some(id) = scene.element_id(handle).map(str::to_owned) {
             step.touch(scene, &id);
         }
         scene.update(handle, entropy.integer(), [("index", Value::String(index))]);
     }
-    scene.permute(&outcome.order);
-    true
+    scene.permute(order);
+}
+
+/// The string member `key` of `element`, unless it is missing or empty.
+fn text(element: &Object, key: &str) -> Option<String> {
+    element
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
 }
 
 fn layer_of(element: &Object) -> Layer {
-    let text = |key: &str| {
-        element
-            .get(key)
-            .and_then(Value::as_str)
-            .filter(|s| !s.is_empty())
-            .map(str::to_owned)
-    };
+    let text = |key: &str| text(element, key);
     let type_name = element.get("type").and_then(Value::as_str);
     Layer {
         id: text("id").unwrap_or_default(),

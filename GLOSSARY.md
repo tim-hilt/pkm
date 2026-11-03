@@ -40,6 +40,10 @@ _Avoid_: Focus, highlight
 Selecting by dragging a rectangle over empty Canvas with the selection Tool: the Selection becomes the Elements the rectangle fully encloses (shift: adds them to it).
 _Avoid_: Marquee, lasso, rubber band
 
+**Group**:
+Elements that are selected, moved, duplicated and erased together: tapping one selects the outermost group it is in, and groups can be nested. A double-tap on an Element of a selected group goes into the group, where the Elements of the next group down (or single Elements) are selected on their own, until a tap outside it or on empty Canvas. Saved as Excalidraw's `groupIds`.
+_Avoid_: Cluster, set
+
 **Point handle**:
 The grip on a point of a selected line or arrow (and a smaller one in the middle of each long segment) that is dragged to move the point or, from a middle, to add one; touch-sized for fingers. A tapped point handle selects the point, so that it can be deleted.
 _Avoid_: Vertex, node, anchor

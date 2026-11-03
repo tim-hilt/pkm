@@ -2,14 +2,14 @@ import SwiftUI
 
 /// The floating Action Bar next to the Selection, in place of a context menu.
 /// The core says whether it is shown and where; this only draws it there and
-/// keeps it inside the Canvas. Duplicate, delete and z-order work; grouping
-/// and the "more" entry come with their own tickets.
+/// keeps it inside the Canvas. Duplicate, delete, z-order and grouping work;
+/// the "more" entry comes with its own ticket.
 struct ActionBarView: View {
     let controller: CanvasController
 
     /// Apple's touch target; the bar's size follows from it.
     private static let button: CGFloat = 44
-    private static let buttons = 4
+    private static let buttons = 6
     private static let padding: CGFloat = 4
     private static let size = CGSize(
         width: button * CGFloat(buttons) + padding * 2, height: button + padding * 2)
@@ -45,7 +45,12 @@ struct ActionBarView: View {
                     controller.moveInZOrder(.toBack)
                 }
             }
-            // Group comes with its own ticket.
+            // Enabled as the core says: grouping needs two Elements that are not
+            // one group yet, ungrouping a selected group.
+            Button("Group", systemImage: "rectangle.3.group") { controller.group() }
+                .disabled(!canGroup)
+            Button("Ungroup", systemImage: "rectangle.3.offgrid") { controller.ungroup() }
+                .disabled(!canUngroup)
             Button("More", systemImage: "ellipsis") {}
                 .disabled(true)
         }
@@ -55,6 +60,9 @@ struct ActionBarView: View {
         .background(.regularMaterial, in: Capsule())
         .shadow(radius: 4, y: 1)
     }
+
+    private var canGroup: Bool { controller.actionBar?.canGroup ?? false }
+    private var canUngroup: Bool { controller.actionBar?.canUngroup ?? false }
 
     /// The top-left corner of the bar whose top edge is centred on `anchor`,
     /// moved as far as needed to keep it in the Canvas.

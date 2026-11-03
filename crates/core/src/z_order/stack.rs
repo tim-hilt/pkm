@@ -2,9 +2,11 @@
 //! commit, on a stack of [`Layer`]s instead of Elements, so that it can be
 //! read next to the original.
 //!
-//! Not ported, because the core has no such thing: editing a group (the
-//! `editingGroupId` branches) and selecting a frame, which would take its
-//! children along.
+//! Not ported: the `editingGroupId` branches, which move an Element among
+//! the Elements of the group that was gone into (see [`crate::group`]); here
+//! an Element moves with its whole outermost group whatever was gone into.
+//! Nor is selecting a frame, which would take its children along, because
+//! the core has no such thing.
 
 use std::collections::{HashMap, HashSet};
 

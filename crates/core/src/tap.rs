@@ -18,6 +18,12 @@ const FINGER_SLOP: f64 = 10.0;
 const PRECISE_SLOP: f64 = 4.0;
 /// The longest a finger may stay down for a tap to be short, in seconds.
 const SHORT_TAP: f64 = 0.3;
+/// The longest between a tap lifting and the next one going down for the two
+/// to be a double-tap, in seconds.
+const DOUBLE_TAP_GAP: f64 = 0.35;
+/// How far apart the two taps of a double-tap may be, in slops: a second tap
+/// is aimed at the same thing, but not at the same pixel.
+const DOUBLE_TAP_SLOPS: f64 = 3.0;
 
 /// How far a pointer of `kind` may wander from where it went down, in view
 /// points, and still be pressing in place rather than dragging.
@@ -54,6 +60,9 @@ pub(crate) struct Tap {
     pub x: f64,
     pub y: f64,
     pub kind: PointerKind,
+    /// Whether this tap came right after another one close to it, which it
+    /// completes: the double-tap (or double-click). The next tap starts over.
+    pub double: bool,
     short: bool,
 }
 
@@ -77,10 +86,21 @@ struct Press {
     moved: bool,
 }
 
+/// Where and when a tap lifted.
+#[derive(Debug, Clone, Copy)]
+struct Lifted {
+    x: f64,
+    y: f64,
+    kind: PointerKind,
+    at: f64,
+}
+
 /// Follows one pointer at a time from down to up.
 #[derive(Debug, Default)]
 pub(crate) struct TapRecognizer {
     press: Option<Press>,
+    /// The latest tap, which a tap soon after may make a double-tap with.
+    last: Option<Lifted>,
 }
 
 impl TapRecognizer {
@@ -88,6 +108,7 @@ impl TapRecognizer {
     /// not a tap any more (another finger landed, the Tool changed).
     pub fn cancel(&mut self) {
         self.press = None;
+        self.last = None;
     }
 
     /// Follows `event`. Returns what the pointer just turned out to be
@@ -127,10 +148,28 @@ impl TapRecognizer {
             PointerPhase::Up => {
                 let press = self.press.filter(|p| p.pointer == event.id)?;
                 self.press = None;
-                (!press.moved).then_some(Recognized::Tap(Tap {
+                if press.moved {
+                    self.last = None;
+                    return None;
+                }
+                let double = self.last.is_some_and(|last| {
+                    last.kind == press.kind
+                        && press.at - last.at <= DOUBLE_TAP_GAP
+                        && (press.x - last.x).hypot(press.y - last.y)
+                            <= DOUBLE_TAP_SLOPS * slop(press.kind)
+                });
+                // A third tap is the first of the next double-tap.
+                self.last = (!double).then_some(Lifted {
                     x: press.x,
                     y: press.y,
                     kind: press.kind,
+                    at: event.timestamp,
+                });
+                Some(Recognized::Tap(Tap {
+                    x: press.x,
+                    y: press.y,
+                    kind: press.kind,
+                    double,
                     short: event.timestamp - press.at <= SHORT_TAP,
                 }))
             }

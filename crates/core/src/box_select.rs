@@ -11,6 +11,7 @@
 //! began with instead of replacing it.
 
 use crate::frame::Frame;
+use crate::group;
 use crate::hit_test;
 use crate::path::Point;
 use crate::scene::Scene;
@@ -28,18 +29,28 @@ pub(crate) struct BoxSelect {
     before: Selection,
     /// Whether the box adds to `before` rather than replacing it.
     additive: bool,
+    /// The group that was gone into when the drag began, if any: the box
+    /// selects the Elements in it one by one, as a tap does.
+    editing: Option<String>,
 }
 
 impl BoxSelect {
     /// Starts a box with `pointer`, which went down at `origin`, while
-    /// `before` is selected.
-    pub fn begin(pointer: u64, origin: Point, before: &Selection, additive: bool) -> Self {
+    /// `before` is selected and the group `editing` is gone into.
+    pub fn begin(
+        pointer: u64,
+        origin: Point,
+        before: &Selection,
+        editing: Option<&str>,
+        additive: bool,
+    ) -> Self {
         Self {
             pointer,
             origin,
             to: origin,
             before: before.clone(),
             additive,
+            editing: editing.map(str::to_owned),
         }
     }
 
@@ -64,7 +75,8 @@ impl BoxSelect {
         }
     }
 
-    /// What the Selection is while the box is where it is.
+    /// What the Selection is while the box is where it is: the Elements it
+    /// encloses, and the other Elements of their groups.
     pub fn selection(&self, scene: &Scene) -> Selection {
         let bounds = self.bounds();
         let enclosed: Vec<String> = scene
@@ -82,6 +94,7 @@ impl BoxSelect {
             })
             .map(|element| element.id().to_owned())
             .collect();
+        let enclosed = group::expand(scene, &enclosed, self.editing.as_deref());
 
         let mut selection = Selection::default();
         match (self.additive, enclosed.is_empty()) {

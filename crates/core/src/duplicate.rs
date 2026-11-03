@@ -4,7 +4,8 @@
 //! Every selected Element gets a copy, 10 units right and down of it, with a
 //! new id and a new seed (so it is hand-drawn differently), right above its
 //! original in z-order; the copies of a group stay together after the group's
-//! last Element and form a group of their own. Labels go with their
+//! last Element and form a group of their own (inside the group that was gone
+//! into, if any: the copies stay in it and the groups outside it). Labels go with their
 //! containers, in the same order (labels cannot be selected on their own). The copies refer to each
 //! other, not to the originals: what a copy of a container lists as bound,
 //! what a label is contained by and what an arrow's ends are bound to are
@@ -30,15 +31,12 @@ pub(crate) fn duplicate(
     entropy: &mut Entropy,
     step: &mut Step,
     selection: &Selection,
+    editing: Option<&str>,
 ) -> Selection {
     // In z-order, so that the copies are made and stacked in it.
     let originals: Vec<String> = scene
         .elements()
-        .filter(|e| {
-            !e.is_deleted()
-                && (selection.contains(e.id())
-                    || e.container_id().is_some_and(|c| selection.contains(c)))
-        })
+        .filter(|e| !e.is_deleted() && selection.covers(e))
         .map(|e| e.id().to_owned())
         .collect();
     let copy_ids: HashMap<&str, String> = originals
@@ -55,7 +53,15 @@ pub(crate) fn duplicate(
             continue;
         };
         let copy_id = copy_ids[id.as_str()].clone();
-        make_copy(&mut copy, &copy_id, &copy_ids, &mut groups, entropy, now);
+        make_copy(
+            &mut copy,
+            &copy_id,
+            &copy_ids,
+            &mut groups,
+            editing,
+            entropy,
+            now,
+        );
         let place = place_of(scene, id);
         let anchor = above.get(&place).unwrap_or(&place).clone();
         step.create(&copy_id);
@@ -98,6 +104,7 @@ fn make_copy(
     id: &str,
     copy_ids: &HashMap<&str, String>,
     groups: &mut HashMap<String, String>,
+    editing: Option<&str>,
     entropy: &mut Entropy,
     now: f64,
 ) {
@@ -120,7 +127,12 @@ fn make_copy(
     element.insert("index".into(), Value::Null);
 
     if let Some(Value::Array(ids)) = element.get_mut("groupIds") {
-        for group in ids.iter_mut() {
+        // Only the groups inside the one that was gone into are copied.
+        let inside = ids
+            .iter()
+            .position(|group| editing.is_some() && group.as_str() == editing)
+            .unwrap_or(ids.len());
+        for group in ids.iter_mut().take(inside) {
             if let Some(old) = group.as_str().map(str::to_owned) {
                 let new = groups.entry(old).or_insert_with(|| entropy.id());
                 *group = Value::String(new.clone());

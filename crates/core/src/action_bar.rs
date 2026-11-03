@@ -1,5 +1,5 @@
 //! The Action Bar: the small floating bar next to a non-empty Selection that
-//! offers duplicate, delete and more, in place of a context menu (ADR-0006).
+//! offers duplicate, delete, group and more, in place of a context menu (ADR-0006).
 //!
 //! The core decides whether the bar is shown and where; clients draw it. The
 //! anchor is in view coordinates, so that it follows the Selection through
@@ -7,6 +7,7 @@
 //! with the viewport after every input, like the viewport itself.
 
 use crate::frame::Frame;
+use crate::group;
 use crate::path::Point;
 use crate::scene::{Element, Scene};
 use crate::selection::Selection;
@@ -24,18 +25,36 @@ const GAP: f64 = 32.0;
 pub struct ActionBar {
     pub x: f64,
     pub y: f64,
+    /// Whether grouping the Selection would do anything; clients enable the
+    /// group button exactly then.
+    pub can_group: bool,
+    /// Whether the Selection holds a group to dissolve; clients enable the
+    /// ungroup button exactly then.
+    pub can_ungroup: bool,
 }
 
 impl ActionBar {
     /// The bar for `selection` as seen through `viewport`: below the middle
     /// of the bounds of its shown Elements. `None` if it selects none.
-    pub(crate) fn of(scene: &Scene, selection: &Selection, viewport: Viewport) -> Option<Self> {
+    /// `editing` is the group that was gone into, which decides what can be
+    /// grouped and ungrouped (see [`crate::group`]).
+    pub(crate) fn of(
+        scene: &Scene,
+        selection: &Selection,
+        editing: Option<&str>,
+        viewport: Viewport,
+    ) -> Option<Self> {
         let frame = scene
             .elements()
             .filter(|e| !e.is_deleted() && selection.contains(e.id()))
             .map(|e: Element| Frame::shown(&e))
             .reduce(Frame::union)?;
         let (x, y): Point = viewport.view_at((frame.centre().0, frame.max.1));
-        Some(Self { x, y: y + GAP })
+        Some(Self {
+            x,
+            y: y + GAP,
+            can_group: group::can_group(scene, selection, editing),
+            can_ungroup: group::can_ungroup(scene, selection, editing),
+        })
     }
 }

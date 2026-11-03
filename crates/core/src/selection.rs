@@ -1,5 +1,7 @@
 //! The Selection: the set of Elements currently selected for editing.
 
+use crate::scene::Element;
+
 /// The ids of the selected Elements, in the order they were selected. Ids
 /// rather than handles, which change when Elements are added or removed.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -20,13 +22,11 @@ impl Selection {
         self.ids.iter().any(|selected| selected == id)
     }
 
-    /// Selects `id` alone. Returns whether the Selection changed.
-    pub fn select_only(&mut self, id: &str) -> bool {
-        if self.ids == [id] {
-            return false;
-        }
-        self.ids = vec![id.to_owned()];
-        true
+    /// Whether commands on the Selection act on `element`: it is selected,
+    /// or it is the label of a selected container (labels cannot be selected
+    /// on their own).
+    pub fn covers(&self, element: &Element) -> bool {
+        self.contains(element.id()) || element.container_id().is_some_and(|c| self.contains(c))
     }
 
     /// Adds `id` to the Selection unless it is in it. Returns whether the
@@ -39,11 +39,21 @@ impl Selection {
         absent
     }
 
-    /// Takes `id` out of the Selection if it is in it, else adds it.
-    pub fn toggle(&mut self, id: &str) {
-        if !self.add(id) {
-            self.ids.retain(|selected| selected != id);
+    /// Takes `ids` out of the Selection if they all are in it, else adds
+    /// them all (in the order given). Returns whether the Selection changed.
+    pub fn toggle_all(&mut self, ids: &[String]) -> bool {
+        if ids.is_empty() {
+            return false;
         }
+        if ids.iter().all(|id| self.contains(id)) {
+            self.ids.retain(|selected| !ids.contains(selected));
+            return true;
+        }
+        let before = self.ids.len();
+        for id in ids {
+            self.add(id);
+        }
+        self.ids.len() != before
     }
 
     /// Selects exactly `ids`, once each, in the order given. Returns whether

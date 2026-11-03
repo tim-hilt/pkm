@@ -176,6 +176,8 @@ pub struct Properties {
 pub struct ActionBar {
     pub x: f64,
     pub y: f64,
+    pub can_group: bool,
+    pub can_ungroup: bool,
 }
 
 /// What the Canvas shows; see [`workingtitle_core::Viewport`]. Small and
@@ -381,6 +383,17 @@ impl Editor {
     /// [`workingtitle_core::Editor::delete_selection`].
     pub fn delete_selection(&self) {
         self.editor().delete_selection();
+    }
+
+    /// Groups the Selection; see [`workingtitle_core::Editor::group`].
+    pub fn group(&self) {
+        self.editor().group();
+    }
+
+    /// Dissolves the groups that are selected; see
+    /// [`workingtitle_core::Editor::ungroup`].
+    pub fn ungroup(&self) {
+        self.editor().ungroup();
     }
 
     /// Moves the Selection in z-order; see
@@ -811,6 +824,48 @@ mod tests {
         editor.delete_selection();
         assert_eq!(editor.element_count(), 1);
         assert!(editor.action_bar().is_none());
+    }
+
+    #[test]
+    fn grouping_works_through_the_bindings() {
+        let editor = Editor::new();
+        editor
+            .load(
+                br##"{"type":"excalidraw","elements":[
+                    {"id":"a","type":"rectangle","x":0,"y":0,"width":30,"height":40,
+                     "backgroundColor":"#ffc9c9"},
+                    {"id":"b","type":"rectangle","x":100,"y":0,"width":30,"height":40,
+                     "backgroundColor":"#ffc9c9"}]}"##
+                    .to_vec(),
+            )
+            .unwrap();
+        let mouse = |phase, x, shift| PointerEvent {
+            id: 0,
+            phase,
+            x,
+            y: 20.0,
+            kind: PointerKind::Mouse,
+            pressure: 0.5,
+            timestamp: 0.0,
+            modifiers: Modifiers {
+                shift,
+                ..Modifiers::default()
+            },
+        };
+        for (x, shift) in [(15.0, false), (115.0, true)] {
+            editor.pointer(mouse(PointerPhase::Down, x, shift));
+            editor.pointer(mouse(PointerPhase::Up, x, shift));
+        }
+        let bar = editor.action_bar().unwrap();
+        assert!(bar.can_group && !bar.can_ungroup);
+
+        editor.group();
+        let bar = editor.action_bar().unwrap();
+        assert!(!bar.can_group && bar.can_ungroup);
+
+        editor.ungroup();
+        let bar = editor.action_bar().unwrap();
+        assert!(!bar.can_ungroup);
     }
 
     #[test]

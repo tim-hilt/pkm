@@ -13,6 +13,7 @@ use crate::duplicate;
 use crate::edit_points::{self, Grab, PointDrag, PointHandles, PointSelection};
 use crate::erase::Erasing;
 use crate::geometry::Geometry;
+use crate::group;
 use crate::history::{self, History, Step};
 use crate::hit_test::{self, Reach};
 use crate::input::{MagnifyEvent, PointerEvent, PointerKind, PointerPhase, ScrollEvent};
@@ -75,6 +76,13 @@ pub struct Editor {
     /// The erase in progress, if the pointer of the eraser Tool is down.
     erasing: Option<Erasing>,
     selection: Selection,
+    /// The group that was gone into (double-tapped), see [`crate::group`]:
+    /// always one that every selected Element is in.
+    editing_group: Option<String>,
+    /// The group that was gone into when the drag in progress began, which
+    /// the drag leaves if it selects outside it, and a drag that is called off
+    /// goes back into.
+    drag_editing: Option<String>,
     taps: TapRecognizer,
     /// What can be undone and redone; never saved (see [`crate::history`]).
     history: History,
@@ -137,6 +145,8 @@ impl Editor {
             stroke: None,
             erasing: None,
             selection: Selection::default(),
+            editing_group: None,
+            drag_editing: None,
             taps: TapRecognizer::default(),
             history: History::default(),
             moving: None,
@@ -159,6 +169,7 @@ impl Editor {
         if self.selection.clear() {
             self.overlay_revision += 1;
         }
+        self.editing_group = None;
         self.taps.cancel();
         // Whatever was being drawn, moved or transformed belonged to the
         // Scene that is gone, and so did what could be undone.
@@ -358,6 +369,7 @@ impl Editor {
         if tool == Tool::Selection || self.tool != Tool::Selection {
             self.select(event);
         }
+        self.sync_editing();
         self.sync_points();
         self.sync_highlight();
     }
@@ -416,6 +428,7 @@ impl Editor {
         };
         self.taps.cancel();
         self.selection = history::without_gone(selection, &self.scene);
+        self.sync_editing();
         // The points may have been added or taken away: no index is right.
         self.points.clear();
         self.overlay_revision += 1;
@@ -477,7 +490,12 @@ impl Editor {
         if self.is_gesturing() {
             return None;
         }
-        ActionBar::of(&self.scene, &self.selection, self.navigation.viewport())
+        ActionBar::of(
+            &self.scene,
+            &self.selection,
+            self.editing_group.as_deref(),
+            self.navigation.viewport(),
+        )
     }
 
     /// Duplicates the Selection (the `duplicate` command): each Element gets
@@ -496,11 +514,13 @@ impl Editor {
             &mut self.entropy,
             &mut step,
             &self.selection,
+            self.editing_group.as_deref(),
         );
         if copies.is_empty() {
             return;
         }
         self.selection = copies;
+        self.sync_editing();
         self.sync_points();
         self.history.record(step, &self.scene, &self.selection);
         self.overlay_revision += 1;
@@ -525,6 +545,7 @@ impl Editor {
             &self.selection,
         );
         self.selection.clear();
+        self.sync_editing();
         self.sync_points();
         self.history.record(step, &self.scene, &self.selection);
         self.overlay_revision += 1;
@@ -556,6 +577,55 @@ impl Editor {
         self.changed(true);
     }
 
+    /// Puts the selected Elements into one new group (the `group` command),
+    /// as Excalidraw does: see [`crate::group`]. Tapping any of them then
+    /// selects them all. One undo step. Does nothing unless two or more
+    /// Elements are selected and not all of them in a group already (see
+    /// [`ActionBar::can_group`]), or while a pointer is drawing or moving.
+    pub fn group(&mut self) {
+        self.finish_placing();
+        if self.is_gesturing() {
+            return;
+        }
+        let mut step = Step::begin(&self.selection);
+        if !group::group(
+            &mut self.scene,
+            &mut self.entropy,
+            &mut step,
+            &self.selection,
+            self.editing_group.as_deref(),
+        ) {
+            return;
+        }
+        self.history.record(step, &self.scene, &self.selection);
+        // The Elements moved up: the handles of some now stand for others.
+        self.changed(true);
+    }
+
+    /// Dissolves the groups that are selected (the `ungroup` command): the
+    /// Elements stay selected, now without them. Groups inside and outside
+    /// those stay. One undo step. Does nothing unless a group is selected
+    /// (see [`ActionBar::can_ungroup`]), or while a pointer is drawing or
+    /// moving.
+    pub fn ungroup(&mut self) {
+        self.finish_placing();
+        if self.is_gesturing() {
+            return;
+        }
+        let mut step = Step::begin(&self.selection);
+        if !group::ungroup(
+            &mut self.scene,
+            &mut self.entropy,
+            &mut step,
+            &self.selection,
+            self.editing_group.as_deref(),
+        ) {
+            return;
+        }
+        self.history.record(step, &self.scene, &self.selection);
+        self.changed(false);
+    }
+
     /// Selects every shown, unlocked Element of the Scene (the `select all`
     /// command).
     pub fn select_all(&mut self) {
@@ -567,6 +637,7 @@ impl Editor {
         if self.selection.select(ids) {
             self.overlay_revision += 1;
         }
+        self.editing_group = None;
         self.sync_points();
     }
 
@@ -621,17 +692,89 @@ impl Editor {
         let hit = self.hit(tap.x, tap.y, tap.kind);
         let before = self.selection.clone();
         match hit {
-            Some(id) if shift => self.selection.toggle(&id),
+            // A double-tap on an Element of a selected group goes into it.
+            Some(id) if tap.double && !shift && self.enter_group(&id) => {}
+            Some(id) if shift => {
+                // Tapping outside the group that was gone into leaves it.
+                self.editing_group = self.editing_around(&id);
+                let unit = self.unit_of(&id);
+                self.selection.toggle_all(&unit);
+            }
             Some(id) => {
-                self.selection.select_only(&id);
+                self.select_unit(&id, false);
             }
             None if tap.is_short() && !shift => {
                 self.selection.clear();
+                self.editing_group = None;
             }
             None => {}
         }
         if self.selection != before {
             self.overlay_revision += 1;
+        }
+    }
+
+    /// The group that was gone into, if it is one the Element `id` is in:
+    /// selecting anything else leaves it.
+    fn editing_around(&self, id: &str) -> Option<String> {
+        let editing = self.editing_group.as_deref()?;
+        let element = self.scene.element_by_id(id)?;
+        element.is_in_group(editing).then(|| editing.to_owned())
+    }
+
+    /// What selecting the Element `id` selects: it, and its group (see
+    /// [`crate::group`]).
+    fn unit_of(&self, id: &str) -> Vec<String> {
+        group::expand(&self.scene, &[id.to_owned()], self.editing_group.as_deref())
+    }
+
+    /// Selects what selecting the Element `id` selects, in place of the
+    /// Selection or, if `additive`, in addition to it. Selecting outside the
+    /// group that was gone into leaves it. Returns whether the Selection
+    /// changed.
+    fn select_unit(&mut self, id: &str, additive: bool) -> bool {
+        self.editing_group = self.editing_around(id);
+        let unit = self.unit_of(id);
+        if additive {
+            let kept = self.selection.ids().iter().cloned();
+            self.selection.select(kept.chain(unit).collect::<Vec<_>>())
+        } else {
+            self.selection.select(unit)
+        }
+    }
+
+    /// Goes into the selected group the Element `id` is in, if there is one,
+    /// and selects the Element (or its group inside the group that was gone
+    /// into). Returns whether it did.
+    fn enter_group(&mut self, id: &str) -> bool {
+        let Some(entered) = group::entered(
+            &self.scene,
+            &self.selection,
+            id,
+            self.editing_group.as_deref(),
+        ) else {
+            return false;
+        };
+        self.editing_group = Some(entered);
+        let unit = self.unit_of(id);
+        self.selection.select(unit);
+        true
+    }
+
+    /// Leaves the group that was gone into unless every selected Element is
+    /// still in it.
+    fn sync_editing(&mut self) {
+        let Some(editing) = self.editing_group.as_deref() else {
+            return;
+        };
+        let inside = !self.selection.is_empty()
+            && self.selection.ids().iter().all(|id| {
+                self.scene
+                    .element_by_id(id)
+                    .is_some_and(|e| e.is_in_group(editing))
+            });
+        if !inside {
+            self.editing_group = None;
         }
     }
 
@@ -906,12 +1049,11 @@ impl Editor {
     fn begin_move(&mut self, id: &str, origin: Origin, event: PointerEvent) {
         // Undoing the move also undoes the selecting it began with.
         let step = Step::begin(&self.selection);
+        self.drag_editing = self.editing_group.clone();
         let changed = if self.selection.contains(id) {
             false
-        } else if event.modifiers.shift {
-            self.selection.add(id)
         } else {
-            self.selection.select_only(id)
+            self.select_unit(id, event.modifiers.shift)
         };
         if changed {
             self.overlay_revision += 1;
@@ -957,6 +1099,7 @@ impl Editor {
         if let Some(moving) = self.moving.take() {
             let selection = moving.cancel(&mut self.scene, &mut self.entropy);
             self.show_selection(selection);
+            self.editing_group = self.drag_editing.take();
             self.changed(false);
         }
     }
@@ -965,10 +1108,12 @@ impl Editor {
     /// adds to the Selection instead of replacing it.
     fn begin_box_select(&mut self, origin: Origin, event: PointerEvent) {
         let start = self.navigation.viewport().scene_at(origin.x, origin.y);
+        self.drag_editing = self.editing_group.clone();
         self.box_selecting = Some(BoxSelect::begin(
             event.id,
             start,
             &self.selection,
+            self.editing_group.as_deref(),
             event.modifiers.shift,
         ));
         self.follow_box_select(event);
@@ -1007,6 +1152,7 @@ impl Editor {
     fn drop_box_select(&mut self) {
         if let Some(boxing) = self.box_selecting.take() {
             self.show_selection(boxing.cancel());
+            self.editing_group = self.drag_editing.take();
             self.overlay_revision += 1;
         }
     }

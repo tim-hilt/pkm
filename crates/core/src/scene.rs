@@ -609,6 +609,17 @@ impl<'a> Element<'a> {
     pub(crate) fn member(&self, key: &str) -> Option<&'a Value> {
         self.object.get(key)
     }
+
+    /// The ids of the groups the Element is in, innermost first, as
+    /// Excalidraw lists them.
+    pub fn group_ids(&self) -> impl Iterator<Item = &'a str> + use<'a> {
+        self.object
+            .get("groupIds")
+            .and_then(Value::as_array)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(Value::as_str)
+    }
 }
 
 impl<'a> Element<'a> {
@@ -649,22 +660,14 @@ impl Element<'_> {
             .unwrap_or(false)
     }
 
-    /// The id of the outermost group the Element is in, if any: Excalidraw
-    /// lists the groups of an Element innermost first.
+    /// The id of the outermost group the Element is in, if any.
     pub fn outermost_group(&self) -> Option<&str> {
-        self.object
-            .get("groupIds")
-            .and_then(Value::as_array)?
-            .last()?
-            .as_str()
+        self.group_ids().last()
     }
 
     /// Whether the Element is in the group `group`, however deeply nested.
     pub fn is_in_group(&self, group: &str) -> bool {
-        self.object
-            .get("groupIds")
-            .and_then(Value::as_array)
-            .is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(group)))
+        self.group_ids().any(|id| id == group)
     }
 
     /// Whether a text is bound to the Element as its label.

@@ -127,6 +127,34 @@ import Testing
         #expect(try position(of: "box", in: setup) < position(of: copy, in: setup))
     }
 
+    @Test func groupingAndUngroupingReachTheCoreAndAreUndoable() throws {
+        let setup = try makeSetup()
+        select(setup)
+        setup.controller.duplicate()
+        // The copy is selected; add the original to the Selection with Shift.
+        setup.canvas.send(shiftPointer(.down, at: (100, 125)))
+        setup.canvas.send(shiftPointer(.up, at: (100, 125)))
+        #expect(setup.editor.selection().count == 2)
+        #expect(setup.controller.actionBar?.canGroup == true)
+        #expect(setup.controller.actionBar?.canUngroup == false)
+
+        setup.controller.group()
+        #expect(setup.controller.actionBar?.canGroup == false)
+        #expect(setup.controller.actionBar?.canUngroup == true)
+
+        setup.controller.ungroup()
+        #expect(setup.controller.actionBar?.canUngroup == false)
+
+        setup.controller.undo()
+        #expect(setup.controller.actionBar?.canUngroup == true)
+    }
+
+    private func shiftPointer(_ phase: PointerPhase, at point: (Double, Double)) -> PointerEvent {
+        PointerEvent(
+            id: 0, phase: phase, x: point.0, y: point.1, kind: .mouse, pressure: 0.5,
+            timestamp: 0, modifiers: Modifiers(shift: true, ctrl: false, alt: false, meta: false))
+    }
+
     @Test func aLongPressOpensNoContextMenu() throws {
         let setup = try makeSetup()
         select(setup)
