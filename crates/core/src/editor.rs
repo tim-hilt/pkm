@@ -289,6 +289,16 @@ impl Editor {
         self.navigation.viewport()
     }
 
+    /// Shows the Scene from `origin` (the Scene point at the Canvas's top-left
+    /// corner) at `zoom`, limited to the allowed range: how a client brings
+    /// back the viewport a Drawing was left at. A value that is not a finite
+    /// number leaves the viewport as it is. Not part of the Scene, so nothing
+    /// to save or undo.
+    pub fn set_viewport(&mut self, origin: (f64, f64), zoom: f64) {
+        self.navigation.set_viewport(origin, zoom);
+        self.navigated();
+    }
+
     /// Tells the core how big the Canvas is, in points. Clients report it on
     /// start and whenever it changes; zoom commands act around its middle.
     pub fn set_view_size(&mut self, width: f64, height: f64) {

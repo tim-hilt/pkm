@@ -147,6 +147,147 @@ import Testing
     }
 }
 
+/// Reopening a Drawing where it was left: its viewport is cached by the
+/// `DrawingStore`, outside the `.excalidraw` file.
+@MainActor @Suite struct ReopenViewportTests {
+    private let directory: URL
+    private let store: DrawingStore
+
+    init() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "ReopenViewportTests-\(UUID().uuidString)", directoryHint: .isDirectory)
+        directory = root.appending(path: "Documents", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        store = DrawingStore(directory: directory, cacheDirectory: root.appending(path: "Caches"))
+    }
+
+    private func newDrawing() throws -> String { try store.create(contents: Editor().save()) }
+
+    private func scrollAndZoom(_ drawing: OpenDrawing) {
+        drawing.editor.setViewSize(width: 400, height: 300)
+        drawing.editor.scroll(
+            event: ScrollEvent(
+                x: 0, y: 0, dx: 30, dy: 70, modifiers: Modifiers(shift: false, ctrl: false, alt: false, meta: false)))
+        drawing.editor.zoomIn()
+        drawing.editor.zoomIn()
+    }
+
+    @Test func aNewDrawingOpensAtTheDefaultViewport() throws {
+        let drawing = try OpenDrawing(name: newDrawing(), store: store)
+
+        #expect(drawing.editor.viewport() == Editor().viewport())
+    }
+
+    @Test func aDrawingWithoutACachedViewportOpensAtTheDefaultViewport() throws {
+        let name = try store.create(contents: Data(contentsOf: SampleDrawing.url))
+
+        let drawing = try OpenDrawing(name: name, store: store)
+
+        #expect(drawing.editor.viewport() == Editor().viewport())
+    }
+
+    @Test func leavingTheDrawingKeepsItsViewportForTheNextOpen() throws {
+        let name = try newDrawing()
+        let drawing = try OpenDrawing(name: name, store: store)
+        scrollAndZoom(drawing)
+        let left = drawing.editor.viewport()
+        #expect(left != Editor().viewport())
+
+        drawing.saveNow()
+        let reopened = try OpenDrawing(name: name, store: store)
+
+        #expect(reopened.editor.viewport() == left)
+    }
+
+    @Test func eachDrawingKeepsItsOwnViewport() throws {
+        let (a, b) = try (newDrawing(), store.duplicate(newDrawing()))
+        let first = try OpenDrawing(name: a, store: store)
+        scrollAndZoom(first)
+        first.saveNow()
+
+        #expect(try OpenDrawing(name: b, store: store).editor.viewport() == Editor().viewport())
+    }
+
+    @Test func theViewportOfTheLastLeaveIsTheOneRestored() throws {
+        let name = try newDrawing()
+        let first = try OpenDrawing(name: name, store: store)
+        scrollAndZoom(first)
+        first.saveNow()
+        let second = try OpenDrawing(name: name, store: store)
+        second.editor.resetZoom()
+        let left = second.editor.viewport()
+
+        second.saveNow()
+
+        #expect(try OpenDrawing(name: name, store: store).editor.viewport() == left)
+    }
+
+    @Test func aViewportIsKeptWithoutAnyChangeToTheScene() throws {
+        let name = try newDrawing()
+        let before = try store.list().first { $0.name == name }
+        let drawing = try OpenDrawing(name: name, store: store)
+        scrollAndZoom(drawing)
+
+        drawing.saveNow()
+
+        #expect(try store.list().first { $0.name == name } == before)
+    }
+
+    @Test func theViewportIsNotWrittenIntoTheFile() throws {
+        let name = try newDrawing()
+        let bytes = try store.open(name)
+        let drawing = try OpenDrawing(name: name, store: store)
+        scrollAndZoom(drawing)
+        drawing.saveNow()
+
+        #expect(try store.open(name) == bytes)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path) == ["\(name).excalidraw"])
+
+        // Not when the Scene is saved with it either.
+        drawing.editor.setTool(tool: .rectangle)
+        for (phase, x) in [(PointerPhase.down, 10.0), (.move, 90), (.up, 90)] {
+            drawing.editor.pointer(
+                event: PointerEvent(
+                    id: 0, phase: phase, x: x, y: x, kind: .mouse, pressure: 0.5, timestamp: 0,
+                    modifiers: Modifiers(shift: false, ctrl: false, alt: false, meta: false)))
+        }
+        drawing.editorDidChange()
+        drawing.saveNow()
+        let saved = try String(decoding: store.open(name), as: UTF8.self)
+        #expect(saved.contains("rectangle"))
+        #expect(!saved.localizedCaseInsensitiveContains("zoom"))
+        #expect(!saved.contains("scrollX"))
+    }
+
+    @Test func theCanvasShowsTheRestoredViewport() throws {
+        let name = try newDrawing()
+        let first = try OpenDrawing(name: name, store: store)
+        scrollAndZoom(first)
+        first.saveNow()
+        let left = first.editor.viewport()
+
+        let canvas = CanvasMetalView()
+        let renderer = try #require(canvas.renderer)
+        let reopened = try OpenDrawing(name: name, store: store)
+        renderer.setGeometry(reopened.editor.geometry())
+        canvas.editor = reopened.editor
+
+        #expect(renderer.viewport == Viewport(left))
+    }
+
+    @Test func aViewportSurvivesRelaunchWhichIsAnotherStoreOnTheSameFolders() throws {
+        let name = try newDrawing()
+        let drawing = try OpenDrawing(name: name, store: store)
+        scrollAndZoom(drawing)
+        drawing.saveNow()
+        let left = drawing.editor.viewport()
+
+        let relaunched = DrawingStore(directory: store.directory, cacheDirectory: store.cacheDirectory)
+
+        #expect(try OpenDrawing(name: name, store: relaunched).editor.viewport() == left)
+    }
+}
+
 /// The Canvas tells when the Scene changed, which is what autosave listens to.
 @MainActor @Suite struct SceneChangeTests {
     @Test func theCanvasReportsSceneChangesButNotNavigation() throws {

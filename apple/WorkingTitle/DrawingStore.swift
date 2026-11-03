@@ -151,6 +151,43 @@ struct DrawingStore: Sendable {
         try FileManager.default.setAttributes([.modificationDate: entry.modified], ofItemAtPath: file.path)
     }
 
+    // MARK: Viewport
+
+    private static let viewportFile = "viewport.json"
+
+    /// The viewport (scroll and zoom) the Drawing was left at, or nil if none
+    /// was cached or it cannot be read. It is the app's own state and not part
+    /// of the Drawing, so it lives in the cache and never in the file.
+    func viewport(for name: String) -> ViewportState? {
+        let file = cacheDirectory(for: name).appending(path: Self.viewportFile, directoryHint: .notDirectory)
+        guard (try? url(for: name)) != nil, let data = try? Data(contentsOf: file),
+            let saved = try? JSONDecoder().decode(CachedViewport.self, from: data)
+        else { return nil }
+        return ViewportState(originX: saved.originX, originY: saved.originY, zoom: saved.zoom)
+    }
+
+    /// Caches `viewport` as the one to open the Drawing at. Not a change of
+    /// the Drawing.
+    func saveViewport(_ viewport: ViewportState, for name: String) throws {
+        _ = try url(for: name)
+        let saved = CachedViewport(originX: viewport.originX, originY: viewport.originY, zoom: viewport.zoom)
+        try writeCache(JSONEncoder().encode(saved), named: Self.viewportFile, for: name)
+    }
+
+    /// The cache file's own format, so that it does not change with the
+    /// generated type.
+    private struct CachedViewport: Codable {
+        let originX: Double
+        let originY: Double
+        let zoom: Double
+    }
+
+    private func writeCache(_ data: Data, named file: String, for name: String) throws {
+        let folder = cacheDirectory(for: name)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try data.write(to: folder.appending(path: file, directoryHint: .notDirectory), options: .atomic)
+    }
+
     /// File dates are stored finer than this; it only absorbs rounding.
     private static let stampTolerance: TimeInterval = 0.001
 

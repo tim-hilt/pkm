@@ -335,6 +335,14 @@ impl Editor {
         self.editor().viewport().into()
     }
 
+    /// Shows the Scene from the given viewport, e.g. the one a Drawing was
+    /// left at; see [`workingtitle_core::Editor::set_viewport`]. Not a change
+    /// of the Scene.
+    pub fn set_viewport(&self, viewport: ViewportState) {
+        self.editor()
+            .set_viewport((viewport.origin_x, viewport.origin_y), viewport.zoom);
+    }
+
     /// Reports the Canvas size in points; call on start and on every resize.
     pub fn set_view_size(&self, width: f64, height: f64) {
         self.editor().set_view_size(width, height);
@@ -860,6 +868,23 @@ mod tests {
         let viewport = editor.viewport();
         assert_eq!((viewport.origin_x, viewport.origin_y), (-10.0, -20.0));
         assert_eq!(viewport.zoom, 1.0);
+    }
+
+    #[test]
+    fn a_viewport_set_is_the_viewport_reported_back() {
+        let editor = Editor::new();
+        let revision = editor.revision();
+
+        editor.set_viewport(ViewportState {
+            origin_x: 30.0,
+            origin_y: -12.5,
+            zoom: 2.0,
+        });
+
+        let viewport = editor.viewport();
+        assert_eq!((viewport.origin_x, viewport.origin_y), (30.0, -12.5));
+        assert_eq!(viewport.zoom, 2.0);
+        assert_eq!(editor.revision(), revision);
     }
 
     #[test]

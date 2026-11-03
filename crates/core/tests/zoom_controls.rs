@@ -291,3 +291,70 @@ fn zooming_does_not_touch_the_scenes_geometry() {
     assert_eq!(before.coords(), after.coords());
     assert_eq!(before.parts(), after.parts());
 }
+
+// --- Restoring a viewport ------------------------------------------------
+
+#[test]
+fn a_viewport_that_was_set_is_the_viewport_shown() {
+    let mut editor = Editor::new();
+
+    editor.set_viewport((120.0, -40.5), 2.5);
+
+    assert_viewport(&editor, (120.0, -40.5), 2.5);
+}
+
+#[test]
+fn loading_a_drawing_leaves_a_viewport_to_be_set_afterwards() {
+    let mut editor = editor_showing(&rectangle(0.0, 0.0, 10.0, 10.0), 400.0, 200.0);
+    let bytes = editor.save();
+    editor.set_viewport((5.0, 6.0), 3.0);
+
+    editor.load(&bytes).unwrap();
+    editor.set_viewport((7.0, 8.0), 0.5);
+
+    assert_viewport(&editor, (7.0, 8.0), 0.5);
+}
+
+#[test]
+fn a_set_zoom_is_kept_within_the_limits() {
+    let mut editor = Editor::new();
+
+    editor.set_viewport((0.0, 0.0), 1000.0);
+    assert_eq!(zoom(&editor), MAX_ZOOM);
+    editor.set_viewport((0.0, 0.0), 0.0);
+    assert_eq!(zoom(&editor), MIN_ZOOM);
+}
+
+#[test]
+fn a_viewport_that_is_not_a_number_is_ignored() {
+    let mut editor = Editor::new();
+    editor.set_viewport((10.0, 20.0), 2.0);
+
+    editor.set_viewport((f64::NAN, 0.0), 1.0);
+    editor.set_viewport((0.0, f64::INFINITY), 1.0);
+    editor.set_viewport((0.0, 0.0), f64::NAN);
+
+    assert_viewport(&editor, (10.0, 20.0), 2.0);
+}
+
+#[test]
+fn setting_a_viewport_does_not_touch_the_scene() {
+    let mut editor = editor_showing(&rectangle(10.0, 20.0, 30.0, 40.0), 400.0, 200.0);
+    let revision = editor.revision();
+    let saved = editor.save();
+
+    editor.set_viewport((300.0, 300.0), 4.0);
+
+    assert_eq!(editor.revision(), revision);
+    assert_eq!(editor.save(), saved);
+}
+
+#[test]
+fn setting_a_zoom_updates_the_overlay_like_any_zoom_change() {
+    let mut editor = Editor::new();
+    let before = editor.overlay_revision();
+
+    editor.set_viewport((0.0, 0.0), 2.0);
+
+    assert_ne!(editor.overlay_revision(), before);
+}

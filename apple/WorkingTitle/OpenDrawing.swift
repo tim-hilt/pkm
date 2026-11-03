@@ -3,6 +3,10 @@ import Foundation
 /// A Drawing opened from the `DrawingStore` into an `Editor`, kept saved:
 /// a change is saved `autosaveDelay` after the last one, and `saveNow` saves
 /// at once (leaving the Drawing, app going to the background).
+///
+/// It opens at the viewport it was left at, which `saveNow` keeps in the
+/// store's cache (not in the file, so panning and zooming never change the
+/// Drawing); one that was never left opens at the default viewport.
 @MainActor
 final class OpenDrawing {
     let name: String
@@ -13,6 +17,8 @@ final class OpenDrawing {
     /// The `Editor.revision` of what the file holds.
     private var savedRevision: UInt64
     private var pendingSave: Task<Void, Never>?
+    /// The viewport the cache holds, or the default if it holds none.
+    private var savedViewport: ViewportState
 
     /// Throws if the Drawing cannot be read or is not a valid Drawing; it is
     /// never overwritten then.
@@ -24,6 +30,8 @@ final class OpenDrawing {
         self.store = store
         self.autosaveDelay = autosaveDelay
         savedRevision = editor.revision()
+        if let viewport = store.viewport(for: name) { editor.setViewport(viewport: viewport) }
+        savedViewport = editor.viewport()
     }
 
     /// Call after input or a command reached the editor. Cheap when the
@@ -38,10 +46,23 @@ final class OpenDrawing {
         }
     }
 
-    /// Saves unsaved changes now and drops the delayed save.
+    /// Saves unsaved changes and the viewport now and drops the delayed save.
     func saveNow() {
         pendingSave?.cancel()
         pendingSave = nil
+        saveViewport()
+        saveScene()
+    }
+
+    /// A failure to cache costs only the viewport: the Drawing opens at the
+    /// default or at an older one.
+    private func saveViewport() {
+        let viewport = editor.viewport()
+        guard viewport != savedViewport, (try? store.saveViewport(viewport, for: name)) != nil else { return }
+        savedViewport = viewport
+    }
+
+    private func saveScene() {
         guard hasUnsavedChanges else { return }
         let revision = editor.revision()
         // A failed save keeps the changes unsaved: the next change or the next

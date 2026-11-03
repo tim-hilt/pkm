@@ -404,4 +404,93 @@ import Testing
 
         #expect(try store.thumbnail(for: entry(copy)) == nil)
     }
+
+    // MARK: Viewport cache
+
+    private let viewport = ViewportState(originX: -120.5, originY: 40, zoom: 2.5)
+
+    @Test func aDrawingWithoutACachedViewportHasNone() throws {
+        try store.save(Data("a".utf8), as: "a")
+
+        #expect(store.viewport(for: "a") == nil)
+    }
+
+    @Test func aCachedViewportComesBackAsItWas() throws {
+        try store.save(Data("a".utf8), as: "a")
+
+        try store.saveViewport(viewport, for: "a")
+
+        #expect(store.viewport(for: "a") == viewport)
+    }
+
+    @Test func theLastCachedViewportWins() throws {
+        try store.save(Data("a".utf8), as: "a")
+        try store.saveViewport(viewport, for: "a")
+
+        try store.saveViewport(ViewportState(originX: 1, originY: 2, zoom: 0.5), for: "a")
+
+        #expect(store.viewport(for: "a") == ViewportState(originX: 1, originY: 2, zoom: 0.5))
+    }
+
+    @Test func aViewportThatCannotBeReadIsNone() throws {
+        try store.save(Data("a".utf8), as: "a")
+        try cache("a", file: "viewport.json")
+
+        #expect(store.viewport(for: "a") == nil)
+    }
+
+    @Test func aViewportLivesOutsideTheDrawingsFolderAndLeavesTheFileAlone() throws {
+        try store.save(Data("a".utf8), as: "a")
+        let before = try entry("a")
+
+        try store.saveViewport(viewport, for: "a")
+
+        #expect(try fileNames() == ["a.excalidraw"])
+        #expect(try store.open("a") == Data("a".utf8))
+        #expect(try entry("a") == before, "saving a viewport is not a change of the Drawing")
+    }
+
+    @Test func aViewportAndAThumbnailDoNotGetInEachOthersWay() throws {
+        try store.save(Data("a".utf8), as: "a")
+        try store.saveThumbnail(Data("png".utf8), for: entry("a"))
+
+        try store.saveViewport(viewport, for: "a")
+
+        #expect(try store.thumbnail(for: entry("a")) == Data("png".utf8))
+        #expect(store.viewport(for: "a") == viewport)
+    }
+
+    @Test func aViewportFollowsItsRenamedDrawing() throws {
+        try store.save(Data("a".utf8), as: "a")
+        try store.saveViewport(viewport, for: "a")
+
+        _ = try store.rename("a", to: "b")
+
+        #expect(store.viewport(for: "b") == viewport)
+        #expect(store.viewport(for: "a") == nil)
+    }
+
+    @Test func aDuplicateStartsWithoutAViewport() throws {
+        try store.save(Data("a".utf8), as: "a")
+        try store.saveViewport(viewport, for: "a")
+
+        let copy = try store.duplicate("a")
+
+        #expect(store.viewport(for: copy) == nil)
+    }
+
+    @Test func deletingADrawingDeletesItsViewport() throws {
+        try store.save(Data("a".utf8), as: "a")
+        try store.saveViewport(viewport, for: "a")
+
+        try store.delete("a")
+        try store.save(Data("a".utf8), as: "a")
+
+        #expect(store.viewport(for: "a") == nil)
+    }
+
+    @Test func aViewportCannotBeSavedForANameThatIsNoDrawing() throws {
+        #expect(throws: DrawingStore.InvalidName.self) { try store.saveViewport(viewport, for: "../a") }
+        #expect(store.viewport(for: "../a") == nil)
+    }
 }

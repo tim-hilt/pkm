@@ -104,6 +104,12 @@ impl Navigation {
         self.view_size = (width, height);
     }
 
+    pub fn set_viewport(&mut self, origin: (f64, f64), zoom: f64) {
+        if origin.0.is_finite() && origin.1.is_finite() && zoom.is_finite() {
+            self.viewport.pin(origin, (0.0, 0.0), zoom);
+        }
+    }
+
     pub fn zoom_in(&mut self) {
         self.zoom_about_centre(self.viewport.zoom() + ZOOM_STEP);
     }
