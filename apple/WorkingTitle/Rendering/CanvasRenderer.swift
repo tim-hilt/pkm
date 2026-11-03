@@ -72,6 +72,9 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
     /// Frames rendered so far. Stays constant while nothing changes, which is
     /// how "no continuous render loop" is verified.
     private(set) var framesRendered = 0
+    /// Whether frames start as white paper; transparent otherwise, for
+    /// exporting images without background.
+    var drawsPaper = true
 
     private let queue: any MTLCommandQueue
     private let pipeline: any MTLRenderPipelineState
@@ -333,7 +336,8 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
             let commands = queue.makeCommandBuffer()
         else { return nil }
         pass.colorAttachments[0].loadAction = .clear
-        pass.colorAttachments[0].clearColor = MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1)
+        pass.colorAttachments[0].clearColor =
+            drawsPaper ? MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1) : MTLClearColor()
         pass.stencilAttachment.loadAction = .clear
         pass.stencilAttachment.clearStencil = 0
         pass.stencilAttachment.storeAction = .dontCare

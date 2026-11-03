@@ -6,9 +6,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use workingtitle_core::scene::{FillPattern, LineStyle};
 use workingtitle_core::{
-    ActionBar, Edges, FontSize, ImageFile, MagnifyEvent, Modifiers, PencilDoubleTap, PointerEvent,
-    PointerKind, PointerPhase, Properties, Property, ScrollEvent, Sloppiness, StrokeWidth,
-    TextAlign, TextEditor, Tool, ZOrder,
+    ActionBar, Edges, ExportScope, FontSize, ImageFile, MagnifyEvent, Modifiers, PencilDoubleTap,
+    PointerEvent, PointerKind, PointerPhase, Properties, Property, ScrollEvent, Sloppiness,
+    StrokeWidth, TextAlign, TextEditor, Tool, ZOrder,
 };
 
 uniffi::setup_scaffolding!("WorkingTitleCore");
@@ -43,6 +43,24 @@ pub struct Modifiers {
     pub ctrl: bool,
     pub alt: bool,
     pub meta: bool,
+}
+
+#[uniffi::remote(Enum)]
+pub enum ExportScope {
+    Scene,
+    Selection,
+}
+
+/// An image export for the client to rasterise; see
+/// [`workingtitle_core::Export`].
+#[derive(uniffi::Record)]
+pub struct Export {
+    pub geometry: Arc<Geometry>,
+    /// The Scene rectangle the image shows, in Scene units.
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
 }
 
 #[uniffi::remote(Enum)]
@@ -608,6 +626,21 @@ impl Editor {
     /// when [`Geometry`] names a file the client has no texture for yet.
     pub fn file_bytes(&self, id: String) -> Option<Vec<u8>> {
         self.editor().file_bytes(&id)
+    }
+
+    /// What a PNG export of `scope` shows, `None` if nothing; see
+    /// [`workingtitle_core::Editor::export`].
+    pub fn export(&self, scope: ExportScope) -> Option<Export> {
+        let export = self.editor().export(scope)?;
+        Some(Export {
+            geometry: Arc::new(Geometry {
+                inner: export.geometry,
+            }),
+            x: export.x,
+            y: export.y,
+            width: export.width,
+            height: export.height,
+        })
     }
 
     /// The paths to draw for the Scene; see [`workingtitle_core::Editor::geometry`].

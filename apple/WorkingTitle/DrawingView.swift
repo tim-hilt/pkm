@@ -37,6 +37,7 @@ struct DrawingView: View {
                         Label("Export", systemImage: "square.and.arrow.up")
                     }
                     .accessibilityIdentifier("export-drawing")
+                    PNGExportMenu(drawing: drawing)
                 }
                 ZoomControls(controller: controller)
             }
@@ -70,6 +71,29 @@ private struct BackControl: View {
             .padding(10)
             .background(.regularMaterial, in: Capsule())
             .padding(.horizontal)
+    }
+}
+
+/// Exports the Scene or the Selection as PNG through the share sheet, with
+/// or without background; its final placement comes with the layout.
+private struct PNGExportMenu: View {
+    let drawing: OpenDrawing
+    @State private var background = true
+
+    var body: some View {
+        Menu {
+            Toggle("Background", isOn: $background)
+            share("Export Scene as PNG", scope: .scene)
+            share("Export Selection as PNG", scope: .selection)
+        } label: {
+            Label("Export PNG", systemImage: "photo")
+        }
+        .accessibilityIdentifier("export-png")
+    }
+
+    private func share(_ title: LocalizedStringKey, scope: ExportScope) -> some View {
+        let png = ExportedPNG(name: drawing.name, editor: drawing.editor, scope: scope, background: background)
+        return ShareLink(item: png, preview: SharePreview(drawing.name)) { Text(title) }
     }
 }
 

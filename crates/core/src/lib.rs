@@ -57,7 +57,7 @@ mod wrap;
 mod z_order;
 
 pub use action_bar::ActionBar;
-pub use editor::Editor;
+pub use editor::{Editor, Export, ExportScope};
 pub use geometry::{
     Dash, FillRule, FillStyle, Geometry, Image, ImageStatus, Part, PartKind, PartWriter,
     StrokeStyle, TextAlign, TextLine, TextStyle, Verb,

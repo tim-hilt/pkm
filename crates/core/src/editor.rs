@@ -48,6 +48,31 @@ static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
 /// opacity Elements keep while the eraser is about to delete them.
 const READY_TO_ERASE_OPACITY: f32 = 0.2;
 
+/// Scene units kept free around an export, like Excalidraw's default
+/// `exportPadding`.
+const EXPORT_PADDING: f64 = 10.0;
+
+/// What to export as an image.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExportScope {
+    /// Every shown Element.
+    Scene,
+    /// The Selection, with the labels of selected containers.
+    Selection,
+}
+
+/// An image export for the client to rasterise (ADR-0008): the geometry of
+/// what is exported and the rectangle of the Scene, in Scene units, that the
+/// image shows.
+#[derive(Debug)]
+pub struct Export {
+    pub geometry: Geometry,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
 fn next_generation() -> u64 {
     NEXT_GENERATION.fetch_add(1, Ordering::Relaxed)
 }
@@ -254,12 +279,35 @@ impl Editor {
     /// by file id, placement, crop and scale for the client to draw (see
     /// [`crate::image`]).
     pub fn geometry(&self) -> Geometry {
-        let mut geometry = Geometry::with_generation(self.generation);
+        self.geometry_of(self.generation, |_| true)
+    }
+
+    /// What a PNG export of `scope` shows: its geometry and the Scene
+    /// rectangle to rasterise, which is the Elements' bounds plus
+    /// Excalidraw's export padding. `None` if there is nothing to export.
+    pub fn export(&self, scope: ExportScope) -> Option<Export> {
+        let included = |element: &Element| match scope {
+            ExportScope::Scene => true,
+            ExportScope::Selection => self.selection.covers(element),
+        };
+        let bounds = bounds_of(self.shown().filter(|e| included(e)))?;
+        Some(Export {
+            geometry: self.geometry_of(next_generation(), included),
+            x: bounds.min_x - EXPORT_PADDING,
+            y: bounds.min_y - EXPORT_PADDING,
+            width: bounds.max_x - bounds.min_x + 2.0 * EXPORT_PADDING,
+            height: bounds.max_y - bounds.min_y + 2.0 * EXPORT_PADDING,
+        })
+    }
+
+    /// The geometry of the shown Elements for which `include` holds.
+    fn geometry_of(&self, generation: u64, include: impl Fn(&Element) -> bool) -> Geometry {
+        let mut geometry = Geometry::with_generation(generation);
         let background = self.scene.view_background_color();
         let containers = Containers::new(&self.scene);
         let measurer = self.measurer.as_ref().map(|m| &*m.0);
         let editing = self.text.as_ref().map(TextEditing::handle);
-        for element in self.shown() {
+        for element in self.shown().filter(|e| include(e)) {
             // The text view shows the text that is being edited.
             if editing == Some(element.handle()) {
                 continue;
@@ -2022,29 +2070,34 @@ impl Editor {
     /// The smallest rectangle containing every shown Element, or `None` if
     /// there is none.
     fn scene_bounds(&self) -> Option<Bounds> {
-        self.shown()
-            .flat_map(|element| bounds_outline(&element))
-            .fold(None, |bounds, (x, y)| {
-                Some(match bounds {
-                    None => Bounds {
-                        min_x: x,
-                        min_y: y,
-                        max_x: x,
-                        max_y: y,
-                    },
-                    Some(b) => Bounds {
-                        min_x: b.min_x.min(x),
-                        min_y: b.min_y.min(y),
-                        max_x: b.max_x.max(x),
-                        max_y: b.max_y.max(y),
-                    },
-                })
-            })
+        bounds_of(self.shown())
     }
 
     fn shown(&self) -> impl Iterator<Item = Element<'_>> {
         self.scene.elements().filter(|e| !e.is_deleted())
     }
+}
+
+/// The smallest rectangle containing `elements`, or `None` if there are none.
+fn bounds_of<'a>(elements: impl Iterator<Item = Element<'a>>) -> Option<Bounds> {
+    elements
+        .flat_map(|element| bounds_outline(&element))
+        .fold(None, |bounds, (x, y)| {
+            Some(match bounds {
+                None => Bounds {
+                    min_x: x,
+                    min_y: y,
+                    max_x: x,
+                    max_y: y,
+                },
+                Some(b) => Bounds {
+                    min_x: b.min_x.min(x),
+                    min_y: b.min_y.min(y),
+                    max_x: b.max_x.max(x),
+                    max_y: b.max_y.max(y),
+                },
+            })
+        })
 }
 
 /// The corners of the Element's bounds, clockwise from the top left, turned
