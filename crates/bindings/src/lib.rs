@@ -95,6 +95,7 @@ pub enum Tool {
     Line,
     Arrow,
     Freedraw,
+    Eraser,
 }
 
 /// What the Canvas shows; see [`workingtitle_core::Viewport`]. Small and

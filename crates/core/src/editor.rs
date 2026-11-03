@@ -8,6 +8,7 @@ use crate::draw_freedraw::StrokeDrawing;
 use crate::draw_linear::{LinearDrawing, Update};
 use crate::draw_shape::{Outcome, ShapeGesture};
 use crate::edit_points::{self, Grab, PointDrag, PointHandles, PointSelection};
+use crate::erase::Erasing;
 use crate::geometry::Geometry;
 use crate::history::{self, History, Step};
 use crate::hit_test::{self, Reach};
@@ -29,6 +30,10 @@ use crate::{image, shape};
 
 /// Hands out [`Geometry::generation`]s; unique across all editors.
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+/// Excalidraw's `ELEMENT_READY_TO_ERASE_OPACITY` (20 %): how much of their
+/// opacity Elements keep while the eraser is about to delete them.
+const READY_TO_ERASE_OPACITY: f32 = 0.2;
 
 fn next_generation() -> u64 {
     NEXT_GENERATION.fetch_add(1, Ordering::Relaxed)
@@ -62,6 +67,8 @@ pub struct Editor {
     /// The freehand stroke being drawn, if the pointer of the freedraw Tool is
     /// down.
     stroke: Option<StrokeDrawing>,
+    /// The erase in progress, if the pointer of the eraser Tool is down.
+    erasing: Option<Erasing>,
     selection: Selection,
     taps: TapRecognizer,
     /// What can be undone and redone; never saved (see [`crate::history`]).
@@ -123,6 +130,7 @@ impl Editor {
             shape: None,
             linear: None,
             stroke: None,
+            erasing: None,
             selection: Selection::default(),
             taps: TapRecognizer::default(),
             history: History::default(),
@@ -152,6 +160,7 @@ impl Editor {
         self.shape = None;
         self.linear = None;
         self.stroke = None;
+        self.erasing = None;
         self.moving = None;
         self.transforming = None;
         self.point_dragging = None;
@@ -215,12 +224,20 @@ impl Editor {
         let containers = Containers::new(&self.scene);
         let measurer = self.measurer.as_ref().map(|m| &*m.0);
         for element in self.shown() {
+            let mark = geometry.mark();
             if element.kind() == ElementType::Text {
                 text::draw(&element, &containers, measurer, &mut geometry);
             } else if element.kind() == ElementType::Image {
                 image::draw(&element, &mut geometry);
             } else {
                 shape::draw(&element, background, &mut geometry);
+            }
+            if self
+                .erasing
+                .as_ref()
+                .is_some_and(|erasing| erasing.is_pending(element.id()))
+            {
+                geometry.fade(mark, READY_TO_ERASE_OPACITY);
             }
         }
         geometry
@@ -280,6 +297,7 @@ impl Editor {
             self.taps.cancel();
             self.drop_shape();
             self.drop_stroke();
+            self.drop_erase();
             self.end_linear();
             self.drop_move();
             self.drop_point_drag();
@@ -310,7 +328,9 @@ impl Editor {
     /// the shape (see [`crate::draw_shape`]), and with the line or arrow Tool
     /// it draws a line, by dragging or by tapping its points one by one (see
     /// [`crate::draw_linear`]), and with the freedraw Tool it draws a stroke
-    /// through the points the pointer passes (see [`crate::draw_freedraw`]). With the selection Tool a tap selects the
+    /// through the points the pointer passes (see [`crate::draw_freedraw`]),
+    /// and with the eraser Tool it previews the Elements the pointer passes
+    /// and deletes them when it lifts (see [`crate::erase`]). With the selection Tool a tap selects the
     /// Element it hits or clears the Selection (see [`Editor::selection`])
     /// while a drag on an Element moves the Selection (see
     /// [`crate::move_selection`]), a drag on a handle of it resizes, rotates
@@ -327,6 +347,7 @@ impl Editor {
         self.draw_shape(event);
         self.draw_linear(event);
         self.draw_stroke(event);
+        self.erase(event);
         // An event that finished a drawing, and so went back to selection, was
         // the drawing's: it is not a tap that selects.
         if tool == Tool::Selection || self.tool != Tool::Selection {
@@ -374,6 +395,7 @@ impl Editor {
     fn is_gesturing(&self) -> bool {
         self.shape.is_some()
             || self.stroke.is_some()
+            || self.erasing.is_some()
             || self.linear.as_ref().is_some_and(|l| !l.is_placing())
             || self.moving.is_some()
             || self.transforming.is_some()
@@ -1117,6 +1139,55 @@ impl Editor {
             }
             PointerPhase::Cancel if drawing_pointer == Some(event.id) => self.drop_stroke(),
             _ => {}
+        }
+    }
+
+    /// Follows the pointer with the erase, or starts one (see
+    /// [`crate::erase`]). The Tool stays after the erase whatever the Tool
+    /// lock says.
+    fn erase(&mut self, event: PointerEvent) {
+        // Two fingers navigate, and an erase one of them began is called off:
+        // nothing is deleted by a finger that was only landing.
+        if self.navigation.is_pinching() {
+            self.drop_erase();
+            return;
+        }
+        let erasing_pointer = self.erasing.as_ref().map(Erasing::pointer);
+        let at = self.navigation.viewport().scene_at(event.x, event.y);
+        let zoom = self.navigation.viewport().zoom();
+        match event.phase {
+            PointerPhase::Down if erasing_pointer.is_none() && self.tool == Tool::Eraser => {
+                self.erasing = Some(Erasing::begin(Step::begin(&self.selection), event, at));
+            }
+            PointerPhase::Move if erasing_pointer == Some(event.id) => {
+                let previewing = self
+                    .erasing
+                    .as_mut()
+                    .is_some_and(|erasing| erasing.drag_to(&self.scene, at, zoom));
+                if previewing {
+                    self.changed(false);
+                }
+            }
+            PointerPhase::Up if erasing_pointer == Some(event.id) => {
+                if let Some(erasing) = self.erasing.take() {
+                    let step = erasing.finish(&mut self.scene, &mut self.entropy, at, zoom);
+                    // What was erased cannot stay selected.
+                    let remaining = history::without_gone(self.selection.clone(), &self.scene);
+                    self.show_selection(remaining);
+                    self.history.record(step, &self.scene, &self.selection);
+                    self.changed(false);
+                }
+            }
+            PointerPhase::Cancel if erasing_pointer == Some(event.id) => self.drop_erase(),
+            _ => {}
+        }
+    }
+
+    /// Calls off the erase in progress, if any: what was previewed as about
+    /// to be erased is shown as it is again.
+    fn drop_erase(&mut self) {
+        if self.erasing.take().is_some() {
+            self.changed(false);
         }
     }
 

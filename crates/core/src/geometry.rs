@@ -139,7 +139,9 @@ pub struct FillStyle {
 pub struct Part {
     /// Core-assigned handle of the Element this part belongs to.
     pub element: u32,
-    /// Element version; changes whenever the Element's geometry does.
+    /// Element version; changes whenever the Element's geometry does, and
+    /// while the Element is shown faded as what an eraser is about to delete
+    /// (its opacity is part of what clients cache).
     pub version: u32,
     /// A [`PartKind`] number.
     pub kind: u32,
@@ -291,6 +293,18 @@ pub struct Image {
     pub corner_radius: f32,
 }
 
+/// Flipped in the version of an Element drawn faded, so that it can never be
+/// the version of the same Element drawn as it is.
+const FADED_VERSION: u32 = 1 << 31;
+
+/// A position in a [`Geometry`], see [`Geometry::mark`].
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Mark {
+    parts: usize,
+    text_lines: usize,
+    images: usize,
+}
+
 /// Paths, text and images to draw, in z-order (later ones are drawn over earlier ones).
 #[derive(Debug, Default)]
 pub struct Geometry {
@@ -326,6 +340,35 @@ impl Geometry {
     /// geometry.
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+
+    /// Where the geometry ends now, to [`Geometry::fade`] what is added after.
+    pub(crate) fn mark(&self) -> Mark {
+        Mark {
+            parts: self.parts.len(),
+            text_lines: self.text_lines.len(),
+            images: self.images.len(),
+        }
+    }
+
+    /// Multiplies the opacity of everything added since `since` by `factor`.
+    /// That is one Element, which then has another version than it would
+    /// unfaded: clients cache by version, and the opacity is baked into what
+    /// they cache.
+    pub(crate) fn fade(&mut self, since: Mark, factor: f32) {
+        let faded = |version: u32| version ^ FADED_VERSION;
+        for part in &mut self.parts[since.parts..] {
+            part.opacity *= factor;
+            part.version = faded(part.version);
+        }
+        for line in &mut self.text_lines[since.text_lines..] {
+            line.opacity *= factor;
+            line.version = faded(line.version);
+        }
+        for image in &mut self.images[since.images..] {
+            image.opacity *= factor;
+            image.version = faded(image.version);
+        }
     }
 
     /// Appends an empty stroked part for `element` at `version` and returns

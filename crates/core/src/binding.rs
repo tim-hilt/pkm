@@ -283,6 +283,34 @@ pub(crate) fn unbind_all(
     }
 }
 
+/// Unbinds every arrow end that is bound to the shape `shape_id`, for a shape
+/// that goes away.
+pub(crate) fn unbind_from(
+    scene: &mut Scene,
+    entropy: &mut Entropy,
+    step: &mut Step,
+    shape_id: &str,
+) {
+    let arrows: Vec<String> = scene
+        .element_by_id(shape_id)
+        .and_then(|shape| shape.member("boundElements")?.as_array())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|b| Some(b.get("id")?.as_str()?.to_owned()))
+        .collect();
+    for id in arrows {
+        for end in End::BOTH {
+            let bound_here = scene
+                .element_by_id(&id)
+                .and_then(|arrow| Some(bound(&arrow, end)?.shape == shape_id))
+                .unwrap_or(false);
+            if bound_here {
+                unbind(scene, entropy, step, &id, end);
+            }
+        }
+    }
+}
+
 /// Makes the `boundElements` of the shape `shape_id` list the arrow
 /// `arrow_id` exactly if one of the arrow's ends is bound to the shape.
 fn sync_bound(

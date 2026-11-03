@@ -1,5 +1,6 @@
 //! Which Element a point on the Canvas hits (`collision.ts` and
-//! `App.getElementAtPosition` at the pinned commit).
+//! `App.getElementAtPosition` at the pinned commit), and which Elements a
+//! step of the eraser touches (`eraserTest` in `eraser/index.ts`).
 //!
 //! Like Excalidraw, a point hits an Element if it is within a *threshold* of
 //! the Element's outline, or, for Elements that can be grabbed by their
@@ -92,6 +93,19 @@ pub(crate) fn topmost<'a>(
     }
 }
 
+/// Every Element hit by `point` (in the Scene), topmost last: what a tap of
+/// the eraser deletes (`App.getElementsAtPosition`).
+pub(crate) fn all_at<'a>(
+    scene: &'a Scene,
+    point: Point,
+    reach: Reach,
+) -> impl Iterator<Item = Element<'a>> {
+    scene
+        .elements()
+        .filter(is_selectable)
+        .filter(move |element| hits_itself(element, point, reach.of(element)))
+}
+
 /// Whether the Element can be selected at all: shown, unlocked, and not a
 /// label, which belongs to its container.
 pub(crate) fn is_selectable(element: &Element) -> bool {
@@ -116,13 +130,7 @@ fn hits_itself(element: &Element, point: Point, threshold: f64) -> bool {
     }
     let point = frame.unturned(point, element.angle());
     let inside_counts = grabbable_inside(element);
-    let (x, y) = (element.x(), element.y());
-    let moved = |points: Vec<Point>| -> Vec<Point> {
-        points
-            .into_iter()
-            .map(|(px, py)| (x + px, y + py))
-            .collect()
-    };
+    let moved = |points: Vec<Point>| in_scene(element, points);
 
     match element.kind() {
         ElementType::Line | ElementType::Arrow => {
@@ -143,6 +151,16 @@ fn hits_itself(element: &Element, point: Point, threshold: f64) -> bool {
     }
 }
 
+/// `points` of the Element's own frame, with its top left corner at the
+/// origin, in the Scene (not turned).
+fn in_scene(element: &Element, points: Vec<Point>) -> Vec<Point> {
+    let (x, y) = (element.x(), element.y());
+    points
+        .into_iter()
+        .map(|(px, py)| (x + px, y + py))
+        .collect()
+}
+
 /// Excalidraw's `shouldTestInside`: whether the inside of the Element is
 /// part of it. That is so for Elements with a visible background, for texts
 /// and images, and for containers of a label; but never for arrows, and for
@@ -159,6 +177,103 @@ fn grabbable_inside(element: &Element) -> bool {
         ElementType::Line | ElementType::Freedraw => draggable && is_loop(&element.points()),
         _ => draggable,
     }
+}
+
+// --- Eraser ---------------------------------------------------------------------
+
+/// How far from the ink of a freedraw stroke the eraser still touches it:
+/// the larger of 2.25 Scene units and 5 view points (Excalidraw's values).
+const FREEDRAW_ERASE_MIN: f64 = 2.25;
+const FREEDRAW_ERASE_VIEW: f64 = 5.0;
+/// How far from a freedraw stroke a step of the eraser is looked for, as
+/// Excalidraw does before it measures.
+const FREEDRAW_ERASE_NEAR: f64 = 15.0;
+
+/// Whether the step of the eraser from `from` to `to` (in the Scene) touches
+/// the Element, in a view at `zoom` (Excalidraw's `eraserTest`).
+///
+/// Shapes are touched by crossing their outline, or, for those that can be
+/// grabbed by their inside, by the step ending in it; the eraser passing
+/// through a hollow shape without touching its outline leaves it alone. Lines
+/// and arrows are touched by passing within a tolerance of their path, and
+/// freedraw strokes of the ink around it.
+pub(crate) fn crossed_by(element: &Element, from: Point, to: Point, zoom: f64) -> bool {
+    let frame = Frame::of(element);
+    let angle = element.angle();
+    let step = (frame.unturned(from, angle), frame.unturned(to, angle));
+    let kind = element.kind();
+    let stroke = element.stroke_width();
+
+    // Cheap rejection first: the boxes of the step and the Element, both
+    // widened by the tolerance, must overlap.
+    let near = match kind {
+        ElementType::Freedraw => FREEDRAW_ERASE_NEAR.max(freedraw::ink_reach(element)),
+        _ => stroke / 2.0,
+    };
+    let overlap =
+        |a: f64, b: f64, min: f64, max: f64| a.min(b) - near <= max && a.max(b) + near >= min;
+    if !(overlap(step.0.0, step.1.0, frame.min.0, frame.max.0)
+        && overlap(step.0.1, step.1.1, frame.min.1, frame.max.1))
+    {
+        return false;
+    }
+
+    let moved = |points: Vec<Point>| in_scene(element, points);
+    let inside_counts = grabbable_inside(element);
+    match kind {
+        ElementType::Line | ElementType::Arrow => {
+            let path = moved(linear_path(element));
+            let tolerance = stroke.max(stroke * 2.0 / zoom);
+            let touched = path_distance(step, &path, false) <= tolerance;
+            touched || (inside_counts && inside(step.1, &path))
+        }
+        ElementType::Freedraw => {
+            let ink = moved(freedraw::outline(element));
+            let tolerance = FREEDRAW_ERASE_MIN.max(FREEDRAW_ERASE_VIEW / zoom);
+            let loop_inside = inside_counts && inside(step.1, &moved(element.points()));
+            path_distance(step, &ink, true) <= tolerance
+                || winding(step.0, &ink) != 0
+                || loop_inside
+        }
+        _ => {
+            let polygon = moved(closed_shape(element));
+            path_distance(step, &polygon, true) <= 0.0
+                || (inside_counts && inside(step.1, &polygon))
+        }
+    }
+}
+
+/// How far the segment `step` is from the path through `points`, closed or
+/// not; `0` where they cross.
+fn path_distance(step: (Point, Point), points: &[Point], closed: bool) -> f64 {
+    match points {
+        [] => f64::INFINITY,
+        [only] => distance_to_segment(*only, step.0, step.1),
+        _ => edges(points, closed)
+            .map(|edge| segments_distance(step, edge))
+            .fold(f64::INFINITY, f64::min),
+    }
+}
+
+/// The distance between two segments: `0` if they cross or touch, else that of
+/// the closest pair of endpoints and segments.
+fn segments_distance(a: (Point, Point), b: (Point, Point)) -> f64 {
+    let side = |(ox, oy): Point, (px, py): Point, (qx, qy): Point| {
+        (px - ox) * (qy - oy) - (py - oy) * (qx - ox)
+    };
+    let crossing = side(b.0, b.1, a.0) * side(b.0, b.1, a.1) < 0.0
+        && side(a.0, a.1, b.0) * side(a.0, a.1, b.1) < 0.0;
+    if crossing {
+        return 0.0;
+    }
+    [
+        distance_to_segment(a.0, b.0, b.1),
+        distance_to_segment(a.1, b.0, b.1),
+        distance_to_segment(b.0, a.0, a.1),
+        distance_to_segment(b.1, a.0, a.1),
+    ]
+    .into_iter()
+    .fold(f64::INFINITY, f64::min)
 }
 
 // --- Shapes ----------------------------------------------------------------------

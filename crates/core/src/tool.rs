@@ -24,6 +24,9 @@ pub enum Tool {
     /// Dragging draws a freehand stroke, see [`crate::draw_freedraw`]. The
     /// Tool stays after each stroke.
     Freedraw,
+    /// Dragging previews the Elements the pointer passes over and deletes
+    /// them on release, see [`crate::erase`]. The Tool stays after each erase.
+    Eraser,
 }
 
 impl Tool {
@@ -33,7 +36,12 @@ impl Tool {
             Tool::Rectangle => Some(ElementType::Rectangle),
             Tool::Diamond => Some(ElementType::Diamond),
             Tool::Ellipse => Some(ElementType::Ellipse),
-            Tool::Selection | Tool::Hand | Tool::Line | Tool::Arrow | Tool::Freedraw => None,
+            Tool::Selection
+            | Tool::Hand
+            | Tool::Line
+            | Tool::Arrow
+            | Tool::Freedraw
+            | Tool::Eraser => None,
         }
     }
 

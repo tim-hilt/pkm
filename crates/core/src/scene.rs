@@ -580,6 +580,24 @@ impl Element<'_> {
             .unwrap_or(false)
     }
 
+    /// The id of the outermost group the Element is in, if any: Excalidraw
+    /// lists the groups of an Element innermost first.
+    pub fn outermost_group(&self) -> Option<&str> {
+        self.object
+            .get("groupIds")
+            .and_then(Value::as_array)?
+            .last()?
+            .as_str()
+    }
+
+    /// Whether the Element is in the group `group`, however deeply nested.
+    pub fn is_in_group(&self, group: &str) -> bool {
+        self.object
+            .get("groupIds")
+            .and_then(Value::as_array)
+            .is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(group)))
+    }
+
     /// Whether a text is bound to the Element as its label.
     pub fn has_bound_text(&self) -> bool {
         self.object

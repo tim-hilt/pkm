@@ -52,6 +52,10 @@ _Avoid_: Connection, glue, snap
 What the freedraw Tool draws from pointer down to pointer up: a freedraw Element that grows with the pointer and is drawn while it grows. A Pencil's stroke keeps its pressure; the stroke of a finger or mouse gets pressure made up from the speed of the pointer (simulated pressure). The Tool stays active after each stroke.
 _Avoid_: Scribble (that is handwriting recognition), path, line (a different Element)
 
+**Erase**:
+What the eraser Tool does from pointer down to pointer up: the Elements the pointer's path touches are previewed faded while it is down and deleted together, as one undo step, when it lifts; a tap erases what is under it. An Element's group, label or container goes with it. The Tool stays active after each erase.
+_Avoid_: Delete (that is the command for the Selection), rub out
+
 **Action Bar**:
 The small floating bar shown next to a non-empty Selection offering actions such as duplicate, delete, z-order and group; replaces a context menu.
 _Avoid_: Context menu, popup

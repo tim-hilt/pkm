@@ -11,6 +11,7 @@ mod draw_linear;
 mod draw_shape;
 mod edit_points;
 mod editor;
+mod erase;
 mod frame;
 mod freedraw;
 mod freehand;
