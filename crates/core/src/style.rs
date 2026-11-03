@@ -1,6 +1,7 @@
 //! The current style: what new Elements look like (Excalidraw's
 //! `currentItem...` app state), and the option sets of the properties panel.
 
+use crate::geometry::TextAlign;
 use crate::scene::{ElementType, FillPattern, LineStyle};
 
 /// The stroke widths the properties panel offers (Excalidraw's `STROKE_WIDTH`).
@@ -72,6 +73,41 @@ pub enum Edges {
     Round,
 }
 
+/// The font sizes the properties panel offers (Excalidraw's `FONT_SIZES`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FontSize {
+    Small,
+    Medium,
+    Large,
+    ExtraLarge,
+}
+
+impl FontSize {
+    const ALL: [FontSize; 4] = [
+        FontSize::Small,
+        FontSize::Medium,
+        FontSize::Large,
+        FontSize::ExtraLarge,
+    ];
+
+    /// The `fontSize` of a text for this option, in Scene units.
+    pub(crate) fn size(self) -> f64 {
+        match self {
+            FontSize::Small => 16.0,
+            FontSize::Medium => 20.0,
+            FontSize::Large => 28.0,
+            FontSize::ExtraLarge => 36.0,
+        }
+    }
+
+    /// The option a text of `font_size` has, if it has one.
+    pub(crate) fn from_size(font_size: f64) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|option| option.size() == font_size)
+    }
+}
+
 /// Excalidraw's defaults (`DEFAULT_ELEMENT_PROPS`), changed by the properties
 /// panel: what every new Element gets.
 #[derive(Debug, Clone, PartialEq)]
@@ -85,6 +121,8 @@ pub(crate) struct Style {
     pub edges: Edges,
     /// `0.0..=100.0`.
     pub opacity: f64,
+    pub font_size: FontSize,
+    pub text_align: TextAlign,
 }
 
 impl Default for Style {
@@ -98,6 +136,8 @@ impl Default for Style {
             sloppiness: Sloppiness::Artist,
             edges: Edges::Round,
             opacity: 100.0,
+            font_size: FontSize::Medium,
+            text_align: TextAlign::Left,
         }
     }
 }

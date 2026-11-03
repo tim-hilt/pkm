@@ -39,6 +39,7 @@ private struct ToolBar: View {
         (.line, "Line", "line.diagonal"),
         (.arrow, "Arrow", "arrow.up.right"),
         (.freedraw, "Draw", "pencil.tip"),
+        (.text, "Text", "textformat"),
         (.eraser, "Eraser", "eraser"),
     ]
 

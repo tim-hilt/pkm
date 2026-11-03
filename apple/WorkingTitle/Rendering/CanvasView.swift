@@ -28,6 +28,7 @@ final class CanvasMetalView: MTKView {
             reportViewSize()
             syncViewport()
             syncOverlay()
+            syncTextEditor()
         }
     }
 
@@ -39,6 +40,8 @@ final class CanvasMetalView: MTKView {
     private var shownRevision: UInt64?
     /// The `Editor.overlayRevision` of the overlay the renderer shows.
     private var shownOverlayRevision: UInt64?
+    /// The native text view over the Canvas while a text is edited.
+    let textOverlay = TextEditorOverlay()
 
     init() {
         let device = MTLCreateSystemDefaultDevice()
@@ -54,6 +57,8 @@ final class CanvasMetalView: MTKView {
         enableSetNeedsDisplay = true
         delegate = renderer
         renderer?.onNeedsDisplay = { [weak self] in self?.requestRedraw() }
+        textOverlay.onChange = { [weak self] text in self?.perform { $0.setEditingText(text: text) } }
+        textOverlay.onEnd = { [weak self] in self?.perform { $0.commitText() } }
         #if !os(macOS)
             isMultipleTouchEnabled = true
         #endif
@@ -112,7 +117,18 @@ final class CanvasMetalView: MTKView {
         syncScene()
         syncViewport()
         syncOverlay()
+        syncTextEditor()
         onEditorChange?()
+    }
+
+    /// Shows the text view where the core says, or takes it away if no text
+    /// is edited. Like the viewport it follows panning and zooming.
+    private func syncTextEditor() {
+        if let shown = editor?.textEditor() {
+            textOverlay.show(shown, in: self)
+        } else {
+            textOverlay.hide()
+        }
     }
 
     /// Hands the renderer the Scene's geometry again if the Scene changed.

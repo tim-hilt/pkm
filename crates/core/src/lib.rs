@@ -44,6 +44,7 @@ mod shape;
 mod style;
 mod tap;
 mod text;
+mod text_editing;
 mod tool;
 mod transform;
 mod transform_handles;
@@ -60,8 +61,9 @@ pub use geometry::{
 pub use input::{MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase, ScrollEvent};
 pub use properties::{Properties, Property};
 pub use scene::LoadError;
-pub use style::{Edges, Sloppiness, StrokeWidth};
+pub use style::{Edges, FontSize, Sloppiness, StrokeWidth};
 pub use text::TextMeasurer;
+pub use text_editing::TextEditor;
 pub use tool::Tool;
 pub use viewport::{MAX_ZOOM, MIN_ZOOM, Viewport};
 pub use z_order::ZOrder;

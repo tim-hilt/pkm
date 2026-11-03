@@ -9,10 +9,11 @@
 //! the value those share.
 
 use crate::draw_shape::{ADAPTIVE_RADIUS, PROPORTIONAL_RADIUS};
+use crate::geometry::TextAlign;
 use crate::json::{Object, Value};
 use crate::random::Entropy;
 use crate::scene::{Element, ElementType, FillPattern, LineStyle, Scene};
-use crate::style::{Edges, Sloppiness, StrokeWidth, Style, fill_name, line_name};
+use crate::style::{Edges, FontSize, Sloppiness, StrokeWidth, Style, fill_name, line_name};
 
 /// A change to one property, as the panel offers them.
 #[derive(Debug, Clone, PartialEq)]
@@ -28,6 +29,10 @@ pub enum Property {
     Edges(Edges),
     /// `0.0` (invisible) to `100.0`; anything outside is brought within.
     Opacity(f64),
+    /// Of texts only.
+    FontSize(FontSize),
+    /// Of texts only.
+    TextAlign(TextAlign),
 }
 
 /// What the properties panel shows: for each property the value of the
@@ -47,6 +52,12 @@ pub struct Properties {
     pub edges: Option<Edges>,
     /// `0.0..=100.0`.
     pub opacity: Option<f64>,
+    pub font_size: Option<FontSize>,
+    pub text_align: Option<TextAlign>,
+    /// Whether the panel offers the font size and alignment: for a Selection
+    /// with a text in it, a text that is edited, and the next Element if it
+    /// is a text. They are shown mixed (`None`) where texts differ.
+    pub has_text_options: bool,
 }
 
 impl Property {
@@ -59,6 +70,7 @@ impl Property {
             Property::StrokeStyle(_) | Property::Sloppiness(_) => has_stroke_style(kind),
             Property::Edges(_) => takes_edges(kind),
             Property::Opacity(_) => true,
+            Property::FontSize(_) | Property::TextAlign(_) => kind == ElementType::Text,
         }
     }
 
@@ -105,6 +117,10 @@ impl Property {
                 let opacity = clamp_opacity(*opacity);
                 (opacity_of(element) != opacity).then(|| vec![("opacity", Value::Number(opacity))])
             }
+            Property::FontSize(size) => (element.font_size() != size.size())
+                .then(|| vec![("fontSize", Value::Number(size.size()))]),
+            Property::TextAlign(align) => (element.text_align() != *align)
+                .then(|| vec![("textAlign", text(align_name(*align)))]),
         }
     }
 }
@@ -121,6 +137,8 @@ impl Style {
             Property::Sloppiness(sloppiness) => self.sloppiness = *sloppiness,
             Property::Edges(edges) => self.edges = *edges,
             Property::Opacity(opacity) => self.opacity = clamp_opacity(*opacity),
+            Property::FontSize(size) => self.font_size = *size,
+            Property::TextAlign(align) => self.text_align = *align,
         }
     }
 }
@@ -138,6 +156,9 @@ impl Properties {
             sloppiness: Some(style.sloppiness),
             edges: Some(style.edges),
             opacity: Some(style.opacity),
+            font_size: Some(style.font_size),
+            text_align: Some(style.text_align),
+            has_text_options: false,
         }
     }
 
@@ -160,6 +181,9 @@ impl Properties {
             }),
             edges: common(selected, takes_edges, edges_of),
             opacity: common(selected, |_| true, |e| Some(opacity_of(e))),
+            font_size: common(selected, has_font, |e| FontSize::from_size(e.font_size())),
+            text_align: common(selected, has_font, |e| Some(e.text_align())),
+            has_text_options: selected.iter().any(|e| has_font(e.kind())),
         }
     }
 }
@@ -230,6 +254,10 @@ fn has_stroke_style(kind: ElementType) -> bool {
     matches!(kind, Rectangle | Ellipse | Diamond | Line | Arrow)
 }
 
+fn has_font(kind: ElementType) -> bool {
+    kind == ElementType::Text
+}
+
 /// Whether Elements of type `kind` have rounded or sharp edges (Excalidraw's
 /// `canChangeRoundness`).
 pub(crate) fn takes_edges(kind: ElementType) -> bool {
@@ -269,6 +297,15 @@ fn opacity_of(element: &Element) -> f64 {
         .member("opacity")
         .and_then(Value::as_f64)
         .unwrap_or(100.0)
+}
+
+/// The `textAlign` the file names `align` by.
+pub(crate) fn align_name(align: TextAlign) -> &'static str {
+    match align {
+        TextAlign::Left => "left",
+        TextAlign::Center => "center",
+        TextAlign::Right => "right",
+    }
 }
 
 fn clamp_opacity(opacity: f64) -> f64 {

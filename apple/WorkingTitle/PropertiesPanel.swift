@@ -56,6 +56,20 @@ struct PropertiesPanel: View {
                             .edges($0)
                         }
                     }
+                    if shown.hasTextOptions {
+                        section("Font size") {
+                            options(
+                                [(.small, "S"), (.medium, "M"), (.large, "L"), (.extraLarge, "XL")],
+                                selected: shown.fontSize
+                            ) { .fontSize($0) }
+                        }
+                        section("Text align") {
+                            options(
+                                [(.left, "Left"), (.center, "Center"), (.right, "Right")],
+                                selected: shown.textAlign
+                            ) { .textAlign($0) }
+                        }
+                    }
                     section("Opacity") {
                         Slider(
                             value: Binding(

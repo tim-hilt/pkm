@@ -20,6 +20,7 @@ use crate::input::{MagnifyEvent, PointerEvent, PointerKind, PointerPhase, Scroll
 use crate::move_selection::MoveGesture;
 use crate::navigation::{Bounds, Navigation};
 use crate::overlay;
+use crate::path::Point;
 use crate::properties::{self, Properties, Property};
 use crate::random::Entropy;
 use crate::scene::{Element, ElementType, LoadError, Scene};
@@ -27,6 +28,7 @@ use crate::selection::Selection;
 use crate::style::Style;
 use crate::tap::{Origin, Recognized, Tap, TapRecognizer};
 use crate::text::{self, Containers, TextMeasurer};
+use crate::text_editing::{TextEditing, TextEditor};
 use crate::tool::Tool;
 use crate::transform::TransformGesture;
 use crate::transform_handles::{Handle, TransformBox};
@@ -111,6 +113,9 @@ pub struct Editor {
     /// overlay highlights.
     highlight: Option<String>,
     measurer: Option<Measurer>,
+    /// The text being edited, if the client shows a text view for one; see
+    /// [`Editor::text_editor`].
+    text: Option<TextEditing>,
 }
 
 /// The client's [`TextMeasurer`].
@@ -159,6 +164,7 @@ impl Editor {
             overlay_zoom: 1.0,
             highlight: None,
             measurer: None,
+            text: None,
         }
     }
 
@@ -182,6 +188,7 @@ impl Editor {
         self.point_dragging = None;
         self.points.clear();
         self.box_selecting = None;
+        self.text = None;
         self.history.clear();
         self.sync_highlight();
         self.changed(true);
@@ -239,7 +246,12 @@ impl Editor {
         let background = self.scene.view_background_color();
         let containers = Containers::new(&self.scene);
         let measurer = self.measurer.as_ref().map(|m| &*m.0);
+        let editing = self.text.as_ref().map(TextEditing::handle);
         for element in self.shown() {
+            // The text view shows the text that is being edited.
+            if editing == Some(element.handle()) {
+                continue;
+            }
             let mark = geometry.mark();
             if element.kind() == ElementType::Text {
                 text::draw(&element, &containers, measurer, &mut geometry);
@@ -309,6 +321,7 @@ impl Editor {
     /// line or arrow that is waiting for its next point is finished as it is.
     pub fn set_tool(&mut self, tool: Tool) {
         if tool != self.tool {
+            self.commit_text();
             self.navigation.cancel_drag();
             self.taps.cancel();
             self.drop_shape();
@@ -338,6 +351,125 @@ impl Editor {
         self.tool_lock = locked;
     }
 
+    /// The text view to show over the Canvas, if a text is being edited, with
+    /// where it is, what it says and how it looks (see
+    /// [`crate::text_editing`]). A tap with the text Tool opens it at the tap
+    /// (or on the text that is there), and so does a double-tap (a
+    /// double-click) on a text; it closes when the text is committed or
+    /// cancelled, or by a tap elsewhere, which commits. The position is in view
+    /// coordinates: clients read it with the viewport after every input and
+    /// command. Needs a [`Editor::set_text_measurer`]: without one no text
+    /// can be edited.
+    pub fn text_editor(&self) -> Option<TextEditor> {
+        self.text
+            .as_ref()?
+            .editor(&self.scene, self.navigation.viewport())
+    }
+
+    /// Tells the core what the text view says now: the text is laid out
+    /// again, and the editor follows it. Clients call it on every change of
+    /// the text view. Does nothing unless a text is being edited.
+    pub fn set_editing_text(&mut self, text: &str) {
+        let (Some(editing), Some(measurer)) = (self.text.as_mut(), self.measurer.as_ref()) else {
+            return;
+        };
+        if editing.set_text(&mut self.scene, &mut self.entropy, text, &*measurer.0) {
+            self.changed(false);
+        }
+    }
+
+    /// Ends the editing of the text and keeps it: a text that is new, or has
+    /// been changed, is one undo step, and becomes the Selection. A text with
+    /// nothing in it but blanks is not kept: one that is new is never made,
+    /// one that was there is deleted. Does nothing unless a text is being
+    /// edited.
+    pub fn commit_text(&mut self) {
+        let Some(editing) = self.text.take() else {
+            return;
+        };
+        let id = editing.id().to_owned();
+        let step = editing.finish(&mut self.scene, &mut self.entropy);
+        let kept = self
+            .scene
+            .element_by_id(&id)
+            .is_some_and(|element| !element.is_deleted());
+        // With the Tool lock the text Tool waits for the next text.
+        if kept && !self.tool_lock {
+            self.selection.select([id]);
+        }
+        if let Some(step) = step {
+            self.history.record(step, &self.scene, &self.selection);
+        }
+        self.overlay_revision += 1;
+        self.changed(true);
+    }
+
+    /// Ends the editing of the text and keeps it as it was before: a text
+    /// that is new is never made. Does nothing unless a text is being edited.
+    pub fn cancel_text(&mut self) {
+        if let Some(editing) = self.text.take() {
+            editing.cancel(&mut self.scene, &mut self.entropy);
+            self.overlay_revision += 1;
+            self.changed(true);
+        }
+    }
+
+    /// Opens the text view on the text `existing`, or on a new text at `at`
+    /// in the Scene. The Selection is empty while a text is edited, and the
+    /// Tool returns to selection unless it is locked.
+    fn begin_text(&mut self, existing: Option<String>, at: Point) {
+        let Some(measurer) = self.measurer.as_ref() else {
+            return;
+        };
+        let step = Step::begin(&self.selection);
+        let editing = match existing.and_then(|id| self.scene.element_by_id(&id)) {
+            Some(element) => TextEditing::begin_existing(step, &self.scene, &element),
+            None => TextEditing::begin_new(
+                step,
+                &mut self.scene,
+                &mut self.entropy,
+                &self.style,
+                at,
+                &*measurer.0,
+            ),
+        };
+        self.text = Some(editing);
+        self.selection.clear();
+        self.editing_group = None;
+        self.sync_points();
+        if !self.tool_lock {
+            self.tool = Tool::Selection;
+        }
+        self.overlay_revision += 1;
+        self.changed(true);
+    }
+
+    /// Whether the Element `id` is a text of its own: one that is not the
+    /// label of a container, which is edited with it.
+    fn is_free_text(&self, id: &str) -> bool {
+        self.scene
+            .element_by_id(id)
+            .is_some_and(|e| e.kind() == ElementType::Text && e.container_id().is_none())
+    }
+
+    /// Follows the pointer for a tap that opens the text view (with the text
+    /// Tool, on a text if there is one at the tap) or, if it is open, closes
+    /// it, keeping the text.
+    fn follow_text_tap(&mut self, event: PointerEvent) {
+        let Some(Recognized::Tap(tap)) = self.taps.track(event) else {
+            return;
+        };
+        if self.text.is_some() {
+            self.commit_text();
+            return;
+        }
+        let at = self.navigation.viewport().scene_at(tap.x, tap.y);
+        let existing = self
+            .hit(tap.x, tap.y, tap.kind)
+            .filter(|id| self.is_free_text(id));
+        self.begin_text(existing, at);
+    }
+
     /// A step of a finger, Pencil or mouse. Two fingers pan and zoom the
     /// viewport, and so does one pointer with the hand Tool (see
     /// [`crate::navigation`]). With a shape Tool, one pointer dragging draws
@@ -346,7 +478,8 @@ impl Editor {
     /// [`crate::draw_linear`]), and with the freedraw Tool it draws a stroke
     /// through the points the pointer passes (see [`crate::draw_freedraw`]),
     /// and with the eraser Tool it previews the Elements the pointer passes
-    /// and deletes them when it lifts (see [`crate::erase`]). With the selection Tool a tap selects the
+    /// and deletes them when it lifts (see [`crate::erase`]), and with the
+    /// text Tool a tap opens the text view (see [`crate::text_editing`]). With the selection Tool a tap selects the
     /// Element it hits or clears the Selection (see [`Editor::selection`])
     /// while a drag on an Element moves the Selection (see
     /// [`crate::move_selection`]), a drag on a handle of it resizes, rotates
@@ -439,8 +572,17 @@ impl Editor {
     /// Elements (`None` where they differ), or, with nothing selected, the
     /// style of the next Element. See [`crate::properties`].
     pub fn properties(&self) -> Properties {
+        // The text being edited is what the panel is for.
+        if let Some(editing) = &self.text
+            && let Some(element) = self.scene.element_by_id(editing.id())
+        {
+            return Properties::of_selection(&[element]);
+        }
         if self.selection.is_empty() {
-            return Properties::of_style(&self.style);
+            return Properties {
+                has_text_options: self.tool == Tool::Text,
+                ..Properties::of_style(&self.style)
+            };
         }
         let selected: Vec<Element> = self
             .selection
@@ -456,23 +598,81 @@ impl Editor {
     /// excalidraw.com. With nothing selected it only does the latter. Does
     /// nothing while a pointer is drawing or moving.
     pub fn set_property(&mut self, property: Property) {
+        // A text that is being edited takes the property as part of its
+        // editing: the text view stays.
+        if let Some(editing) = self.text.as_mut()
+            && let Some(measurer) = self.measurer.as_ref()
+        {
+            self.style.set(&property);
+            if editing.apply(&mut self.scene, &mut self.entropy, &property, &*measurer.0) {
+                self.changed(false);
+            }
+            return;
+        }
         self.finish_placing();
         if self.is_gesturing() {
             return;
         }
         self.style.set(&property);
         let mut step = Step::begin(&self.selection);
-        let changed = properties::apply(
+        let versions = self.selected_text_versions();
+        let mut changed = properties::apply(
             &mut self.scene,
             &mut self.entropy,
             self.selection.ids(),
             &property,
             |scene, id| step.touch(scene, id),
         );
+        if matches!(property, Property::FontSize(_) | Property::TextAlign(_)) {
+            changed |= self.refit_changed_texts(&versions);
+        }
         if changed {
             self.history.record(step, &self.scene, &self.selection);
             self.changed(false);
         }
+    }
+
+    /// The ids and versions of the selected texts.
+    fn selected_text_versions(&self) -> Vec<(String, u32)> {
+        self.selection
+            .ids()
+            .iter()
+            .filter_map(|id| self.scene.element_by_id(id))
+            .filter(|element| element.kind() == ElementType::Text)
+            .map(|element| (element.id().to_owned(), element.version()))
+            .collect()
+    }
+
+    /// Lays out the texts again that are not the versions they were (and so
+    /// are already part of the step): a change of their font size or
+    /// alignment may change how big they are and where. Returns whether any
+    /// changed.
+    fn refit_changed_texts(&mut self, versions: &[(String, u32)]) -> bool {
+        let Some(measurer) = self.measurer.as_ref() else {
+            return false;
+        };
+        let containers = Containers::new(&self.scene);
+        let refits: Vec<_> = self
+            .selection
+            .ids()
+            .iter()
+            .filter_map(|id| self.scene.element_by_id(id))
+            .filter(|element| {
+                versions
+                    .iter()
+                    .any(|(id, version)| id == element.id() && *version != element.version())
+            })
+            .filter_map(|element| {
+                let members =
+                    text::refit(&element, containers.of(&element).as_ref(), &*measurer.0)?;
+                Some((element.handle(), members))
+            })
+            .collect();
+        let changed = !refits.is_empty();
+        for (handle, members) in refits {
+            self.scene.update(handle, self.entropy.integer(), members);
+        }
+        changed
     }
 
     /// The ids of the selected Elements, in the order they were selected.
@@ -629,6 +829,7 @@ impl Editor {
     /// Selects every shown, unlocked Element of the Scene (the `select all`
     /// command).
     pub fn select_all(&mut self) {
+        self.commit_text();
         let ids: Vec<String> = self
             .shown()
             .filter(|e| !e.is_locked())
@@ -650,12 +851,17 @@ impl Editor {
     /// down: they navigate, and must not disturb the Selection, nor leave a
     /// move half done.
     fn select(&mut self, event: PointerEvent) {
-        if self.tool != Tool::Selection || self.navigation.is_pinching() {
+        let tapping = matches!(self.tool, Tool::Selection | Tool::Text);
+        if !tapping || self.navigation.is_pinching() {
             self.taps.cancel();
             self.drop_move();
             self.drop_transform();
             self.drop_point_drag();
             self.drop_box_select();
+            return;
+        }
+        if self.tool == Tool::Text || self.text.is_some() {
+            self.follow_text_tap(event);
             return;
         }
         self.follow_move(event);
@@ -673,6 +879,11 @@ impl Editor {
     /// is in it, takes it out, and a tap on empty Canvas leaves the Selection
     /// alone.
     fn tap(&mut self, tap: Tap, shift: bool) {
+        // Before the handles: they are as big as a small text, which would
+        // otherwise never be edited by a finger.
+        if tap.double && !shift && self.edit_text_tapped(tap) {
+            return;
+        }
         // A tap on a handle is a grab that never dragged: it neither selects
         // nor clears the Selection. On a point handle it selects the point.
         if let Some((handles, grab)) = self.grabbed_point(tap.x, tap.y, tap.kind) {
@@ -712,6 +923,30 @@ impl Editor {
         if self.selection != before {
             self.overlay_revision += 1;
         }
+    }
+
+    /// Opens the text view on the text a double-tap hit, unless the double-tap
+    /// goes into a group instead. Returns whether it did.
+    fn edit_text_tapped(&mut self, tap: Tap) -> bool {
+        let Some(id) = self
+            .hit(tap.x, tap.y, tap.kind)
+            .filter(|id| self.is_free_text(id))
+        else {
+            return false;
+        };
+        let goes_into_group = group::entered(
+            &self.scene,
+            &self.selection,
+            &id,
+            self.editing_group.as_deref(),
+        )
+        .is_some();
+        if goes_into_group {
+            return false;
+        }
+        let at = self.navigation.viewport().scene_at(tap.x, tap.y);
+        self.begin_text(Some(id), at);
+        self.text.is_some()
     }
 
     /// The group that was gone into, if it is one the Element `id` is in:
@@ -1354,8 +1589,10 @@ impl Editor {
         }
     }
 
-    /// Finishes the line being drawn if it is waiting for further points.
+    /// Finishes the text being edited, and the line being drawn if it is
+    /// waiting for further points: what commands on the Scene do first.
     fn finish_placing(&mut self) {
+        self.commit_text();
         if self.linear.as_ref().is_some_and(LinearDrawing::is_placing) {
             self.finish_linear();
             self.sync_highlight();

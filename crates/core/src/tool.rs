@@ -27,6 +27,9 @@ pub enum Tool {
     /// Dragging previews the Elements the pointer passes over and deletes
     /// them on release, see [`crate::erase`]. The Tool stays after each erase.
     Eraser,
+    /// Tapping opens the text editor at the tap, or on the text that is
+    /// there; see [`crate::text_editing`].
+    Text,
 }
 
 impl Tool {
@@ -41,7 +44,8 @@ impl Tool {
             | Tool::Line
             | Tool::Arrow
             | Tool::Freedraw
-            | Tool::Eraser => None,
+            | Tool::Eraser
+            | Tool::Text => None,
         }
     }
 

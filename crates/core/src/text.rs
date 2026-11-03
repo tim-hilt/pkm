@@ -8,6 +8,7 @@ use std::cell::OnceCell;
 use std::collections::HashMap;
 
 use crate::geometry::{Geometry, TextAlign, TextStyle};
+use crate::json::Value;
 use crate::scene::{Element, ElementType, Scene, VerticalAlign};
 use crate::shape::parse_color;
 use crate::wrap;
@@ -42,7 +43,7 @@ impl<'a> Containers<'a> {
 
     /// The Element `text` is a label of, if it has one that is shown and can
     /// hold text.
-    fn of(&self, text: &Element) -> Option<Element<'a>> {
+    pub(crate) fn of(&self, text: &Element) -> Option<Element<'a>> {
         let id = text.container_id()?;
         let by_id = self
             .by_id
@@ -267,6 +268,120 @@ fn bound_position(text: &Element, container: &Element, (width, height): (f64, f6
         pivot.0 + dx * cos - dy * sin - width / 2.0,
         pivot.1 + dx * sin + dy * cos - height / 2.0,
     )
+}
+
+/// What a text Element with typed text has to save, laid out as Excalidraw
+/// does while it is edited (`refreshTextDimensions`).
+pub(crate) struct Typed {
+    /// The lines joined by `\n`.
+    pub text: String,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// The text `typed` in the unbound text `element`: a text that grows with its
+/// content stays one line per line break and is as wide as the widest, one of
+/// fixed width wraps to it. It stays where its alignment anchors it as it
+/// grows or shrinks: a left aligned text at its left edge, a centred one at
+/// its middle, a right aligned one at its right edge, all at their top
+/// (`getAdjustedDimensions`), also when turned.
+pub(crate) fn fit_typed(element: &Element, typed: &str, measurer: &dyn TextMeasurer) -> Typed {
+    let font_size = element.font_size();
+    let typed = normalized(typed);
+    let (lines, width) = if element.auto_resize() {
+        let lines: Vec<String> = typed.split('\n').map(str::to_owned).collect();
+        let width = wrap::widest(&lines, font_size, measurer);
+        (lines, width)
+    } else {
+        let lines = wrap::wrap_text(&typed, font_size, element.width(), measurer);
+        (lines, element.width())
+    };
+    let height = lines.len() as f64 * font_size * element.line_height();
+    let (x, y) = anchored_origin(element, (width, height));
+    Typed {
+        text: lines.join("\n"),
+        x,
+        y,
+        width,
+        height,
+    }
+}
+
+/// The members a text has to save to be as `fit` says, if they are not what
+/// it has.
+pub(crate) fn members_of(element: &Element, fit: Typed) -> Option<Vec<(&'static str, Value)>> {
+    let same = element.text() == fit.text
+        && (element.x(), element.y()) == (fit.x, fit.y)
+        && (element.width(), element.height()) == (fit.width, fit.height);
+    (!same).then(|| {
+        vec![
+            ("text", Value::String(fit.text)),
+            ("x", Value::Number(fit.x)),
+            ("y", Value::Number(fit.y)),
+            ("width", Value::Number(fit.width)),
+            ("height", Value::Number(fit.height)),
+        ]
+    })
+}
+
+/// The members the text `element` has to save to fit its font size and
+/// alignment again, if it has to save any (Excalidraw's
+/// `redrawTextBoundingBox`): a label sits in its `container` again, any other
+/// text is laid out as typed. The text of an arrow is where the file has it.
+pub(crate) fn refit(
+    element: &Element,
+    container: Option<&Element>,
+    measurer: &dyn TextMeasurer,
+) -> Option<Vec<(&'static str, Value)>> {
+    let fit = match container {
+        Some(container) if container.kind() == ElementType::Arrow => return None,
+        Some(container) => {
+            let fit = fit_label(element, container, Some(measurer));
+            Typed {
+                text: fit.text.unwrap_or_else(|| element.text().to_owned()),
+                x: fit.x,
+                y: fit.y,
+                width: fit.width,
+                height: fit.height,
+            }
+        }
+        None => fit_typed(element, element.original_text(), measurer),
+    };
+    members_of(element, fit)
+}
+
+/// Where the top left of `element` goes when it becomes `(width, height)`,
+/// for the point of its top edge its alignment anchors to stay where it is.
+fn anchored_origin(element: &Element, (width, height): (f64, f64)) -> (f64, f64) {
+    let ratio = anchor_ratio(element.text_align());
+    let (old_width, old_height) = (element.width(), element.height());
+    let (sin, cos) = element.angle().sin_cos();
+    // From the middle of a box of the given size to its anchor, turned.
+    let to_anchor = |width: f64, height: f64| {
+        let (dx, dy) = (width * (ratio - 0.5), -height / 2.0);
+        (dx * cos - dy * sin, dx * sin + dy * cos)
+    };
+    let (old_to, new_to) = (to_anchor(old_width, old_height), to_anchor(width, height));
+    let old_middle = (
+        element.x() + old_width / 2.0,
+        element.y() + old_height / 2.0,
+    );
+    let middle = (
+        old_middle.0 + old_to.0 - new_to.0,
+        old_middle.1 + old_to.1 - new_to.1,
+    );
+    (middle.0 - width / 2.0, middle.1 - height / 2.0)
+}
+
+/// How far along the width of a text its alignment anchors it.
+pub(crate) fn anchor_ratio(align: TextAlign) -> f64 {
+    match align {
+        TextAlign::Left => 0.0,
+        TextAlign::Center => 0.5,
+        TextAlign::Right => 1.0,
+    }
 }
 
 /// A text set in lines.

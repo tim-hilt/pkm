@@ -6,8 +6,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use workingtitle_core::scene::{FillPattern, LineStyle};
 use workingtitle_core::{
-    ActionBar, Edges, MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase, Properties,
-    Property, ScrollEvent, Sloppiness, StrokeWidth, Tool, ZOrder,
+    ActionBar, Edges, FontSize, MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase,
+    Properties, Property, ScrollEvent, Sloppiness, StrokeWidth, TextAlign, TextEditor, Tool,
+    ZOrder,
 };
 
 uniffi::setup_scaffolding!("WorkingTitleCore");
@@ -98,6 +99,7 @@ pub enum Tool {
     Arrow,
     Freedraw,
     Eraser,
+    Text,
 }
 
 #[uniffi::remote(Enum)]
@@ -147,6 +149,21 @@ pub enum Edges {
 }
 
 #[uniffi::remote(Enum)]
+pub enum FontSize {
+    Small,
+    Medium,
+    Large,
+    ExtraLarge,
+}
+
+#[uniffi::remote(Enum)]
+pub enum TextAlign {
+    Left,
+    Center,
+    Right,
+}
+
+#[uniffi::remote(Enum)]
 pub enum Property {
     StrokeColor(String),
     BackgroundColor(String),
@@ -156,6 +173,8 @@ pub enum Property {
     Sloppiness(Sloppiness),
     Edges(Edges),
     Opacity(f64),
+    FontSize(FontSize),
+    TextAlign(TextAlign),
 }
 
 #[uniffi::remote(Record)]
@@ -168,6 +187,29 @@ pub struct Properties {
     pub sloppiness: Option<Sloppiness>,
     pub edges: Option<Edges>,
     pub opacity: Option<f64>,
+    pub font_size: Option<FontSize>,
+    pub text_align: Option<TextAlign>,
+    pub has_text_options: bool,
+}
+
+/// The text view to show over the Canvas while a text is edited, in view
+/// coordinates; see [`workingtitle_core::TextEditor`].
+#[uniffi::remote(Record)]
+pub struct TextEditor {
+    pub text: String,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub font_size: f64,
+    pub line_height: f64,
+    pub font_family: u32,
+    pub align: TextAlign,
+    pub color: u32,
+    pub opacity: f64,
+    pub angle: f64,
+    pub zoom: f64,
+    pub fixed_width: bool,
 }
 
 /// Where the Action Bar is shown, in view coordinates; see
@@ -364,6 +406,31 @@ impl Editor {
     /// see [`workingtitle_core::Editor::set_property`].
     pub fn set_property(&self, property: Property) {
         self.editor().set_property(property);
+    }
+
+    /// The text view to show over the Canvas, `None` if no text is being
+    /// edited; see [`workingtitle_core::Editor::text_editor`]. Read it with
+    /// the viewport after forwarding input or a command.
+    pub fn text_editor(&self) -> Option<TextEditor> {
+        self.editor().text_editor()
+    }
+
+    /// Tells the core what the text view says now; see
+    /// [`workingtitle_core::Editor::set_editing_text`].
+    pub fn set_editing_text(&self, text: String) {
+        self.editor().set_editing_text(&text);
+    }
+
+    /// Ends the editing of the text and keeps it; see
+    /// [`workingtitle_core::Editor::commit_text`].
+    pub fn commit_text(&self) {
+        self.editor().commit_text();
+    }
+
+    /// Ends the editing of the text and keeps it as it was; see
+    /// [`workingtitle_core::Editor::cancel_text`].
+    pub fn cancel_text(&self) {
+        self.editor().cancel_text();
     }
 
     /// Where the Action Bar is shown, `None` if it is hidden; see
@@ -682,6 +749,43 @@ mod tests {
         let shown = editor.properties();
         assert_eq!(shown.stroke_width, Some(StrokeWidth::Bold));
         assert_eq!(shown.stroke_color.as_deref(), Some("#e03131"));
+    }
+
+    #[test]
+    fn a_text_is_created_through_the_text_editor() {
+        let editor = Editor::new();
+        editor.set_text_measurer(Arc::new(Monospace));
+        editor.set_property(Property::FontSize(FontSize::Large));
+        editor.set_tool(Tool::Text);
+        for phase in [PointerPhase::Down, PointerPhase::Up] {
+            editor.pointer(PointerEvent {
+                id: 1,
+                phase,
+                x: 100.0,
+                y: 200.0,
+                kind: PointerKind::Finger,
+                pressure: 0.5,
+                timestamp: 1.0,
+                modifiers: Modifiers {
+                    shift: false,
+                    ctrl: false,
+                    alt: false,
+                    meta: false,
+                },
+            });
+        }
+        // A line of 28 points is 35 high; the first is centred on the tap.
+        let open = editor.text_editor().expect("a text editor is open");
+        assert_eq!((open.x, open.y, open.font_size), (100.0, 182.5, 28.0));
+        assert_eq!(open.align, TextAlign::Left);
+
+        editor.set_editing_text("Hi".into());
+        assert_eq!(editor.text_editor().map(|e| e.width), Some(28.0));
+        editor.commit_text();
+
+        assert!(editor.text_editor().is_none());
+        assert_eq!(editor.element_count(), 1);
+        assert_eq!(editor.properties().font_size, Some(FontSize::Large));
     }
 
     #[test]

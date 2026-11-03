@@ -60,10 +60,14 @@ _Avoid_: Scribble (that is handwriting recognition), path, line (a different Ele
 What the eraser Tool does from pointer down to pointer up: the Elements the pointer's path touches are previewed faded while it is down and deleted together, as one undo step, when it lifts; a tap erases what is under it. An Element's group, label or container goes with it. The Tool stays active after each erase.
 _Avoid_: Delete (that is the command for the Selection), rub out
 
+**Text view**:
+The native text view shown over the Canvas while a text is created or edited (like Excalidraw's textarea), at the position, size, zoom and style the core reports, so that the system keyboard, autocorrect, dictation and Scribble work. A tap with the text Tool opens it on empty Canvas (or on the text there), a double-tap on a text opens it on that text; committing keeps the text as one undo step, empty text is not kept, and a tap elsewhere commits.
+_Avoid_: Text editor (that is the core's description of the view), textarea, input field
+
 **Action Bar**:
 The small floating bar shown next to a non-empty Selection offering actions such as duplicate, delete, z-order and group; replaces a context menu.
 _Avoid_: Context menu, popup
 
 **Properties panel**:
-The panel that sets stroke colour, background colour, fill style, stroke width, stroke style, sloppiness, edges and opacity on the Selection, and, with an empty Selection, as the style of the next Element. It shows the Selection's current values, or none chosen where they are mixed.
+The panel that sets stroke colour, background colour, fill style, stroke width, stroke style, sloppiness, edges and opacity (and, for text, font size and text alignment) on the Selection, and, with an empty Selection, as the style of the next Element. It shows the Selection's current values, or none chosen where they are mixed.
 _Avoid_: Inspector, style bar, sidebar

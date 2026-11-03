@@ -46,6 +46,7 @@ final class Excalifont: TextMeasurer, @unchecked Sendable {
     }
 
     private let font: CTFont
+    private let url: URL
     /// Guards `glyphs`; the core may measure from another thread than the renderer draws on.
     private let lock = NSLock()
     private var glyphs: [GlyphKey: GlyphOutline] = [:]
@@ -56,6 +57,23 @@ final class Excalifont: TextMeasurer, @unchecked Sendable {
             let graphicsFont = CGFont(provider)
         else { return nil }
         font = CTFontCreateWithGraphicsFont(graphicsFont, Self.designSize, nil, nil)
+        self.url = url
+    }
+
+    /// The font's PostScript name once the font is registered for this process
+    /// (see `registerForTextViews`).
+    var postScriptName: String { CTFontCopyPostScriptName(font) as String }
+
+    /// Makes the font known by name to this process, so that the platform's text
+    /// views can set text in it (they cannot be given a `CTFont`). Registering
+    /// again is harmless. Returns whether the font can be used by name.
+    @discardableResult
+    func registerForTextViews() -> Bool {
+        var error: Unmanaged<CFError>?
+        if CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error) { return true }
+        // Already registered is as good as registered.
+        let code = error.map { CFErrorGetCode($0.takeRetainedValue()) }
+        return code == CFIndex(CTFontManagerError.alreadyRegistered.rawValue)
     }
 
     /// Number of distinct glyph outlines made so far; a glyph is made once,
