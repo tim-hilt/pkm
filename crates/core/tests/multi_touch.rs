@@ -7,7 +7,9 @@
 //! middle of it, and then checks that what the action had begun is gone
 //! without a trace while the two fingers navigated.
 
-use workingtitle_core::{Editor, Tool};
+use std::sync::Arc;
+
+use workingtitle_core::{Editor, TextMeasurer, Tool};
 
 mod common;
 use common::{editor_with, replay, tap};
@@ -160,6 +162,151 @@ fn a_second_finger_mid_draw_leaves_no_partial_element() {
         assert_eq!(Untouched::of(&editor), before, "{tool:?}");
         assert_eq!(editor.element_count(), 2, "{tool:?}");
     }
+}
+
+#[test]
+fn a_second_finger_mid_line_leaves_no_partial_line() {
+    for tool in [Tool::Line, Tool::Arrow] {
+        let mut editor = selected();
+        editor.set_tool(tool);
+        let before = Untouched::of(&editor);
+
+        replay(
+            &mut editor,
+            "1.00 down 1 finger 300 300
+             1.10 move 1 finger 340 320
+             1.20 move 1 finger 380 340
+             1.50 down 2 finger 520 500
+             1.60 move 2 finger 600 500
+             2.00 up 2 finger 600 500
+             2.05 up 1 finger 380 340",
+        );
+
+        assert_eq!(Untouched::of(&editor), before, "{tool:?}");
+        assert_eq!(editor.element_count(), 2, "{tool:?}");
+    }
+}
+
+/// A line from (100, 300) to (300, 300), with point handles on its ends.
+const LINE: &str = r#"{"id":"l","type":"line","x":100,"y":300,"width":200,"height":0,
+    "points":[[0,0],[200,0]],"roughness":0,"roundness":null,"strokeWidth":2,
+    "version":3,"versionNonce":11}"#;
+
+#[test]
+fn a_second_finger_mid_point_drag_leaves_the_line_as_it_was() {
+    // The end point, and the middle, whose drag adds a point.
+    for from in ["300 300", "200 300"] {
+        let mut editor = editor_with(&[LINE]);
+        tap(&mut editor, "mouse", (150.0, 300.0), 0.0);
+        assert_eq!(editor.selection(), ["l"]);
+        let before = Untouched::of(&editor);
+
+        replay(
+            &mut editor,
+            &format!(
+                "1.00 down 1 finger {from}
+                 1.10 move 1 finger 330 330
+                 1.20 move 1 finger 360 360
+                 1.50 down 2 finger 520 500
+                 1.60 move 2 finger 600 500
+                 2.00 up 2 finger 600 500
+                 2.05 up 1 finger 360 360"
+            ),
+        );
+
+        assert_eq!(Untouched::of(&editor), before, "{from}");
+        assert!(editor.selected_points().is_empty(), "{from}");
+    }
+}
+
+#[test]
+fn a_second_finger_mid_erase_erases_nothing() {
+    let mut editor = selected();
+    editor.set_tool(Tool::Eraser);
+    let before = Untouched::of(&editor);
+
+    // The first finger crosses both rectangles before the second lands.
+    replay(
+        &mut editor,
+        "1.00 down 1 finger 50 125
+         1.10 move 1 finger 250 125
+         1.20 move 1 finger 450 125
+         1.50 down 2 finger 520 500
+         1.60 move 2 finger 600 500
+         2.00 up 2 finger 600 500
+         2.05 up 1 finger 450 125",
+    );
+
+    assert_eq!(Untouched::of(&editor), before);
+    assert_eq!(editor.element_count(), 2);
+}
+
+/// Text needs measuring to be edited; any width will do here.
+struct FixedWidth;
+
+impl TextMeasurer for FixedWidth {
+    fn line_width(&self, text: &str, font_size: f64) -> f64 {
+        text.chars().count() as f64 * font_size / 2.0
+    }
+}
+
+/// [`selected`] with the text Tool, able to edit text.
+fn with_text_tool() -> Editor {
+    let mut editor = selected();
+    editor.set_text_measurer(Arc::new(FixedWidth));
+    editor.set_tool(Tool::Text);
+    editor
+}
+
+#[test]
+fn a_tap_with_the_text_tool_opens_a_text() {
+    // What the next test relies on to mean something.
+    let mut editor = with_text_tool();
+    tap(&mut editor, "finger", (300.0, 300.0), 1.0);
+    assert!(editor.text_editor().is_some());
+}
+
+#[test]
+fn a_second_finger_during_a_text_tap_opens_no_text() {
+    for lift in [LIFT_SECOND_FIRST, LIFT_FIRST_FIRST] {
+        let mut editor = with_text_tool();
+        let before = Untouched::of(&editor);
+
+        replay(
+            &mut editor,
+            &format!(
+                "1.00 down 1 finger 300 300
+                 1.01 down 2 finger 520 500
+                 {}",
+                lift.replace("{first}", "300 300")
+            ),
+        );
+
+        assert!(editor.text_editor().is_none(), "{lift}");
+        assert_eq!(Untouched::of(&editor), before, "{lift}");
+    }
+}
+
+#[test]
+fn a_pinch_leaves_the_text_being_edited_open() {
+    let mut editor = with_text_tool();
+    tap(&mut editor, "finger", (300.0, 300.0), 0.5);
+    editor.set_editing_text("hello");
+    assert!(editor.text_editor().is_some());
+    let selection = editor.selection().to_vec();
+
+    replay(
+        &mut editor,
+        "1.00 down 1 finger 300 300
+         1.10 down 2 finger 400 300
+         1.20 move 2 finger 500 300
+         1.30 up 2 finger 500 300
+         1.40 up 1 finger 300 300",
+    );
+
+    let shown = editor.text_editor().expect("still editing");
+    assert_eq!(shown.text, "hello");
+    assert_eq!(editor.selection(), selection);
 }
 
 #[test]

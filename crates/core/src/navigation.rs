@@ -138,8 +138,7 @@ impl Navigation {
             (bounds.min_x + bounds.max_x) / 2.0,
             (bounds.min_y + bounds.max_y) / 2.0,
         );
-        self.viewport
-            .pin(centre, (width / 2.0, height / 2.0), round_zoom(zoom));
+        self.viewport.pin(centre, (width / 2.0, height / 2.0), zoom);
     }
 
     /// Whether two or more fingers are down: they pan and zoom, and no other
@@ -191,6 +190,7 @@ impl Navigation {
                     x: event.x,
                     y: event.y,
                 });
+                // Re-anchor: the finger may have been part of the pinch.
                 self.pinch = None;
                 self.retarget_pinch();
             }
@@ -233,11 +233,10 @@ impl Navigation {
     }
 
     /// Zooms the way the zoom commands do: keeping the middle of the view in
-    /// place, and rounded so repeated steps never drift.
+    /// place.
     fn zoom_about_centre(&mut self, zoom: f64) {
         let (width, height) = self.view_size;
-        self.viewport
-            .zoom_at(width / 2.0, height / 2.0, round_zoom(zoom));
+        self.viewport.zoom_at(width / 2.0, height / 2.0, zoom);
     }
 
     /// Zooms like Excalidraw's wheel handler: small steps, larger ones the
@@ -297,11 +296,6 @@ impl Navigation {
     fn finger(&self, id: u64) -> Option<Finger> {
         self.fingers.iter().find(|f| f.id == id).copied()
     }
-}
-
-/// Excalidraw keeps zoom to six decimals (`getNormalizedZoom`).
-fn round_zoom(zoom: f64) -> f64 {
-    (zoom * 1e6).round() / 1e6
 }
 
 fn centre(a: Finger, b: Finger) -> (f64, f64) {

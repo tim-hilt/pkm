@@ -10,7 +10,9 @@ pub const MAX_ZOOM: f64 = 30.0;
 
 /// The Scene point at the Canvas's top-left corner and the zoom: how many
 /// view points one Scene unit covers. Zoom is always within
-/// [`MIN_ZOOM`]`..=`[`MAX_ZOOM`].
+/// [`MIN_ZOOM`]`..=`[`MAX_ZOOM`] and, like Excalidraw's
+/// (`getNormalizedZoom`), rounded to six decimals, so that repeated zoom
+/// steps never drift.
 ///
 /// View coordinates are points from the Canvas's top-left corner, y down.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -59,8 +61,8 @@ impl Viewport {
         self.y += dy / self.zoom;
     }
 
-    /// Zooms to `zoom` (limited to the allowed range) such that the Scene
-    /// point `scene` is shown at the view point `view`.
+    /// Zooms to `zoom` (normalized as described on [`Viewport`]) such that
+    /// the Scene point `scene` is shown at the view point `view`.
     ///
     /// This one operation is every pan/zoom gesture: a pinch pins the Scene
     /// point first grabbed to wherever the fingers' centre is now.
@@ -69,18 +71,24 @@ impl Viewport {
         if zoom.is_nan() {
             return;
         }
-        self.zoom = zoom.clamp(MIN_ZOOM, MAX_ZOOM);
+        self.zoom = normalized(zoom);
         self.x = scene.0 - view.0 / self.zoom;
         self.y = scene.1 - view.1 / self.zoom;
     }
 
-    /// Zooms to `zoom` (limited to the allowed range) keeping the Scene under
-    /// the view point `(x, y)` in place. Does nothing if the zoom would not
-    /// change, so hitting a limit leaves the viewport exactly as it was.
+    /// Zooms to `zoom` (normalized as described on [`Viewport`]) keeping the
+    /// Scene under the view point `(x, y)` in place. Does nothing if the zoom
+    /// would not change, so hitting a limit leaves the viewport exactly as it
+    /// was.
     pub(crate) fn zoom_at(&mut self, x: f64, y: f64, zoom: f64) {
-        if zoom.clamp(MIN_ZOOM, MAX_ZOOM) == self.zoom {
+        if normalized(zoom) == self.zoom {
             return;
         }
         self.pin(self.scene_at(x, y), (x, y), zoom);
     }
+}
+
+/// `zoom` within the limits and rounded to six decimals.
+fn normalized(zoom: f64) -> f64 {
+    ((zoom * 1e6).round() / 1e6).clamp(MIN_ZOOM, MAX_ZOOM)
 }

@@ -1402,27 +1402,21 @@ impl Editor {
     /// Starts moving points of the selected line or arrow if the drag began
     /// on a handle of one: the point is selected, if it is not yet, and moves
     /// with the other selected points; the middle of a segment gets a point
-    /// that moves.
+    /// that moves (see [`PointHandles::drag`]).
     fn begin_point_drag(&mut self, origin: Origin, event: PointerEvent) {
         let Some((handles, grab)) = self.grabbed_point(origin.x, origin.y, origin.kind) else {
             return;
         };
-        let id = handles.id().to_owned();
-        match grab {
-            Grab::Point(index) if self.points.contains(index) => {}
-            Grab::Point(index) if event.modifiers.shift => self.points.add(&id, index),
-            Grab::Point(index) | Grab::Middle(index) => self.points.select_only(&id, index),
-        }
         self.overlay_revision += 1;
         let start = self.navigation.viewport().scene_at(origin.x, origin.y);
-        let moving = self.points.indices().to_vec();
         self.point_dragging = Some(handles.drag(
             Step::begin(&self.selection),
             &self.scene,
             event.id,
             start,
-            moving,
+            &mut self.points,
             grab,
+            event.modifiers.shift,
             binding::reach(origin.kind, self.navigation.viewport().zoom()),
         ));
         self.follow_point_drag(event);
@@ -1455,10 +1449,12 @@ impl Editor {
         }
     }
 
-    /// Puts the points being dragged, if any, back where they were.
+    /// Puts the points being dragged, if any, back where they were, and
+    /// selects again the points that were selected before the drag.
     fn drop_point_drag(&mut self) {
         if let Some(dragging) = self.point_dragging.take() {
-            dragging.cancel(&mut self.scene, &mut self.entropy);
+            self.points = dragging.cancel(&mut self.scene, &mut self.entropy);
+            self.overlay_revision += 1;
             self.changed(false);
         }
     }

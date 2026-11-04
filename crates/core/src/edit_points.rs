@@ -128,10 +128,12 @@ impl PointHandles {
             .or_else(|| nearest(&mut self.middles.iter().copied()).map(Grab::Middle))
     }
 
-    /// A drag by `pointer`, which went down at `origin`, that moves the
-    /// points `moving` of what is held, as the action of `step`. The drag of
-    /// a middle first adds its point. An end of an arrow that is dragged binds
-    /// to shapes within `bind_reach` of it.
+    /// A drag by `pointer`, which went down at `origin` on `grab`, as the
+    /// action of `step`. The grabbed point joins the selected `points` (with
+    /// `shift`) or, unless it is one of them already, becomes the only one;
+    /// the drag of a middle first adds its point and selects it alone. All
+    /// selected points move. An end of an arrow that is dragged binds to
+    /// shapes within `bind_reach` of it.
     #[allow(clippy::too_many_arguments)]
     pub fn drag(
         &self,
@@ -139,10 +141,18 @@ impl PointHandles {
         scene: &Scene,
         pointer: u64,
         origin: Point,
-        moving: Vec<usize>,
+        points: &mut PointSelection,
         grab: Grab,
+        shift: bool,
         bind_reach: f64,
     ) -> PointDrag {
+        let points_before = points.clone();
+        match grab {
+            Grab::Point(index) if points.contains(index) => {}
+            Grab::Point(index) if shift => points.add(&self.id, index),
+            Grab::Point(index) | Grab::Middle(index) => points.select_only(&self.id, index),
+        }
+        let moving = points.indices().to_vec();
         step.touch(scene, &self.id);
         let mut start = self.points.clone();
         if let Grab::Middle(index) = grab
@@ -162,6 +172,7 @@ impl PointHandles {
             moving,
             offset: (0.0, 0.0),
             step,
+            points_before,
         }
     }
 
@@ -268,6 +279,9 @@ pub(crate) struct PointDrag {
     /// How far they are from where they started.
     offset: Point,
     step: Step,
+    /// The selected points from before the drag, which selected the grabbed
+    /// one.
+    points_before: PointSelection,
 }
 
 impl PointDrag {
@@ -299,9 +313,11 @@ impl PointDrag {
         self.step
     }
 
-    /// Puts the Element back as it was before the drag.
-    pub fn cancel(self, scene: &mut Scene, entropy: &mut Entropy) {
+    /// Puts the Element back as it was before the drag. Returns the selected
+    /// points from before it.
+    pub fn cancel(self, scene: &mut Scene, entropy: &mut Entropy) -> PointSelection {
         self.step.revert(scene, entropy);
+        self.points_before
     }
 
     fn place(&mut self, scene: &mut Scene, entropy: &mut Entropy, offset: Point) {

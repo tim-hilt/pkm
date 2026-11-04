@@ -216,6 +216,25 @@ fn trackpad_pinch_zooms_around_the_pinch_centre() {
     assert_close(origin(&editor), (100.0 / 3.0, 50.0 / 3.0));
 }
 
+#[test]
+fn every_zoom_is_rounded_to_six_decimals_like_excalidraws() {
+    let mut editor = Editor::new();
+    editor.magnify(MagnifyEvent {
+        x: 0.0,
+        y: 0.0,
+        magnification: 0.123_456_789,
+    });
+    assert_eq!(zoom(&editor), 1.123_457);
+
+    let ctrl = Modifiers {
+        ctrl: true,
+        ..Modifiers::default()
+    };
+    scroll(&mut editor, 0.0, 0.123_456_789, ctrl);
+    // 1.123457 + 0.123456789 / 100 + log10(1.123457) * 0.123456789 / 20.
+    assert_eq!(zoom(&editor), 1.125004);
+}
+
 // --- Zoom limits -------------------------------------------------------
 
 #[test]
