@@ -62,3 +62,43 @@ import Testing
         }
     }
 }
+
+/// How the Elements' parts, lines of text and images interleave in z-order.
+@Suite struct ElementsInZOrderTests {
+    private enum Kind: Equatable {
+        case parts(Int)
+        case lines(Int)
+        case image
+    }
+
+    @Test func everyElementComesOnceInFileOrderWithWhatDrawsIt() {
+        let rectangle =
+            ##"{"id":"r","type":"rectangle","x":0,"y":0,"width":10,"height":10,"backgroundColor":"#a5d8ff","fillStyle":"solid"}"##
+        let (_, geometry) = TestScenes.scene(
+            withImages: ["q": TestImages.quadrants()],
+            [
+                rectangle,
+                TestScenes.text("t1", 0, 20, (40, 50), #"one\ntwo"#),
+                TestScenes.image("i1", 0, 80, (10, 10)),
+                TestScenes.text("t2", 0, 100, (40, 25), "three"),
+                TestScenes.image("i2", 0, 140, (10, 10)),
+                TestScenes.image("i3", 0, 160, (10, 10)),
+                rectangle.replacingOccurrences(of: #""id":"r""#, with: #""id":"s""#),
+            ])
+
+        let elements = geometry.withBuffers { buffers in
+            buffers.elementsInZOrder().map { item -> (UInt32, Kind) in
+                switch item.content {
+                case .parts(let run): (item.element, .parts(run.count))
+                case .textLines(let run): (item.element, .lines(run.count))
+                case .image: (item.element, .image)
+                }
+            }
+        }
+
+        #expect(elements.map(\.0) == Array(0...6), "each handle once, bottom first")
+        #expect(
+            elements.map(\.1) == [.parts(2), .lines(2), .image, .lines(1), .image, .image, .parts(2)],
+            "fill and outline, two lines, ...")
+    }
+}

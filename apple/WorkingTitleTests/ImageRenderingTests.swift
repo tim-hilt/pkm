@@ -203,12 +203,40 @@ import Testing
         let (_, renderer) = try OffscreenRender.render(first.geometry, viewport: Viewport(), files: first.editor)
 
         let moved = scene(TestScenes.image("a", 90, 10, (50, 50), #","version":2"#))
-        renderer.files = moved.editor
         renderer.setGeometry(moved.geometry)
         let frame = OffscreenRender.draw(with: renderer)
 
         #expect(frame.rgb(100, 20) == red)
         #expect(renderer.textures.decodeCount == 1, "the file's texture is kept for the new version")
+    }
+
+    @Test func anotherDrawingsFileOfTheSameIdIsShownWithItsOwnPixels() throws {
+        // File ids are only unique within a Drawing.
+        let quadrants = scene(TestScenes.image("a", 50, 50, (100, 100)))
+        let (_, renderer) = try OffscreenRender.render(
+            quadrants.geometry, viewport: Viewport(), size: 200, files: quadrants.editor)
+
+        let allBlue = TestImages.png(width: 4, height: 4) { _, _ in TestImages.blue }
+        let other = scene(TestScenes.image("a", 50, 50, (100, 100)), files: ["q": allBlue])
+        renderer.files = other.editor
+        renderer.setGeometry(other.geometry)
+        let frame = OffscreenRender.draw(with: renderer, size: 200)
+
+        #expect(frame.rgb(75, 75) == blue)
+    }
+
+    @Test func aFileThatWasMissingIsShownOnceTheFilesComeFromWhereItIs() throws {
+        let image = TestScenes.image("a", 50, 50, (100, 100))
+        let without = scene(image, files: [:])
+        let (placeholder, renderer) = try OffscreenRender.render(
+            without.geometry, viewport: Viewport(), size: 200, files: without.editor)
+        #expect(placeholder.rgb(60, 60) == placeholderGrey)
+
+        // Same geometry, now with a source that has the file.
+        renderer.files = scene(image).editor
+        let frame = OffscreenRender.draw(with: renderer, size: 200)
+
+        #expect(frame.rgb(75, 75) == red)
     }
 
     // MARK: Reference images

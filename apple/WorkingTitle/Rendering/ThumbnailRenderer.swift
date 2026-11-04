@@ -55,9 +55,6 @@ final class ThumbnailRenderer {
     }
 
     func render(_ scene: ThumbnailScene) -> RenderedImage? {
-        // Images are looked up by file id, which different Drawings may use
-        // for different files.
-        renderer.textures.keepOnly([])
         renderer.files = scene.editor
         renderer.setGeometry(scene.geometry)
         renderer.viewport = scene.viewport

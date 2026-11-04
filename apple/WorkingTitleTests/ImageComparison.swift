@@ -13,12 +13,14 @@ struct ImageMismatch {
 /// How far a render may stray from its reference and still match.
 struct ImageTolerance {
     /// Largest per-channel difference (0...255) of a pixel that still counts as
-    /// equal. Covers anti-aliasing coverage that varies slightly between GPUs.
-    var channel = 32
+    /// equal. Covers anti-aliasing coverage that varies slightly between GPUs;
+    /// on one machine renders are identical. Low enough that a 10 % change of
+    /// opacity or a colour one shade off fails.
+    var channel = 8
     /// Share of pixels allowed to differ by more than `channel`, e.g. MSAA samples
-    /// landing differently on a few edge pixels. A moved or missing element
-    /// changes far more than this.
-    var pixelFraction = 0.0005
+    /// landing differently on a few edge pixels: 32 pixels of a 400 x 400
+    /// render. A moved, missing or recoloured element changes more than this.
+    var pixelFraction = 0.0002
 
     static let standard = ImageTolerance()
 }

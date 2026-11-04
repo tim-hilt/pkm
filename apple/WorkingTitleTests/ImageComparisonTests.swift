@@ -29,13 +29,18 @@ import Testing
     @Test func faintAntiAliasingDifferencesAreTolerated() {
         // Every pixel of the line is a few levels off, as after a GPU change.
         let expected = image(lineAt: 40, grey: 100)
-        let actual = image(lineAt: 40, grey: 110)
+        let actual = image(lineAt: 40, grey: 105)
         #expect(ImageComparison.mismatch(between: actual, and: expected) == nil)
+    }
+
+    @Test func aSlightlyOtherColourIsAMismatch() {
+        // Ink (30) at 90 % opacity over paper is 52.
+        #expect(ImageComparison.mismatch(between: image(lineAt: 40, grey: 52), and: image(lineAt: 40, grey: 30)) != nil)
     }
 
     @Test func aFewStrayPixelsAreTolerated() {
         // A handful of edge pixels flip, e.g. a different MSAA sample position.
-        let actual = (0..<3).reduce(image(lineAt: 40)) { $0.with(pixel: (41, $1), grey: 0) }
+        let actual = (0..<2).reduce(image(lineAt: 40)) { $0.with(pixel: (41, $1), grey: 0) }
         #expect(ImageComparison.mismatch(between: actual, and: image(lineAt: 40)) == nil)
     }
 

@@ -136,6 +136,38 @@ import Testing
         #expect(red(frame, 100, 300) == 255, "outside")
     }
 
+    @Test func marksOfTranslucentStrokesDoNotLeakIntoALaterFillAfterAnotherFill() throws {
+        // The fill in between lies away from the stroke; the triangle after it
+        // must still count its winding from zero where the stroke was.
+        let elsewhere: [SIMD2<Float>] = [[300, 300], [350, 300], [350, 350], [300, 350]]
+        let lowerLeft: [SIMD2<Float>] = [[50, 50], [50, 350], [350, 350]]
+        let geometry = HandBuiltGeometry(
+            .stroke([[60, 100], [340, 100]], width: 40, opacity: 0.5),
+            .fill(elsewhere),
+            .fill(lowerLeft))
+        let frame = try render(geometry)
+
+        // (300, 100) is on the stroke, inside the triangle's cover rectangle
+        // but outside the triangle: half-opaque ink over paper.
+        #expect((135...150).contains(red(frame, 300, 100)), "outside the triangle: \(red(frame, 300, 100))")
+        #expect(red(frame, 100, 300) == fillRed, "inside the triangle")
+    }
+
+    @Test func everyTranslucentStrokeIsDrawnHoweverManyCameBefore() throws {
+        // More translucent strokes than the stencil has values: the last one
+        // crosses the first and must blend over it like any other Element.
+        let filler = (0..<300).map { _ in
+            HandBuiltPart.stroke([[10, 380], [12, 380]], width: 1, opacity: 0.5)
+        }
+        let first = HandBuiltPart.stroke([[50, 200], [350, 200]], width: 40, opacity: 0.5)
+        let last = HandBuiltPart.stroke([[200, 50], [200, 350]], width: 40, opacity: 0.5)
+        for count in [254, 255, 256] {
+            let frame = try render(HandBuiltGeometry([first] + filler.prefix(count) + [last]))
+            // Ink at half opacity twice over paper: 255 -> 142 -> 86.
+            #expect((80...92).contains(red(frame, 200, 200)), "after \(count): \(red(frame, 200, 200))")
+        }
+    }
+
     @Test func aTranslucentStrokeIsFullyDrawnOverAnEarlierFill() throws {
         let geometry = HandBuiltGeometry(
             .fill(triangle),

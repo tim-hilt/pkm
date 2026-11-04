@@ -41,7 +41,7 @@ import Testing
         let file = references.appending(path: "stable.png")
         let before = try Data(contentsOf: file)
         // Within tolerance: would be churn in version control if rewritten.
-        #expect(store(recording: true).check(image(grey: 110), named: "stable") == .matched)
+        #expect(store(recording: true).check(image(grey: 105), named: "stable") == .matched)
         #expect(try Data(contentsOf: file) == before)
     }
 

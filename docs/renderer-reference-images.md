@@ -17,10 +17,11 @@ expectMatchesReference(image, named: "my-scene")   // compares with References/m
 
 ## Tolerance
 
-A pixel counts as different when any channel differs by more than 32/255, and
-a render matches while at most 0.05 % of its pixels differ (`ImageTolerance`).
-That absorbs anti-aliasing noise; a moved, missing or recoloured element is far
-beyond it. Pass a stricter `ImageTolerance` to `expectMatchesReference` for a
+A pixel counts as different when any channel differs by more than 8/255, and
+a render matches while at most 0.02 % of its pixels differ (`ImageTolerance`).
+On one machine renders are identical, and the iOS simulator uses the Mac's
+GPU, so this only has to absorb anti-aliasing noise between GPUs; a moved,
+missing or recoloured element, or a 10 % change of opacity, is beyond it. Pass a stricter `ImageTolerance` to `expectMatchesReference` for a
 specific test if needed.
 
 ## When a test fails

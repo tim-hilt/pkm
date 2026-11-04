@@ -188,6 +188,55 @@ struct GeometryBuffers {
     }
 }
 
+/// What one Element contributes to the geometry. An Element is drawn by a
+/// run of parts, by a run of lines of text or by one image, never a mix.
+struct ElementGeometry {
+    enum Content {
+        /// Indices into `GeometryBuffers.parts`.
+        case parts(Range<Int>)
+        /// Indices into `GeometryBuffers.textLines`.
+        case textLines(Range<Int>)
+        /// Index into `GeometryBuffers.images`.
+        case image(Int)
+    }
+
+    var element: UInt32
+    var version: UInt32
+    var content: Content
+}
+
+extension GeometryBuffers {
+    /// Every Element's share of the buffers, in z-order (bottom first).
+    func elementsInZOrder() -> some Sequence<ElementGeometry> {
+        sequence(state: (part: 0, line: 0, image: 0)) { next -> ElementGeometry? in
+            let (part, line, image) = next
+            // Lines and images come before the part their `partIndex` names.
+            // Lines and images due at the same part belong to Elements
+            // without parts between them; the lower handle is lower in z-order.
+            let lineDue = line < textLines.count && Int(textLines[line].partIndex) <= part
+            let imageDue = image < images.count && Int(images[image].partIndex) <= part
+            if imageDue && (!lineDue || images[image].element < textLines[line].element) {
+                next.image += 1
+                let current = images[image]
+                return ElementGeometry(element: current.element, version: current.version, content: .image(image))
+            }
+            if lineDue {
+                let first = textLines[line]
+                var end = line + 1
+                while end < textLines.count, textLines[end].element == first.element { end += 1 }
+                next.line = end
+                return ElementGeometry(element: first.element, version: first.version, content: .textLines(line..<end))
+            }
+            guard part < parts.count else { return nil }
+            let first = parts[part]
+            var end = part + 1
+            while end < parts.count, parts[end].element == first.element { end += 1 }
+            next.part = end
+            return ElementGeometry(element: first.element, version: first.version, content: .parts(part..<end))
+        }
+    }
+}
+
 /// Geometry the renderer can draw: the core's `Geometry`, or hand-built
 /// geometry in tests.
 protocol GeometrySource: AnyObject {

@@ -22,11 +22,12 @@ struct Viewport: Equatable {
 /// fragment shader anti-aliases analytically; 4x MSAA smooths what is left.
 ///
 /// A translucent stroke (hand-drawn shapes overlap themselves a lot) must not
-/// blend twice where capsules overlap. It is drawn in two passes with the
+/// blend twice where capsules overlap. It is drawn in three passes with the
 /// stencil buffer: first everything that is fully covered, marking those
 /// pixels so that no capsule paints over another, then the anti-aliased
-/// fringe on pixels not marked. Only fringe
-/// pixels where capsules overlap still blend twice, which is invisible.
+/// fringe on pixels not marked, then once more without colour to clear the
+/// marks. Only fringe pixels where capsules overlap still blend twice, which
+/// is invisible.
 ///
 /// Fills are stencil-then-cover: the first pass rasterises a triangle fan per
 /// subpath into the stencil buffer, which counts how often the path winds
@@ -34,6 +35,9 @@ struct Viewport: Equatable {
 /// a rectangle over the fill wherever the count is not zero and resets the
 /// stencil. That is exact for concave and self-intersecting outlines and,
 /// per sample, anti-aliased by the 4x MSAA.
+///
+/// Every draw leaves the stencil buffer zero where it touched it, so no
+/// stroke or fill sees what an earlier one did there.
 ///
 /// Text is filled too: each line of text becomes the outlines of its glyphs
 /// (cached per glyph, see `Excalifont`) in one fill, so it stays sharp at any
@@ -86,11 +90,14 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
     let device: any MTLDevice
 
     /// Where image files come from. Set it before the geometry is drawn; the
-    /// `CanvasMetalView` does so with its editor.
+    /// `CanvasMetalView` does so with its editor. File ids mean nothing
+    /// outside their source, so another source starts with no textures.
     var files: (any ImageFileSource)? {
         didSet {
             guard files !== oldValue else { return }
-            textures.forgetFailures()
+            textures.keepOnly([])
+            // Cached draws hold the old source's textures and placeholders.
+            cache.removeAll()
             drawsAreStale = true
             onNeedsDisplay?()
         }
@@ -99,13 +106,14 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
     /// The decoded image files, one texture each.
     let textures: ImageTextures
 
-    /// Depth-stencil states for opaque strokes, and for the two passes of
-    /// translucent ones.
+    /// Depth-stencil states for opaque strokes, and for the first two passes
+    /// of translucent ones (the third is `clearStencil`).
     private let plain: any MTLDepthStencilState
     private let interior: any MTLDepthStencilState
     private let fringe: any MTLDepthStencilState
-    /// Depth-stencil states of fills: counting the winding by either rule,
-    /// painting where it is not zero, and clearing.
+    /// Depth-stencil states of fills: counting the winding by either rule and
+    /// painting where it is not zero (and resetting it there). `clearStencil`
+    /// zeroes whatever it covers.
     private let windingNonZero: any MTLDepthStencilState
     private let windingEvenOdd: any MTLDepthStencilState
     private let paintInside: any MTLDepthStencilState
@@ -352,13 +360,6 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
                 origin: viewport.origin, viewSize: SIMD2(Float(target.width), Float(target.height)), scale: scale)
             encoder.setVertexBytes(&frame, length: MemoryLayout<FrameUniforms>.stride, index: 1)
             encoder.setFragmentBytes(&frame, length: MemoryLayout<FrameUniforms>.stride, index: 1)
-            // Each translucent stroke marks its pixels with its own stencil
-            // value (1...255, then around again; a stale equal value only
-            // costs a fringe pixel).
-            var translucentCount = 0
-            // Whether translucent strokes left marks that a fill must not
-            // count as winding.
-            var stencilIsMarked = false
             var drawingStrokes = false
             // The Scene, then the overlay on top; no copy of the (large) draws.
             for items in [draws, overlayDraws] {
@@ -371,21 +372,21 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
                         }
                         encoder.setVertexBuffer(stroke.segments, offset: 0, index: 0)
                         if stroke.isTranslucent {
-                            encoder.setStencilReferenceValue(UInt32(translucentCount % 255 + 1))
-                            translucentCount += 1
-                            stencilIsMarked = true
+                            encoder.setStencilReferenceValue(1)
                             var uniforms = stroke.uniforms
                             uniforms.interiorOnly = 1
                             draw(stroke, uniforms, with: interior, in: encoder)
                             uniforms.interiorOnly = 0
                             draw(stroke, uniforms, with: fringe, in: encoder)
+                            // No colour: premultiplied zero blends to what is there.
+                            uniforms.color = .zero
+                            draw(stroke, uniforms, with: clearStencil, in: encoder)
                         } else {
                             draw(stroke, stroke.uniforms, with: plain, in: encoder)
                         }
                     case .fill(let fill):
                         drawingStrokes = false
-                        draw(fill, clearingMarks: stencilIsMarked, in: encoder)
-                        stencilIsMarked = false
+                        draw(fill, in: encoder)
                     case .image(let image):
                         drawingStrokes = false
                         draw(image, in: encoder)
@@ -425,17 +426,12 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
 
     /// Draws `fill` with stencil-then-cover. The stencil is zero again where it
     /// ends, so fills never need the whole buffer cleared.
-    private func draw(_ fill: FillDraw, clearingMarks: Bool, in encoder: any MTLRenderCommandEncoder) {
+    private func draw(_ fill: FillDraw, in encoder: any MTLRenderCommandEncoder) {
         var uniforms = fill.uniforms
         let coverStart = fill.fanVertexCount
         encoder.setVertexBuffer(fill.vertices, offset: 0, index: 0)
         encoder.setRenderPipelineState(fillStencilPipeline)
         encoder.setStencilReferenceValue(0)
-        if clearingMarks {
-            // Only what the fill's rectangle touches matters.
-            encoder.setDepthStencilState(clearStencil)
-            encoder.drawPrimitives(type: .triangle, vertexStart: coverStart, vertexCount: 6)
-        }
         encoder.setDepthStencilState(fill.rule == .evenOdd ? windingEvenOdd : windingNonZero)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: coverStart)
 
@@ -481,8 +477,6 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
     /// the Elements that changed or were flattened for another power-of-two
     /// zoom level, reuses the others.
     private func refreshDraws(level: Int) {
-        /// Which of the geometry's three lists supplies the next Element.
-        enum Next { case part, line, image }
         guard drawsAreStale || level != flatteningLevel, let geometry else { return }
         drawsAreStale = false
         flatteningLevel = level
@@ -499,63 +493,27 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         var all: [Draw] = []
         var referencedFiles = Set<String>()
         geometry.withBuffers { buffers in
-            let (parts, lines, images) = (buffers.parts, buffers.textLines, buffers.images)
-            var (part, line, image) = (0, 0, 0)
-            while part < parts.count || line < lines.count || image < images.count {
-                // Lines of text and images come before the part their index
-                // names, and the parts, lines and images of one Element follow
-                // each other. If a line and an image are due, the lower Element
-                // handle (the lower in z-order) goes first.
-                let lineDue = line < lines.count && Int(lines[line].partIndex) <= part
-                let imageDue = image < images.count && Int(images[image].partIndex) <= part
-                let (element, version, end): (UInt32, UInt32, Int)
-                let build: () -> [Draw]
-                let next: Next =
-                    imageDue && (!lineDue || images[image].element < lines[line].element)
-                    ? .image : lineDue ? .line : .part
-                switch next {
-                case .image:
-                    let current = images[image]
-                    (element, version, end) = (current.element, current.version, image + 1)
-                    build = { self.makeDraws(for: current, in: buffers, tolerance: tolerance) }
-                case .line:
-                    var last = line + 1
-                    while last < lines.count, lines[last].element == lines[line].element,
-                        Int(lines[last].partIndex) <= part
-                    {
-                        last += 1
-                    }
-                    (element, version, end) = (lines[line].element, lines[line].version, last)
-                    let run = line..<last
-                    build = { run.compactMap { self.makeDraw(for: lines[$0], in: buffers, tolerance: tolerance) } }
-                case .part:
-                    var last = part + 1
-                    while last < parts.count, parts[last].element == parts[part].element,
-                        !(line < lines.count && Int(lines[line].partIndex) == last),
-                        !(image < images.count && Int(images[image].partIndex) == last)
-                    {
-                        last += 1
-                    }
-                    (element, version, end) = (parts[part].element, parts[part].version, last)
-                    let run = part..<last
-                    build = { run.compactMap { self.makeDraw(for: parts[$0], in: buffers, tolerance: tolerance) } }
+            for item in buffers.elementsInZOrder() {
+                if case .image(let index) = item.content {
+                    referencedFiles.insert(buffers.fileID(of: buffers.images[index]))
                 }
-
-                var entry = cache[element]
-                if entry?.version != version || entry?.level != level {
-                    entry = CachedElement(version: version, level: level, draws: build())
+                var entry = cache[item.element]
+                if entry?.version != item.version || entry?.level != level {
+                    let draws: [Draw] =
+                        switch item.content {
+                        case .parts(let run):
+                            run.compactMap { makeDraw(for: buffers.parts[$0], in: buffers, tolerance: tolerance) }
+                        case .textLines(let run):
+                            run.compactMap { makeDraw(for: buffers.textLines[$0], in: buffers, tolerance: tolerance) }
+                        case .image(let index):
+                            makeDraws(for: buffers.images[index], in: buffers, tolerance: tolerance)
+                        }
+                    entry = CachedElement(version: item.version, level: level, draws: draws)
                     elementsBuilt += 1
                 }
                 if let entry {
-                    kept[element] = entry
+                    kept[item.element] = entry
                     all += entry.draws
-                }
-                switch next {
-                case .image:
-                    referencedFiles.insert(buffers.fileID(of: images[image]))
-                    image = end
-                case .line: line = end
-                case .part: part = end
                 }
             }
         }
