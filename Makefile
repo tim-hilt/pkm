@@ -11,7 +11,7 @@ SIM ?= $(SIM_IPHONE)
 CORE_XCFRAMEWORK := apple/Generated/WorkingTitleCoreFFI.xcframework
 CORE_SOURCES := Cargo.toml Cargo.lock scripts/build-core-apple.sh $(shell find crates -type f)
 
-.PHONY: core-apple apple-project build test test-ios test-ui record-references lint fmt sim run clean golden-fixtures bench visual-parity visual-parity-app screenshot
+.PHONY: core-apple apple-project build ipa test test-ios test-ui record-references lint fmt sim run clean golden-fixtures bench visual-parity visual-parity-app screenshot
 
 # Rust core -> XCFramework + Swift bindings in apple/Generated (rebuilt only
 # when the Rust sources change).
@@ -28,6 +28,19 @@ apple-project: core-apple
 build: apple-project
 	$(XCODEBUILD) build -destination 'platform=macOS'
 	$(XCODEBUILD) build -destination 'generic/platform=iOS Simulator'
+
+# Builds an unsigned WorkingTitle.ipa for sideloading on an iPhone or iPad
+# (TARGETED_DEVICE_FAMILY is 1,2). SideStore, AltStore and similar tools
+# re-sign it on the device, so no provisioning profile is embedded.
+IPA_PRODUCT := apple/build/Build/Products/Release-iphoneos/WorkingTitle.app
+ipa: apple-project
+	$(XCODEBUILD) build -configuration Release -destination 'generic/platform=iOS' \
+		-derivedDataPath build CODE_SIGNING_ALLOWED=NO
+	rm -rf apple/build/Payload apple/build/WorkingTitle.ipa
+	mkdir -p apple/build/Payload
+	cp -R $(IPA_PRODUCT) apple/build/Payload/
+	cd apple/build && zip -qry WorkingTitle.ipa Payload
+	@echo "apple/build/WorkingTitle.ipa"
 
 test: apple-project
 	cargo test --workspace --locked
