@@ -541,6 +541,33 @@ fn a_label_belongs_to_its_container() {
 }
 
 #[test]
+fn tapping_an_arrows_label_selects_the_arrow() {
+    // A straight arrow from (0, 0) to (200, 0), its label (60 by 50) sitting
+    // on its middle: from (70, -25) to (130, 25).
+    let arrow = element(
+        "arrow",
+        "arrow",
+        r#""x":0,"y":0,"width":200,"height":0,"points":[[0,0],[200,0]],"roundness":null,
+        "boundElements":[{"type":"text","id":"label"}]"#,
+    );
+    let label = element(
+        "label",
+        "text",
+        r#""x":70,"y":-25,"width":60,"height":50,"text":"hi","originalText":"hi","fontSize":40,
+        "containerId":"arrow""#,
+    );
+
+    // 20 units from the arrow, out of a mouse's reach of it, but on the
+    // label (Excalidraw's `hitElementBoundText`).
+    for (point, hit) in [((80.0, 20.0), true), ((60.0, 20.0), false)] {
+        let mut editor = editor_with(&[&arrow, &label]);
+        tap(&mut editor, "mouse", point, 0.0);
+        let expected: &[&str] = if hit { &["arrow"] } else { &[] };
+        assert_eq!(editor.selection(), expected, "tap at {point:?}");
+    }
+}
+
+#[test]
 fn locked_and_deleted_elements_are_not_hit() {
     for members in [r#""locked":true"#, r#""isDeleted":true"#] {
         assert_hits(
@@ -805,13 +832,15 @@ fn the_overlay_does_not_change_while_something_unselected_is_drawn() {
     let before = editor.overlay_revision();
     editor.set_tool(Tool::Rectangle);
 
-    replay(
-        &mut editor,
-        "0 down 0 mouse 10 10\n0.1 move 0 mouse 60 60\n0.2 up 0 mouse 60 60",
-    );
+    replay(&mut editor, "0 down 0 mouse 10 10\n0.1 move 0 mouse 60 60");
 
     assert_eq!(editor.element_count(), 1);
     assert_eq!(editor.overlay_revision(), before);
+
+    // Lifting selects the new shape, which then has a frame.
+    replay(&mut editor, "0.2 up 0 mouse 60 60");
+    assert_ne!(editor.overlay_revision(), before);
+    assert!(!editor.overlay().parts().is_empty());
 }
 
 #[test]

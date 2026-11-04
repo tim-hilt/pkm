@@ -156,6 +156,26 @@ fn locked_deleted_and_label_elements_are_not_boxed() {
     assert_eq!(editor.selection(), ["c"]);
 }
 
+#[test]
+fn an_arrow_is_boxed_with_its_label() {
+    // From (100, 100) to (200, 100), its label from (130, 80) to (170, 120).
+    let arrow = r#"{"id":"a","type":"arrow","x":100,"y":100,"width":100,"height":0,
+        "strokeWidth":2,"points":[[0,0],[100,0]],"roundness":null,
+        "boundElements":[{"id":"t","type":"text"}]}"#;
+    let label = r#"{"id":"t","type":"text","x":130,"y":80,"width":40,"height":40,
+        "text":"hi","originalText":"hi","containerId":"a","fontSize":30,"fontFamily":5}"#;
+
+    // Around the arrow and its stroke, but through the label.
+    let mut editor = editor_with(&[arrow, label]);
+    drag(&mut editor, "mouse", (90.0, 90.0), (210.0, 110.0));
+    assert!(editor.selection().is_empty());
+
+    // Around both (Excalidraw's `elementsOverlappingBBox`).
+    let mut editor = editor_with(&[arrow, label]);
+    drag(&mut editor, "mouse", (90.0, 70.0), (210.0, 130.0));
+    assert_eq!(editor.selection(), ["a"]);
+}
+
 // --- Replacing, keeping and adding ---------------------------------------------
 
 /// An editor with the row's `a` selected.
@@ -284,14 +304,20 @@ fn a_tool_change_ends_the_box() {
 
 #[test]
 fn only_the_selection_tool_box_selects() {
-    for tool in [Tool::Hand, Tool::Rectangle] {
-        let mut editor = row();
-        editor.set_tool(tool);
+    // The hand Tool pans, and selects nothing at all.
+    let mut editor = row();
+    editor.set_tool(Tool::Hand);
+    drag(&mut editor, "mouse", (50.0, 50.0), (270.0, 150.0));
+    assert!(editor.selection().is_empty());
 
-        drag(&mut editor, "mouse", (50.0, 50.0), (270.0, 150.0));
-
-        assert!(editor.selection().is_empty(), "{tool:?}");
-    }
+    // The rectangle Tool draws, and selects what it drew, not what the drag
+    // enclosed.
+    let mut editor = row();
+    editor.set_tool(Tool::Rectangle);
+    drag(&mut editor, "mouse", (50.0, 50.0), (270.0, 150.0));
+    let drawn = editor.selection().to_vec();
+    assert_eq!(drawn.len(), 1);
+    assert!(!["a", "b"].contains(&drawn[0].as_str()));
 }
 
 // --- The rectangle over the Canvas -----------------------------------------------

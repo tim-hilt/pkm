@@ -696,9 +696,10 @@ impl Editor {
             self.draw_stroke(event);
             self.erase(event);
         }
-        // An event that finished a drawing, and so went back to selection, was
-        // the drawing's: it is not a tap that selects.
-        if tool == Tool::Selection || self.tool != Tool::Selection {
+        // An event that finished a drawing, and so went back to selection,
+        // was the drawing's: it is no tap of the selection Tool.
+        let finished_drawing = tool != Tool::Selection && self.tool == Tool::Selection;
+        if !finished_drawing {
             self.select(event);
         }
         self.sync_editing();
@@ -1608,9 +1609,10 @@ impl Editor {
     }
 
     /// Starts what a drag of the selection Tool is for, by where it began: on
-    /// a transform handle it resizes or rotates the Selection, on an Element
-    /// it moves, and on empty Canvas it box-selects. `event` is the step that
-    /// turned the press into a drag.
+    /// a transform handle it resizes or rotates the Selection, in the box
+    /// around a Selection of several Elements or on an Element it moves, and
+    /// on empty Canvas it box-selects. `event` is the step that turned the
+    /// press into a drag.
     fn begin_drag(&mut self, origin: Origin, event: PointerEvent) {
         self.begin_transform(origin, event);
         if self.transforming.is_some() {
@@ -1620,23 +1622,40 @@ impl Editor {
         if self.point_dragging.is_some() {
             return;
         }
+        if self.in_selection_box(origin) {
+            return self.begin_move(None, origin, event);
+        }
         match self.hit(origin.x, origin.y, origin.kind) {
-            Some(id) => self.begin_move(&id, origin, event),
+            Some(id) => self.begin_move(Some(&id), origin, event),
             None => self.begin_box_select(origin, event),
         }
     }
 
-    /// Starts moving the Selection by a drag that began on the Element `id`:
-    /// on the Selection itself, or else on an Element that becomes the
-    /// Selection, or with shift joins it.
-    fn begin_move(&mut self, id: &str, origin: Origin, event: PointerEvent) {
+    /// Whether a press at `origin` is in the box around a Selection of
+    /// several Elements, where a drag moves them all, whatever is under it
+    /// (Excalidraw's `isHittingCommonBoundingBoxOfSelectedElements`). A
+    /// single Element's box is part of hitting it, see
+    /// [`hit_test::topmost`].
+    fn in_selection_box(&self, origin: Origin) -> bool {
+        if self.selection.ids().len() < 2 {
+            return false;
+        }
+        let viewport = self.navigation.viewport();
+        TransformBox::of(&self.scene, &self.selection).is_some_and(|transform_box| {
+            transform_box.encloses(viewport.scene_at(origin.x, origin.y), viewport.zoom())
+        })
+    }
+
+    /// Starts moving the Selection by a drag that began on the Element `on`,
+    /// if any: on the Selection itself, or else on an Element that becomes
+    /// the Selection, or with shift joins it.
+    fn begin_move(&mut self, on: Option<&str>, origin: Origin, event: PointerEvent) {
         // Undoing the move also undoes the selecting it began with.
         let step = Step::begin(&self.selection);
         self.drag_editing = self.editing_group.clone();
-        let changed = if self.selection.contains(id) {
-            false
-        } else {
-            self.select_unit(id, event.modifiers.shift)
+        let changed = match on {
+            Some(id) if !self.selection.contains(id) => self.select_unit(id, event.modifiers.shift),
+            _ => false,
         };
         if changed {
             self.overlay_revision += 1;
@@ -1662,7 +1681,8 @@ impl Editor {
             PointerPhase::Down => {}
             PointerPhase::Move => {
                 let to = self.navigation.viewport().scene_at(event.x, event.y);
-                if moving.drag_to(&mut self.scene, &mut self.entropy, to) {
+                let lock_axis = event.modifiers.shift;
+                if moving.drag_to(&mut self.scene, &mut self.entropy, to, lock_axis) {
                     self.changed(false);
                 }
             }
@@ -1847,8 +1867,17 @@ impl Editor {
                 let Some(shape) = self.shape.take() else {
                     return;
                 };
+                let id = shape.id().to_owned();
                 match shape.finish(&mut self.scene) {
                     Outcome::Drawn(step) => {
+                        // As on excalidraw.com the new shape is selected, to
+                        // be adjusted right away, and the Tool returns to
+                        // selection; with the Tool lock neither, so that the
+                        // next shape can follow.
+                        let selected = (!self.tool_lock).then_some(id);
+                        if self.selection.select(selected) {
+                            self.overlay_revision += 1;
+                        }
                         self.history.record(step, &self.scene, &self.selection);
                         if !self.tool_lock {
                             self.assign_tool(Tool::Selection);

@@ -10,12 +10,15 @@
 //! [`crate::tap`]). With shift held the box adds to the Selection the drag
 //! began with instead of replacing it.
 
+use std::collections::HashMap;
+
 use crate::frame::Frame;
 use crate::group;
 use crate::hit_test;
 use crate::path::Point;
-use crate::scene::Scene;
+use crate::scene::{Element, ElementType, Scene};
 use crate::selection::Selection;
+use crate::text;
 
 /// A box-select drag by one pointer.
 #[derive(Debug)]
@@ -79,6 +82,8 @@ impl BoxSelect {
     /// encloses, and the other Elements of their groups.
     pub fn selection(&self, scene: &Scene) -> Selection {
         let bounds = self.bounds();
+        // Made when the first arrow with a label is reached.
+        let mut labels: Option<HashMap<&str, Element>> = None;
         let enclosed: Vec<String> = scene
             .elements()
             .filter(hit_test::is_selectable)
@@ -87,10 +92,25 @@ impl BoxSelect {
                 // turned bounds and half of their stroke around them.
                 let shown = Frame::shown(element);
                 let stroke = element.stroke_width() / 2.0;
-                bounds.min.0 <= shown.min.0 - stroke
-                    && bounds.min.1 <= shown.min.1 - stroke
-                    && bounds.max.0 >= shown.max.0 + stroke
-                    && bounds.max.1 >= shown.max.1 + stroke
+                let mut drawn = Frame {
+                    min: (shown.min.0 - stroke, shown.min.1 - stroke),
+                    max: (shown.max.0 + stroke, shown.max.1 + stroke),
+                };
+                // An arrow's label is part of it too, which the bounds of a
+                // curve through its points are not (`elementsOverlappingBBox`
+                // counts labels for arrows only).
+                if element.kind() == ElementType::Arrow
+                    && element.has_bound_text()
+                    && let Some(label) = labels
+                        .get_or_insert_with(|| text::labels(scene))
+                        .get(element.id())
+                {
+                    drawn = drawn.union(Frame::shown(label));
+                }
+                bounds.min.0 <= drawn.min.0
+                    && bounds.min.1 <= drawn.min.1
+                    && bounds.max.0 >= drawn.max.0
+                    && bounds.max.1 >= drawn.max.1
             })
             .map(|element| element.id().to_owned())
             .collect();

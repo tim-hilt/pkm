@@ -660,3 +660,74 @@ fn a_dropped_shape_does_not_leave_its_handle_to_the_next_one() {
     // clients' caches of the handle must not survive that.
     assert_ne!(editor.geometry().generation(), while_drawing);
 }
+
+// --- The Selection after drawing -----------------------------------------------
+
+/// The ids of the saved Elements, bottom first.
+fn ids(editor: &Editor) -> Vec<String> {
+    elements(editor)
+        .iter()
+        .map(|e| text(e, "id").to_owned())
+        .collect()
+}
+
+#[test]
+fn the_drawn_shape_becomes_the_selection_so_it_can_be_adjusted_right_away() {
+    let mut editor = editor_with(Tool::Rectangle);
+
+    drag(&mut editor, (0.0, 0.0), (50.0, 50.0));
+
+    assert_eq!(editor.selection(), ids(&editor));
+}
+
+#[test]
+fn drawing_replaces_the_selection() {
+    let mut editor = editor_with(Tool::Rectangle);
+    drag(&mut editor, (0.0, 0.0), (50.0, 50.0));
+    let first = ids(&editor)[0].clone();
+    assert_eq!(editor.selection(), std::slice::from_ref(&first));
+
+    editor.set_tool(Tool::Ellipse);
+    drag(&mut editor, (100.0, 0.0), (150.0, 50.0));
+
+    let second = ids(&editor)[1].clone();
+    assert_eq!(editor.selection(), [second]);
+    // Undoing the shape brings back what was selected before it.
+    editor.undo();
+    assert_eq!(editor.selection(), [first]);
+}
+
+#[test]
+fn a_tap_or_a_cancelled_drawing_leaves_the_selection_alone() {
+    let mut editor = editor_with(Tool::Rectangle);
+    drag(&mut editor, (0.0, 0.0), (50.0, 50.0));
+    let first = ids(&editor);
+    editor.set_tool(Tool::Rectangle);
+
+    let mouse = (0, Mouse);
+    let none = Modifiers::default();
+    send(&mut editor, mouse, Down, (100.0, 0.0), none);
+    send(&mut editor, mouse, Up, (100.0, 0.0), none);
+    assert_eq!(editor.selection(), first);
+
+    send(&mut editor, mouse, Down, (100.0, 0.0), none);
+    send(&mut editor, mouse, Move, (150.0, 50.0), none);
+    send(&mut editor, mouse, Cancel, (150.0, 50.0), none);
+    assert_eq!(editor.selection(), first);
+}
+
+#[test]
+fn with_the_tool_lock_on_a_drawn_shape_is_not_selected() {
+    let mut editor = editor_with(Tool::Rectangle);
+    drag(&mut editor, (0.0, 0.0), (50.0, 50.0));
+    editor.set_tool_lock(true);
+    editor.set_tool(Tool::Diamond);
+
+    drag(&mut editor, (100.0, 0.0), (150.0, 50.0));
+    drag(&mut editor, (200.0, 0.0), (250.0, 50.0));
+
+    // As on excalidraw.com: the next shape follows right away, and a
+    // Selection would only be in its way.
+    assert!(editor.selection().is_empty());
+    assert_eq!(editor.tool(), Tool::Diamond);
+}

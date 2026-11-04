@@ -73,6 +73,9 @@ impl Handle {
     }
 }
 
+/// Excalidraw's `DEFAULT_COLLISION_THRESHOLD`, in view points.
+const COLLISION_THRESHOLD: f64 = 8.0;
+
 /// How far in view points a handle's centre keeps beyond the frame, which
 /// itself keeps [`FRAME_PADDING`] from the box (Excalidraw's
 /// `DEFAULT_TRANSFORM_HANDLE_SPACING`).
@@ -184,6 +187,14 @@ impl TransformBox {
 
     pub fn frame(&self) -> Frame {
         self.frame
+    }
+
+    /// Whether `point` (in the Scene) is inside the selection frame, or
+    /// within Excalidraw's `DEFAULT_COLLISION_THRESHOLD` (8 view points, at
+    /// least 1 unit) of it, in a view at `zoom`.
+    pub fn encloses(&self, point: Point, zoom: f64) -> bool {
+        let margin = self.padding / zoom + (COLLISION_THRESHOLD / zoom).max(1.0);
+        self.frame.contains_turned(point, self.angle, margin)
     }
 
     pub fn angle(&self) -> f64 {

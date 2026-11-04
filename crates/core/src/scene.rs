@@ -666,6 +666,11 @@ impl<'a> Element<'a> {
             object,
         })
     }
+
+    /// The `id` of the Element a text is bound to (a label), if any.
+    pub fn container_id(&self) -> Option<&'a str> {
+        self.object.get("containerId").and_then(Value::as_str)
+    }
 }
 
 impl Element<'_> {
@@ -998,11 +1003,6 @@ impl Element<'_> {
             Some("bottom") => VerticalAlign::Bottom,
             _ => VerticalAlign::Top,
         }
-    }
-
-    /// The `id` of the Element a text is bound to (a label), if any.
-    pub fn container_id(&self) -> Option<&str> {
-        self.str("containerId")
     }
 
     /// Whether a text's width follows its content; `false` for texts with a

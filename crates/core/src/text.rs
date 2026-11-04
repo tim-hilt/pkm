@@ -77,6 +77,17 @@ pub(crate) fn label_of<'a>(scene: &'a Scene, container_id: &str) -> Option<Eleme
     })
 }
 
+/// The label of every container that has one, by the container's id, for
+/// looking up many: a label is part of its container for tapping it
+/// (`hitElementBoundText`) and, for an arrow, for box-selecting it.
+pub(crate) fn labels<'a>(scene: &'a Scene) -> HashMap<&'a str, Element<'a>> {
+    scene
+        .elements()
+        .filter(|e| e.kind() == ElementType::Text && !e.is_deleted())
+        .filter_map(|e| e.container_id().map(|container| (container, e)))
+        .collect()
+}
+
 /// Where a text is and what it says: its lines in a box.
 struct Block {
     lines: Vec<String>,

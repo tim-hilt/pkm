@@ -14,6 +14,7 @@
 //! the middle of the box around their points rather than around that of their
 //! sketched stroke, which differs by the sketch's jitter.
 
+use std::collections::HashMap;
 use std::f64::consts::TAU;
 
 use crate::frame::Frame;
@@ -25,6 +26,7 @@ use crate::rough::Op;
 use crate::scene::{Element, ElementType, Scene};
 use crate::selection::Selection;
 use crate::shape::{diamond_corners, parse_color, rounded_diamond, rounded_rectangle};
+use crate::text;
 
 /// Excalidraw's `DEFAULT_COLLISION_THRESHOLD` (8, less an epsilon) times the
 /// 0.85 of `getElementHitThreshold`: the reach of a mouse in view points.
@@ -58,7 +60,7 @@ impl Reach {
 /// The topmost Element hit by `point` (in the Scene), if any.
 ///
 /// Locked Elements, deleted ones and labels (which belong to their
-/// container) are not hit.
+/// container) are not hit: a point on a label hits the container.
 pub(crate) fn topmost<'a>(
     scene: &'a Scene,
     selection: &Selection,
@@ -67,6 +69,9 @@ pub(crate) fn topmost<'a>(
 ) -> Option<Element<'a>> {
     // Only the two topmost hits matter.
     let (mut below, mut top) = (None, None);
+    // Made when the first container with a label is reached: most Scenes
+    // have none, or few.
+    let mut labels: Option<HashMap<&str, Element>> = None;
     for element in scene.elements().filter(is_selectable) {
         let threshold = reach.of(&element);
         // The box of a selected Element is part of it, so that a hollow
@@ -74,7 +79,15 @@ pub(crate) fn topmost<'a>(
         let in_box = selection.contains(element.id())
             && has_bounding_box(&element)
             && Frame::of(&element).contains_turned(point, element.angle(), threshold);
-        if in_box || hits_itself(&element, point, threshold) {
+        // The label of a container is part of it, wherever it sits
+        // (Excalidraw's `hitElementBoundText`): an arrow's may be well off
+        // its line.
+        let on_label = element.has_bound_text()
+            && labels
+                .get_or_insert_with(|| text::labels(scene))
+                .get(element.id())
+                .is_some_and(|label| Frame::of(label).contains_turned(point, label.angle(), 0.0));
+        if in_box || on_label || hits_itself(&element, point, threshold) {
             (below, top) = (top, Some(element));
         }
     }

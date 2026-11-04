@@ -76,9 +76,26 @@ impl MoveGesture {
         self.pointer
     }
 
-    /// Follows the pointer to `to`. Returns whether anything moved.
-    pub fn drag_to(&mut self, scene: &mut Scene, entropy: &mut Entropy, to: (f64, f64)) -> bool {
-        let offset = (to.0 - self.origin.0, to.1 - self.origin.1);
+    /// Follows the pointer to `to`; with `lock_axis` (shift) only along the
+    /// axis it has travelled further along, as on excalidraw.com. Returns
+    /// whether anything moved.
+    pub fn drag_to(
+        &mut self,
+        scene: &mut Scene,
+        entropy: &mut Entropy,
+        to: (f64, f64),
+        lock_axis: bool,
+    ) -> bool {
+        let (mut dx, mut dy) = (to.0 - self.origin.0, to.1 - self.origin.1);
+        if lock_axis {
+            // On a diagonal neither is locked, as there.
+            if dx.abs() < dy.abs() {
+                dx = 0.0;
+            } else if dx.abs() > dy.abs() {
+                dy = 0.0;
+            }
+        }
+        let offset = (dx, dy);
         if offset == self.offset {
             return false;
         }

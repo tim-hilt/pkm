@@ -25,6 +25,7 @@ pub(crate) const PROPORTIONAL_RADIUS: f64 = 2.0;
 pub(crate) struct ShapeGesture {
     pointer: u64,
     handle: u32,
+    id: String,
     /// Where the pointer went down, in Scene coordinates.
     origin: (f64, f64),
     /// Where the shape is now: `(x, y, width, height)`.
@@ -54,13 +55,18 @@ impl ShapeGesture {
         origin: (f64, f64),
     ) -> Self {
         let shape = new_shape(kind, entropy, style, origin);
-        if let Some(id) = shape.get("id").and_then(Value::as_str) {
-            step.create(id);
-        }
+        // `new_element` always gives one.
+        let id = shape
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        step.create(&id);
         let handle = scene.push(shape);
         Self {
             pointer,
             handle,
+            id,
             origin,
             frame: (origin.0, origin.1, 0.0, 0.0),
             step,
@@ -70,6 +76,11 @@ impl ShapeGesture {
     /// The pointer that draws this shape.
     pub fn pointer(&self) -> u64 {
         self.pointer
+    }
+
+    /// The id of the shape being drawn.
+    pub fn id(&self) -> &str {
+        &self.id
     }
 
     /// Stretches the shape from where the pointer went down to `to`, as a

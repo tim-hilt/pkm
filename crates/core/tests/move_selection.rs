@@ -347,3 +347,69 @@ fn a_line_moves_with_its_position_and_keeps_its_points() {
     assert_eq!(position(&editor, "l"), (10.0, 40.0));
     assert_eq!(saved(&editor, "l", "width"), 100.0);
 }
+
+#[test]
+fn shift_keeps_a_move_to_the_axis_the_pointer_went_further_along() {
+    let mut editor = editor_with(&[RECTANGLE]);
+    tap(&mut editor, "mouse", (150.0, 125.0), 0.0);
+
+    // (+30, -10): along x. Then (+5, +40): along y, as on excalidraw.com,
+    // where shift may be pressed and released during the drag.
+    replay(
+        &mut editor,
+        "1.0 down 1 mouse 150 125
+         1.1 move 1 mouse 180 115 shift",
+    );
+    assert_eq!(position(&editor, "a"), (130.0, 100.0));
+    replay(&mut editor, "1.2 move 1 mouse 155 165 shift");
+    assert_eq!(position(&editor, "a"), (100.0, 140.0));
+    replay(
+        &mut editor,
+        "1.3 move 1 mouse 155 165
+         1.4 up 1 mouse 155 165",
+    );
+    assert_eq!(position(&editor, "a"), (105.0, 140.0));
+}
+
+#[test]
+fn a_drag_between_the_elements_of_a_multi_selection_moves_it() {
+    let other = r##"{"id":"b","type":"rectangle","x":300,"y":100,"width":100,"height":50,
+        "backgroundColor":"#ffc9c9","roundness":null}"##;
+    let mut editor = editor_with(&[RECTANGLE, other]);
+    editor.select_all();
+
+    // From (250, 125), between a (to x = 200) and b (from x = 300): inside
+    // the box around both (Excalidraw's
+    // `isHittingCommonBoundingBoxOfSelectedElements`), so it moves them
+    // rather than box-selecting.
+    replay(
+        &mut editor,
+        "1.0 down 1 mouse 250 125
+         1.1 move 1 mouse 250 145
+         1.2 up 1 mouse 250 145",
+    );
+
+    assert_eq!(editor.selection(), ["a", "b"]);
+    assert_eq!(position(&editor, "a"), (100.0, 120.0));
+    assert_eq!(position(&editor, "b"), (300.0, 120.0));
+}
+
+#[test]
+fn a_drag_just_outside_the_box_of_a_multi_selection_box_selects() {
+    let other = r##"{"id":"b","type":"rectangle","x":300,"y":100,"width":100,"height":50,
+        "backgroundColor":"#ffc9c9","roundness":null}"##;
+    let mut editor = editor_with(&[RECTANGLE, other]);
+    editor.select_all();
+
+    // The box reaches from y = 100 to 150, plus 4 of padding and 8 of
+    // threshold: 170 is outside it.
+    replay(
+        &mut editor,
+        "1.0 down 1 mouse 250 170
+         1.1 move 1 mouse 250 200
+         1.2 up 1 mouse 250 200",
+    );
+
+    assert_eq!(position(&editor, "a"), (100.0, 100.0));
+    assert_eq!(position(&editor, "b"), (300.0, 100.0));
+}
