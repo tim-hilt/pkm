@@ -247,6 +247,50 @@ pub fn assert_part_matches_set(
     }
 }
 
+/// Checks every Element of fixture `name` that `keep` accepts against
+/// rough.js: one part per op set of every drawable, in rough.js' order (the
+/// fill, then the outline; arrowheads after the line), each matching its set
+/// (see [`assert_part_matches_set`]). Returns how many Elements were checked.
+pub fn assert_rough_elements_match_golden(name: &str, keep: impl Fn(&Value) -> bool) -> usize {
+    let editor = editor_with_fixture(name);
+    let fixture = Fixture::load(name);
+    let geometry = editor.geometry();
+    let mut checked = 0;
+
+    for (handle, element) in fixture.elements().iter().enumerate() {
+        if !keep(element) {
+            continue;
+        }
+        let id = text(element, "id");
+        let position = (num(element, "x"), num(element, "y"));
+        let drawables: Vec<_> = fixture
+            .shapes(id)
+            .into_iter()
+            .map(|shape| match shape {
+                Shape::Rough {
+                    shape,
+                    options,
+                    sets,
+                } => (shape, options, sets),
+                Shape::Outline(_) => panic!("{id}: not drawn by rough.js alone"),
+            })
+            .collect();
+
+        let parts = parts_of(&geometry, handle);
+        let set_count: usize = drawables.iter().map(|(_, _, sets)| sets.len()).sum();
+        assert_eq!(parts.len(), set_count, "{id}: one part per op set");
+        let mut parts = parts.iter();
+        for (shape, options, sets) in &drawables {
+            for set in sets {
+                let part = parts.next().unwrap();
+                assert_part_matches_set(&geometry, part, set, (shape, options), position, id);
+            }
+        }
+        checked += 1;
+    }
+    checked
+}
+
 /// One `.excalidraw` source file and the output Excalidraw generated for it.
 pub struct Fixture {
     scene: Value,

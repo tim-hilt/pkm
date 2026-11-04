@@ -11,9 +11,9 @@ Each fixture `<name>` is a pair:
 
 | Fixture        | Covers                                                                              |
 | -------------- | ----------------------------------------------------------------------------------- |
-| `shapes`       | rectangle, diamond, ellipse x roughness 0/1/2 x solid/dashed/dotted x sharp/round; tiny and narrow Elements (roughness reduction) |
-| `fills`        | hachure, cross-hatch, zigzag, solid on every closed shape at each roughness; rounded shapes; stroke widths |
-| `lines-arrows` | lines and arrows: straight, multi-point, curved, closed (filled) loops; every arrowhead at start and end; dashed, dotted, thick |
+| `shapes`       | rectangle, diamond, ellipse x roughness 0/1/2 x solid/dashed/dotted x sharp/round; tiny and narrow Elements (roughness reduction); medium and large ones (less jitter on long lines, fixed and custom corner radii) |
+| `fills`        | hachure, cross-hatch, zigzag, solid on every closed shape at each roughness; rounded shapes; stroke widths; fills under dashed and dotted outlines; a large rough ellipse |
+| `lines-arrows` | lines and arrows: straight, multi-point, curved (every roughness), closed (filled) loops; every arrowhead at start and end; dashed, dotted, thick; long ones; small ones (roughness reduction, which round lines escape) |
 | `arrowhead-turns` | every arrowhead at the start and end of arrows whose last segment is short and turns away; thick and curved variants |
 | `freedraw`     | simulated and real (stylus) pressure; thick, precise, dot, short, closed and filled strokes |
 | `text`         | text Elements laid out by Excalidraw itself (see below): alignments, rotation, font families, fixed-width wrapping (hyphens, spaces, long words, CJK), labels in rectangles, ellipses and diamonds |

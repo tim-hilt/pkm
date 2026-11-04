@@ -60,6 +60,15 @@ function shapes(upstream) {
     elements.push(make(type, `${type}-tiny-r2`, { roughness: 2, width: 8, height: 8 }));
     elements.push(make(type, `${type}-narrow-r2`, { roughness: 2, width: 60, height: 12 }));
   }
+  // rough.js jitters lines over 200 units less, and lines over 500 least; big
+  // rectangles round their corners by a fixed radius, or by their own.
+  for (const type of CLOSED_SHAPES) {
+    elements.push(make(type, `${type}-medium`, { width: 320, height: 110 }));
+    elements.push(make(type, `${type}-large-r2`, { roughness: 2, width: 620, height: 300 }));
+  }
+  elements.push(make("rectangle", "rectangle-large-round", { width: 620, height: 300, roundness: ADAPTIVE_RADIUS }));
+  elements.push(make("rectangle", "rectangle-round-value-8", { roundness: { ...ADAPTIVE_RADIUS, value: 8 } }));
+  elements.push(make("diamond", "diamond-large-round", { width: 420, height: 300, roundness: PROPORTIONAL_RADIUS }));
   return elements;
 }
 
@@ -88,6 +97,20 @@ function fills(upstream) {
       elements.push(make("rectangle", `rectangle-${fillStyle}-w${strokeWidth}`, { fillStyle, strokeWidth }));
     }
   }
+  // Dashed and dotted outlines are drawn once, which changes the random
+  // sequence the fill continues.
+  for (const type of CLOSED_SHAPES) {
+    for (const strokeStyle of ["dashed", "dotted"]) {
+      for (const fillStyle of ["hachure", "solid"]) {
+        elements.push(make(type, `${type}-${fillStyle}-${strokeStyle}`, { fillStyle, strokeStyle }));
+      }
+    }
+  }
+  for (const fillStyle of ["cross-hatch", "solid"]) {
+    elements.push(make("rectangle", `rectangle-round-${fillStyle}-dashed`, { fillStyle, strokeStyle: "dashed", roundness: ADAPTIVE_RADIUS }));
+    elements.push(make("diamond", `diamond-round-${fillStyle}-dotted`, { fillStyle, strokeStyle: "dotted", roundness: PROPORTIONAL_RADIUS }));
+  }
+  elements.push(make("ellipse", "ellipse-large-hachure-r2", { fillStyle: "hachure", roughness: 2, width: 620, height: 300 }));
   return elements;
 }
 
@@ -144,6 +167,19 @@ function linesAndArrows(upstream) {
       backgroundColor: PINK, fillStyle, roundness: PROPORTIONAL_RADIUS,
     }));
   }
+  // Every roughness on curves; long strokes; small Elements, whose roughness
+  // is reduced unless they are lines that are round and not too narrow.
+  const small = [[0, 0], [20, 22], [40, 0]];
+  elements.push(
+    make("line", "line-curved-r0", multi, { roughness: 0, roundness: PROPORTIONAL_RADIUS }),
+    make("line", "line-curved-r2", multi, { roughness: 2, roundness: PROPORTIONAL_RADIUS }),
+    make("arrow", "arrow-curved-r2", multi, { roughness: 2, endArrowhead: "arrow", roundness: PROPORTIONAL_RADIUS }),
+    make("line", "line-long", [[0, 0], [620, 120]]),
+    make("arrow", "arrow-medium", [[0, 0], [300, 80]], { endArrowhead: "triangle" }),
+    make("line", "line-small-r2", small, { roughness: 2 }),
+    make("line", "line-small-curved-r2", small, { roughness: 2, roundness: PROPORTIONAL_RADIUS }),
+    make("arrow", "arrow-small-curved-r2", small, { roughness: 2, endArrowhead: "arrow", roundness: PROPORTIONAL_RADIUS }),
+  );
   return elements;
 }
 
@@ -336,7 +372,9 @@ function seedFor(id) {
 /** Excalidraw's fractional index for the i-th Element: "a0".."aZ", then "b00".. */
 function fractionalIndex(i) {
   const digits = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-  if (i < digits.length) return `a${digits[i]}`;
+  const n = digits.length;
+  if (i < n) return `a${digits[i]}`;
+  if (i < n + n * n) return `b${digits[Math.floor((i - n) / n)]}${digits[(i - n) % n]}`;
   throw new Error("scene too large for the simple index scheme");
 }
 

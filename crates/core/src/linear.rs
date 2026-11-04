@@ -210,6 +210,7 @@ fn cubic_bounds([p0, p1, p2, p3]: [Point; 4]) -> (Point, Point) {
         let (lo, hi) = (a.min(d), a.max(d));
         extremes(a, b, c, d)
             .into_iter()
+            .flatten()
             .fold((lo, hi), |(lo, hi), v| (lo.min(v), hi.max(v)))
     };
     let (x0, x1) = along(p0.0, p1.0, p2.0, p3.0);
@@ -217,13 +218,14 @@ fn cubic_bounds([p0, p1, p2, p3]: [Point; 4]) -> (Point, Point) {
     ((x0, y0), (x1, y1))
 }
 
-/// The values of one coordinate of a cubic Bézier curve where it turns around.
-fn extremes(p0: f64, p1: f64, p2: f64, p3: f64) -> Vec<f64> {
+/// The values of one coordinate of a cubic Bézier curve where it turns around
+/// (at most two).
+fn extremes(p0: f64, p1: f64, p2: f64, p3: f64) -> [Option<f64>; 2] {
     let (i, j, k) = (p1 - p0, p2 - p1, p3 - p2);
     let (a, b, c) = (3.0 * i - 6.0 * j + 3.0 * k, 6.0 * j - 6.0 * i, 3.0 * i);
     let discriminant = b * b - 4.0 * c * a;
     if discriminant < 0.0 {
-        return Vec::new();
+        return [None; 2];
     }
     let roots = if a == 0.0 {
         [-c / b; 2]
@@ -231,14 +233,12 @@ fn extremes(p0: f64, p1: f64, p2: f64, p3: f64) -> Vec<f64> {
         let root = discriminant.sqrt();
         [(-b + root) / (2.0 * a), (-b - root) / (2.0 * a)]
     };
-    roots
-        .into_iter()
-        .filter(|t| (0.0..=1.0).contains(t))
-        .map(|t| {
+    roots.map(|t| {
+        (0.0..=1.0).contains(&t).then(|| {
             let u = 1.0 - t;
             u.powi(3) * p0 + 3.0 * u.powi(2) * t * p1 + 3.0 * u * t.powi(2) * p2 + t.powi(3) * p3
         })
-        .collect()
+    })
 }
 
 // --- Arrowheads (getArrowheadShapes) ----------------------------------------

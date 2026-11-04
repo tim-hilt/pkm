@@ -10,9 +10,10 @@ use crate::rough::{Drawing, Fill, FillOps, Hatch, Op, Pattern, Sketcher, Style};
 use crate::scene::{Element, ElementType, FillPattern, LineStyle, Roundness};
 
 /// Adds the fill and the strokes of `element` to `geometry`. `background` is
-/// the colour of the Canvas, which some arrowheads are filled with. Returns
-/// `false`, adding nothing, for Element types that have no generator yet.
-pub(crate) fn draw(element: &Element, background: &str, geometry: &mut Geometry) -> bool {
+/// the colour of the Canvas, which some arrowheads are filled with. Adds
+/// nothing for Elements that are not drawn as rough.js or perfect-freehand
+/// shapes (text, images, and types the app does not support).
+pub(crate) fn draw(element: &Element, background: &str, geometry: &mut Geometry) {
     match element.kind() {
         ElementType::Rectangle | ElementType::Diamond | ElementType::Ellipse => {
             draw_closed(element, geometry);
@@ -21,9 +22,8 @@ pub(crate) fn draw(element: &Element, background: &str, geometry: &mut Geometry)
             linear::draw(element, parse_color(background), geometry);
         }
         ElementType::Freedraw => freedraw::draw(element, geometry),
-        _ => return false,
+        _ => {}
     }
-    true
 }
 
 fn draw_closed(element: &Element, geometry: &mut Geometry) {
@@ -220,7 +220,8 @@ fn is_path_shape(element: &Element) -> bool {
 fn adjusted_roughness(element: &Element, (width, height): (f64, f64)) -> f64 {
     let roughness = element.roughness();
     let (max_size, min_size) = (width.max(height), width.min(height));
-    let can_round = is_path_shape(element);
+    // Excalidraw's `canChangeRoundness`: lines too, but not arrows.
+    let can_round = is_path_shape(element) || element.kind() == ElementType::Line;
 
     if (min_size >= 20.0 && max_size >= 50.0)
         || (min_size >= 15.0 && element.roundness().is_some() && can_round)

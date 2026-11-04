@@ -8,58 +8,9 @@
 
 mod common;
 
-use common::{
-    Fixture, Shape, assert_part_matches_set, editor_with_element, editor_with_fixture, ops,
-    parts_of, text,
-};
+use common::{assert_rough_elements_match_golden, editor_with_element, ops, text};
 use workingtitle_core::json::Value;
 use workingtitle_core::{PartKind, Verb};
-
-/// Checks every Element of fixture `name` that `keep` accepts against
-/// rough.js: one part per op set of every drawable, in order. Returns how many
-/// Elements were checked.
-fn assert_elements_match_golden(name: &str, keep: impl Fn(&Value) -> bool) -> usize {
-    let editor = editor_with_fixture(name);
-    let fixture = Fixture::load(name);
-    let geometry = editor.geometry();
-    let mut checked = 0;
-
-    for (handle, element) in fixture.elements().iter().enumerate() {
-        if !keep(element) {
-            continue;
-        }
-        let id = text(element, "id");
-        let position = (
-            element.get("x").and_then(Value::as_f64).unwrap(),
-            element.get("y").and_then(Value::as_f64).unwrap(),
-        );
-        let drawables: Vec<_> = fixture
-            .shapes(id)
-            .into_iter()
-            .map(|shape| match shape {
-                Shape::Rough {
-                    shape,
-                    options,
-                    sets,
-                } => (shape, options, sets),
-                Shape::Outline(_) => panic!("{id}: lines have no freedraw outline"),
-            })
-            .collect();
-
-        let parts = parts_of(&geometry, handle);
-        let set_count: usize = drawables.iter().map(|(_, _, sets)| sets.len()).sum();
-        assert_eq!(parts.len(), set_count, "{id}: one part per op set");
-        let mut parts = parts.iter();
-        for (shape, options, sets) in &drawables {
-            for set in sets {
-                let part = parts.next().unwrap();
-                assert_part_matches_set(&geometry, part, set, (shape, options), position, id);
-            }
-        }
-        checked += 1;
-    }
-    checked
-}
 
 fn is_a(kind: &'static str) -> impl Fn(&Value) -> bool {
     move |element| text(element, "type") == kind
@@ -69,21 +20,21 @@ fn is_a(kind: &'static str) -> impl Fn(&Value) -> bool {
 
 #[test]
 fn lines_match_the_golden_output_straight_multi_point_curved_and_closed() {
-    let checked = assert_elements_match_golden("lines-arrows", is_a("line"));
+    let checked = assert_rough_elements_match_golden("lines-arrows", is_a("line"));
 
     assert!(checked >= 12, "only {checked} lines checked");
 }
 
 #[test]
 fn arrows_match_the_golden_output_with_every_arrowhead_at_either_end() {
-    let checked = assert_elements_match_golden("lines-arrows", is_a("arrow"));
+    let checked = assert_rough_elements_match_golden("lines-arrows", is_a("arrow"));
 
     assert!(checked >= 45, "only {checked} arrows checked");
 }
 
 #[test]
 fn arrowheads_shrink_and_keep_clear_of_a_turn_on_a_short_last_segment() {
-    let checked = assert_elements_match_golden("arrowhead-turns", is_a("arrow"));
+    let checked = assert_rough_elements_match_golden("arrowhead-turns", is_a("arrow"));
 
     assert_eq!(checked, 42);
 }

@@ -10,119 +10,18 @@ mod common;
 
 use std::f64::consts::FRAC_PI_2;
 
-use common::{Fixture, Op, Shape, editor_with_element, editor_with_fixture, ops};
-use workingtitle_core::json::Value;
-use workingtitle_core::{Editor, Geometry, Part, PartKind, Verb};
-
-/// Largest allowed difference between a coordinate and rough.js' double. The
-/// geometry is `f32`, whose resolution at the fixtures' coordinates is ~1e-4.
-const TOLERANCE: f64 = 1e-3;
-
-/// The stroke parts drawn for the Element with `handle`.
-fn strokes(geometry: &Geometry, handle: usize) -> Vec<Part> {
-    geometry
-        .parts()
-        .iter()
-        .copied()
-        .filter(|p| p.element as usize == handle && p.kind == PartKind::Stroke as u32)
-        .collect()
-}
-
-fn golden_to_verb(op: &Op) -> (Verb, Vec<f64>) {
-    match *op {
-        Op::Move(p) => (Verb::Move, p.to_vec()),
-        Op::LineTo(p) => (Verb::Line, p.to_vec()),
-        Op::BCurveTo(p) => (Verb::Cubic, p.to_vec()),
-    }
-}
-
-fn num(element: &Value, key: &str) -> f64 {
-    element.get(key).and_then(Value::as_f64).unwrap()
-}
-
-fn text<'a>(value: &'a Value, key: &str) -> &'a str {
-    value.get(key).and_then(Value::as_str).unwrap()
-}
-
-/// Checks every rectangle, diamond and ellipse of a fixture against rough.js:
-/// the same ops (the stroke sets, shifted from the Element's frame to the
-/// Scene) and the stroke width and dash rough.js was given.
-fn assert_strokes_match_golden(name: &str) {
-    let editor = editor_with_fixture(name);
-    let fixture = Fixture::load(name);
-    let geometry = editor.geometry();
-    let mut checked = 0;
-
-    for (handle, element) in fixture.elements().iter().enumerate() {
-        if !matches!(text(element, "type"), "rectangle" | "diamond" | "ellipse") {
-            continue;
-        }
-        let id = text(element, "id");
-        let (x, y) = (num(element, "x"), num(element, "y"));
-
-        let mut expected_ops = Vec::new();
-        let mut options = None;
-        for shape in fixture.shapes(id) {
-            let Shape::Rough {
-                options: shape_options,
-                sets,
-                ..
-            } = shape
-            else {
-                panic!("{id}: closed shapes are rough shapes")
-            };
-            options = Some(shape_options);
-            for set in sets.iter().filter(|set| set.kind == "path") {
-                expected_ops.extend(set.ops.iter().map(golden_to_verb));
-            }
-        }
-        let options = options.unwrap();
-
-        let parts = strokes(&geometry, handle);
-        let [part] = parts.as_slice() else {
-            panic!("{id}: one stroke part, got {}", parts.len())
-        };
-        let actual = ops(&geometry, part);
-
-        assert_eq!(
-            actual.iter().map(|(verb, _)| *verb).collect::<Vec<_>>(),
-            expected_ops
-                .iter()
-                .map(|(verb, _)| *verb)
-                .collect::<Vec<_>>(),
-            "{id}: verbs"
-        );
-        for (i, ((_, got), (_, want))) in actual.iter().zip(&expected_ops).enumerate() {
-            for (k, (g, w)) in got.iter().zip(want).enumerate() {
-                let w = w + if k % 2 == 0 { x } else { y };
-                assert!(
-                    (f64::from(*g) - w).abs() < TOLERANCE,
-                    "{id}: op {i} operand {k}: {g} vs {w}"
-                );
-            }
-        }
-
-        assert_eq!(f64::from(part.width), num(&options, "strokeWidth"), "{id}");
-        let dash = options
-            .get("strokeLineDash")
-            .and_then(Value::as_array)
-            .map(|d| (d[0].as_f64().unwrap(), d[1].as_f64().unwrap()))
-            .unwrap_or((0.0, 0.0));
-        assert_eq!(
-            (f64::from(part.dash_on), f64::from(part.dash_off)),
-            dash,
-            "{id}: dash"
-        );
-        checked += 1;
-    }
-    assert!(checked > 0, "{name} has closed shapes");
-}
+use common::{Fixture, assert_rough_elements_match_golden, editor_with_element, ops};
+use workingtitle_core::{Editor, Geometry, Part, Verb};
 
 // --- Parity with rough.js ---------------------------------------------------
 
 #[test]
 fn shapes_match_the_golden_output_for_every_roughness_stroke_style_and_roundness() {
-    assert_strokes_match_golden("shapes");
+    let checked = assert_rough_elements_match_golden("shapes", |_| true);
+
+    // Every type x roughness x stroke style x roundness, small and big ones.
+    assert_eq!(checked, Fixture::load("shapes").elements().len());
+    assert!(checked >= 51, "only {checked} elements checked");
 }
 
 #[test]
@@ -252,19 +151,6 @@ fn a_rotated_element_turns_about_its_centre() {
     let (verb, first) = &ops(&geometry, &part)[0];
     assert_eq!(*verb, Verb::Move);
     assert!((first[0] - 80.0).abs() < 1e-3 && (first[1] + 20.0).abs() < 1e-3);
-}
-
-#[test]
-fn other_element_types_keep_their_placeholder_box_until_their_generators_land() {
-    let editor =
-        editor_with_element(r#""id":"a","type":"line","x":10,"y":20,"width":30,"height":40"#);
-    let (geometry, part) = only_stroke(&editor);
-
-    assert_eq!(
-        ops(&geometry, &part)[0],
-        (Verb::Move, vec![10.0, 20.0]),
-        "box corner"
-    );
 }
 
 // --- Client caching ---------------------------------------------------------

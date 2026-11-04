@@ -9,50 +9,14 @@
 
 mod common;
 
-use common::{
-    Fixture, Shape, assert_part_matches_set, editor_with_element, editor_with_fixture, num, ops,
-    parts_of, text,
-};
+use common::{assert_rough_elements_match_golden, editor_with_element, ops};
 use workingtitle_core::{Geometry, PartKind, Verb};
-
-/// Checks every Element of the `fills` fixture against rough.js: one part per
-/// op set, in rough.js' order. Returns how many Elements were checked.
-fn assert_fills_match_golden() -> usize {
-    let editor = editor_with_fixture("fills");
-    let fixture = Fixture::load("fills");
-    let geometry = editor.geometry();
-    let mut checked = 0;
-
-    for (handle, element) in fixture.elements().iter().enumerate() {
-        let id = text(element, "id");
-        let position = (num(element, "x"), num(element, "y"));
-        let shapes = fixture.shapes(id);
-        let [
-            Shape::Rough {
-                shape,
-                options,
-                sets,
-            },
-        ] = shapes.as_slice()
-        else {
-            panic!("{id}: closed shapes are one rough shape")
-        };
-
-        let parts = parts_of(&geometry, handle);
-        assert_eq!(parts.len(), sets.len(), "{id}: one part per op set");
-        for (part, set) in parts.iter().zip(sets) {
-            assert_part_matches_set(&geometry, part, set, (shape, options), position, id);
-        }
-        checked += 1;
-    }
-    checked
-}
 
 // --- Parity with rough.js ---------------------------------------------------
 
 #[test]
 fn every_fill_style_matches_the_golden_output_for_every_shape_roughness_and_stroke_width() {
-    let checked = assert_fills_match_golden();
+    let checked = assert_rough_elements_match_golden("fills", |_| true);
     // 3 shapes x 4 fill styles x 3 roughnesses, rounded shapes, stroke widths.
     assert!(checked >= 44, "only {checked} elements checked");
 }

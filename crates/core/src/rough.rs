@@ -190,15 +190,7 @@ impl Sketcher {
                 Fill::Solid => {
                     // One continuous, rougher stroke; the sequence goes on
                     // where the outline's first stroke left it.
-                    let style = Style {
-                        roughness: if roughness == 0.0 {
-                            0.0
-                        } else {
-                            roughness + FILL_SHAPE_ROUGHNESS_GAIN
-                        },
-                        multi_stroke: false,
-                        ..self.style
-                    };
+                    let style = self.fill_shape_style();
                     let ops = self.with_style(style, |this| {
                         this.curve_stroke(points, 1.0 + style.roughness * 0.2)
                     });
@@ -322,16 +314,7 @@ impl Sketcher {
             match fill {
                 Fill::Solid if polygons.len() == 1 => {
                     // Sketched once and as one continuous path, a bit rougher.
-                    let roughness = self.style.roughness;
-                    let style = Style {
-                        roughness: if roughness == 0.0 {
-                            0.0
-                        } else {
-                            roughness + FILL_SHAPE_ROUGHNESS_GAIN
-                        },
-                        multi_stroke: false,
-                        ..self.style
-                    };
+                    let style = self.fill_shape_style();
                     let ops = self.with_style(style, |this| this.path_ops(&segments));
                     FillOps::Area(join_pieces(ops))
                 }
@@ -362,6 +345,22 @@ impl Sketcher {
             }
         }
         ops
+    }
+
+    /// The style of the single stroke that a solid fill of a curve or path
+    /// is sketched as: rougher than the outline, and drawn once (rough.js
+    /// `fillShapeRoughnessGain`).
+    fn fill_shape_style(&self) -> Style {
+        let roughness = self.style.roughness;
+        Style {
+            roughness: if roughness == 0.0 {
+                0.0
+            } else {
+                roughness + FILL_SHAPE_ROUGHNESS_GAIN
+            },
+            multi_stroke: false,
+            ..self.style
+        }
     }
 
     /// Runs `draw` with `style` instead of the sketcher's own.
@@ -619,7 +618,7 @@ pub(crate) fn join_pieces(mut ops: Vec<Op>) -> Vec<Op> {
 /// (rough.js `_curve`, a Catmull-Rom spline). The first and last points only
 /// shape the ends and are not on the curve.
 fn curve(points: &[Point]) -> Vec<Op> {
-    debug_assert!(points.len() > 3, "an ellipse always has enough points");
+    debug_assert!(points.len() > 3, "callers pass at least four points");
     let mut ops = vec![Op::Move(points[1])];
     for i in 1..points.len() - 2 {
         let (before, here, next, after) = (points[i - 1], points[i], points[i + 1], points[i + 2]);

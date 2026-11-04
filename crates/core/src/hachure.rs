@@ -114,17 +114,12 @@ fn edge_table(polygons: &[Vec<Point>]) -> Vec<Edge> {
         {
             continue;
         }
-        let mut vertices = polygon.clone();
-        if let (Some(&first), Some(&last)) = (vertices.first(), vertices.last())
-            && first != last
-        {
-            vertices.push(first);
-        }
-        if vertices.len() <= 2 {
-            continue;
-        }
-        for pair in vertices.windows(2) {
-            let (p1, p2) = (pair[0], pair[1]);
+        // Each edge, and the one closing the polygon. hachure-fill skips
+        // polygons of fewer than three points once closed, but those have
+        // only level edges, which yield nothing anyway.
+        let closing = polygon.last().zip(polygon.first());
+        let edges_of = polygon.windows(2).map(|pair| (pair[0], pair[1]));
+        for (p1, p2) in edges_of.chain(closing.map(|(&last, &first)| (last, first))) {
             if p1.1 != p2.1 {
                 let y_min = p1.1.min(p2.1);
                 edges.push(Edge {

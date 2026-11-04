@@ -209,21 +209,18 @@ pub(crate) fn place(
 /// `placed` unless a number in it is not one (an arrow with no length has no
 /// direction to put a head on).
 fn finite(placed: Placed) -> Option<Placed> {
-    let numbers: Vec<f64> = match placed {
-        Placed::Circle { centre, diameter } => vec![centre.0, centre.1, diameter],
-        Placed::Wedge { tip, left, right } => {
-            vec![tip.0, tip.1, left.0, left.1, right.0, right.1]
-        }
+    let point = |(x, y): Point| x.is_finite() && y.is_finite();
+    let ok = match placed {
+        Placed::Circle { centre, diameter } => point(centre) && diameter.is_finite(),
+        Placed::Wedge { tip, left, right } => point(tip) && point(left) && point(right),
         Placed::Diamond {
             tip,
             left,
             back,
             right,
-        } => vec![
-            tip.0, tip.1, left.0, left.1, back.0, back.1, right.0, right.1,
-        ],
+        } => point(tip) && point(left) && point(back) && point(right),
     };
-    numbers.iter().all(|n| n.is_finite()).then_some(placed)
+    ok.then_some(placed)
 }
 
 /// The cubic that ends the sketched stroke at `end` (or the first one, at the
