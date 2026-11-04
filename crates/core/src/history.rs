@@ -87,7 +87,7 @@ impl Step {
         }
         for (id, before) in self.before {
             match before {
-                Some(before) => scene.restore(before, entropy.integer()),
+                Some(before) => scene.put(before, entropy.integer()),
                 None => scene.mark_deleted(&id, entropy.integer()),
             }
         }
@@ -208,7 +208,7 @@ impl History {
         let entry = self.undo.pop()?;
         for change in &entry.changes {
             match &change.before {
-                Some(before) => scene.restore(before.clone(), entropy.integer()),
+                Some(before) => scene.put(before.clone(), entropy.integer()),
                 None => scene.mark_deleted(&change.id, entropy.integer()),
             }
         }
@@ -225,7 +225,7 @@ impl History {
     pub fn redo(&mut self, scene: &mut Scene, entropy: &mut Entropy) -> Option<Selection> {
         let entry = self.redo.pop()?;
         for change in &entry.changes {
-            scene.restore(change.after.clone(), entropy.integer());
+            scene.put(change.after.clone(), entropy.integer());
         }
         if let Some((_, after)) = &entry.order {
             scene.arrange(after);

@@ -504,9 +504,9 @@ fn write_value(out: &mut String, value: &Value, indent: Option<&str>, level: usi
 }
 
 fn write_object(out: &mut String, object: &Object, indent: Option<&str>, level: usize) {
-    let members: Vec<_> = object.iter().collect();
+    let members = &object.members;
     write_container(out, '{', '}', members.len(), indent, level, |out, i| {
-        let (key, member) = members[i];
+        let (key, member) = &members[i];
         write_string(out, key);
         out.push(':');
         if indent.is_some() {

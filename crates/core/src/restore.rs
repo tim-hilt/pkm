@@ -1,18 +1,64 @@
-//! Excalidraw's defaults for fields a file leaves out.
+//! Excalidraw's repairs of the Elements of a file that is opened.
 //!
-//! Mirrors `restoreElement` in Excalidraw's `data/restore.ts` at the pinned
-//! commit (`8bcdca4`), for the Element types the core understands. A field is
-//! only added when the Element has no such member at all; present values, even
-//! odd ones (`"opacity": 0`, `"boundElements": null`), are left alone so that
-//! files written by excalidraw.com come back unchanged.
+//! Mirrors `restoreElements` and `restoreElement` in Excalidraw's
+//! `data/restore.ts` at the pinned commit (`8bcdca4`), for the Element types
+//! the core understands; Elements of other types are kept as they are. A
+//! field is only added when the Element has no such member at all; present
+//! values, even odd ones (`"opacity": 0`, `"boundElements": null`), are left
+//! alone so that files written by excalidraw.com come back unchanged. The
+//! readers in [`crate::scene::Element`] cope with invalid values instead.
 //!
-//! Not restored, because the core has no use for it yet or cannot do it:
-//! `id` (Excalidraw invents a random one) and `updated` (the current time),
-//! legacy-property migrations (`strokeSharpness`, `font`, `boundElementIds`),
-//! repairs of invalid values and binding repair.
+//! Not restored: `updated` (the current time; nothing in the core reads it),
+//! legacy-property migrations (`strokeSharpness`, `font`, `boundElementIds`;
+//! files that old are drawn with the defaults instead, see issue 54),
+//! repairs of invalid values and binding repair (the core tolerates bindings
+//! to Elements that are not there).
+
+use std::collections::HashSet;
 
 use crate::json::{self, Object, Value};
-use crate::scene::ElementType;
+use crate::linear;
+use crate::random::Entropy;
+use crate::scene::{Element, ElementType};
+
+/// Excalidraw's `MAX_LINEAR_PX`: lines and arrows wider or taller than this
+/// would freeze the editor (a dashed one is millions of dashes), so they are
+/// deleted on load.
+const MAX_LINEAR_PX: f64 = 75_000.0;
+
+/// Repairs the Elements of a file that is opened, in file order: every
+/// Element of a known type gets Excalidraw's defaults for its missing fields
+/// (see [`fill_missing`]), an id of its own if its id is missing, empty, not
+/// a string or that of an earlier Element, and is deleted if it is a line too
+/// large to draw. Elements of other types are not touched, but their ids
+/// count as taken.
+pub(crate) fn restore_elements(elements: &mut [Value], entropy: &mut Entropy) {
+    let mut taken = HashSet::new();
+    for element in elements.iter_mut().filter_map(Value::as_object_mut) {
+        let id = element
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let kind = element
+            .get("type")
+            .and_then(Value::as_str)
+            .and_then(ElementType::from_name);
+        let Some(kind) = kind else {
+            taken.insert(id.to_owned());
+            continue;
+        };
+        if id.is_empty() || !taken.insert(id.to_owned()) {
+            // A new id could clash with a later one only by a 126-bit chance.
+            let id = entropy.id();
+            taken.insert(id.clone());
+            element.insert("id".into(), Value::String(id));
+        }
+        fill_missing(element, kind);
+        if kind.is_linear() {
+            delete_if_oversized(element);
+        }
+    }
+}
 
 /// Members every Element has, in Excalidraw's order, as JSON text.
 const COMMON: &[(&str, &str)] = &[
@@ -187,6 +233,28 @@ fn fill_linear(element: &mut Object, kind: ElementType) {
     );
     if kind == ElementType::Line {
         fill(element, &[("polygon", "false")]);
+    }
+}
+
+/// Excalidraw's `handleOversizedLinearElements` for a line or arrow, whose
+/// size is that of its points.
+fn delete_if_oversized(element: &mut Object) {
+    let Some(points) = Element::view(0, element).map(|line| line.points()) else {
+        return;
+    };
+    let (width, height) = linear::extent(&points);
+    if width <= MAX_LINEAR_PX && height <= MAX_LINEAR_PX {
+        return;
+    }
+    for (key, value) in [
+        ("x", "0"),
+        ("y", "0"),
+        ("width", "100"),
+        ("height", "100"),
+        ("points", "[[0,0],[100,100]]"),
+        ("isDeleted", "true"),
+    ] {
+        element.insert(key.into(), json::parse(value).expect("valid JSON"));
     }
 }
 

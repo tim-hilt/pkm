@@ -151,8 +151,12 @@ fn sketched_outline(element: &Element) -> Vec<Op> {
     sketch(element, &element.points()).drawing.outline
 }
 
-/// Width and height of the box around `points`.
-fn extent(points: &[Point]) -> (f64, f64) {
+/// Width and height of the box around `points`, `(0, 0)` for none: what
+/// Excalidraw's `getSizeFromPoints` makes the size of a line or arrow.
+pub(crate) fn extent(points: &[Point]) -> (f64, f64) {
+    if points.is_empty() {
+        return (0.0, 0.0);
+    }
     let (mut min, mut max) = (
         (f64::INFINITY, f64::INFINITY),
         (f64::NEG_INFINITY, f64::NEG_INFINITY),

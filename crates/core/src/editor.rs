@@ -209,7 +209,7 @@ impl Editor {
     /// Replaces the Scene with the Drawing in `bytes`, the content of a
     /// `.excalidraw` file. If the bytes are not a Drawing the Scene is kept.
     pub fn load(&mut self, bytes: &[u8]) -> Result<(), LoadError> {
-        self.scene = Scene::from_bytes(bytes)?;
+        self.scene = Scene::from_bytes(bytes, &mut self.entropy)?;
         if self.selection.clear() {
             self.overlay_revision += 1;
         }

@@ -5,9 +5,11 @@
 //! read through typed views ([`Element`]); everything the core does not
 //! interpret (unknown Element types and properties, the `files` map, other
 //! top-level members) is simply never touched, so it is written back
-//! verbatim and in its original order. The only changes made on load are the
-//! defaults for missing fields (see [`crate::restore`]), so files written by
-//! excalidraw.com round-trip byte for byte.
+//! verbatim and in its original order. The only changes made on load are
+//! the repairs Excalidraw makes too (see [`crate::restore`]): defaults for
+//! missing fields, ids for Elements without one of their own, and deleting
+//! lines too large to draw. Files written by excalidraw.com need none of
+//! them, so they round-trip byte for byte.
 //!
 //! Saving always uses excalidraw.com's own layout: `JSON.stringify(data, null,
 //! 2)` without a trailing newline.
@@ -18,6 +20,8 @@ use std::str::Utf8Error;
 use crate::base64;
 use crate::geometry::{ImageStatus, TextAlign};
 use crate::json::{self, Object, ParseError, Value};
+use crate::linear;
+use crate::random::Entropy;
 use crate::restore;
 
 /// The kinds of Element the core understands. Elements of any other type
@@ -194,9 +198,10 @@ impl Scene {
         Scene { root }
     }
 
-    /// Reads the bytes of a `.excalidraw` file, giving every Element of a
-    /// known type Excalidraw's defaults for its missing fields.
-    pub fn from_bytes(bytes: &[u8]) -> Result<Scene, LoadError> {
+    /// Reads the bytes of a `.excalidraw` file, repairing its Elements as
+    /// Excalidraw does (see [`restore::restore_elements`]); `entropy` makes
+    /// the ids of Elements that need new ones.
+    pub(crate) fn from_bytes(bytes: &[u8], entropy: &mut Entropy) -> Result<Scene, LoadError> {
         let text = std::str::from_utf8(bytes).map_err(LoadError::NotText)?;
         let Value::Object(mut root) = json::parse(text).map_err(LoadError::InvalidJson)? else {
             return Err(not_a_drawing("the document is not an object"));
@@ -210,14 +215,10 @@ impl Scene {
         let Some(elements) = root.get_mut("elements").and_then(Value::as_array_mut) else {
             return Err(not_a_drawing("`elements` is not an array"));
         };
-        for (index, element) in elements.iter_mut().enumerate() {
-            let Some(element) = element.as_object_mut() else {
-                return Err(not_a_drawing(&format!("element {index} is not an object")));
-            };
-            if let Some(kind) = type_of(element) {
-                restore::fill_missing(element, kind);
-            }
+        if let Some(index) = elements.iter().position(|e| e.as_object().is_none()) {
+            return Err(not_a_drawing(&format!("element {index} is not an object")));
         }
+        restore::restore_elements(elements, entropy);
         Ok(Scene { root })
     }
 
@@ -423,7 +424,7 @@ impl Scene {
     /// Makes the Element `element` the one of its `id`, in the place of the
     /// current one (or on top if there is none), as a new version of it, see
     /// [`Scene::revise`].
-    pub(crate) fn restore(&mut self, mut element: Object, nonce: f64) {
+    pub(crate) fn put(&mut self, mut element: Object, nonce: f64) {
         let Some(id) = element.get("id").and_then(Value::as_str).map(str::to_owned) else {
             return;
         };
@@ -447,7 +448,7 @@ impl Scene {
     pub(crate) fn mark_deleted(&mut self, id: &str, nonce: f64) {
         if let Some(mut element) = self.snapshot(id) {
             element.insert("isDeleted".into(), Value::Bool(true));
-            self.restore(element, nonce);
+            self.put(element, nonce);
         }
     }
 
@@ -496,14 +497,7 @@ impl Scene {
         points: &[(f64, f64)],
         nonce: f64,
     ) {
-        let extent = |axis: fn(&(f64, f64)) -> f64| {
-            let values = points.iter().map(axis);
-            let max = values.clone().fold(f64::NEG_INFINITY, f64::max);
-            let min = values.fold(f64::INFINITY, f64::min);
-            if points.is_empty() { 0.0 } else { max - min }
-        };
-        let width = extent(|p| p.0);
-        let height = extent(|p| p.1);
+        let (width, height) = linear::extent(points);
         let points = points
             .iter()
             .map(|&(px, py)| Value::Array(vec![Value::Number(px), Value::Number(py)]))

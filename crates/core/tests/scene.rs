@@ -292,6 +292,67 @@ fn freedraw_and_image_defaults() {
     assert_eq!(json_of(&element, "crop"), "null");
 }
 
+// --- Repairs Excalidraw makes on load --------------------------------------
+
+#[test]
+fn elements_without_an_id_of_their_own_get_a_new_one() {
+    // Excalidraw's `restoreElements` gives a random id to an Element whose id
+    // is missing, empty or already taken; the core finds Elements by id.
+    let editor = editor_with(
+        r#"{"type":"excalidraw","version":2,"elements":[
+            {"id":"u","type":"futuristic-widget"},
+            {"id":"a","type":"rectangle","width":1,"height":1},
+            {"id":"a","type":"ellipse","width":1,"height":1},
+            {"type":"diamond","width":1,"height":1},
+            {"id":"","type":"diamond","width":1,"height":1},
+            {"id":7,"type":"diamond","width":1,"height":1},
+            {"id":"u","type":"diamond","width":1,"height":1},
+            {"id":"a","type":"futuristic-widget"}
+        ]}"#,
+    );
+
+    let ids: Vec<String> = (0..8)
+        .map(|index| match member(&saved_element(&editor, index), "id") {
+            Value::String(id) => id.clone(),
+            other => panic!("element {index} has id {other:?}"),
+        })
+        .collect();
+    assert_eq!([&ids[0], &ids[1], &ids[7]], ["u", "a", "a"], "kept");
+    let new = &ids[2..7];
+    for id in new {
+        assert_eq!(id.len(), 21, "Excalidraw's id length: {id:?}");
+    }
+    let unique: std::collections::HashSet<_> = ids[..7].iter().collect();
+    assert_eq!(unique.len(), 7, "{ids:?}");
+}
+
+#[test]
+fn a_line_too_large_to_draw_is_deleted_as_excalidraw_does() {
+    // Excalidraw's `handleOversizedLinearElements`: more than 75,000 px.
+    let editor = editor_with(
+        r#"{"type":"excalidraw","version":2,"elements":[
+            {"id":"l","type":"line","x":5,"y":6,"width":1,"height":1,"points":[[0,0],[75001,0]]},
+            {"id":"r","type":"arrow","x":5,"y":6,"width":0,"height":80000},
+            {"id":"k","type":"arrow","x":5,"y":6,"points":[[0,0],[75000,-75000]]}
+        ]}"#,
+    );
+
+    for index in [0, 1] {
+        let element = saved_element(&editor, index);
+        assert_eq!(json_of(&element, "isDeleted"), "true", "{index}");
+        for (key, expected) in [("x", "0"), ("y", "0"), ("width", "100"), ("height", "100")] {
+            assert_eq!(json_of(&element, key), expected, "{index}.{key}");
+        }
+        assert_eq!(json_of(&element, "points"), "[[0,0],[100,100]]", "{index}");
+    }
+    assert_eq!(
+        json_of(&saved_element(&editor, 2), "isDeleted"),
+        "false",
+        "75,000 px is still drawn"
+    );
+    assert_eq!(editor.element_count(), 1);
+}
+
 // --- Deleted Elements -----------------------------------------------------
 
 const WITH_DELETED: &str = r#"{"type":"excalidraw","version":2,"elements":[
