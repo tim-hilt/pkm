@@ -75,6 +75,29 @@ fn solid_strokes_use_the_elements_width_and_colour() {
 }
 
 #[test]
+fn css_colour_names_and_functions_draw_in_that_colour() {
+    // Values from tinycolor2 1.6.0 (`toHex8`), the reader of Excalidraw's colour input.
+    let editor = editor_with_element(
+        r#""id":"a","type":"rectangle","width":100,"height":60,"strokeColor":"rebeccapurple","backgroundColor":"rgb(255, 0, 0)","fillStyle":"solid""#,
+    );
+    let geometry = editor.geometry();
+    let colours: Vec<u32> = geometry.parts().iter().map(|part| part.color).collect();
+
+    assert!(colours.contains(&0x6633_99ff), "stroke: {colours:x?}");
+    assert!(colours.contains(&0xff00_00ff), "fill: {colours:x?}");
+}
+
+#[test]
+fn an_unknown_colour_string_draws_in_the_default_ink() {
+    let editor = editor_with_element(
+        r#""id":"a","type":"rectangle","width":100,"height":60,"strokeColor":"not a colour""#,
+    );
+    let (_, part) = only_stroke(&editor);
+
+    assert_eq!(part.color, 0x1e1e_1eff);
+}
+
+#[test]
 fn dashed_strokes_are_slightly_wider_with_8_on_and_8_plus_width_off() {
     // shape.ts: dash [8, 8 + strokeWidth], strokeWidth + 0.5.
     let editor = editor_with_element(

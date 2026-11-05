@@ -7,13 +7,13 @@
 //! route them).
 
 use crate::arrowhead::{self, Arrow, End, Placed};
+use crate::color::parse_color;
 use crate::geometry::{Dash, FillRule, Geometry, StrokeStyle};
 use crate::path::{Point, is_loop};
 use crate::rough::{Drawing, FillOps, Op, Sketcher, Style};
 use crate::scene::{Arrowhead, Element, ElementType, LineStyle};
 use crate::shape::{
-    Paint, Placement, Target, dash_of, emit, fill_of, fill_weight, parse_color, stroke_width,
-    style_of,
+    Paint, Placement, Target, dash_of, emit, fill_of, fill_weight, stroke_width, style_of,
 };
 
 /// Adds the strokes of the line or arrow `element` to `geometry`.

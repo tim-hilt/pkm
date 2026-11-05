@@ -17,6 +17,7 @@
 use std::collections::HashMap;
 use std::f64::consts::TAU;
 
+use crate::color::parse_color;
 use crate::frame::Frame;
 use crate::freedraw;
 use crate::input::PointerKind;
@@ -25,7 +26,7 @@ use crate::path::{Point, Segment, is_loop, to_cubics};
 use crate::rough::Op;
 use crate::scene::{Element, ElementType, Scene};
 use crate::selection::Selection;
-use crate::shape::{diamond_corners, parse_color, rounded_diamond, rounded_rectangle};
+use crate::shape::{diamond_corners, rounded_diamond, rounded_rectangle};
 use crate::text;
 
 /// Excalidraw's `DEFAULT_COLLISION_THRESHOLD` (8, less an epsilon) times the

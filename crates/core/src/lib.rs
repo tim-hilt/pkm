@@ -8,6 +8,7 @@ mod base64;
 mod binding;
 mod box_select;
 mod clipboard;
+mod color;
 mod delete;
 mod draw_freedraw;
 mod draw_linear;

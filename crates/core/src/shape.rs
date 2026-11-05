@@ -2,6 +2,7 @@
 //! as geometry: the Element's style turned into rough.js options, its shape
 //! into a fill and strokes (ADR-0004), placed in the Scene.
 
+use crate::color::parse_color;
 use crate::freedraw;
 use crate::geometry::{Dash, FillRule, FillStyle, Geometry, PartWriter, StrokeStyle};
 use crate::linear;
@@ -394,55 +395,9 @@ fn write(path: &mut PartWriter, op: Op, placement: &Placement) {
     }
 }
 
-// --- Colour --------------------------------------------------------------
-
-/// `0xRRGGBBAA` for a CSS colour. Understands hex notation (3, 4, 6 or 8
-/// digits) and `transparent`; Excalidraw's own palette is hex. Anything else
-/// is drawn in Excalidraw's default ink.
-pub(crate) fn parse_color(css: &str) -> u32 {
-    const DEFAULT: u32 = 0x1e1e_1eff;
-    if css == "transparent" {
-        return 0;
-    }
-    css.strip_prefix('#')
-        .and_then(parse_hex_color)
-        .unwrap_or(DEFAULT)
-}
-
-fn parse_hex_color(hex: &str) -> Option<u32> {
-    let value = u32::from_str_radix(hex, 16).ok()?;
-    Some(match hex.len() {
-        6 => (value << 8) | 0xff,
-        8 => value,
-        // Each digit stands for itself twice: #f80 is #ff8800.
-        3 | 4 => {
-            let expanded = hex
-                .chars()
-                .try_fold(0u32, |acc, c| Some((acc << 8) | (c.to_digit(16)? * 0x11)))?;
-            if hex.len() == 3 {
-                (expanded << 8) | 0xff
-            } else {
-                expanded
-            }
-        }
-        _ => return None,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn colours_are_read_from_css_notation() {
-        assert_eq!(parse_color("#e03131"), 0xe031_31ff);
-        assert_eq!(parse_color("#e0313180"), 0xe031_3180);
-        assert_eq!(parse_color("#f80"), 0xff88_00ff);
-        assert_eq!(parse_color("#f808"), 0xff88_0088);
-        assert_eq!(parse_color("transparent"), 0);
-        assert_eq!(parse_color("not a colour"), 0x1e1e_1eff);
-        assert_eq!(parse_color("#12345"), 0x1e1e_1eff);
-    }
 
     #[test]
     fn adaptive_corners_are_32_but_at_most_a_quarter_of_a_small_side() {

@@ -15,6 +15,7 @@
 //! the arrows bound to it follow.
 
 use crate::binding::Attachments;
+use crate::color::parse_color;
 use crate::draw_shape::new_element;
 use crate::geometry::TextAlign;
 use crate::history::Step;
@@ -23,7 +24,6 @@ use crate::path::Point;
 use crate::properties::{self, Property, align_name};
 use crate::random::Entropy;
 use crate::scene::{Element, Scene};
-use crate::shape::parse_color;
 use crate::style::Style;
 use crate::text::{self, TextMeasurer};
 use crate::viewport::Viewport;

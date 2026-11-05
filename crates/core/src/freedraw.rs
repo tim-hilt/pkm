@@ -7,14 +7,14 @@
 //! Excalidraw draws with its laser pointer geometry) are drawn with variable
 //! width like the others.
 
+use crate::color::parse_color;
 use crate::freehand::{self, Options, Sample};
 use crate::geometry::{FillRule, FillStyle, Geometry, StrokeStyle};
 use crate::path::{Point, Segment, is_loop, simplify, to_cubics};
 use crate::rough::{Op, Sketcher, Style};
 use crate::scene::Element;
 use crate::shape::{
-    Paint, Placement, Target, emit_fill, fill_of, fill_weight, parse_color, stroke_width, style_of,
-    write_ops,
+    Paint, Placement, Target, emit_fill, fill_of, fill_weight, stroke_width, style_of, write_ops,
 };
 
 /// A stroke is this many times as wide as the Element's stroke width at full
