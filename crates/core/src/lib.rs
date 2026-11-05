@@ -31,6 +31,7 @@ mod index_sync;
 pub mod input;
 mod insert_image;
 pub mod json;
+mod laser;
 mod linear;
 mod move_selection;
 mod navigation;

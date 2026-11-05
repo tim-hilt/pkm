@@ -264,3 +264,39 @@ fn a_loop_is_filled_before_its_stroke_is_drawn() {
         ]
     );
 }
+
+// --- Constant width ---------------------------------------------------------
+
+fn is_constant_width(element: &Value) -> bool {
+    element
+        .get("strokeOptions")
+        .and_then(Value::as_object)
+        .and_then(|options| options.get("variability"))
+        .and_then(Value::as_str)
+        == Some("constant")
+}
+
+#[test]
+fn strokes_of_constant_width_match_the_golden_output() {
+    // Straight, wavy, single point, thick, two points and a sharp corner.
+    let checked = assert_strokes_match_golden(is_constant_width);
+
+    assert!(checked >= 6, "only {checked} strokes checked");
+}
+
+/// A horizontal stroke through (10, 20) to (30, 20) of constant width.
+const CONSTANT_STROKE: &str = r#""id":"a","type":"freedraw","x":10,"y":20,"width":20,"height":0,
+    "points":[[0,0],[10,0],[20,0]],"pressures":[],"simulatePressure":true,
+    "strokeOptions":{"variability":"constant","streamline":0.5}"#;
+
+#[test]
+fn a_stroke_of_constant_width_reaches_one_and_four_tenths_of_its_stroke_width() {
+    let editor = editor_with_element(&format!(r#"{CONSTANT_STROKE},"strokeWidth":4"#));
+
+    let reach = outline_coords(&editor)
+        .chunks(2)
+        .map(|p| (f64::from(p[1]) - 20.0).abs())
+        .fold(0.0, f64::max);
+
+    assert!((reach - 5.6).abs() < 1e-2, "reach {reach}");
+}

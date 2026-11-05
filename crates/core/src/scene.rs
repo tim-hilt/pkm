@@ -863,6 +863,17 @@ impl Element<'_> {
             .unwrap_or(false)
     }
 
+    /// Whether a freedraw stroke is drawn with the same width all along
+    /// (`strokeOptions.variability` is `"constant"`) rather than by pressure.
+    pub(crate) fn has_constant_width(&self) -> bool {
+        self.object
+            .get("strokeOptions")
+            .and_then(Value::as_object)
+            .and_then(|options| options.get("variability"))
+            .and_then(Value::as_str)
+            == Some("constant")
+    }
+
     /// How much a freedraw stroke smooths out the movement of the pointer,
     /// `0.0..=1.0`; Excalidraw's `0.5` if the file has no usable value.
     pub(crate) fn streamline(&self) -> f64 {

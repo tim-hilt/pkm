@@ -3,13 +3,13 @@
 //! the stroke colour, and for a closed stroke a sketched fill of its
 //! background (ADR-0004).
 //!
-//! Strokes of constant width (`strokeOptions.variability` `"constant"`, which
-//! Excalidraw draws with its laser pointer geometry) are drawn with variable
-//! width like the others.
+//! Strokes of constant width (`strokeOptions.variability` `"constant"`) are
+//! outlined with Excalidraw's laser pointer geometry instead (`laser.rs`).
 
 use crate::color::parse_color;
 use crate::freehand::{self, Options, Sample};
 use crate::geometry::{FillRule, FillStyle, Geometry, StrokeStyle};
+use crate::laser;
 use crate::path::{Point, Segment, is_loop, simplify, to_cubics};
 use crate::rough::{Op, Sketcher, Style};
 use crate::scene::Element;
@@ -20,6 +20,8 @@ use crate::shape::{
 /// A stroke is this many times as wide as the Element's stroke width at full
 /// pressure. Tuned by eye in Excalidraw.
 const SIZE_FACTOR: f64 = 4.25;
+/// The same for a stroke of constant width.
+const CONSTANT_SIZE_FACTOR: f64 = 1.4;
 const THINNING: f64 = 0.6;
 const SMOOTHING: f64 = 0.5;
 /// How far the simplified path the fill follows may stray from the points.
@@ -86,7 +88,12 @@ fn centre(element: &Element, points: &[Point]) -> Point {
 
 /// How far the ink of a stroke reaches beyond its points at the most.
 pub(crate) fn ink_reach(element: &Element) -> f64 {
-    element.stroke_width() * SIZE_FACTOR
+    element.stroke_width()
+        * if element.has_constant_width() {
+            CONSTANT_SIZE_FACTOR
+        } else {
+            SIZE_FACTOR
+        }
 }
 
 /// The polygon around the stroke of `element`, in the Element's frame.
@@ -96,6 +103,9 @@ pub(crate) fn outline(element: &Element) -> Vec<Point> {
 
 /// The polygon around the stroke, in the Element's frame.
 fn stroke_outline(element: &Element, points: &[Point]) -> Vec<Point> {
+    if element.has_constant_width() {
+        return laser::outline(points, ink_reach(element), element.streamline());
+    }
     let simulate_pressure = element.simulates_pressure();
     let pressures = element.pressures();
     let samples: Vec<Sample> = if simulate_pressure {

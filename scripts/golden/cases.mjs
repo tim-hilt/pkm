@@ -230,6 +230,8 @@ function freedraw(upstream) {
   });
   const circlePressures = circle.map((_, i) => round2(0.4 + 0.3 * Math.cos(i / 4)));
 
+  const constant = { variability: "constant", streamline: 0.5 };
+
   return [
     make("freedraw-simulated-wave", wave, { simulatePressure: true, pressures: [] }),
     make("freedraw-real-wave", wave, { simulatePressure: false, pressures }),
@@ -243,6 +245,13 @@ function freedraw(upstream) {
     make("freedraw-simulated-short", [[0, 0], [2, 1]], { simulatePressure: true, pressures: [] }),
     make("freedraw-simulated-loop-filled", circle, { simulatePressure: true, pressures: [], backgroundColor: PINK, fillStyle: "hachure" }),
     make("freedraw-real-loop-filled", circle, { simulatePressure: false, pressures: circlePressures, backgroundColor: PINK, fillStyle: "solid" }),
+    // Constant width: drawn with the laser pointer geometry, pressure ignored.
+    make("freedraw-constant-straight", [[0, 0], [10, 0], [20, 0], [30, 0]], { simulatePressure: false, pressures: [], strokeOptions: constant }),
+    make("freedraw-constant-wave", wave, { simulatePressure: false, pressures: [], strokeOptions: constant }),
+    make("freedraw-constant-thick", wave, { simulatePressure: false, pressures: [], strokeWidth: 4, strokeOptions: constant }),
+    make("freedraw-constant-dot", [[0, 0]], { simulatePressure: false, pressures: [0.5], strokeOptions: constant }),
+    make("freedraw-constant-two-points", [[0, 0], [12, 5]], { simulatePressure: false, pressures: [], strokeOptions: constant }),
+    make("freedraw-constant-sharp-corner", [[0, 0], [20, 0], [20, 20], [0, 18]], { simulatePressure: false, pressures: [], strokeOptions: constant }),
   ];
 }
 

@@ -496,6 +496,20 @@ fn a_freedraw_stroke_is_hit_on_its_ink() {
 }
 
 #[test]
+fn a_stroke_of_constant_width_is_hit_on_its_own_ink() {
+    // Ink 2.8 (1.4 times the stroke width) each side of the line.
+    let stroke = element(
+        "a",
+        "freedraw",
+        r#""x":0,"y":0,"width":100,"height":0,"backgroundColor":"transparent",
+        "points":[[0,0],[50,0],[100,0]],"pressures":[],"simulatePressure":false,
+        "strokeOptions":{"variability":"constant","streamline":0.5}"#,
+    );
+
+    assert_hits(&stroke, &[((50.0, 2.0), true), ((50.0, 20.0), false)]);
+}
+
+#[test]
 fn text_and_images_are_hit_anywhere_in_their_box() {
     let text = element(
         "a",
