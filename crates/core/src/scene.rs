@@ -173,10 +173,97 @@ impl fmt::Display for LoadError {
 impl std::error::Error for LoadError {}
 
 /// The open Drawing's content.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Scene {
     /// The document: always an object with an `elements` array of objects.
     root: Object,
+    /// Which handle stands for which Element of `root`.
+    handles: Handles,
+}
+
+/// Scenes are equal if their documents are; handles are bookkeeping.
+impl PartialEq for Scene {
+    fn eq(&self, other: &Self) -> bool {
+        self.root == other.root
+    }
+}
+
+/// Gives every Element a handle that it keeps for as long as the Scene is
+/// open, whatever happens to the Elements around it, so that clients can
+/// cache what they derive from an Element by `(handle, version)`.
+///
+/// Handles are numbered from 0 in file order on load and are never handed
+/// out twice. An Element that is removed and comes back with the same id
+/// (undo of a cancelled drawing, a paste of it) gets its old handle again.
+#[derive(Debug, Clone, Default)]
+struct Handles {
+    /// The handle of the Element at each position of the file.
+    by_position: Vec<u32>,
+    /// The position of each handle, `ABSENT` if its Element was removed.
+    position: Vec<u32>,
+    /// The handles of removed Elements, by id.
+    removed: std::collections::HashMap<String, u32>,
+}
+
+impl Handles {
+    const ABSENT: u32 = u32::MAX;
+
+    /// For a file of `count` Elements.
+    fn new(count: usize) -> Self {
+        let count = u32::try_from(count).unwrap_or(Self::ABSENT - 1);
+        Self {
+            by_position: (0..count).collect(),
+            position: (0..count).collect(),
+            removed: Default::default(),
+        }
+    }
+
+    fn position_of(&self, handle: u32) -> Option<usize> {
+        match *self.position.get(handle as usize)? {
+            Self::ABSENT => None,
+            at => Some(at as usize),
+        }
+    }
+
+    fn handle_at(&self, position: usize) -> Option<u32> {
+        self.by_position.get(position).copied()
+    }
+
+    /// Records an Element with `id` inserted at `position`; returns its
+    /// handle.
+    fn insert(&mut self, position: usize, id: &str) -> u32 {
+        let handle = self.removed.remove(id).unwrap_or_else(|| {
+            self.position.push(Self::ABSENT);
+            (self.position.len() - 1) as u32
+        });
+        self.by_position.insert(position, handle);
+        if position + 1 == self.by_position.len() {
+            self.position[handle as usize] = position as u32;
+        } else {
+            self.reindex();
+        }
+        handle
+    }
+
+    /// Records that the Element with `id` at `position` is gone.
+    fn remove(&mut self, position: usize, id: &str) {
+        let handle = self.by_position.remove(position);
+        self.position[handle as usize] = Self::ABSENT;
+        self.removed.insert(id.to_owned(), handle);
+        self.reindex();
+    }
+
+    /// Records that the Element at `order[place]` moved to `place`.
+    fn permute(&mut self, order: &[usize]) {
+        self.by_position = order.iter().map(|&from| self.by_position[from]).collect();
+        self.reindex();
+    }
+
+    fn reindex(&mut self) {
+        for (at, &handle) in self.by_position.iter().enumerate() {
+            self.position[handle as usize] = at as u32;
+        }
+    }
 }
 
 impl Scene {
@@ -195,7 +282,10 @@ impl Scene {
         root.insert("elements".into(), Value::Array(Vec::new()));
         root.insert("appState".into(), Value::Object(app_state));
         root.insert("files".into(), Value::Object(Object::new()));
-        Scene { root }
+        Scene {
+            root,
+            handles: Handles::new(0),
+        }
     }
 
     /// Reads the bytes of a `.excalidraw` file, repairing its Elements as
@@ -219,7 +309,8 @@ impl Scene {
             return Err(not_a_drawing(&format!("element {index} is not an object")));
         }
         restore::restore_elements(elements, entropy);
-        Ok(Scene { root })
+        let handles = Handles::new(elements.len());
+        Ok(Scene { root, handles })
     }
 
     /// The `.excalidraw` file content, in excalidraw.com's layout.
@@ -230,13 +321,15 @@ impl Scene {
     /// The Element with `handle`, if there is one (see
     /// [`Element::handle`]).
     pub(crate) fn element(&self, handle: u32) -> Option<Element<'_>> {
-        let value = self.element_values().get(handle as usize)?;
+        let value = self
+            .element_values()
+            .get(self.handles.position_of(handle)?)?;
         Element::view(handle, value.as_object()?)
     }
 
     /// The Element with `id`, if there is one, deleted or not.
     pub(crate) fn element_by_id(&self, id: &str) -> Option<Element<'_>> {
-        self.element(u32::try_from(self.index_of(id)?).ok()?)
+        self.element(self.handles.handle_at(self.index_of(id)?)?)
     }
 
     /// The Elements of a type the core understands, deleted ones included, in
@@ -245,10 +338,10 @@ impl Scene {
         self.element_values()
             .iter()
             .enumerate()
-            .filter_map(|(handle, value)| {
+            .filter_map(|(position, value)| {
                 let object = value.as_object()?;
                 Some(Element {
-                    handle: u32::try_from(handle).ok()?,
+                    handle: self.handles.handle_at(position)?,
                     kind: type_of(object)?,
                     object,
                 })
@@ -256,15 +349,27 @@ impl Scene {
     }
 
     /// Every Element of the file, whatever its type, deleted ones included,
-    /// in z-order. The position of an Element here is its handle.
+    /// in z-order. An Element's position here is not its handle; see
+    /// [`Scene::handle_at`].
     pub(crate) fn raw_elements(&self) -> impl Iterator<Item = &Object> {
         self.element_values().iter().filter_map(Value::as_object)
+    }
+
+    /// The handle of the Element at `position` in the file (see
+    /// [`Scene::raw_elements`]).
+    pub(crate) fn handle_at(&self, position: usize) -> Option<u32> {
+        self.handles.handle_at(position)
+    }
+
+    /// The position in the file of the Element with `handle`.
+    pub(crate) fn position_of(&self, handle: u32) -> Option<usize> {
+        self.handles.position_of(handle)
     }
 
     /// The id of the Element with `handle`.
     pub(crate) fn element_id(&self, handle: u32) -> Option<&str> {
         self.element_values()
-            .get(handle as usize)?
+            .get(self.handles.position_of(handle)?)?
             .as_object()?
             .get("id")?
             .as_str()
@@ -283,7 +388,7 @@ impl Scene {
     }
 
     /// Reorders the Elements: the one that is at `order[place]` now goes to
-    /// `place`. `order` has to be a permutation of the handles.
+    /// `place`. `order` has to be a permutation of the positions.
     pub(crate) fn permute(&mut self, order: &[usize]) {
         let elements = self.element_values_mut();
         debug_assert_eq!(order.len(), elements.len());
@@ -292,6 +397,7 @@ impl Scene {
             .iter()
             .filter_map(|&from| old.get_mut(from)?.take())
             .collect();
+        self.handles.permute(order);
     }
 
     /// Puts the Elements with `ids` into the places that they take now, in
@@ -301,14 +407,11 @@ impl Scene {
         let positions: Vec<usize> = ids.iter().filter_map(|id| self.index_of(id)).collect();
         let mut places = positions.clone();
         places.sort_unstable();
-        let elements = self.element_values_mut();
-        let values: Vec<Value> = positions
-            .iter()
-            .map(|&at| std::mem::replace(&mut elements[at], Value::Null))
-            .collect();
-        for (place, value) in places.into_iter().zip(values) {
-            elements[place] = value;
+        let mut order: Vec<usize> = (0..self.element_values().len()).collect();
+        for (&place, &at) in places.iter().zip(&positions) {
+            order[place] = at;
         }
+        self.permute(&order);
     }
 
     /// The colour of the Canvas as written in the file (a CSS colour), white
@@ -386,32 +489,39 @@ impl Scene {
     /// Adds `element`, an object with all the members of an Element, on top
     /// of the others. Returns its handle.
     pub(crate) fn push(&mut self, element: Object) -> u32 {
-        let elements = self.element_values_mut();
-        elements.push(Value::Object(element));
-        // A Scene of four billion Elements is beyond what can be drawn.
-        u32::try_from(elements.len() - 1).unwrap_or(u32::MAX)
+        let position = self.element_values().len();
+        self.insert_at(position, element)
+    }
+
+    fn insert_at(&mut self, position: usize, element: Object) -> u32 {
+        let handle = self.handles.insert(position, id_of(&element));
+        self.element_values_mut()
+            .insert(position, Value::Object(element));
+        handle
     }
 
     /// Puts `element`, an object with all the members of an Element, right
     /// above the Element `anchor` in z-order (on top if there is no such
-    /// Element). The handles of Elements above it change. Returns its handle.
+    /// Element). Returns its handle.
     pub(crate) fn insert_after(&mut self, anchor: &str, element: Object) -> u32 {
         let Some(index) = self.index_of(anchor) else {
             return self.push(element);
         };
-        let elements = self.element_values_mut();
-        elements.insert(index + 1, Value::Object(element));
-        // A Scene of four billion Elements is beyond what can be drawn.
-        u32::try_from(index + 1).unwrap_or(u32::MAX)
+        self.insert_at(index + 1, element)
     }
 
-    /// Removes the Element with `handle`. The handles of Elements above it
-    /// change.
+    /// Removes the Element with `handle`. The handles of the others stay.
     pub(crate) fn remove(&mut self, handle: u32) {
-        let elements = self.element_values_mut();
-        if (handle as usize) < elements.len() {
-            elements.remove(handle as usize);
-        }
+        let Some(position) = self.handles.position_of(handle) else {
+            return;
+        };
+        let removed = self.element_values_mut().remove(position);
+        let id = removed
+            .as_object()
+            .map(id_of)
+            .unwrap_or_default()
+            .to_owned();
+        self.handles.remove(position, &id);
     }
 
     /// The Element with `id` as it is now, whatever its type, deleted or
@@ -584,8 +694,9 @@ impl Scene {
     }
 
     fn element_object_mut(&mut self, handle: u32) -> Option<&mut Object> {
+        let position = self.handles.position_of(handle)?;
         self.element_values_mut()
-            .get_mut(handle as usize)
+            .get_mut(position)
             .and_then(Value::as_object_mut)
     }
 
@@ -617,6 +728,13 @@ fn finite_pair(point: &Value) -> Option<(f64, f64)> {
     };
     let (x, y) = (x.as_f64()?, y.as_f64()?);
     (x.is_finite() && y.is_finite()).then_some((x, y))
+}
+
+fn id_of(element: &Object) -> &str {
+    element
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
 }
 
 fn type_of(element: &Object) -> Option<ElementType> {
@@ -674,8 +792,10 @@ impl<'a> Element<'a> {
 }
 
 impl Element<'_> {
-    /// Identifies the Element within the Scene for as long as the Scene's
-    /// Elements are not added or removed: its position in the file.
+    /// Identifies the Element within the Scene for as long as the Scene is
+    /// open, whatever is added, removed or reordered: not its position in
+    /// the file. An Element that is removed and comes back with the same id
+    /// has its old handle again.
     pub fn handle(&self) -> u32 {
         self.handle
     }

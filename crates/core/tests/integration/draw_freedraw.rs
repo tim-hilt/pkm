@@ -410,8 +410,8 @@ fn a_cancelled_pointer_removes_the_stroke_and_keeps_the_tool() {
 
     assert_eq!(editor.element_count(), 0);
     assert_eq!(editor.tool(), Tool::Freedraw);
-    // The next Element reuses the handle of the removed one.
-    assert_ne!(editor.geometry().generation(), while_drawing);
+    // Handles are never reused, so caches of the removed one stay valid.
+    assert_eq!(editor.geometry().generation(), while_drawing);
 }
 
 #[test]

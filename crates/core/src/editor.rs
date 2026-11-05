@@ -85,7 +85,8 @@ fn next_generation() -> u64 {
 #[derive(Debug)]
 pub struct Editor {
     scene: Scene,
-    /// Changes whenever Element handles are reassigned, see
+    /// Changes whenever a Drawing is loaded and handles are
+    /// reassigned, see
     /// [`Geometry::generation`].
     generation: u64,
     /// Changes whenever anything shown on the Canvas does, see
@@ -211,6 +212,7 @@ impl Editor {
     /// `.excalidraw` file. If the bytes are not a Drawing the Scene is kept.
     pub fn load(&mut self, bytes: &[u8]) -> Result<(), LoadError> {
         self.scene = Scene::from_bytes(bytes, &mut self.entropy)?;
+        self.generation = next_generation();
         if self.selection.clear() {
             self.overlay_revision += 1;
         }
@@ -230,7 +232,7 @@ impl Editor {
         self.text = None;
         self.history.clear();
         self.sync_highlight();
-        self.changed(true);
+        self.changed();
         Ok(())
     }
 
@@ -246,7 +248,7 @@ impl Editor {
     pub fn set_text_measurer(&mut self, measurer: Arc<dyn TextMeasurer>) {
         self.measurer = Some(Measurer(measurer));
         // What was drawn for texts may differ now.
-        self.changed(true);
+        self.changed();
     }
 
     /// Tells whether the Scene changed: it differs after every input or
@@ -484,7 +486,7 @@ impl Editor {
             return;
         };
         if editing.set_text(&mut self.scene, &mut self.entropy, text, &*measurer.0) {
-            self.changed(false);
+            self.changed();
         }
     }
 
@@ -516,7 +518,7 @@ impl Editor {
             self.history.record(step, &self.scene, &self.selection);
         }
         self.overlay_revision += 1;
-        self.changed(true);
+        self.changed();
     }
 
     /// Ends the editing of the text and keeps it as it was before: a text
@@ -525,7 +527,7 @@ impl Editor {
         if let Some(editing) = self.text.take() {
             editing.cancel(&mut self.scene, &mut self.entropy);
             self.overlay_revision += 1;
-            self.changed(true);
+            self.changed();
         }
     }
 
@@ -612,7 +614,7 @@ impl Editor {
             self.assign_tool(Tool::Selection);
         }
         self.overlay_revision += 1;
-        self.changed(true);
+        self.changed();
     }
 
     /// The command to edit the text of the Selection (Enter on a Mac): the
@@ -764,7 +766,7 @@ impl Editor {
         // The points may have been added or taken away: no index is right.
         self.points.clear();
         self.overlay_revision += 1;
-        self.changed(true);
+        self.changed();
     }
 
     /// What the properties panel shows: the values of the Selection's
@@ -811,7 +813,7 @@ impl Editor {
         {
             self.style.set(&property);
             if editing.apply(&mut self.scene, &mut self.entropy, &property, &*measurer.0) {
-                self.changed(false);
+                self.changed();
             }
             return;
         }
@@ -857,7 +859,7 @@ impl Editor {
         }
         if changed {
             self.history.record(step, &self.scene, &self.selection);
-            self.changed(false);
+            self.changed();
         }
     }
 
@@ -977,7 +979,7 @@ impl Editor {
         self.sync_points();
         self.history.record(step, &self.scene, &self.selection);
         self.overlay_revision += 1;
-        self.changed(true);
+        self.changed();
     }
 
     /// The text to put on the clipboard for copying the Selection: Excalidraw's
@@ -1033,7 +1035,7 @@ impl Editor {
         self.sync_points();
         self.history.record(step, &self.scene, &self.selection);
         self.overlay_revision += 1;
-        self.changed(true);
+        self.changed();
         true
     }
 
@@ -1078,7 +1080,7 @@ impl Editor {
         self.sync_points();
         self.history.record(step, &self.scene, &self.selection);
         self.overlay_revision += 1;
-        self.changed(true);
+        self.changed();
     }
 
     /// Deletes the Selection (the `delete` command), and with it the labels
@@ -1108,7 +1110,7 @@ impl Editor {
         self.sync_points();
         self.history.record(step, &self.scene, &self.selection);
         self.overlay_revision += 1;
-        self.changed(false);
+        self.changed();
     }
 
     /// Moves the Selection in z-order (the `bring forward`, `send backward`,
@@ -1133,7 +1135,7 @@ impl Editor {
         }
         self.history.record(step, &self.scene, &self.selection);
         // The handles of the Elements now stand for others.
-        self.changed(true);
+        self.changed();
     }
 
     /// Puts the selected Elements into one new group (the `group` command),
@@ -1158,7 +1160,7 @@ impl Editor {
         }
         self.history.record(step, &self.scene, &self.selection);
         // The Elements moved up: the handles of some now stand for others.
-        self.changed(true);
+        self.changed();
     }
 
     /// Dissolves the groups that are selected (the `ungroup` command): the
@@ -1182,7 +1184,7 @@ impl Editor {
             return;
         }
         self.history.record(step, &self.scene, &self.selection);
-        self.changed(false);
+        self.changed();
     }
 
     /// Carries out `command`, e.g. from a keyboard shortcut (see
@@ -1500,7 +1502,7 @@ impl Editor {
             PointerPhase::Move => {
                 let to = self.navigation.viewport().scene_at(event.x, event.y);
                 if dragging.drag_to(&mut self.scene, &mut self.entropy, to) {
-                    self.changed(false);
+                    self.changed();
                 }
             }
             PointerPhase::Up => {
@@ -1519,7 +1521,7 @@ impl Editor {
         if let Some(dragging) = self.point_dragging.take() {
             self.points = dragging.cancel(&mut self.scene, &mut self.entropy);
             self.overlay_revision += 1;
-            self.changed(false);
+            self.changed();
         }
     }
 
@@ -1582,7 +1584,7 @@ impl Editor {
         }
         self.history.record(step, &self.scene, &self.selection);
         self.overlay_revision += 1;
-        self.changed(true);
+        self.changed();
     }
 
     /// Makes the highlight the shape an arrow end is over, if one is being put
@@ -1648,7 +1650,7 @@ impl Editor {
                     event.modifiers,
                     self.measurer.as_ref().map(|m| m.0.as_ref()),
                 ) {
-                    self.changed(false);
+                    self.changed();
                 }
             }
             PointerPhase::Up => {
@@ -1665,7 +1667,7 @@ impl Editor {
     fn drop_transform(&mut self) {
         if let Some(transforming) = self.transforming.take() {
             transforming.cancel(&mut self.scene, &mut self.entropy);
-            self.changed(false);
+            self.changed();
         }
     }
 
@@ -1744,7 +1746,7 @@ impl Editor {
                 let to = self.navigation.viewport().scene_at(event.x, event.y);
                 let lock_axis = event.modifiers.shift;
                 if moving.drag_to(&mut self.scene, &mut self.entropy, to, lock_axis) {
-                    self.changed(false);
+                    self.changed();
                 }
             }
             PointerPhase::Up => {
@@ -1764,7 +1766,7 @@ impl Editor {
             let selection = moving.cancel(&mut self.scene, &mut self.entropy);
             self.show_selection(selection);
             self.editing_group = self.drag_editing.take();
-            self.changed(false);
+            self.changed();
         }
     }
 
@@ -1912,7 +1914,7 @@ impl Editor {
                         event.id,
                         at,
                     ));
-                    self.changed(true);
+                    self.changed();
                 }
             }
             PointerPhase::Move if drawing_pointer == Some(event.id) => {
@@ -1921,7 +1923,7 @@ impl Editor {
                     shape.drag_to(&mut self.scene, &mut self.entropy, at, square)
                 });
                 if moved {
-                    self.changed(false);
+                    self.changed();
                 }
             }
             PointerPhase::Up if drawing_pointer == Some(event.id) => {
@@ -1944,7 +1946,7 @@ impl Editor {
                             self.assign_tool(Tool::Selection);
                         }
                     }
-                    Outcome::Dropped => self.changed(true),
+                    Outcome::Dropped => self.changed(),
                 }
             }
             PointerPhase::Cancel if drawing_pointer == Some(event.id) => self.drop_shape(),
@@ -1984,7 +1986,7 @@ impl Editor {
                 at,
                 zoom,
             ));
-            self.changed(true);
+            self.changed();
         }
     }
 
@@ -1992,7 +1994,7 @@ impl Editor {
     fn linear_updated(&mut self, update: Update) {
         match update {
             Update::Unchanged => {}
-            Update::Changed => self.changed(false),
+            Update::Changed => self.changed(),
             Update::Finished => self.finish_linear(),
             Update::Abandoned => self.drop_linear(),
         }
@@ -2009,11 +2011,11 @@ impl Editor {
         match linear.finish(&mut self.scene, &mut self.entropy, zoom) {
             Outcome::Drawn(step) => {
                 self.history.record(step, &self.scene, &self.selection);
-                self.changed(false);
+                self.changed();
                 true
             }
             Outcome::Dropped => {
-                self.changed(true);
+                self.changed();
                 false
             }
         }
@@ -2041,7 +2043,7 @@ impl Editor {
     fn drop_linear(&mut self) {
         if let Some(linear) = self.linear.take() {
             linear.cancel(&mut self.scene, &mut self.entropy);
-            self.changed(true);
+            self.changed();
         }
     }
 
@@ -2056,7 +2058,7 @@ impl Editor {
             if let Some(stroke) = self.stroke.take() {
                 if stroke.is_spike() {
                     stroke.cancel(&mut self.scene);
-                    self.changed(true);
+                    self.changed();
                 } else {
                     self.history
                         .record(stroke.finish(), &self.scene, &self.selection);
@@ -2076,21 +2078,21 @@ impl Editor {
                     event,
                     at,
                 ));
-                self.changed(true);
+                self.changed();
             }
             PointerPhase::Move if drawing_pointer == Some(event.id) => {
                 let moved = self.stroke.as_mut().is_some_and(|stroke| {
                     stroke.extend(&mut self.scene, &mut self.entropy, event, at)
                 });
                 if moved {
-                    self.changed(false);
+                    self.changed();
                 }
             }
             PointerPhase::Up if drawing_pointer == Some(event.id) => {
                 if let Some(stroke) = self.stroke.take() {
                     let step = stroke.lift(&mut self.scene, &mut self.entropy, event, at);
                     self.history.record(step, &self.scene, &self.selection);
-                    self.changed(false);
+                    self.changed();
                 }
             }
             PointerPhase::Cancel if drawing_pointer == Some(event.id) => self.drop_stroke(),
@@ -2121,7 +2123,7 @@ impl Editor {
                     .as_mut()
                     .is_some_and(|erasing| erasing.drag_to(&self.scene, at, zoom));
                 if previewing {
-                    self.changed(false);
+                    self.changed();
                 }
             }
             PointerPhase::Up if erasing_pointer == Some(event.id) => {
@@ -2131,7 +2133,7 @@ impl Editor {
                     let remaining = history::without_gone(self.selection.clone(), &self.scene);
                     self.show_selection(remaining);
                     self.history.record(step, &self.scene, &self.selection);
-                    self.changed(false);
+                    self.changed();
                 }
             }
             PointerPhase::Cancel if erasing_pointer == Some(event.id) => self.drop_erase(),
@@ -2143,7 +2145,7 @@ impl Editor {
     /// to be erased is shown as it is again.
     fn drop_erase(&mut self) {
         if self.erasing.take().is_some() {
-            self.changed(false);
+            self.changed();
         }
     }
 
@@ -2151,7 +2153,7 @@ impl Editor {
     fn drop_stroke(&mut self) {
         if let Some(stroke) = self.stroke.take() {
             stroke.cancel(&mut self.scene);
-            self.changed(true);
+            self.changed();
         }
     }
 
@@ -2159,20 +2161,17 @@ impl Editor {
     fn drop_shape(&mut self) {
         if let Some(shape) = self.shape.take() {
             shape.cancel(&mut self.scene);
-            self.changed(true);
+            self.changed();
         }
     }
 
-    /// Records that the Scene changed. `restructured` if Elements were added
-    /// or removed, which may hand their handles to other Elements.
-    fn changed(&mut self, restructured: bool) {
+    /// Records that the Scene changed. [`Geometry::generation`] stays: handles
+    /// are stable, so no cached `(handle, version)` can go stale.
+    fn changed(&mut self) {
         self.revision += 1;
         // Only selected Elements have anything drawn over them.
         if !self.selection.is_empty() {
             self.overlay_revision += 1;
-        }
-        if restructured {
-            self.generation = next_generation();
         }
     }
 

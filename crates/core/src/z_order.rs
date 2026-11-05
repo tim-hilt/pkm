@@ -72,7 +72,7 @@ pub(crate) fn move_selection(
     true
 }
 
-/// Brings the Elements with the handles `together` next to each other, at
+/// Brings the Elements at the positions `together` next to each other, at
 /// the place of the highest of them and in the order they have, as grouping
 /// does (`actionGroup`): the Elements in between that are not among them
 /// go below. The moved Elements get indices that fit their new places.
@@ -115,9 +115,11 @@ fn apply(
         return;
     }
     step.touch_order(scene);
-    // By position, which is the handle, before the Elements are moved.
-    for (handle, index) in indices {
-        let handle = handle as u32;
+    // By position, before the Elements are moved.
+    for (position, index) in indices {
+        let Some(handle) = scene.handle_at(position) else {
+            continue;
+        };
         if let Some(id) = scene.element_id(handle).map(str::to_owned) {
             step.touch(scene, &id);
         }

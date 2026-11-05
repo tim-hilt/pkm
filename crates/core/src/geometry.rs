@@ -334,10 +334,13 @@ impl Geometry {
 
     /// Tells clients whether their per-Element caches, keyed by
     /// `(Part::element, Part::version)`, are still valid: it changes whenever
-    /// an [`Part::element`] handle may stand for another Element than before
-    /// (the Scene was replaced, Elements were added or removed). While it
-    /// stays the same, an Element with an unchanged version has unchanged
-    /// geometry.
+    /// an [`Part::element`] handle may stand for another Element than before.
+    /// That is only the case when a Drawing is loaded: an Element keeps its
+    /// handle while the Scene is open, whatever is added, removed, reordered,
+    /// undone or pasted, and a handle is never given to another Element.
+    /// While it stays the same, an Element with an unchanged version has
+    /// unchanged geometry; clients draw the Elements in the order of the
+    /// parts.
     pub fn generation(&self) -> u64 {
         self.generation
     }

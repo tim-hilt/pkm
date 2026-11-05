@@ -467,16 +467,27 @@ fn undo_puts_elements_back_that_were_drawn_since() {
 // --- Clients ------------------------------------------------------------------
 
 #[test]
-fn the_geometry_generation_changes_because_handles_stand_for_other_elements() {
+fn the_geometry_generation_and_handles_stay_when_elements_change_places() {
     let mut editor = three();
     select(&mut editor, 0.0, 0.0);
     let before = editor.geometry().generation();
+    let handles = |editor: &Editor| -> Vec<u32> {
+        let mut handles: Vec<u32> = editor
+            .geometry()
+            .parts()
+            .iter()
+            .map(|p| p.element)
+            .collect();
+        handles.dedup();
+        handles
+    };
+    let drawn_before = handles(&editor);
 
     editor.move_in_z_order(ZOrder::ToFront);
-    assert_ne!(editor.geometry().generation(), before);
 
-    // Nothing moved: nothing for clients to do.
-    let unchanged = editor.geometry().generation();
-    editor.move_in_z_order(ZOrder::ToFront);
-    assert_eq!(editor.geometry().generation(), unchanged);
+    assert_eq!(editor.geometry().generation(), before);
+    // `a` is drawn last now, with the handle it had at the bottom.
+    let drawn = handles(&editor);
+    assert_eq!(drawn[..drawn.len() - 1], drawn_before[1..]);
+    assert_eq!(drawn[drawn.len() - 1], drawn_before[0]);
 }

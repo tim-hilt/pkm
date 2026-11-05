@@ -163,4 +163,43 @@ import Testing
         _ = OffscreenRender.draw(with: renderer)
         #expect(renderer.elementsBuilt == 2, "zoomed in")
     }
+
+    // MARK: Stable handles
+
+    private func drawRectangle(_ editor: Editor, at x: Double) {
+        let modifiers = Modifiers(shift: false, ctrl: false, alt: false, meta: false)
+        editor.setTool(tool: .rectangle)
+        for (phase, dx, time) in [(PointerPhase.down, 0.0, 0.0), (.move, 40, 0.05), (.up, 40, 0.1)] {
+            editor.pointer(
+                event: PointerEvent(
+                    id: 0, phase: phase, x: x + dx, y: 40 + dx, kind: .mouse, pressure: 0.5, timestamp: time,
+                    modifiers: modifiers))
+        }
+    }
+
+    @Test func addingOrDeletingOneElementOfALargeSceneRebuildsOnlyThatOne() throws {
+        let renderer = try OffscreenRender.makeRenderer()
+        let editor = Editor()
+        let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        try editor.load(bytes: try Data(contentsOf: repository.appending(path: "benchmarks/scene-5000.excalidraw")))
+        renderer.setGeometry(editor.geometry())
+        _ = OffscreenRender.draw(with: renderer)
+        let loaded = renderer.elementsBuilt
+        #expect(loaded > 1000)
+
+        drawRectangle(editor, at: 100_000)
+        let clock = ContinuousClock()
+        let took = clock.measure {
+            renderer.setGeometry(editor.geometry())
+            _ = OffscreenRender.draw(with: renderer)
+        }
+        print("adding one Element: \(renderer.elementsBuilt - loaded) built, \(took)")
+        #expect(renderer.elementsBuilt == loaded + 1, "only the new Element")
+
+        editor.deleteSelection()
+        renderer.setGeometry(editor.geometry())
+        _ = OffscreenRender.draw(with: renderer)
+        #expect(renderer.elementsBuilt == loaded + 1, "deleting builds nothing")
+    }
 }

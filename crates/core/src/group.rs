@@ -153,11 +153,11 @@ pub(crate) fn group(
     if !can_group(scene, selection, editing) {
         return false;
     }
-    let members: Vec<(usize, String, Vec<String>)> = selection
+    let members: Vec<(u32, String, Vec<String>)> = selection
         .covered(scene)
         .map(|e| {
             let groups = e.group_ids().map(str::to_owned).collect();
-            (e.handle() as usize, e.id().to_owned(), groups)
+            (e.handle(), e.id().to_owned(), groups)
         })
         .collect();
     let new_group = entropy.id();
@@ -169,7 +169,7 @@ pub(crate) fn group(
         groups.insert(position, new_group.clone());
         step.touch(scene, &id);
         scene.update(
-            handle as u32,
+            handle,
             entropy.integer(),
             [(
                 "groupIds",
@@ -177,7 +177,10 @@ pub(crate) fn group(
             )],
         );
     }
-    let together: HashSet<usize> = members.iter().map(|(handle, ..)| *handle).collect();
+    let together: HashSet<usize> = members
+        .iter()
+        .filter_map(|(handle, ..)| scene.position_of(*handle))
+        .collect();
     z_order::gather(scene, entropy, step, &together);
     true
 }

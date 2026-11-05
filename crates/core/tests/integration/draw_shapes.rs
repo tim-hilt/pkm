@@ -642,7 +642,7 @@ fn the_revision_tells_clients_when_to_ask_for_geometry_again() {
 }
 
 #[test]
-fn a_dropped_shape_does_not_leave_its_handle_to_the_next_one() {
+fn a_dropped_shape_keeps_the_generation_because_its_handle_is_never_reused() {
     let mut editor = editor_with(Tool::Rectangle);
     let finger = (1, Finger);
     send(&mut editor, finger, Down, (0.0, 0.0), Modifiers::default());
@@ -656,9 +656,9 @@ fn a_dropped_shape_does_not_leave_its_handle_to_the_next_one() {
         Modifiers::default(),
     );
 
-    // The element was removed, and the next one will reuse its handle:
-    // clients' caches of the handle must not survive that.
-    assert_ne!(editor.geometry().generation(), while_drawing);
+    // The element was removed; handles are never reused, so no cache of the
+    // handle can stand for the next element.
+    assert_eq!(editor.geometry().generation(), while_drawing);
 }
 
 // --- The Selection after drawing -----------------------------------------------

@@ -519,8 +519,8 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         drawsAreStale = false
         flatteningLevel = level
         if geometry.generation() != cacheGeneration {
-            // Element handles may mean other Elements now, and a Drawing that
-            // was loaded since may have files that were missing.
+            // A Drawing was loaded: handles mean other Elements now, and it may
+            // have files that were missing.
             cache.removeAll()
             textures.forgetFailures()
             cacheGeneration = geometry.generation()

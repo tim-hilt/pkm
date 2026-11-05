@@ -42,6 +42,7 @@ mod properties;
 mod resize_rotate;
 mod scene;
 mod select;
+mod stable_handles;
 mod text;
 mod text_editing;
 mod undo_redo;
