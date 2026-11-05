@@ -1584,7 +1584,7 @@ impl Editor {
                     &mut self.scene,
                     &mut self.entropy,
                     to,
-                    event.modifiers.shift,
+                    event.modifiers,
                     self.measurer.as_ref().map(|m| m.0.as_ref()),
                 ) {
                     self.changed(false);

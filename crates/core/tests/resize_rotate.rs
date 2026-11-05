@@ -216,12 +216,14 @@ fn dragging_the_rotation_handle_turns_the_element() {
 }
 
 #[test]
-fn shift_snaps_the_rotation_to_fifteenths_of_a_turn() {
+fn shift_snaps_the_rotation_to_steps_of_15_degrees() {
     let mut editor = selected_rectangle();
 
-    // The pointer asks for a 45-degree turn; snapped, it becomes 135: the
-    // nearest fifteenth of a turn counted from straight above.
-    held_drag(&mut editor, "mouse", ROTATION, (220.71, 195.71), true);
+    // The pointer is 140° clockwise from straight above the middle
+    // (150, 125); snapped, the turn becomes the nearest step of 15°, 135°.
+    let (sin, cos) = 140f64.to_radians().sin_cos();
+    let to = (150.0 + 100.0 * sin, 125.0 - 100.0 * cos);
+    held_drag(&mut editor, "mouse", ROTATION, to, true);
 
     nearly(&editor, "a", "angle", 3.0 * std::f64::consts::FRAC_PI_4);
 }
@@ -632,4 +634,162 @@ fn resizing_the_selection_rescales_the_points_of_lines_and_arrows() {
     assert_eq!(frame(&editor, "a"), (100.0, 100.0, 150.0, 100.0));
     assert_eq!(saved_points(&editor, "a"), [(0.0, 0.0), (150.0, 100.0)]);
     assert_eq!(frame(&editor, "b"), (400.0, 200.0, 150.0, 200.0));
+}
+
+// --- Turned Elements, strokes, groups, the least font, from the centre -------
+
+/// `offset` from `centre`, turned by `angle` (clockwise on the screen).
+fn turned_from(centre: (f64, f64), angle: f64, offset: (f64, f64)) -> (f64, f64) {
+    let (sin, cos) = angle.sin_cos();
+    (
+        centre.0 + offset.0 * cos - offset.1 * sin,
+        centre.1 + offset.0 * sin + offset.1 * cos,
+    )
+}
+
+#[test]
+fn resizing_a_turned_element_from_any_corner_keeps_the_opposite_corner() {
+    // The rectangle of the first test, turned by half a radian about its
+    // middle (150, 125).
+    let angle = 0.5;
+    let turned = format!(
+        r##"{{"id":"a","type":"rectangle","x":100,"y":100,"width":100,"height":50,
+        "angle":{angle},"strokeWidth":2,"backgroundColor":"#ffc9c9",
+        "roundness":null,"version":3,"versionNonce":7}}"##
+    );
+    for (sx, sy) in [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
+        let mut editor = editor_with(&[&turned]);
+        tap(&mut editor, "mouse", (150.0, 125.0), 0.0);
+        let opposite = turned_from((150.0, 125.0), angle, (-sx * 50.0, -sy * 25.0));
+
+        // The handle is 6 beyond the corner in the Element's own frame, and
+        // is dragged 15 out across and 10 out down in that frame.
+        let handle = turned_from((150.0, 125.0), angle, (sx * 56.0, sy * 31.0));
+        let delta = turned_from((0.0, 0.0), angle, (sx * 15.0, sy * 10.0));
+        let to = (handle.0 + delta.0, handle.1 + delta.1);
+        held_drag(&mut editor, "mouse", handle, to, false);
+
+        let (x, y, width, height) = frame(&editor, "a");
+        assert!(
+            (width - 115.0).abs() < 1e-9 && (height - 60.0).abs() < 1e-9,
+            "handle ({sx}, {sy}): {width} x {height}"
+        );
+        let centre = (x + width / 2.0, y + height / 2.0);
+        let kept = turned_from(centre, angle, (-sx * width / 2.0, -sy * height / 2.0));
+        assert!(
+            (kept.0 - opposite.0).abs() < 1e-9 && (kept.1 - opposite.1).abs() < 1e-9,
+            "handle ({sx}, {sy}): the opposite corner moved from {opposite:?} to {kept:?}"
+        );
+    }
+}
+
+#[test]
+fn resizing_a_stroke_that_reaches_back_past_its_start_keeps_the_opposite_corner() {
+    // A stroke from (100, 100) back to (50, 80) and on to (150, 130): its
+    // box is 50..150 by 80..130, left of and above its first point.
+    let mut editor = editor_with(&[
+        r##"{"id":"a","type":"freedraw","x":100,"y":100,"width":100,"height":50,
+        "points":[[0,0],[-50,-20],[50,30]],"pressures":[0.5,0.5,0.5],"version":3,"versionNonce":7}"##,
+    ]);
+    editor.select_all();
+
+    // The south-east corner goes from (150, 130) to (200, 180); the north-west
+    // one stays at (50, 80). The points scale by 1.5 across and 2 down and
+    // keep their least coordinates, so the first point is still (100, 100).
+    held_drag(&mut editor, "mouse", (156.0, 136.0), (206.0, 186.0), false);
+
+    assert_eq!(frame(&editor, "a"), (100.0, 100.0, 150.0, 100.0));
+    assert_eq!(
+        saved_points(&editor, "a"),
+        [(25.0, 20.0), (-50.0, -20.0), (100.0, 80.0)]
+    );
+}
+
+#[test]
+fn a_group_keeps_the_ratio_of_its_sides() {
+    let grouped = |element: &str| element.replacen("\"x\"", "\"groupIds\":[\"g\"],\"x\"", 1);
+    let mut editor = editor_with(&[&grouped(RECTANGLE), &grouped(BIGGER_RECTANGLE)]);
+    tap(&mut editor, "mouse", (150.0, 125.0), 0.0);
+    assert_eq!(editor.selection(), ["a", "b"]);
+
+    // The box is 100..400 by 100..250; the east side is dragged out by half
+    // again, and a group grows down by as much as across (Excalidraw's
+    // `isInGroup`), about the middle of the west side.
+    held_drag(&mut editor, "mouse", (406.0, 175.0), (556.0, 175.0), false);
+
+    assert_eq!(frame(&editor, "a"), (100.0, 62.5, 150.0, 75.0));
+    assert_eq!(frame(&editor, "b"), (400.0, 137.5, 150.0, 150.0));
+}
+
+#[test]
+fn a_selection_whose_text_would_get_too_small_a_font_is_not_resized() {
+    // A text of a 2-unit font, 5 x 2.5 at (300, 150), selected with the
+    // rectangle: the box is 100..305 by 100..152.5.
+    let mut editor = editor_with(&[
+        RECTANGLE,
+        r##"{"id":"b","type":"text","x":300,"y":150,"width":5,"height":2.5,
+        "fontSize":2,"lineHeight":1.25,"text":"abcde","originalText":"abcde","version":3,"versionNonce":7}"##,
+    ]);
+    editor.select_all();
+
+    // Shrunk to two fifths, the text's font would be 0.8, under Excalidraw's
+    // least of 1: nothing is resized, the rectangle neither.
+    replay(
+        &mut editor,
+        "4.0 down 1 mouse 311 158.5
+         4.1 move 1 mouse 188 127
+         4.2 up 1 mouse 188 127",
+    );
+
+    assert_eq!(frame(&editor, "a"), (100.0, 100.0, 100.0, 50.0));
+    nearly(&editor, "b", "fontSize", 2.0);
+    assert!(!editor.can_undo());
+}
+
+#[test]
+fn alt_resizes_an_element_about_its_middle() {
+    let mut editor = selected_rectangle();
+
+    // The corner is dragged out by 25 x 15; with Alt the opposite corner
+    // moves out as far, so the Element grows by twice that about its middle.
+    replay(
+        &mut editor,
+        "5.0 down 1 mouse 206 156 alt
+         5.1 move 1 mouse 231 171 alt
+         5.2 up 1 mouse 231 171 alt",
+    );
+
+    assert_eq!(frame(&editor, "a"), (75.0, 85.0, 150.0, 80.0));
+}
+
+#[test]
+fn alt_resizes_the_selection_about_its_middle() {
+    let mut editor = selected_rectangles();
+
+    // The box is 100..400 by 100..250, its middle (250, 175). The corner is
+    // dragged to (475, 287.5): with Alt, twice as far from the middle, so
+    // everything is scaled by 1.5 about the middle.
+    replay(
+        &mut editor,
+        "5.0 down 1 mouse 406 256 alt
+         5.1 move 1 mouse 481 293.5 alt
+         5.2 up 1 mouse 481 293.5 alt",
+    );
+
+    assert_eq!(frame(&editor, "a"), (25.0, 62.5, 150.0, 75.0));
+    assert_eq!(frame(&editor, "b"), (325.0, 137.5, 150.0, 150.0));
+}
+
+#[test]
+fn a_rotation_is_one_undo_step() {
+    let mut editor = selected_rectangle();
+    held_drag(&mut editor, "mouse", ROTATION, (250.0, 125.0), false);
+
+    editor.undo();
+    nearly(&editor, "a", "angle", 0.0);
+    assert_eq!(editor.selection(), ["a"]);
+
+    editor.redo();
+    nearly(&editor, "a", "angle", std::f64::consts::FRAC_PI_2);
+    assert!(!editor.can_redo());
 }

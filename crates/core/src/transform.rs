@@ -10,9 +10,10 @@
 //! each touched Element, as on excalidraw.com, which is what makes the
 //! transform part of the saved Drawing.
 //!
-//! While a pointer resizes, Shift (on the Mac) keeps the ratio of the sides;
-//! an image keeps it anyway and Shift frees it. While a pointer rotates,
-//! Shift snaps the rotation to fifteenths of a turn.
+//! While a pointer resizes, Shift (on a keyboard) keeps the ratio of the
+//! sides; a Selection with an image keeps it anyway and Shift frees it. Alt
+//! resizes about the middle of the box instead of the opposite corner or
+//! side. While a pointer rotates, Shift snaps the rotation to steps of 15°.
 //!
 //! Arrows bound to the shapes that are transformed follow them, and arrows
 //! that are transformed without the shape they are bound to are unbound from
@@ -23,9 +24,12 @@
 //! transformed like any other line here, points and all, where Excalidraw
 //! re-routes it; the core keeps its points as the file has them.
 
+use std::collections::HashMap;
+
 use crate::binding::Attachments;
 use crate::frame::Frame;
 use crate::history::Step;
+use crate::input::Modifiers;
 use crate::json::{Object, Value};
 use crate::path::Point;
 use crate::random::Entropy;
@@ -43,21 +47,14 @@ const MIN_FONT_SIZE: f64 = 1.0;
 const TWO_PI: f64 = std::f64::consts::TAU;
 
 /// An Element the gesture transforms, as it was when the gesture began
-/// (Excalidraw's `originalElements`). Resizing follows the pointer from the
-/// Elements as they began, not as the last step left them, so dragging back
-/// undoes the steps before.
+/// (Excalidraw's `originalElements`), with its label. Resizing follows the
+/// pointer from the Elements as they began, not as the last step left them,
+/// so dragging back undoes the steps before.
 #[derive(Debug)]
 struct Tracked {
     handle: u32,
     snapshot: Object,
-}
-
-/// A label that follows the container it sits in.
-#[derive(Debug)]
-struct Label {
-    handle: u32,
-    container: u32,
-    snapshot: Object,
+    label: Option<Label>,
 }
 
 impl Tracked {
@@ -65,18 +62,97 @@ impl Tracked {
     fn element(&self) -> Option<Element<'_>> {
         Element::view(self.handle, &self.snapshot)
     }
+
+    /// The label as it began.
+    fn label(&self) -> Option<Element<'_>> {
+        self.label.as_ref()?.element()
+    }
+
+    /// Puts the label, if there is one, where it sits in the Element as it
+    /// is now; see [`Label::refit`].
+    fn refit_label(
+        &self,
+        scene: &mut Scene,
+        entropy: &mut Entropy,
+        font: Option<f64>,
+        angle: Option<f64>,
+        wrap: Option<&dyn TextMeasurer>,
+    ) {
+        if let Some(label) = &self.label {
+            label.refit(scene, entropy, self.handle, font, angle, wrap);
+        }
+    }
+}
+
+/// A label that follows the container it sits in, as it was when the
+/// gesture began.
+#[derive(Debug)]
+struct Label {
+    handle: u32,
+    snapshot: Object,
 }
 
 impl Label {
-    /// The label as it began.
     fn element(&self) -> Option<Element<'_>> {
         Element::view(self.handle, &self.snapshot)
     }
 
-    /// The Element `id` of the label, if the file gave it one.
-    fn id(&self) -> Option<&str> {
-        self.snapshot.get("id").and_then(Value::as_str)
+    /// Puts the label where it sits in the `container` as it is now. With
+    /// `font` the label's font becomes it first; with `angle` the label
+    /// turns with its container, which lines and arrows except; with `wrap`
+    /// its lines wrap to the container again. An arrow's label keeps where
+    /// the file has it.
+    fn refit(
+        &self,
+        scene: &mut Scene,
+        entropy: &mut Entropy,
+        container: u32,
+        font: Option<f64>,
+        angle: Option<f64>,
+        wrap: Option<&dyn TextMeasurer>,
+    ) {
+        if let Some(font) = font {
+            scene.update(
+                self.handle,
+                entropy.integer(),
+                [("fontSize", Value::Number(font))],
+            );
+        }
+        let (fit, kind) = {
+            let (Some(label), Some(container)) =
+                (scene.element(self.handle), scene.element(container))
+            else {
+                return;
+            };
+            (text::fit_label(&label, &container, wrap), container.kind())
+        };
+        let mut members = Vec::new();
+        if kind != ElementType::Arrow {
+            members.push(("x", Value::Number(fit.x)));
+            members.push(("y", Value::Number(fit.y)));
+        }
+        members.push(("width", Value::Number(fit.width)));
+        members.push(("height", Value::Number(fit.height)));
+        if let Some(text) = fit.text {
+            members.push(("text", Value::String(text)));
+        }
+        if let (Some(angle), false) = (angle, kind.is_linear()) {
+            members.push(("angle", Value::Number(angle)));
+        }
+        scene.update(self.handle, entropy.integer(), members);
     }
+}
+
+/// How the pointer resizes: by which handle, and what the keys held ask
+/// for.
+#[derive(Debug, Clone, Copy)]
+struct Resize {
+    handle: Handle,
+    /// The sides keep their ratio (Shift; images the other way round).
+    keep_ratio: bool,
+    /// The middle of the box stays and the side opposite the handle moves
+    /// as far the other way (Alt).
+    from_centre: bool,
 }
 
 /// A resize or rotation of the Selection by one pointer.
@@ -94,13 +170,11 @@ pub(crate) struct TransformGesture {
     /// The Elements the gesture transforms: those of the Selection, labels
     /// excepted, each with how it began.
     tracked: Vec<Tracked>,
-    /// The labels of the tracked Elements, each with how it began.
-    labels: Vec<Label>,
-    /// The effective pointer of the last step, to tell a pointer that moved
+    /// The pointer and keys of the last step, to tell a pointer that moved
     /// from one that is where it was.
-    applied: Option<Point>,
-    /// The angle of the last rotation, to tell a pointer that moved from one
-    /// that is where it was.
+    applied: Option<(Point, Modifiers)>,
+    /// The turn of the last rotation, to tell one that changed the angle
+    /// from one that snapped to the same.
     turned: Option<f64>,
     attachments: Attachments,
     step: Step,
@@ -119,48 +193,44 @@ impl TransformGesture {
         handle: Handle,
         origin: Point,
     ) -> Self {
-        let mut tracked = Vec::new();
-        for element in crate::transform_handles::targets(scene, selection) {
+        let targets: Vec<Element> = crate::transform_handles::targets(scene, selection).collect();
+        let index: HashMap<&str, usize> = targets
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (e.id(), i))
+            .collect();
+        let mut labels: Vec<Option<Label>> = targets.iter().map(|_| None).collect();
+        for element in scene.elements().filter(|e| !e.is_deleted()) {
+            let Some(&i) = element.container_id().and_then(|id| index.get(id)) else {
+                continue;
+            };
             if let Some(snapshot) = scene.snapshot(element.id()) {
                 step.touch(scene, element.id());
+                labels[i] = Some(Label {
+                    handle: element.handle(),
+                    snapshot,
+                });
+            }
+        }
+        let mut tracked = Vec::with_capacity(targets.len());
+        let mut ids = Vec::with_capacity(targets.len());
+        for (element, label) in targets.iter().zip(labels) {
+            if let Some(snapshot) = scene.snapshot(element.id()) {
+                step.touch(scene, element.id());
+                ids.push(element.id().to_owned());
                 tracked.push(Tracked {
                     handle: element.handle(),
                     snapshot,
+                    label,
                 });
             }
         }
-        let mut labels = Vec::new();
-        for element in scene.elements() {
-            let Some(container) = element.container_id() else {
-                continue;
-            };
-            let transforms = tracked
-                .iter()
-                .filter_map(Tracked::element)
-                .any(|e| e.id() == container);
-            if element.is_deleted() || !transforms {
-                continue;
-            }
-            if let Some(snapshot) = scene.snapshot(element.id()) {
-                step.touch(scene, element.id());
-                labels.push(Label {
-                    handle: element.handle(),
-                    container: container_of(&tracked, container),
-                    snapshot,
-                });
-            }
-        }
-        let ids = tracked
-            .iter()
-            .filter_map(|t| Some(t.element()?.id().to_owned()))
-            .collect();
         Self {
             pointer,
             handle,
             offset: transform_box.grab_offset(handle, origin),
             transform_box,
             tracked,
-            labels,
             applied: None,
             turned: None,
             attachments: Attachments::begin(&mut step, scene, ids),
@@ -183,25 +253,34 @@ impl TransformGesture {
         self.step.revert(scene, entropy);
     }
 
-    /// Follows the pointer to `to`, keeping the ratio of the sides or
-    /// snapping the rotation if `shift` is held. Returns whether anything
-    /// changed.
+    /// Follows the pointer to `to`. Shift keeps the ratio of the sides or
+    /// snaps the rotation; Alt resizes about the middle of the box. Returns
+    /// whether anything changed.
     pub fn drag_to(
         &mut self,
         scene: &mut Scene,
         entropy: &mut Entropy,
         to: Point,
-        shift: bool,
+        keys: Modifiers,
         measurer: Option<&dyn TextMeasurer>,
     ) -> bool {
         let at = (to.0 - self.offset.0, to.1 - self.offset.1);
-        if self.applied == Some(at) {
+        if self.applied == Some((at, keys)) {
             return false;
         }
-        self.applied = Some(at);
-        let changed = match self.handle {
-            Handle::Rotation => self.rotate(scene, entropy, at, shift),
-            _ => self.resize(scene, entropy, at, shift, measurer),
+        self.applied = Some((at, keys));
+        let changed = if self.handle == Handle::Rotation {
+            self.rotate(scene, entropy, at, keys.shift)
+        } else {
+            let resize = Resize {
+                handle: self.handle,
+                keep_ratio: self.keeps_ratio(keys.shift),
+                from_centre: keys.alt,
+            };
+            match self.tracked.as_slice() {
+                [single] => resize_single(single, scene, entropy, at, resize, measurer),
+                _ => self.resize_many(scene, entropy, at, resize, measurer),
+            }
         };
         if changed {
             self.attachments.update(scene, entropy, &mut self.step);
@@ -209,421 +288,74 @@ impl TransformGesture {
         changed
     }
 
-    /// Whether a font may become this small (Excalidraw's `MIN_FONT_SIZE`).
-    fn font_fits(font: f64) -> bool {
-        font >= MIN_FONT_SIZE
-    }
-
-    /// Whether the Selection keeps the ratio of its sides of itself: images
-    /// do, and Shift frees them; everything else needs Shift for it.
+    /// Whether the Selection keeps the ratio of its sides: Selections with an
+    /// image do of themselves and Shift frees them; any other needs Shift.
     fn keeps_ratio(&self, shift: bool) -> bool {
         let images = self
             .tracked
             .iter()
             .any(|t| t.element().is_some_and(|e| e.kind() == ElementType::Image));
-        if images { !shift } else { shift }
+        images != shift
     }
 
     // --- Rotation -----------------------------------------------------------
 
     /// Turns the Selection about the middle of its box so that it points
-    /// where the pointer does from there.
+    /// where the pointer does from there: snapped to steps of 15° if `shift`
+    /// is held. One Element keeps where it is and takes the angle;
+    /// several each keep their own angle on top of the turn, and move with
+    /// their middles. Returns whether the turn changed.
     fn rotate(&mut self, scene: &mut Scene, entropy: &mut Entropy, at: Point, shift: bool) -> bool {
-        let angle = self.rotation(at, shift);
-        if Some(angle) == self.turned {
+        let centre = self.transform_box.frame().centre();
+        let mut turn = TWO_PI * 1.25 + (at.1 - centre.1).atan2(at.0 - centre.0);
+        if shift {
+            turn += SHIFT_LOCKING_ANGLE / 2.0;
+            turn -= turn % SHIFT_LOCKING_ANGLE;
+        }
+        let turn = normalized(turn);
+        if self.turned.replace(turn) == Some(turn) {
             return false;
         }
-        self.turned = Some(angle);
-        if self.tracked.len() == 1 {
-            self.rotate_single(scene, entropy, angle);
-        } else {
-            let centre = self.transform_box.frame().centre();
-            self.rotate_many(scene, entropy, centre, angle);
+        if let [single] = self.tracked.as_slice() {
+            scene.update(
+                single.handle,
+                entropy.integer(),
+                [("angle", Value::Number(turn))],
+            );
+            single.refit_label(scene, entropy, None, Some(turn), None);
+            return true;
         }
-        true
-    }
-
-    /// The angle the Selection is to point at: where the pointer is from the
-    /// middle of the box, counted from straight above it; snapped to
-    /// fifteenths of a turn if `shift` is held.
-    fn rotation(&self, at: Point, shift: bool) -> f64 {
-        let (cx, cy) = self.transform_box.frame().centre();
-        let mut angle = TWO_PI * 1.25 + (at.1 - cy).atan2(at.0 - cx);
-        if shift {
-            angle += SHIFT_LOCKING_ANGLE / 2.0;
-            angle -= angle % SHIFT_LOCKING_ANGLE;
-        }
-        normalized(angle)
-    }
-
-    /// Turns the one Element of the Selection: it keeps where it is and
-    /// takes the angle.
-    fn rotate_single(&mut self, scene: &mut Scene, entropy: &mut Entropy, angle: f64) {
-        let Some(tracked) = self.tracked.first() else {
-            return;
-        };
-        scene.update(
-            tracked.handle,
-            entropy.integer(),
-            [("angle", Value::Number(angle))],
-        );
-        self.refit_label(
-            scene,
-            entropy,
-            tracked.handle,
-            None,
-            Some(angle),
-            false,
-            None,
-        );
-    }
-
-    /// Turns every Element of the Selection about `centre`: each keeps its
-    /// own angle on top of the turn, and moves with its middle.
-    fn rotate_many(&mut self, scene: &mut Scene, entropy: &mut Entropy, centre: Point, angle: f64) {
-        let (sin, cos) = angle.sin_cos();
-        let mut moves = Vec::new();
         for tracked in &self.tracked {
             let Some(orig) = tracked.element() else {
                 continue;
             };
-            let (cx, cy) = Frame::of(&orig).centre();
-            let (dx, dy) = (cx - centre.0, cy - centre.1);
-            moves.push((
-                tracked.handle,
-                orig.x() + dx * cos - dy * sin - dx,
-                orig.y() + dx * sin + dy * cos - dy,
-                normalized(orig.angle() + angle),
-            ));
+            let middle = Frame::of(&orig).centre();
+            let (x, y) = turned(middle, centre, turn);
+            let angle = normalized(orig.angle() + turn);
+            let members = [
+                ("x", Value::Number(orig.x() + x - middle.0)),
+                ("y", Value::Number(orig.y() + y - middle.1)),
+                ("angle", Value::Number(angle)),
+            ];
+            scene.update(tracked.handle, entropy.integer(), members);
+            tracked.refit_label(scene, entropy, None, Some(angle), None);
         }
-        for (handle, x, y, new_angle) in moves {
-            scene.update(
-                handle,
-                entropy.integer(),
-                [
-                    ("x", Value::Number(x)),
-                    ("y", Value::Number(y)),
-                    ("angle", Value::Number(new_angle)),
-                ],
-            );
-            self.refit_label(scene, entropy, handle, None, Some(new_angle), false, None);
-        }
-    }
-
-    // --- Resizing -----------------------------------------------------------
-
-    /// Scales the Selection as its box does when `handle` is dragged.
-    fn resize(
-        &mut self,
-        scene: &mut Scene,
-        entropy: &mut Entropy,
-        at: Point,
-        shift: bool,
-        measurer: Option<&dyn TextMeasurer>,
-    ) -> bool {
-        let aspect = self.keeps_ratio(shift);
-        if self.tracked.len() == 1 {
-            self.resize_single(scene, entropy, at, aspect, measurer)
-        } else {
-            self.resize_many(scene, entropy, at, aspect, measurer)
-        }
-    }
-
-    /// Scales the one Element of the Selection from the pointer: the sides
-    /// the handle is on follow it, the opposite corner or side stays.
-    fn resize_single(
-        &mut self,
-        scene: &mut Scene,
-        entropy: &mut Entropy,
-        at: Point,
-        aspect: bool,
-        measurer: Option<&dyn TextMeasurer>,
-    ) -> bool {
-        let Some(tracked) = self.tracked.first() else {
-            return false;
-        };
-        let handle = tracked.handle;
-        // The Element as it began, out of the gesture: the views below outlive
-        // the borrow of it.
-        let snapshot = tracked.snapshot.clone();
-        let Some(orig) = Element::view(handle, &snapshot) else {
-            return false;
-        };
-        let (shown_width, shown_height, shown_font_size) = scene
-            .element(handle)
-            .map(|e| (e.width(), e.height(), e.font_size()))
-            .unwrap_or((orig.width(), orig.height(), orig.font_size()));
-        // The pointer in the Element's own, unturned frame: resizing keeps
-        // the Element's angle and works in the sides it had before it.
-        let (x, y) = unturned(at, Frame::of(&orig).centre(), orig.angle());
-        let mut next_width = if self.handle.is_east() {
-            x - orig.x()
-        } else if self.handle.is_west() {
-            orig.x() + orig.width() - x
-        } else {
-            orig.width()
-        };
-        let mut next_height = if self.handle.is_south() {
-            y - orig.y()
-        } else if self.handle.is_north() {
-            orig.y() + orig.height() - y
-        } else {
-            orig.height()
-        };
-        // Keeping the ratio of the sides: from a corner both sides take the
-        // scale of the longer one; from a side the other side follows the
-        // one that is dragged.
-        if aspect {
-            let width_ratio = next_width.abs() / orig.width();
-            let height_ratio = next_height.abs() / orig.height();
-            if self.handle.is_corner() {
-                let ratio = width_ratio.max(height_ratio);
-                next_width = orig.width() * ratio * next_width.signum();
-                next_height = orig.height() * ratio * next_height.signum();
-            } else {
-                next_height *= width_ratio;
-                next_width *= height_ratio;
-            }
-        }
-        if orig.kind() == ElementType::Text {
-            return self.resize_text(
-                scene,
-                entropy,
-                &orig,
-                shown_width,
-                shown_height,
-                shown_font_size,
-                next_width,
-                next_height,
-                measurer,
-            );
-        }
-        self.apply_single(
-            scene,
-            entropy,
-            orig,
-            next_width,
-            next_height,
-            aspect,
-            measurer,
-        )
-    }
-
-    /// Lays a text out again at its new size: its font scales with its
-    /// height, and its width rewraps its lines (Excalidraw's
-    /// `resizeSingleTextElement`). A corner keeps the ratio of the sides, as
-    /// keeping it does.
-    #[allow(clippy::too_many_arguments)]
-    fn resize_text(
-        &mut self,
-        scene: &mut Scene,
-        entropy: &mut Entropy,
-        orig: &Element,
-        shown_width: f64,
-        shown_height: f64,
-        shown_font_size: f64,
-        next_width: f64,
-        next_height: f64,
-        measurer: Option<&dyn TextMeasurer>,
-    ) -> bool {
-        let Some(measurer) = measurer else {
-            return false;
-        };
-        let pointer_width = next_width;
-        let corner = self.handle.is_corner();
-        let next_height = if corner {
-            next_height.max(next_width / orig.width() * orig.height())
-        } else {
-            next_height
-        };
-        // From the top or bottom, the width scales with the height.
-        let next_width = shown_width * (next_height / shown_height);
-        let font = shown_font_size * (next_height / shown_height);
-        if !Self::font_fits(font) {
-            return false;
-        }
-        if corner || self.handle.is_north() || self.handle.is_south() {
-            let origin = resized_origin(
-                (orig.x(), orig.y()),
-                orig.width(),
-                orig.height(),
-                next_width,
-                next_height,
-                orig.angle(),
-                self.handle,
-                false,
-            );
-            scene.update(
-                orig.handle(),
-                entropy.integer(),
-                [
-                    ("x", Value::Number(origin.0)),
-                    ("y", Value::Number(origin.1)),
-                    ("fontSize", Value::Number(font)),
-                    ("width", Value::Number(next_width)),
-                    ("height", Value::Number(next_height)),
-                ],
-            );
-            return true;
-        }
-        // From the sides: the lines wrap again to the new width, and the
-        // height is the height the lines take.
-        let width = pointer_width.max(text::min_text_width(shown_font_size, measurer));
-        let lines = {
-            let Some(current) = scene.snapshot(orig.id()) else {
-                return false;
-            };
-            let Some(current) = Element::view(orig.handle(), &current) else {
-                return false;
-            };
-            text::set_in_lines(&current, width.abs(), measurer)
-        };
-        let origin = resized_origin(
-            (orig.x(), orig.y()),
-            orig.width(),
-            orig.height(),
-            width,
-            lines.height,
-            orig.angle(),
-            self.handle,
-            false,
-        );
-        scene.update(
-            orig.handle(),
-            entropy.integer(),
-            [
-                ("x", Value::Number(origin.0)),
-                ("y", Value::Number(origin.1)),
-                ("width", Value::Number(width.abs())),
-                ("height", Value::Number(lines.height)),
-                ("text", Value::String(lines.text)),
-                ("autoResize", Value::Bool(false)),
-            ],
-        );
         true
     }
 
-    /// Scales the one Element of the Selection, its kind's rules applied:
-    /// points rescale, an image mirrors, its label follows.
-    #[allow(clippy::too_many_arguments)]
-    fn apply_single(
-        &mut self,
-        scene: &mut Scene,
-        entropy: &mut Entropy,
-        orig: Element<'_>,
-        mut next_width: f64,
-        mut next_height: f64,
-        aspect: bool,
-        measurer: Option<&dyn TextMeasurer>,
-    ) -> bool {
-        // The least size and the label's font use sizes as they are; the
-        // signs are kept for the geometry below, where crossing the opposite
-        // edge mirrors the Element.
-        let flip_x = next_width < 0.0;
-        let flip_y = next_height < 0.0;
-        next_width = next_width.abs();
-        next_height = next_height.abs();
-
-        let mut label_font = None;
-        if let Some(label) = self.label_of(orig.handle()) {
-            if aspect {
-                let font = label.font_size()
-                    * (text::label_max_width(orig.kind(), next_width)
-                        / text::label_max_width(orig.kind(), orig.width()));
-                if !Self::font_fits(font) {
-                    return false;
-                }
-                label_font = Some(font);
-            } else {
-                // The label's font is what it was when the gesture began;
-                // only the lines rewrap.
-                label_font = Some(label.font_size());
-                if let Some(measurer) = measurer {
-                    let (min_width, min_height) = text::min_container_size(&label, measurer);
-                    next_width = next_width.max(min_width);
-                    next_height = next_height.max(min_height);
-                }
-            }
-        }
-
-        let signed_width = if flip_x { -next_width } else { next_width };
-        let signed_height = if flip_y { -next_height } else { next_height };
-        let rescaled = rescale_points(&orig.points(), signed_width, signed_height, true);
-        // A line or arrow alone has no handles (see `TransformBox::of`), so
-        // only a freedraw stroke resizes alone: its points keep the least
-        // coordinate they had, as Excalidraw's rescaling normalizes them.
-        let previous = if linear(orig.kind()) {
-            Frame::of(&orig).min
-        } else {
-            (orig.x(), orig.y())
-        };
-        let mut origin = resized_origin(
-            previous,
-            orig.width(),
-            orig.height(),
-            signed_width,
-            signed_height,
-            orig.angle(),
-            self.handle,
-            aspect,
-        );
-        // Mirroring puts the origin on the far side of the Element.
-        if flip_x {
-            origin.0 += signed_width;
-        }
-        if flip_y {
-            origin.1 += signed_height;
-        }
-        if signed_width == 0.0 || signed_height == 0.0 {
-            return false;
-        }
-
-        let mut members = vec![
-            ("x", Value::Number(origin.0)),
-            ("y", Value::Number(origin.1)),
-            ("width", Value::Number(next_width)),
-            ("height", Value::Number(next_height)),
-        ];
-        if linear(orig.kind()) {
-            members.push(("points", points_value(&rescaled)));
-        }
-        if orig.kind() == ElementType::Image {
-            let (scale_x, scale_y) = orig.image_scale();
-            members.push((
-                "scale",
-                Value::Array(vec![
-                    Value::Number(scale_x * signed_width.signum()),
-                    Value::Number(scale_y * signed_height.signum()),
-                ]),
-            ));
-        }
-        scene.update(orig.handle(), entropy.integer(), members);
-        // The label's font goes on before the lines wrap to the container it
-        // sits in now.
-        // Only the handles in the middle of the top and bottom sides leave the
-        // width, which the lines wrap to, as it is (`handleBindTextResize`).
-        let rewrap = aspect || !matches!(self.handle, Handle::N | Handle::S);
-        self.refit_label(
-            scene,
-            entropy,
-            orig.handle(),
-            label_font,
-            None,
-            rewrap,
-            measurer,
-        );
-        true
-    }
+    // --- Resizing several Elements -----------------------------------------
 
     /// Scales every Element of the Selection as its box does: each from the
-    /// corner or side opposite the handle, mirroring when the pointer
-    /// crosses the anchor (Excalidraw's `resizeMultipleElements`).
+    /// corner or side opposite the handle (or the middle, from the centre),
+    /// mirroring when the pointer crosses it (Excalidraw's
+    /// `resizeMultipleElements`). Nothing changes if a font would get
+    /// smaller than the least.
     fn resize_many(
-        &mut self,
+        &self,
         scene: &mut Scene,
         entropy: &mut Entropy,
         at: Point,
-        aspect: bool,
+        resize: Resize,
         measurer: Option<&dyn TextMeasurer>,
     ) -> bool {
         let Some(bounds) = self.common_bounds() else {
@@ -633,68 +365,68 @@ impl TransformGesture {
         if width == 0.0 || height == 0.0 {
             return false;
         }
-        let anchor = anchor_of(self.handle, bounds);
-        let (flip_x, flip_y) = flips_of(self.handle, at, anchor);
-        let mut next_width = if self.handle.is_east() || self.handle.is_west() {
-            (at.0 - anchor.0).abs()
+        let handle = resize.handle;
+        let (anchor, factor) = if resize.from_centre {
+            (bounds.centre(), 2.0)
         } else {
-            width
+            (anchor_of(handle, bounds), 1.0)
         };
-        let mut next_height = if self.handle.is_north() || self.handle.is_south() {
-            (at.1 - anchor.1).abs()
+        let (flip_x, flip_y) = flips_of(handle, at, anchor);
+        let (reach_x, reach_y) = (
+            (at.0 - anchor.0).abs() * factor,
+            (at.1 - anchor.1).abs() * factor,
+        );
+        let across = handle.is_east() || handle.is_west();
+        let down = handle.is_north() || handle.is_south();
+        // Without the ratio kept, an axis the handle is not on keeps its
+        // size; with it, both take the scale of the pointer's farther reach.
+        let (next_width, next_height) = if resize.keep_ratio {
+            let scale = (reach_x / width).max(reach_y / height);
+            (width * scale, height * scale)
         } else {
-            height
+            (
+                if across { reach_x } else { width },
+                if down { reach_y } else { height },
+            )
         };
         if next_width == 0.0 || next_height == 0.0 {
             return false;
         }
-        if aspect {
-            let scale = ((at.0 - anchor.0).abs() / width).max((at.1 - anchor.1).abs() / height);
-            next_width = width * scale * (at.0 - anchor.0).signum();
-            next_height = height * scale * (at.1 - anchor.1).signum();
-        }
-        if next_width == 0.0 || next_height == 0.0 {
-            return false;
-        }
-        let mut scale_x = if self.handle.is_east() || self.handle.is_west() {
-            next_width.abs() / width
-        } else {
-            1.0
-        };
-        let mut scale_y = if self.handle.is_north() || self.handle.is_south() {
-            next_height.abs() / height
-        } else {
-            1.0
-        };
-        // Elements that are turned, or texts, keep the ratio of their sides
-        // so that their angle and their font do not skew.
-        let scale = if self.handle.is_corner() {
-            (next_width.abs() / width).max(next_height.abs() / height)
-        } else if self.handle.is_east() || self.handle.is_west() {
+        let scale_x = if across { next_width / width } else { 1.0 };
+        let scale_y = if down { next_height / height } else { 1.0 };
+        let scale = if handle.is_corner() {
+            (next_width / width).max(next_height / height)
+        } else if across {
             scale_x
         } else {
             scale_y
         };
-        let keeps = aspect
+        // Turned Elements, texts and groups keep the ratio of their sides,
+        // so that angles, fonts and groups do not skew.
+        let keeps = resize.keep_ratio
             || self.tracked.iter().any(|t| {
-                t.element()
-                    .is_some_and(|e| e.angle() != 0.0 || e.kind() == ElementType::Text)
+                t.element().is_some_and(|e| {
+                    e.angle() != 0.0
+                        || e.kind() == ElementType::Text
+                        || e.group_ids().next().is_some()
+                })
             });
-        if keeps {
-            scale_x = scale;
-            scale_y = scale;
-        }
+        let (scale_x, scale_y) = if keeps {
+            (scale, scale)
+        } else {
+            (scale_x, scale_y)
+        };
 
-        let mut moves = Vec::new();
-        let mut label_fonts = Vec::new();
+        // Worked out in full before anything changes: a font that would get
+        // too small leaves everything as it is.
+        let mut updates = Vec::with_capacity(self.tracked.len());
         for tracked in &self.tracked {
             let Some(orig) = tracked.element() else {
                 continue;
             };
             let (scaled_width, scaled_height) = (orig.width() * scale_x, orig.height() * scale_y);
             let angle = normalized(orig.angle() * flip_sign(flip_x) * flip_sign(flip_y));
-            let points = linear(orig.kind());
-            let (offset_x, offset_y) = (orig.x() - anchor.0, orig.y() - anchor.1);
+            let points = made_of_points(orig.kind());
             // Mirroring a made-of-points Element mirrors its points, so its
             // position does not shift over; any other does.
             let shift_x = if flip_x && !points { scaled_width } else { 0.0 };
@@ -703,26 +435,8 @@ impl TransformGesture {
             } else {
                 0.0
             };
-            let x = anchor.0 + flip_sign(flip_x) * (offset_x * scale_x + shift_x);
-            let y = anchor.1 + flip_sign(flip_y) * (offset_y * scale_y + shift_y);
-            let mut font = None;
-            if orig.kind() == ElementType::Text {
-                font = Some(orig.font_size() * scale_x);
-                if !Self::font_fits(font.unwrap()) {
-                    continue;
-                }
-            }
-            let mut label_font = None;
-            if let Some(label) = self.label_of(tracked.handle) {
-                if keeps {
-                    label_font = Some(label.font_size() * scale);
-                    if !Self::font_fits(label_font.unwrap()) {
-                        continue;
-                    }
-                } else {
-                    label_font = Some(label.font_size());
-                }
-            }
+            let x = anchor.0 + flip_sign(flip_x) * ((orig.x() - anchor.0) * scale_x + shift_x);
+            let y = anchor.1 + flip_sign(flip_y) * ((orig.y() - anchor.1) * scale_y + shift_y);
             let mut members = vec![
                 ("x", Value::Number(x)),
                 ("y", Value::Number(y)),
@@ -731,45 +445,36 @@ impl TransformGesture {
                 ("angle", Value::Number(angle)),
             ];
             if points {
-                members.push((
-                    "points",
-                    points_value(&rescale_points(
-                        &orig.points(),
-                        scaled_width * flip_sign(flip_x),
-                        scaled_height * flip_sign(flip_y),
-                        false,
-                    )),
-                ));
+                let width = scaled_width * flip_sign(flip_x);
+                let height = scaled_height * flip_sign(flip_y);
+                let rescaled = rescale_points(&orig.points(), width, height, false);
+                members.push(("points", points_value(&rescaled)));
             }
-            if let Some(font) = font {
+            if orig.kind() == ElementType::Text {
+                let font = orig.font_size() * scale_x;
+                if font < MIN_FONT_SIZE {
+                    return false;
+                }
                 members.push(("fontSize", Value::Number(font)));
             }
             if orig.kind() == ElementType::Image {
-                let (scale_x, scale_y) = orig.image_scale();
-                members.push((
-                    "scale",
-                    Value::Array(vec![
-                        Value::Number(scale_x * flip_sign(flip_x)),
-                        Value::Number(scale_y * flip_sign(flip_y)),
-                    ]),
-                ));
+                let (image_x, image_y) = orig.image_scale();
+                let mirrored = [image_x * flip_sign(flip_x), image_y * flip_sign(flip_y)];
+                members.push(("scale", Value::Array(mirrored.map(Value::Number).to_vec())));
             }
-            moves.push((tracked.handle, members));
-            label_fonts.push((tracked.handle, label_font, angle));
+            let label_font = match tracked.label() {
+                Some(label) if keeps => Some(label.font_size() * scale),
+                Some(label) => Some(label.font_size()),
+                None => None,
+            };
+            if label_font.is_some_and(|font| font < MIN_FONT_SIZE) {
+                return false;
+            }
+            updates.push((tracked, members, label_font, angle));
         }
-        for (handle, members) in moves {
-            scene.update(handle, entropy.integer(), members);
-        }
-        for (container, label_font, angle) in label_fonts {
-            self.refit_label(
-                scene,
-                entropy,
-                container,
-                label_font,
-                Some(angle),
-                true,
-                measurer,
-            );
+        for (tracked, members, label_font, angle) in updates {
+            scene.update(tracked.handle, entropy.integer(), members);
+            tracked.refit_label(scene, entropy, label_font, Some(angle), measurer);
         }
         true
     }
@@ -778,116 +483,252 @@ impl TransformGesture {
     /// the labels of lines and arrows included (Excalidraw's
     /// `getCommonBoundingBox`).
     fn common_bounds(&self) -> Option<Frame> {
-        let mut bounds: Option<Frame> = None;
-        let include = |frame: Frame, bounds: &mut Option<Frame>| {
-            *bounds = Some(match *bounds {
-                None => frame,
-                Some(around) => around.union(frame),
-            });
-        };
+        let mut frames = Vec::with_capacity(self.tracked.len());
         for tracked in &self.tracked {
             let orig = tracked.element()?;
-            include(Frame::shown(&orig), &mut bounds);
-            if orig.kind().is_linear() {
-                for label in &self.labels {
-                    if label.container != tracked.handle {
-                        continue;
-                    }
-                    if let Some(label) = label.element() {
-                        include(Frame::shown(&label), &mut bounds);
-                    }
-                }
+            frames.push(Frame::shown(&orig));
+            if let Some(label) = tracked.label().filter(|_| orig.kind().is_linear()) {
+                frames.push(Frame::shown(&label));
             }
         }
-        bounds
-    }
-
-    /// The label of the container with `handle`, as it began.
-    fn label_of(&self, container: u32) -> Option<Element<'_>> {
-        let label = self.labels.iter().find(|l| l.container == container)?;
-        label.element()
-    }
-
-    /// Puts the label of the container with `handle` where it sits in the
-    /// container as it is now. With `font` the label's font becomes it
-    /// first; with `angle` the label turns with its container, which lines
-    /// and arrows except against; with `rewrap` the lines wrap to the
-    /// container again. An arrow's label keeps where the file has it.
-    #[allow(clippy::too_many_arguments)]
-    fn refit_label(
-        &self,
-        scene: &mut Scene,
-        entropy: &mut Entropy,
-        container: u32,
-        font: Option<f64>,
-        angle: Option<f64>,
-        rewrap: bool,
-        measurer: Option<&dyn TextMeasurer>,
-    ) {
-        let Some(label) = self.labels.iter().find(|l| l.container == container) else {
-            return;
-        };
-        if let Some(font) = font {
-            scene.update(
-                label.handle,
-                entropy.integer(),
-                [("fontSize", Value::Number(font))],
-            );
-        }
-        let fit = {
-            let Some(container_element) = scene.element(container) else {
-                return;
-            };
-            let is_arrow = container_element.kind() == ElementType::Arrow;
-            let keeps_angle = !container_element.kind().is_linear();
-            let Some(label_id) = label.id().and_then(|id| scene.snapshot(id)) else {
-                return;
-            };
-            let Some(container_id) = scene.snapshot(container_element.id()) else {
-                return;
-            };
-            let Some(label_element) = Element::view(label.handle, &label_id) else {
-                return;
-            };
-            let Some(container_element) = Element::view(container, &container_id) else {
-                return;
-            };
-            let wrap = if rewrap { measurer } else { None };
-            (
-                text::fit_label(&label_element, &container_element, wrap),
-                is_arrow,
-                keeps_angle,
-            )
-        };
-        let (fit, is_arrow, keeps_angle) = fit;
-        let mut members = Vec::new();
-        if !is_arrow {
-            members.push(("x", Value::Number(fit.x)));
-            members.push(("y", Value::Number(fit.y)));
-        }
-        members.push(("width", Value::Number(fit.width)));
-        members.push(("height", Value::Number(fit.height)));
-        if let Some(text) = fit.text {
-            members.push(("text", Value::String(text)));
-        }
-        if let (Some(angle), true) = (angle, keeps_angle) {
-            members.push(("angle", Value::Number(angle)));
-        }
-        scene.update(label.handle, entropy.integer(), members);
+        frames.into_iter().reduce(Frame::union)
     }
 }
 
-/// The handle of the tracked Element whose `id` is `id`.
-fn container_of(tracked: &[Tracked], id: &str) -> u32 {
-    tracked
-        .iter()
-        .find(|t| t.element().is_some_and(|e| e.id() == id))
-        .map(|t| t.handle)
-        .unwrap_or_default()
+// --- Resizing one Element ---------------------------------------------------
+
+/// Scales the one Element of the Selection from the pointer: the sides the
+/// handle is on follow it, and the opposite corner or side stays (or, from
+/// the centre, the middle). Turned Elements are resized in their own,
+/// unturned frame and keep their angle (Excalidraw's
+/// `getNextSingleWidthAndHeightFromPointer` and `resizeSingleElement`).
+fn resize_single(
+    tracked: &Tracked,
+    scene: &mut Scene,
+    entropy: &mut Entropy,
+    at: Point,
+    resize: Resize,
+    measurer: Option<&dyn TextMeasurer>,
+) -> bool {
+    let Some(orig) = tracked.element() else {
+        return false;
+    };
+    let handle = resize.handle;
+    // The box the Element is drawn in: for a freedraw stroke that of its
+    // points, which may reach left of or above its first one.
+    let bounds = Frame::of(&orig);
+    let (x, y) = unturned(at, bounds.centre(), orig.angle());
+    let mut next_width = if handle.is_east() {
+        x - bounds.min.0
+    } else if handle.is_west() {
+        bounds.max.0 - x
+    } else {
+        orig.width()
+    };
+    let mut next_height = if handle.is_south() {
+        y - bounds.min.1
+    } else if handle.is_north() {
+        bounds.max.1 - y
+    } else {
+        orig.height()
+    };
+    if resize.from_centre {
+        next_width = 2.0 * next_width - orig.width();
+        next_height = 2.0 * next_height - orig.height();
+    }
+    // Keeping the ratio of the sides: from a corner both sides take the
+    // scale of the longer one; from a side the other side follows the one
+    // that is dragged.
+    if resize.keep_ratio {
+        let width_ratio = next_width.abs() / orig.width();
+        let height_ratio = next_height.abs() / orig.height();
+        if handle.is_corner() {
+            let ratio = width_ratio.max(height_ratio);
+            next_width = orig.width() * ratio * next_width.signum();
+            next_height = orig.height() * ratio * next_height.signum();
+        } else {
+            next_height *= width_ratio;
+            next_width *= height_ratio;
+        }
+    }
+    if orig.kind() == ElementType::Text {
+        return resize_text(
+            scene,
+            entropy,
+            &orig,
+            (next_width, next_height),
+            resize,
+            measurer,
+        );
+    }
+
+    // The least size and the label's font use sizes as they are; the signs
+    // are kept for the geometry below, where crossing the opposite edge
+    // mirrors the Element.
+    let (flip_x, flip_y) = (next_width < 0.0, next_height < 0.0);
+    next_width = next_width.abs();
+    next_height = next_height.abs();
+    let mut label_font = None;
+    if let Some(label) = tracked.label() {
+        if resize.keep_ratio {
+            let font = label.font_size()
+                * (text::label_max_width(orig.kind(), next_width)
+                    / text::label_max_width(orig.kind(), orig.width()));
+            if font < MIN_FONT_SIZE {
+                return false;
+            }
+            label_font = Some(font);
+        } else {
+            // The label's font is what it was when the gesture began; only
+            // the lines rewrap.
+            label_font = Some(label.font_size());
+            if let Some(measurer) = measurer {
+                let (min_width, min_height) = text::min_container_size(&label, measurer);
+                next_width = next_width.max(min_width);
+                next_height = next_height.max(min_height);
+            }
+        }
+    }
+    let signed_width = next_width * flip_sign(flip_x);
+    let signed_height = next_height * flip_sign(flip_y);
+    if signed_width == 0.0 || signed_height == 0.0 {
+        return false;
+    }
+    // A line or arrow alone has no handles (see `TransformBox::of`), so of
+    // the Elements made of points only a freedraw stroke resizes alone: its
+    // points keep their least coordinates, and so its first point is where
+    // the box's corner goes, as for any other Element.
+    let mut origin = resized_origin(
+        (orig.x(), orig.y()),
+        (orig.width(), orig.height()),
+        (signed_width, signed_height),
+        orig.angle(),
+        Anchor::of(handle, resize.keep_ratio, resize.from_centre),
+    );
+    // Mirroring puts the origin on the far side of the Element.
+    if flip_x {
+        origin.0 += signed_width;
+    }
+    if flip_y {
+        origin.1 += signed_height;
+    }
+
+    let mut members = vec![
+        ("x", Value::Number(origin.0)),
+        ("y", Value::Number(origin.1)),
+        ("width", Value::Number(next_width)),
+        ("height", Value::Number(next_height)),
+    ];
+    if made_of_points(orig.kind()) {
+        let rescaled = rescale_points(&orig.points(), signed_width, signed_height, true);
+        members.push(("points", points_value(&rescaled)));
+    }
+    if orig.kind() == ElementType::Image {
+        let (image_x, image_y) = orig.image_scale();
+        let mirrored = [image_x * flip_sign(flip_x), image_y * flip_sign(flip_y)];
+        members.push(("scale", Value::Array(mirrored.map(Value::Number).to_vec())));
+    }
+    scene.update(orig.handle(), entropy.integer(), members);
+    // The label's font goes on before the lines wrap to the container it
+    // sits in now. Only the handles in the middle of the top and bottom
+    // sides leave the width, which the lines wrap to, as it is
+    // (`handleBindTextResize`).
+    let rewrap = resize.keep_ratio || !matches!(handle, Handle::N | Handle::S);
+    let wrap = measurer.filter(|_| rewrap);
+    tracked.refit_label(scene, entropy, label_font, None, wrap);
+    true
+}
+
+/// Lays a text out again at the size `next` the pointer asks for: from a
+/// corner, the top or the bottom its font scales with its height (a corner
+/// keeping the ratio of the sides, as keeping it does); from the left or
+/// right its lines wrap again to the width (Excalidraw's
+/// `resizeSingleTextElement`).
+fn resize_text(
+    scene: &mut Scene,
+    entropy: &mut Entropy,
+    orig: &Element,
+    (next_width, next_height): (f64, f64),
+    resize: Resize,
+    measurer: Option<&dyn TextMeasurer>,
+) -> bool {
+    let Some(measurer) = measurer else {
+        return false;
+    };
+    // Texts ignore Shift: they keep their ratio from every handle but the
+    // left and right ones, which rewrap instead.
+    let anchor = Anchor::of(resize.handle, false, resize.from_centre);
+    let previous = ((orig.x(), orig.y()), (orig.width(), orig.height()));
+    let handle = resize.handle;
+    if handle.is_north() || handle.is_south() {
+        let Some((shown_width, shown_height, shown_font)) = scene
+            .element(orig.handle())
+            .map(|e| (e.width(), e.height(), e.font_size()))
+        else {
+            return false;
+        };
+        let next_height = if handle.is_corner() {
+            next_height.max(next_width / orig.width() * orig.height())
+        } else {
+            next_height
+        };
+        let width = shown_width * (next_height / shown_height);
+        let font = shown_font * (next_height / shown_height);
+        if font < MIN_FONT_SIZE {
+            return false;
+        }
+        let origin = resized_origin(
+            previous.0,
+            previous.1,
+            (width, next_height),
+            orig.angle(),
+            anchor,
+        );
+        scene.update(
+            orig.handle(),
+            entropy.integer(),
+            [
+                ("x", Value::Number(origin.0)),
+                ("y", Value::Number(origin.1)),
+                ("fontSize", Value::Number(font)),
+                ("width", Value::Number(width)),
+                ("height", Value::Number(next_height)),
+            ],
+        );
+        return true;
+    }
+    let lines = {
+        let Some(current) = scene.element(orig.handle()) else {
+            return false;
+        };
+        let width = next_width.max(text::min_text_width(current.font_size(), measurer));
+        (width, text::set_in_lines(&current, width.abs(), measurer))
+    };
+    let (width, lines) = lines;
+    let origin = resized_origin(
+        previous.0,
+        previous.1,
+        (width, lines.height),
+        orig.angle(),
+        anchor,
+    );
+    scene.update(
+        orig.handle(),
+        entropy.integer(),
+        [
+            ("x", Value::Number(origin.0)),
+            ("y", Value::Number(origin.1)),
+            ("width", Value::Number(width.abs())),
+            ("height", Value::Number(lines.height)),
+            ("text", Value::String(lines.text)),
+            ("autoResize", Value::Bool(false)),
+        ],
+    );
+    true
 }
 
 /// Whether a kind of Element is made of points.
-fn linear(kind: ElementType) -> bool {
+fn made_of_points(kind: ElementType) -> bool {
     kind.is_linear() || kind == ElementType::Freedraw
 }
 
@@ -950,84 +791,75 @@ fn flips_of(handle: Handle, at: Point, anchor: Point) -> (bool, bool) {
     }
 }
 
-/// Where the top left of an Element of `previous` size at `previous` goes
-/// when it is resized to `next` by `handle`, which keeps the ratio of the
-/// sides if `aspect` does (Excalidraw's `getResizedOrigin`).
-#[allow(clippy::too_many_arguments)]
+/// The part of an Element that stays where it is while it is resized
+/// (Excalidraw's `getResizeAnchor`).
+#[derive(Debug, Clone, Copy)]
+enum Anchor {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+    West,
+    East,
+    North,
+    South,
+    Centre,
+}
+
+impl Anchor {
+    /// The anchor of a resize by `handle`: the opposite corner, or, keeping
+    /// the ratio of the sides, the opposite side for a side handle, or the
+    /// middle from the centre.
+    fn of(handle: Handle, keep_ratio: bool, from_centre: bool) -> Self {
+        match handle {
+            _ if from_centre => Anchor::Centre,
+            Handle::N if keep_ratio => Anchor::South,
+            Handle::E if keep_ratio => Anchor::West,
+            Handle::S if keep_ratio => Anchor::North,
+            Handle::W if keep_ratio => Anchor::East,
+            Handle::NE => Anchor::BottomLeft,
+            Handle::SW => Anchor::TopRight,
+            Handle::N | Handle::NW | Handle::W => Anchor::BottomRight,
+            _ => Anchor::TopLeft,
+        }
+    }
+}
+
+/// Where the top left of an Element at `previous`, of `previous_size` and
+/// turned by `angle`, goes when it is resized to `next_size` so that its
+/// `anchor` stays where it is on the screen (Excalidraw's
+/// `getResizedOrigin`). The Element turns about its middle, so a corner
+/// stays only if the middle moves by the turned half of the change.
 fn resized_origin(
     previous: Point,
-    previous_width: f64,
-    previous_height: f64,
-    next_width: f64,
-    next_height: f64,
+    (previous_width, previous_height): (f64, f64),
+    (next_width, next_height): (f64, f64),
     angle: f64,
-    handle: Handle,
-    aspect: bool,
+    anchor: Anchor,
 ) -> Point {
-    /// The part of the Element that stays where it is.
-    enum Anchor {
-        TopLeft,
-        TopRight,
-        BottomLeft,
-        BottomRight,
-        West,
-        East,
-        North,
-        South,
-    }
-    let anchor = match handle {
-        Handle::N if aspect => Anchor::South,
-        Handle::E if aspect => Anchor::West,
-        Handle::S if aspect => Anchor::North,
-        Handle::W if aspect => Anchor::East,
-        Handle::NE => Anchor::BottomLeft,
-        Handle::NW if aspect => Anchor::BottomRight,
-        Handle::SE => Anchor::TopLeft,
-        Handle::SW => Anchor::TopRight,
-        Handle::N | Handle::NW | Handle::W => Anchor::BottomRight,
-        _ => Anchor::TopLeft,
+    // Where the anchor is from the middle, in halves of the change of size
+    // (in the Element's own frame): the middle moves by that much, turned.
+    let (along_x, along_y) = match anchor {
+        Anchor::TopLeft => (-1.0, -1.0),
+        Anchor::TopRight => (1.0, -1.0),
+        Anchor::BottomLeft => (-1.0, 1.0),
+        Anchor::BottomRight => (1.0, 1.0),
+        Anchor::West => (-1.0, 0.0),
+        Anchor::East => (1.0, 0.0),
+        Anchor::North => (0.0, -1.0),
+        Anchor::South => (0.0, 1.0),
+        Anchor::Centre => (0.0, 0.0),
     };
-    let (sin, cos) = angle.sin_cos();
     let (dw, dh) = (
         (previous_width - next_width) / 2.0,
         (previous_height - next_height) / 2.0,
     );
-    match anchor {
-        Anchor::TopLeft => (
-            previous.0 + dw - dw * cos - dh * sin,
-            previous.1 + dh - dw * sin - dh * cos,
-        ),
-        Anchor::TopRight => (
-            previous.0 + dw * (cos + 1.0) + dh * sin,
-            previous.1 + dh - dw * sin - dh * cos,
-        ),
-        Anchor::BottomLeft => (
-            previous.0 + dw * (1.0 - cos) - dh * sin,
-            previous.1 + dh * (cos + 1.0) - dw * sin,
-        ),
-        Anchor::BottomRight => (
-            previous.0 + dw * (cos + 1.0) - dh * sin,
-            previous.1 + dh * (cos + 1.0) - dw * sin,
-        ),
-        // The west side of the Element stays: the middle of the side the
-        // handle is on, mirrored about in its own frame.
-        Anchor::West => (
-            previous.0 + dw * (1.0 - cos),
-            previous.1 - dw * sin + (previous_height - next_height) / 2.0,
-        ),
-        Anchor::East => (
-            previous.0 + dw * (cos + 1.0),
-            previous.1 + dw * sin + (previous_height - next_height) / 2.0,
-        ),
-        Anchor::North => (
-            previous.0 + dw + dh * sin,
-            previous.1 + (next_height - previous_height) / 2.0 * (cos - 1.0),
-        ),
-        Anchor::South => (
-            previous.0 + dw - dh * sin,
-            previous.1 + (previous_height - next_height) / 2.0 * (cos + 1.0),
-        ),
-    }
+    let (sin, cos) = angle.sin_cos();
+    let (mx, my) = (along_x * dw, along_y * dh);
+    (
+        previous.0 + dw + mx * cos - my * sin,
+        previous.1 + dh + mx * sin + my * cos,
+    )
 }
 
 /// Scales the points to `width` by `height`, mirroring them when a size is

@@ -41,6 +41,8 @@ pub(crate) struct Step {
     /// The ids of all Elements in z-order before the action, if it reorders
     /// them.
     order: Option<Vec<String>>,
+    /// The ids in `before`, to tell in constant time whether one is there.
+    tracked: HashSet<String>,
 }
 
 impl Step {
@@ -50,6 +52,7 @@ impl Step {
             selection: selection.clone(),
             before: Vec::new(),
             order: None,
+            tracked: HashSet::new(),
         }
     }
 
@@ -61,7 +64,7 @@ impl Step {
     /// Notes that the action is about to change the Element `id` of the
     /// Scene, which is as it was before.
     pub fn touch(&mut self, scene: &Scene, id: &str) {
-        if !self.is_tracking(id) {
+        if self.track(id) {
             self.before.push((id.to_owned(), scene.snapshot(id)));
         }
     }
@@ -74,7 +77,7 @@ impl Step {
 
     /// Notes that the action created the Element `id`.
     pub fn create(&mut self, id: &str) {
-        if !self.is_tracking(id) {
+        if self.track(id) {
             self.before.push((id.to_owned(), None));
         }
     }
@@ -93,8 +96,11 @@ impl Step {
         }
     }
 
-    fn is_tracking(&self, id: &str) -> bool {
-        self.before.iter().any(|(tracked, _)| tracked == id)
+    /// Starts tracking `id`; returns whether it was not tracked yet. A set
+    /// rather than a search of `before`: a Selection of thousands of
+    /// Elements touches each of them once.
+    fn track(&mut self, id: &str) -> bool {
+        !self.tracked.contains(id) && self.tracked.insert(id.to_owned())
     }
 }
 

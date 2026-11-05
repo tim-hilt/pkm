@@ -25,7 +25,7 @@ pub fn editor_with_fixture(name: &str) -> Editor {
 // --- Recorded pointer input ---------------------------------------------------
 
 /// Feeds a recorded pointer sequence to the editor. An event may end with
-/// `shift` for the Shift key held while it happened.
+/// `shift` and/or `alt` for the keys held while it happened.
 pub fn replay(editor: &mut Editor, recording: &str) {
     for line in recording.lines().filter(|l| !l.trim().is_empty()) {
         let f: Vec<&str> = line.split_whitespace().collect();
@@ -36,6 +36,7 @@ pub fn replay(editor: &mut Editor, recording: &str) {
         for flag in rest {
             match *flag {
                 "shift" => modifiers.shift = true,
+                "alt" => modifiers.alt = true,
                 _ => panic!("unknown modifier in: {line}"),
             }
         }
