@@ -24,6 +24,11 @@ struct Edge {
     slope_inverse: f64,
 }
 
+/// Most scan lines one fill looks at. Shapes of up to this many pixels in
+/// height are hatched; a taller one is left unfilled, since it would take
+/// millions of lines (or never end, once adding `step` no longer moves `y`).
+const MAX_SCAN_LINES: f64 = 100_000.0;
+
 /// Lines `gap` apart, tilted `angle` degrees, clipped to the area enclosed by
 /// `polygons` (even-odd). Every `step`th scan line is looked at, `gap` of them
 /// producing lines unless `step` is not `1`, in which case all of them do.
@@ -70,6 +75,11 @@ fn straight_lines(polygons: &[Vec<Point>], gap: f64, step: f64) -> Vec<Line> {
         return lines;
     };
     if !step.is_finite() || step <= 0.0 {
+        return lines;
+    }
+
+    let bottom = edges.iter().fold(first.y_min, |m, e| m.max(e.y_max));
+    if (bottom - first.y_min) / step > MAX_SCAN_LINES {
         return lines;
     }
 

@@ -130,6 +130,10 @@ pub(crate) struct Style {
 const MAX_OFFSET: f64 = 2.0;
 const BOWING: f64 = 1.0;
 const CURVE_STEP_COUNT: f64 = 9.0;
+/// Most steps an ellipse is drawn in. Ellipses that fit a screen use a few
+/// hundred at most; this stops absurd sizes (up to infinity) from needing
+/// endless ones.
+const MAX_ELLIPSE_STEPS: f64 = 10_000.0;
 /// How much rougher the single stroke of a solid fill is than the outline.
 const FILL_SHAPE_ROUGHNESS_GAIN: f64 = 0.8;
 
@@ -259,8 +263,10 @@ impl Sketcher {
     pub(crate) fn ellipse(&mut self, cx: f64, cy: f64, width: f64, height: f64) -> Drawing {
         let radius_mean = ((width / 2.0).powi(2) + (height / 2.0).powi(2)) / 2.0;
         let psq = (PI * 2.0 * radius_mean.sqrt()).sqrt();
+        // Capped, or an ellipse of 1e300 would have infinitely many steps.
         let steps = CURVE_STEP_COUNT
             .max(CURVE_STEP_COUNT / 200f64.sqrt() * psq)
+            .min(MAX_ELLIPSE_STEPS)
             .ceil();
         let increment = PI * 2.0 / steps;
         let wobble = 1.0 - self.style.curve_fitting;

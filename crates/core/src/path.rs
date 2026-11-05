@@ -156,13 +156,19 @@ fn points_on_bezier_curves(points: &[Point], tolerance: f64) -> Vec<Point> {
             points[offset + 2],
             points[offset + 3],
         ];
-        split_until_flat(piece, tolerance, &mut out);
+        split_until_flat(piece, tolerance, MAX_SPLITS, &mut out);
     }
     out
 }
 
-fn split_until_flat(curve: [Point; 4], tolerance: f64, out: &mut Vec<Point>) {
-    if flatness(&curve) < tolerance {
+/// How often one curve is halved at most. Each halving cuts the distance to
+/// the chord to a quarter, so ten reach any curve of a sane size; the limit
+/// only stops curves whose coordinates are huge or not numbers, which would
+/// never get flat (and would exhaust the stack and memory).
+const MAX_SPLITS: u32 = 10;
+
+fn split_until_flat(curve: [Point; 4], tolerance: f64, splits_left: u32, out: &mut Vec<Point>) {
+    if splits_left == 0 || flatness(&curve) < tolerance {
         let start = curve[0];
         match out.last() {
             Some(&last) => {
@@ -178,8 +184,8 @@ fn split_until_flat(curve: [Point; 4], tolerance: f64, out: &mut Vec<Point>) {
         let (q1, q2, q3) = (lerp(p1, p2), lerp(p2, p3), lerp(p3, p4));
         let (r1, r2) = (lerp(q1, q2), lerp(q2, q3));
         let middle = lerp(r1, r2);
-        split_until_flat([p1, q1, r1, middle], tolerance, out);
-        split_until_flat([middle, r2, q3, p4], tolerance, out);
+        split_until_flat([p1, q1, r1, middle], tolerance, splits_left - 1, out);
+        split_until_flat([middle, r2, q3, p4], tolerance, splits_left - 1, out);
     }
 }
 
@@ -374,6 +380,18 @@ mod tests {
         assert_eq!(
             points_on_path(&two, 0.5),
             [vec![(0.0, 0.0), (10.0, 0.0)], vec![(0.0, 5.0), (10.0, 5.0)]]
+        );
+    }
+
+    #[test]
+    fn a_curve_of_absurd_size_is_cut_into_a_bounded_number_of_chords() {
+        // Cut until flat, this one would need thousands of chords.
+        let polyline = curve_polyline(&[(0.0, 0.0), (1e5, 1e5), (2e5, 0.0)], 0.15, 0.0);
+
+        assert!(
+            polyline.len() <= (1 << MAX_SPLITS) + 1,
+            "{}",
+            polyline.len()
         );
     }
 }
