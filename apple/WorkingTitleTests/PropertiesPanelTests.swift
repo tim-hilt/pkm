@@ -43,6 +43,7 @@ import Testing
 
     @Test func withNothingSelectedTheCommandIsTheStyleOfTheNextElement() throws {
         let setup = try makeSetup()
+        setup.controller.setTool(.rectangle)
         #expect(setup.controller.properties?.strokeColor == "#1e1e1e")
 
         setup.controller.setProperty(.strokeColor("#e03131"))
@@ -62,5 +63,48 @@ import Testing
         setup.controller.undo()
 
         #expect(setup.controller.properties?.strokeWidth == .medium)
+    }
+
+    @Test func thePanelIsShownForADrawingToolOrASelection() throws {
+        let setup = try makeSetup()
+        #expect(setup.controller.properties == nil)
+        setup.controller.setTool(.rectangle)
+        #expect(setup.controller.properties != nil)
+        setup.controller.setTool(.selection)
+        #expect(setup.controller.properties == nil)
+        select(setup)
+        #expect(setup.controller.properties != nil)
+    }
+
+    /// The chrome reads the controller's state; input that leaves it as it
+    /// was (a pan, every pointer move of a drag) must not make SwiftUI
+    /// re-evaluate the chrome.
+    @Test func inputThatChangesNoChromeStateLeavesTheChromeAlone() throws {
+        let setup = try makeSetup()
+        select(setup)
+        let invalidated = Flag()
+        withObservationTracking {
+            _ = setup.controller.tool
+            _ = setup.controller.toolLock
+            _ = setup.controller.isEditingText
+            _ = setup.controller.pencilOnlyDrawing
+            _ = setup.controller.canUndo
+            _ = setup.controller.canRedo
+            _ = setup.controller.properties
+            _ = setup.controller.viewSize
+        } onChange: {
+            invalidated.isSet = true
+        }
+
+        setup.canvas.send(ScrollEvent(x: 10, y: 10, dx: 5, dy: 5, modifiers: Self.noModifiers))
+
+        #expect(!invalidated.isSet)
+    }
+
+    private static let noModifiers = Modifiers(shift: false, ctrl: false, alt: false, meta: false)
+
+    /// Set from the observation's change handler, which may run on any thread.
+    private final class Flag: @unchecked Sendable {
+        var isSet = false
     }
 }

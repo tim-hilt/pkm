@@ -65,14 +65,21 @@ struct DrawingView: View {
 
     private func desktopChrome(in size: CGSize) -> some View {
         ZStack {
-            HStack(spacing: 8) {
-                BackControl(action: onBack)
-                MainMenu(drawing: drawing, export: export, controller: controller)
+            HStack(alignment: .top, spacing: 0) {
+                HStack(spacing: 8) {
+                    BackControl(action: onBack)
+                    MainMenu(drawing: drawing, export: export, controller: controller)
+                }
+                Spacer(minLength: 8)
+                ToolBar(controller: controller).fixedSize()
+                Spacer(minLength: 8)
+                // As wide as the controls on the left while there is room, so
+                // that the toolbar is centred; it gives way first, so that in a
+                // narrow window (iPad Split View) the toolbar moves right
+                // instead of covering them, as on excalidraw.com.
+                Color.clear.frame(maxWidth: 36 + 8 + 36, maxHeight: 0)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
-            ToolBar(controller: controller)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .frame(maxHeight: .infinity, alignment: .top)
 
             if showsProperties {
                 PropertiesPanel(
@@ -119,10 +126,8 @@ struct DrawingView: View {
         }
     }
 
-    /// Excalidraw shows no properties for the Tools that make no Elements.
-    private var showsProperties: Bool {
-        controller.properties != nil && controller.tool != .hand && controller.tool != .eraser
-    }
+    /// The core decides when there is something to style.
+    private var showsProperties: Bool { controller.properties != nil }
 }
 
 /// Excalidraw's island: white, radius 8, its soft shadow.
@@ -162,6 +167,7 @@ private struct BackControl: View {
         Button("Gallery", systemImage: "chevron.backward", action: action)
             .labelStyle(.iconOnly)
             .buttonStyle(.borderless)
+            .tint(.primary)
             .controlButton(width: size, height: size)
             .background(controlFill, in: RoundedRectangle(cornerRadius: 8))
             .accessibilityIdentifier("back-to-gallery")
@@ -195,6 +201,7 @@ private struct MainMenu: View {
         .labelStyle(.iconOnly)
         .menuIndicator(.hidden)
         .buttonStyle(.borderless)
+        .tint(.primary)
         .controlButton(width: size, height: size)
         .background(controlFill, in: RoundedRectangle(cornerRadius: 8))
         .accessibilityIdentifier("main-menu")
@@ -406,6 +413,7 @@ private struct MobileActionRow: View {
         }
         .labelStyle(.iconOnly)
         .buttonStyle(.borderless)
+        .tint(.primary)
         .frame(height: 43.2)
         .sheet(
             isPresented: Binding(
@@ -426,8 +434,14 @@ private struct ZoomControls: View {
     var body: some View {
         HStack(spacing: 0) {
             Button("Zoom out", systemImage: "minus") { controller.zoomOut() }.controlButton()
-            Button("Reset zoom", systemImage: "1.magnifyingglass") { controller.resetZoom() }
-                .controlButton(width: 44)
+            Button {
+                controller.resetZoom()
+            } label: {
+                Text(verbatim: "\(controller.zoomPercent)%").font(.subheadline).monospacedDigit()
+            }
+            .controlButton(width: 60)
+            .accessibilityLabel(Text("Reset zoom"))
+            .accessibilityValue(Text(verbatim: "\(controller.zoomPercent)%"))
             Button("Zoom in", systemImage: "plus") { controller.zoomIn() }.controlButton()
             Button("Zoom to fit", systemImage: "arrow.up.left.and.down.right.magnifyingglass") {
                 controller.zoomToFit()
@@ -460,6 +474,7 @@ extension View {
     fileprivate func controlGroup() -> some View {
         labelStyle(.iconOnly)
             .buttonStyle(.borderless)
+            .tint(.primary)
             .background(controlFill, in: RoundedRectangle(cornerRadius: 8))
     }
 }

@@ -52,9 +52,12 @@ struct CanvasCommands: Commands {
         CommandGroup(replacing: .undoRedo) {
             items(for: [.undo, .redo])
         }
+        // Select All and Delete stay the platform's own Edit items (see
+        // `CanvasMetalView.selectAll` and `delete`), so that they are not
+        // listed twice.
         CommandGroup(after: .pasteboard) {
             Divider()
-            items(for: [.duplicate, .delete])
+            items(for: [.duplicate])
         }
         CommandGroup(after: .toolbar) {
             items(for: [.zoomIn, .zoomOut, .resetZoom, .zoomToFit])
@@ -75,10 +78,9 @@ struct CanvasCommands: Commands {
         items { commands.contains($0) }
     }
 
-    /// Select All stays the platform's own Edit item, see `CanvasMetalView.selectAll`.
     private func items(where included: @escaping (Command) -> Bool) -> some View {
         ForEach(Array(MenuShortcut.all.enumerated()), id: \.offset) { _, entry in
-            if included(entry.command) && entry.command != .selectAll {
+            if included(entry.command) {
                 Button(Self.title(entry.command)) { controller?.perform(entry.command) }
                     .keyboardShortcut(entry.key, modifiers: entry.modifiers)
                     // Keys type into a text that is being edited.

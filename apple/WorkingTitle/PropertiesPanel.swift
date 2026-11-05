@@ -88,6 +88,9 @@ struct PropertiesPanel: View {
                             options(
                                 "Font size",
                                 [(.small, "S"), (.medium, "M"), (.large, "L"), (.extraLarge, "XL")],
+                                spoken: [
+                                    .small: "Small", .medium: "Medium", .large: "Large", .extraLarge: "Extra large",
+                                ],
                                 selected: shown.fontSize
                             ) { .fontSize($0) }
                         }
@@ -154,8 +157,11 @@ struct PropertiesPanel: View {
         }
     }
 
+    /// A segmented control of `options`; VoiceOver reads an option's
+    /// `spoken` name where its shown name is an abbreviation.
     private func options<Value: Hashable>(
-        _ title: LocalizedStringResource, _ options: [(Value, LocalizedStringResource)], selected: Value?,
+        _ title: LocalizedStringResource, _ options: [(Value, LocalizedStringResource)],
+        spoken: [Value: LocalizedStringResource] = [:], selected: Value?,
         property: @escaping (Value) -> Property
     ) -> some View {
         Picker(
@@ -164,7 +170,9 @@ struct PropertiesPanel: View {
                 get: { selected },
                 set: { if let value = $0 { controller.setProperty(property(value)) } })
         ) {
-            ForEach(options, id: \.0) { value, name in Text(name).tag(Optional(value)) }
+            ForEach(options, id: \.0) { value, name in
+                Text(name).accessibilityLabel(Text(spoken[value] ?? name)).tag(Optional(value))
+            }
         }
         .pickerStyle(.segmented)
         .labelsHidden()

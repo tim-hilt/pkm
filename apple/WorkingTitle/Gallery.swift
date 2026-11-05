@@ -70,7 +70,8 @@ final class Gallery {
             }
         }
         if !rejected.isEmpty {
-            failure = "Could not import \(rejected.joined(separator: ", ")): not a valid Excalidraw file."
+            failure = String(
+                localized: "Could not import \(rejected.joined(separator: ", ")): not a valid Excalidraw file.")
         }
         reload()
         return imported
@@ -145,16 +146,16 @@ final class Gallery {
 
     func dismissFailure() { failure = nil }
 
-    private func attempt(_ message: String, _ work: () throws -> Void) {
+    private func attempt(_ message: LocalizedStringResource, _ work: () throws -> Void) {
         do {
             failure = nil
             try work()
         } catch let taken as DrawingStore.NameTaken {
-            failure = "“\(taken.name)” already exists. Choose another name."
+            failure = String(localized: "“\(taken.name)” already exists. Choose another name.")
         } catch is DrawingStore.InvalidName {
-            failure = "That name cannot be used. Choose another name."
+            failure = String(localized: "That name cannot be used. Choose another name.")
         } catch {
-            failure = message
+            failure = String(localized: message)
         }
     }
 }

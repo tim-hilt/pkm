@@ -98,6 +98,14 @@ final class CanvasMetalView: MTKView {
     /// Edit > Select All (⌘A) while the Canvas has the keyboard.
     override func selectAll(_ sender: Any?) { perform { $0.perform(command: .selectAll) } }
 
+    /// Edit > Delete while the Canvas has the keyboard; the Backspace and
+    /// Forward Delete keys reach the core through `pressKey`.
+    #if os(macOS)
+        @objc func delete(_ sender: Any?) { perform { $0.perform(command: .delete) } }
+    #else
+        override func delete(_ sender: Any?) { perform { $0.perform(command: .delete) } }
+    #endif
+
     /// The core's zoom commands act around the middle of the view, so it must
     /// know the view's size.
     private func reportViewSize() {
@@ -203,13 +211,18 @@ final class CanvasMetalView: MTKView {
             switch event.keyCode {
             case Self.returnKey, Self.keypadEnterKey: perform { $0.editSelectedText() }
             default:
-                let key =
-                    switch event.keyCode {
-                    case Self.backspaceKey: "backspace"
-                    case Self.forwardDeleteKey: "delete"
-                    default: event.charactersIgnoringModifiers?.lowercased() ?? ""
-                    }
-                if !pressKey(key, Modifiers(event.modifierFlags)) { super.keyDown(with: event) }
+                if !pressKey(Self.keyName(of: event), Modifiers(event.modifierFlags)) { super.keyDown(with: event) }
+            }
+        }
+
+        /// The key as `Shortcut.key` names it: the character it types without
+        /// any modifier. `charactersIgnoringModifiers` keeps Shift, so ⇧1
+        /// would read "!" and never reach zoom to fit.
+        static func keyName(of event: NSEvent) -> String {
+            switch event.keyCode {
+            case backspaceKey: "backspace"
+            case forwardDeleteKey: "delete"
+            default: event.characters(byApplyingModifiers: [])?.lowercased() ?? ""
             }
         }
 
@@ -378,8 +391,8 @@ final class CanvasController {
     private(set) var canUndo = false
     private(set) var canRedo = false
     /// What the properties panel shows: the Selection's values, or the style
-    /// of the next Element if nothing is selected. `nil` until there is an
-    /// editor.
+    /// of the next Element if nothing is selected. `nil` while the panel is
+    /// hidden (`Editor.showsProperties`) and until there is an editor.
     private(set) var properties: Properties?
     /// Where the Action Bar is shown, in the Canvas's coordinates, or `nil` if
     /// it is hidden; the core decides, and the position follows the Selection
@@ -390,6 +403,9 @@ final class CanvasController {
     var hasSelection: Bool { actionBar != nil }
     /// The size of the Canvas, which keeps the Action Bar inside it.
     private(set) var viewSize = CGSize.zero
+    /// The zoom in whole percent, as the reset zoom button shows it. Whole
+    /// percent, so that a pinch updates the chrome only when the number does.
+    private(set) var zoomPercent = 100
 
     /// `settings` is where the Pencil-only choice is kept; tests pass their own.
     init(settings: UserDefaults = .standard) {
@@ -404,9 +420,10 @@ final class CanvasController {
         syncPencilOnlyDrawing(editor)
         canUndo = editor.canUndo()
         canRedo = editor.canRedo()
-        properties = editor.properties()
+        properties = editor.showsProperties() ? editor.properties() : nil
         actionBar = editor.actionBar()
         viewSize = canvas?.bounds.size ?? .zero
+        zoomPercent = Int((editor.viewport().zoom * 100).rounded())
     }
 
     private func syncPencilOnlyDrawing(_ editor: Editor) {

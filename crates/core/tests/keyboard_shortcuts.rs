@@ -188,6 +188,14 @@ fn zoom_shortcuts() {
 }
 
 #[test]
+fn cmd_plus_zooms_in_whatever_the_layout() {
+    // Excalidraw ignores Shift for zoom in, so ⌘+ on a US keyboard (⌘⇧=)
+    // works; on layouts with a key of its own for "+" (German) that key does.
+    assert_eq!(command_for("=", CMD_SHIFT), Some(Command::ZoomIn));
+    assert_eq!(command_for("+", CMD), Some(Command::ZoomIn));
+}
+
+#[test]
 fn every_key_and_modifier_combination_is_bound_once() {
     let table = shortcuts();
     for (i, a) in table.iter().enumerate() {

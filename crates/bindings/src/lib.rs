@@ -498,6 +498,13 @@ impl Editor {
         self.editor().properties()
     }
 
+    /// Whether the properties panel is shown; see
+    /// [`workingtitle_core::Editor::shows_properties`]. Read it with
+    /// [`Editor::properties`].
+    pub fn shows_properties(&self) -> bool {
+        self.editor().shows_properties()
+    }
+
     /// Sets a property on the Selection and as the style of the next Element;
     /// see [`workingtitle_core::Editor::set_property`].
     pub fn set_property(&self, property: Property) {

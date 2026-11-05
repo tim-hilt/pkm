@@ -86,6 +86,8 @@ const TABLE: &[(&str, Modifiers, Command)] = &[
     ("[", CMD_ALT, Command::MoveInZOrder(ZOrder::ToBack)),
     ("a", CMD, Command::SelectAll),
     ("=", CMD, Command::ZoomIn),
+    ("=", CMD_SHIFT, Command::ZoomIn),
+    ("+", CMD, Command::ZoomIn),
     ("-", CMD, Command::ZoomOut),
     ("0", CMD, Command::ResetZoom),
     ("1", SHIFT, Command::ZoomToFit),

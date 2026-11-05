@@ -377,3 +377,40 @@ fn a_change_makes_a_new_version_of_the_elements_it_changed() {
     assert!(editor.revision() > revision, "clients must redraw");
     assert_eq!(number_of(&editor, "a", "version"), 4.0);
 }
+
+// --- Whether the panel is shown ---------------------------------------------
+
+#[test]
+fn the_panel_is_shown_for_a_drawing_tool_or_a_selection() {
+    // Excalidraw's `showSelectedShapeActions`: a Tool that draws, a text
+    // being edited or a Selection; not for selection, hand or eraser alone.
+    let mut editor = editor_with(&[RECTANGLE]);
+    for tool in [Tool::Selection, Tool::Hand, Tool::Eraser] {
+        editor.set_tool(tool);
+        assert!(!editor.shows_properties(), "{tool:?}");
+    }
+    for tool in [
+        Tool::Rectangle,
+        Tool::Diamond,
+        Tool::Ellipse,
+        Tool::Arrow,
+        Tool::Line,
+        Tool::Freedraw,
+        Tool::Text,
+    ] {
+        editor.set_tool(tool);
+        assert!(editor.shows_properties(), "{tool:?}");
+    }
+    editor.set_tool(Tool::Selection);
+    editor.select_all();
+    assert!(editor.shows_properties());
+
+    let mut editor = Editor::new();
+    editor.set_text_measurer(std::sync::Arc::new(common::FixedWidth));
+    editor.set_tool(Tool::Text);
+    tap(&mut editor, "mouse", (500.0, 500.0), 0.0);
+    assert!(editor.text_editor().is_some());
+    assert!(editor.shows_properties());
+    editor.commit_text(); // an empty text is dropped
+    assert!(!editor.shows_properties());
+}

@@ -188,6 +188,83 @@
         }
       }
     },
+    "Could not create a Drawing.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not create a Drawing."
+          }
+        }
+      }
+    },
+    "Could not delete “%@”.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not delete “%@”."
+          }
+        }
+      }
+    },
+    "Could not duplicate “%@”.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not duplicate “%@”."
+          }
+        }
+      }
+    },
+    "Could not export “%@”.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not export “%@”."
+          }
+        }
+      }
+    },
+    "Could not import %@: not a valid Excalidraw file.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not import %@: not a valid Excalidraw file."
+          }
+        }
+      }
+    },
+    "Could not open “%@”.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not open “%@”."
+          }
+        }
+      }
+    },
+    "Could not rename “%@”.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not rename “%@”."
+          }
+        }
+      }
+    },
     "Cross-hatch": {
       "extractionState": "manual",
       "localizations": {
@@ -386,6 +463,17 @@
         }
       }
     },
+    "Extra large": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extra large"
+          }
+        }
+      }
+    },
     "Fill": {
       "extractionState": "manual",
       "localizations": {
@@ -529,6 +617,17 @@
         }
       }
     },
+    "Large": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Large"
+          }
+        }
+      }
+    },
     "Left": {
       "extractionState": "manual",
       "localizations": {
@@ -613,6 +712,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "M"
+          }
+        }
+      }
+    },
+    "Medium": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Medium"
           }
         }
       }
@@ -903,6 +1013,17 @@
         }
       }
     },
+    "Small": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Small"
+          }
+        }
+      }
+    },
     "Solid": {
       "extractionState": "manual",
       "localizations": {
@@ -976,6 +1097,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Text align"
+          }
+        }
+      }
+    },
+    "That name cannot be used. Choose another name.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That name cannot be used. Choose another name."
           }
         }
       }
@@ -1130,6 +1262,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Zoom to fit"
+          }
+        }
+      }
+    },
+    "“%@” already exists. Choose another name.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@” already exists. Choose another name."
           }
         }
       }

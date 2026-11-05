@@ -80,6 +80,20 @@ import Testing
         #expect(renderer.viewport.zoom == 1)
     }
 
+    /// Excalidraw's reset button reads the zoom, rounded to whole percent.
+    @Test func theZoomButtonShowsTheZoom() throws {
+        let (canvas, _, _) = try makeCanvas()
+        canvas.frame = CGRect(x: 0, y: 0, width: 400, height: 200)
+        let controller = CanvasController(settings: .isolated())
+        controller.canvas = canvas
+        #expect(controller.zoomPercent == 100)
+
+        controller.zoomIn()
+        #expect(controller.zoomPercent == 110)
+        canvas.send(MagnifyEvent(x: 0, y: 0, magnification: 0.004))
+        #expect(controller.zoomPercent == 110)
+    }
+
     @Test func theHandToolPansWithOneFinger() throws {
         let (canvas, renderer, _) = try makeCanvas()
         let controller = CanvasController(settings: .isolated())

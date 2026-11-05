@@ -18,6 +18,10 @@ struct ContentView: View {
             }
         }
         .onOpenURL { url in gallery.openFile(at: url) }
+        // Dark mode is out of scope for v1 (spec): the Canvas is always
+        // light, and the chrome uses Excalidraw's light-theme colours, which
+        // would clash with the system's dark materials.
+        .preferredColorScheme(.light)
     }
 }
 

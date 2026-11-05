@@ -789,6 +789,16 @@ impl Editor {
         Properties::of_selection(&covered)
     }
 
+    /// Whether the chrome shows the properties panel (Excalidraw's
+    /// `showSelectedShapeActions`): while a text is edited, a Tool that
+    /// draws is active or something is selected. The selection, hand and
+    /// eraser Tools have nothing to style on their own.
+    pub fn shows_properties(&self) -> bool {
+        self.text.is_some()
+            || !matches!(self.tool, Tool::Selection | Tool::Hand | Tool::Eraser)
+            || !self.selection.is_empty()
+    }
+
     /// Sets `property` on every Element of the Selection that has it, as one
     /// undo step, and makes it the style of the Elements drawn next, as on
     /// excalidraw.com. With nothing selected it only does the latter. Does
