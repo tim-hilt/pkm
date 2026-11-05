@@ -11,7 +11,7 @@ SIM ?= $(SIM_IPHONE)
 CORE_XCFRAMEWORK := apple/Generated/WorkingTitleCoreFFI.xcframework
 CORE_SOURCES := Cargo.toml Cargo.lock scripts/build-core-apple.sh $(shell find crates -type f)
 
-.PHONY: core-apple apple-project build ipa test test-ios test-ui record-references lint fmt sim run clean golden-fixtures bench visual-parity visual-parity-app screenshot
+.PHONY: core-apple apple-project build ipa test test-ios test-ui record-references lint fmt check sim run clean golden-fixtures bench visual-parity visual-parity-app screenshot
 
 # Rust core -> XCFramework + Swift bindings in apple/Generated (rebuilt only
 # when the Rust sources change).
@@ -62,6 +62,9 @@ record-references: apple-project
 
 # The pre-commit hook runs this (enable: git config core.hooksPath .githooks).
 lint:
+	@# One integration-test binary: each extra one costs linking and a ~13 s first-launch scan on macOS.
+	@! ls crates/*/tests/*.rs >/dev/null 2>&1 \
+		|| { echo 'error: add integration tests as modules of crates/core/tests/integration/main.rs, not as files in tests/'; exit 1; }
 	swift format lint --strict -r $(SWIFT_SRC)
 	cargo fmt --all --check
 	cargo clippy --workspace --all-targets --locked -q -- -D warnings
@@ -71,6 +74,12 @@ lint:
 
 fmt:
 	swift format -i -r $(SWIFT_SRC)
+	cargo fmt --all
+
+# Fixes formatting, then lints, then runs the Rust tests: cheapest failure first.
+# Run this before committing.
+check: fmt lint
+	cargo test --workspace --locked -q
 
 # Creates the SIM device unless it exists.
 sim:
@@ -102,7 +111,7 @@ visual-parity-app: apple-project
 # share of one input event in the 5,000-Element one.
 # See docs/performance-benchmarks.md for the full procedure.
 bench:
-	cargo test --release --locked -q -p workingtitle-core --test benchmarks -- --ignored --nocapture
+	cargo test --release --locked -q -p workingtitle-core --test integration -- --ignored --nocapture benchmarks::
 
 clean:
 	rm -rf apple/WorkingTitle.xcodeproj apple/build apple/Generated target
