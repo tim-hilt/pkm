@@ -177,6 +177,17 @@
         }
       }
     },
+    "Copy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy"
+          }
+        }
+      }
+    },
     "Cross-hatch": {
       "extractionState": "manual",
       "localizations": {
@@ -184,6 +195,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Cross-hatch"
+          }
+        }
+      }
+    },
+    "Cut": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cut"
           }
         }
       }

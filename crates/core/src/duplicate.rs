@@ -34,9 +34,8 @@ pub(crate) fn duplicate(
     editing: Option<&str>,
 ) -> Selection {
     // In z-order, so that the copies are made and stacked in it.
-    let originals: Vec<String> = scene
-        .elements()
-        .filter(|e| !e.is_deleted() && selection.covers(e))
+    let originals: Vec<String> = selection
+        .covered(scene)
         .map(|e| e.id().to_owned())
         .collect();
     let mut copying = Copying::new(&originals, entropy, editing);
@@ -141,8 +140,10 @@ impl<'a> Copying<'a> {
             element.insert(key.into(), Value::Number(value));
         }
         element.insert("id".into(), Value::String(id.clone()));
-        // The index of an Element is its place among others; the copy's is
-        // made when the Drawing is next opened, as for any new Element.
+        // The index of an Element is its place among others. Like any new
+        // Element the copy has none until it is moved in z-order; until then
+        // its place in the file is its order, which excalidraw.com turns
+        // into an index when it opens the file (`syncInvalidIndices`).
         element.insert("index".into(), Value::Null);
 
         self.renew_groups(element, entropy);

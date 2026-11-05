@@ -20,6 +20,7 @@ use crate::history::{self, History, Step};
 use crate::hit_test::{self, Reach};
 use crate::input::{MagnifyEvent, PointerEvent, PointerKind, PointerPhase, ScrollEvent};
 use crate::insert_image::{self, ImageFile, Placement};
+use crate::json::Value;
 use crate::move_selection::MoveGesture;
 use crate::navigation::{Bounds, Navigation};
 use crate::overlay;
@@ -784,13 +785,10 @@ impl Editor {
                 ..Properties::of_style(&self.style)
             };
         }
-        let selected: Vec<Element> = self
-            .selection
-            .ids()
-            .iter()
-            .filter_map(|id| self.scene.element_by_id(id))
-            .collect();
-        Properties::of_selection(&selected)
+        // With the labels of selected containers, whose text options the
+        // panel offers, as excalidraw.com does.
+        let covered: Vec<Element> = self.selection.covered(&self.scene).collect();
+        Properties::of_selection(&covered)
     }
 
     /// Sets `property` on every Element of the Selection that has it, as one
@@ -815,23 +813,38 @@ impl Editor {
         }
         self.style.set(&property);
         let mut step = Step::begin(&self.selection);
-        let versions = self.selected_text_versions();
+        // The labels of selected containers change with them, as with
+        // Excalidraw's `includeBoundText`: their colour, opacity, font size
+        // and alignment (they have none of the other properties).
+        let targets: Vec<(String, ElementType, u32)> = self
+            .selection
+            .covered(&self.scene)
+            .map(|e| (e.id().to_owned(), e.kind(), e.version()))
+            .collect();
+        let ids: Vec<String> = targets.iter().map(|(id, ..)| id.clone()).collect();
+        let texts: Vec<(String, u32)> = targets
+            .into_iter()
+            .filter(|(_, kind, _)| *kind == ElementType::Text)
+            .map(|(id, _, version)| (id, version))
+            .collect();
         let refits = matches!(property, Property::FontSize(_) | Property::TextAlign(_));
-        // A text that is laid out again may change size: the arrows bound to
-        // it follow, as `changeFontSize` has them do.
+        // A text that is laid out again may change size, and a label its
+        // container: the arrows bound to them follow, as `changeFontSize`
+        // has them do.
         let attachments = refits.then(|| {
-            let texts = versions.iter().map(|(id, _)| id.clone()).collect();
-            Attachments::begin(&mut step, &self.scene, texts)
+            let mut changing: Vec<String> = texts.iter().map(|(id, _)| id.clone()).collect();
+            changing.extend(self.label_containers(&texts));
+            Attachments::begin(&mut step, &self.scene, changing)
         });
         let mut changed = properties::apply(
             &mut self.scene,
             &mut self.entropy,
-            self.selection.ids(),
+            &ids,
             &property,
             |scene, id| step.touch(scene, id),
         );
         if let Some(attachments) = attachments {
-            changed |= self.refit_changed_texts(&versions);
+            changed |= self.refit_changed_texts(&mut step, &texts);
             attachments.update(&mut self.scene, &mut self.entropy, &mut step);
         }
         if changed {
@@ -840,47 +853,71 @@ impl Editor {
         }
     }
 
-    /// The ids and versions of the selected texts.
-    fn selected_text_versions(&self) -> Vec<(String, u32)> {
-        self.selection
-            .ids()
+    /// The ids of the shapes (not arrows) that the `texts` are labels of.
+    fn label_containers(&self, texts: &[(String, u32)]) -> Vec<String> {
+        let containers = Containers::new(&self.scene);
+        texts
             .iter()
-            .filter_map(|id| self.scene.element_by_id(id))
-            .filter(|element| element.kind() == ElementType::Text)
-            .map(|element| (element.id().to_owned(), element.version()))
+            .filter_map(|(id, _)| containers.of(&self.scene.element_by_id(id)?))
+            .filter(|container| container.kind() != ElementType::Arrow)
+            .map(|container| container.id().to_owned())
             .collect()
     }
 
-    /// Lays out the texts again that are not the versions they were (and so
-    /// are already part of the step): a change of their font size or
-    /// alignment may change how big they are and where. Returns whether any
-    /// changed.
-    fn refit_changed_texts(&mut self, versions: &[(String, u32)]) -> bool {
+    /// Lays out the `texts` (ids and the versions they were) again that are
+    /// not the versions they were (and so are already part of `step`): a
+    /// change of their font size or alignment may change how big they are
+    /// and where. A label's shape grows to hold it, and never shrinks
+    /// (Excalidraw's `redrawTextBoundingBox`). Returns whether any changed.
+    fn refit_changed_texts(&mut self, step: &mut Step, texts: &[(String, u32)]) -> bool {
         let Some(measurer) = self.measurer.as_ref() else {
             return false;
         };
-        let containers = Containers::new(&self.scene);
-        let refits: Vec<_> = self
-            .selection
-            .ids()
+        let changed: Vec<String> = texts
             .iter()
-            .filter_map(|id| self.scene.element_by_id(id))
-            .filter(|element| {
-                versions
-                    .iter()
-                    .any(|(id, version)| id == element.id() && *version != element.version())
+            .filter(|(id, version)| {
+                self.scene
+                    .element_by_id(id)
+                    .is_some_and(|text| text.version() != *version)
             })
-            .filter_map(|element| {
+            .map(|(id, _)| id.clone())
+            .collect();
+        let containers = Containers::new(&self.scene);
+        let grown: Vec<(String, u32, (f64, f64))> = changed
+            .iter()
+            .filter_map(|id| {
+                let label = self.scene.element_by_id(id)?;
+                let shape = containers
+                    .of(&label)
+                    .filter(|shape| shape.kind() != ElementType::Arrow)?;
+                let size = text::container_size_for(&label, &shape, shape.height(), &*measurer.0);
+                (size != (shape.width(), shape.height()))
+                    .then(|| (shape.id().to_owned(), shape.handle(), size))
+            })
+            .collect();
+        for (id, handle, (width, height)) in grown {
+            step.touch(&self.scene, &id);
+            let members = [
+                ("width", Value::Number(width)),
+                ("height", Value::Number(height)),
+            ];
+            self.scene.update(handle, self.entropy.integer(), members);
+        }
+        let containers = Containers::new(&self.scene);
+        let refits: Vec<_> = changed
+            .iter()
+            .filter_map(|id| {
+                let element = self.scene.element_by_id(id)?;
                 let members =
                     text::refit(&element, containers.of(&element).as_ref(), &*measurer.0)?;
                 Some((element.handle(), members))
             })
             .collect();
-        let changed = !refits.is_empty();
+        let refitted = !refits.is_empty();
         for (handle, members) in refits {
             self.scene.update(handle, self.entropy.integer(), members);
         }
-        changed
+        refitted
     }
 
     /// The ids of the selected Elements, in the order they were selected.

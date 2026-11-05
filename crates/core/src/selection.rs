@@ -1,6 +1,8 @@
 //! The Selection: the set of Elements currently selected for editing.
 
-use crate::scene::Element;
+use std::collections::HashSet;
+
+use crate::scene::{Element, Scene};
 
 /// The ids of the selected Elements, in the order they were selected. Ids
 /// rather than handles, which change when Elements are added or removed.
@@ -27,6 +29,16 @@ impl Selection {
     /// on their own).
     pub fn covers(&self, element: &Element) -> bool {
         self.contains(element.id()) || element.container_id().is_some_and(|c| self.contains(c))
+    }
+
+    /// The shown Elements of `scene` that commands on the Selection act on
+    /// (see [`Selection::covers`]), in z-order.
+    pub fn covered<'a>(&'a self, scene: &'a Scene) -> impl Iterator<Item = Element<'a>> {
+        let ids: HashSet<&str> = self.ids.iter().map(String::as_str).collect();
+        scene.elements().filter(move |e| {
+            !e.is_deleted()
+                && (ids.contains(e.id()) || e.container_id().is_some_and(|c| ids.contains(c)))
+        })
     }
 
     /// Adds `id` to the Selection unless it is in it. Returns whether the

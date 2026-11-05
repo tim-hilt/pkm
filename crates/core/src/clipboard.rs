@@ -31,10 +31,7 @@ const ACCEPTED: [&str; 3] = [CLIPBOARD, "excalidraw-api/clipboard", "excalidraw"
 /// their labels, in z-order, and the files of its images. `None` if that is
 /// nothing.
 pub(crate) fn copy(scene: &Scene, selection: &Selection) -> Option<String> {
-    let copied: Vec<Element> = scene
-        .elements()
-        .filter(|e| !e.is_deleted() && selection.covers(e))
-        .collect();
+    let copied: Vec<Element> = selection.covered(scene).collect();
     if copied.is_empty() {
         return None;
     }

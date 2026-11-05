@@ -2,8 +2,7 @@ import SwiftUI
 
 /// The floating Action Bar next to the Selection, in place of a context menu.
 /// The core says whether it is shown and where; this only draws it there and
-/// keeps it inside the Canvas. Duplicate, delete, z-order and grouping work;
-/// the "more" entry comes with its own ticket.
+/// keeps it inside the Canvas.
 struct ActionBarView: View {
     let controller: CanvasController
 
@@ -51,8 +50,12 @@ struct ActionBarView: View {
                 .disabled(!canGroup)
             Button("Ungroup", systemImage: "rectangle.3.offgrid") { controller.ungroup() }
                 .disabled(!canUngroup)
-            Button("More", systemImage: "ellipsis") {}
-                .disabled(true)
+            // What a context menu would offer beyond the bar: the only way to
+            // copy and cut on a device without a keyboard.
+            Menu("More", systemImage: "ellipsis") {
+                Button("Copy", systemImage: "doc.on.doc") { controller.copySelection() }
+                Button("Cut", systemImage: "scissors") { controller.cutSelection() }
+            }
         }
         .labelStyle(.iconOnly)
         .buttonStyle(.borderless)

@@ -440,5 +440,9 @@ final class CanvasController {
     func ungroup() { canvas?.perform { $0.ungroup() } }
     func moveInZOrder(_ how: ZOrder) { canvas?.perform { $0.moveInZOrder(how: how) } }
     func deleteSelection() { canvas?.perform { $0.deleteSelection() } }
+    /// Puts the Selection on the system pasteboard, as Edit > Copy does.
+    func copySelection() { canvas?.copy(nil) }
+    /// Puts the Selection on the system pasteboard and deletes it, as Edit > Cut does.
+    func cutSelection() { canvas?.cut(nil) }
     func setProperty(_ property: Property) { canvas?.perform { $0.setProperty(property: property) } }
 }

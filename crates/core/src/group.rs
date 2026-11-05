@@ -153,9 +153,8 @@ pub(crate) fn group(
     if !can_group(scene, selection, editing) {
         return false;
     }
-    let members: Vec<(usize, String, Vec<String>)> = scene
-        .elements()
-        .filter(|e| !e.is_deleted() && selection.covers(e))
+    let members: Vec<(usize, String, Vec<String>)> = selection
+        .covered(scene)
         .map(|e| {
             let groups = e.group_ids().map(str::to_owned).collect();
             (e.handle() as usize, e.id().to_owned(), groups)

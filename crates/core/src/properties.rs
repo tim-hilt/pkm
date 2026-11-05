@@ -55,8 +55,9 @@ pub struct Properties {
     pub font_size: Option<FontSize>,
     pub text_align: Option<TextAlign>,
     /// Whether the panel offers the font size and alignment: for a Selection
-    /// with a text in it, a text that is edited, and the next Element if it
-    /// is a text. They are shown mixed (`None`) where texts differ.
+    /// with a text or a labelled container in it, a text that is edited, and
+    /// the next Element if it is a text. They are shown mixed (`None`) where
+    /// texts differ.
     pub has_text_options: bool,
 }
 

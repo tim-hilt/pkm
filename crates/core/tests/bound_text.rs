@@ -516,6 +516,66 @@ fn arrows_bound_to_the_shape_follow_it_as_it_grows() {
     assert_eq!(saved(&editor, "a").get("points"), before.get("points"));
 }
 
+// --- Styling a selected shape with a label ----------------------------------------------
+//
+// As on excalidraw.com (`changeProperty(..., includeBoundText)`), the
+// properties panel reaches the label of a selected shape: its colour,
+// opacity, font size and alignment.
+
+#[test]
+fn stroke_colour_and_opacity_of_a_selected_shape_reach_its_label() {
+    let mut editor = labelled("rectangle", 200.0, "Hello");
+    assert_eq!(editor.selection(), ["s"]);
+
+    editor.set_property(Property::StrokeColor("#e03131".into()));
+    editor.set_property(Property::Opacity(40.0));
+
+    let label = label(&editor);
+    assert_eq!(string(&label, "strokeColor"), "#e03131");
+    assert_eq!(number(&label, "opacity"), 40.0);
+    assert_eq!(string(&saved(&editor, "s"), "strokeColor"), "#e03131");
+
+    editor.undo();
+    assert_eq!(number(&self::label(&editor), "opacity"), 100.0);
+}
+
+#[test]
+fn the_panel_offers_the_text_options_of_the_label_of_a_selected_shape() {
+    let editor = labelled("rectangle", 200.0, "Hello");
+    let shown = editor.properties();
+    assert!(shown.has_text_options);
+    assert_eq!(shown.font_size, Some(FontSize::Medium));
+    assert_eq!(shown.text_align, Some(TextAlign::Center));
+}
+
+#[test]
+fn a_larger_font_grows_the_selected_shape_to_hold_its_label_in_one_undo_step() {
+    let mut editor = labelled("rectangle", 200.0, "a\nb\nc");
+    assert_eq!(height_of(&editor, "s"), 100.0);
+
+    editor.set_property(Property::FontSize(FontSize::ExtraLarge));
+
+    // Three lines of 36 * 1.25, and 5 of padding above and below.
+    let label = label(&editor);
+    assert_eq!(number(&label, "fontSize"), 36.0);
+    assert_eq!(number(&label, "height"), 135.0);
+    assert_eq!(height_of(&editor, "s"), 145.0);
+    assert_eq!(number(&label, "y"), 105.0);
+
+    editor.undo();
+    assert_eq!(height_of(&editor, "s"), 100.0);
+    assert_eq!(number(&self::label(&editor), "fontSize"), 20.0);
+}
+
+#[test]
+fn aligning_the_label_of_a_selected_shape_moves_it_within_the_shape() {
+    let mut editor = labelled("rectangle", 200.0, "Hello");
+    editor.set_property(Property::TextAlign(TextAlign::Left));
+    let label = label(&editor);
+    assert_eq!(string(&label, "textAlign"), "left");
+    assert_eq!(number(&label, "x"), 105.0);
+}
+
 // --- Editing a label that is there ------------------------------------------------------
 
 /// A rectangle at (100, 100), 200 x 100, with the label `hi`, as a file from
