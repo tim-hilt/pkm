@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::action_bar::ActionBar;
-use crate::binding::{self, End};
+use crate::binding::{self, Attachments, End};
 use crate::box_select::BoxSelect;
 use crate::clipboard;
 use crate::delete;
@@ -816,6 +816,13 @@ impl Editor {
         self.style.set(&property);
         let mut step = Step::begin(&self.selection);
         let versions = self.selected_text_versions();
+        let refits = matches!(property, Property::FontSize(_) | Property::TextAlign(_));
+        // A text that is laid out again may change size: the arrows bound to
+        // it follow, as `changeFontSize` has them do.
+        let attachments = refits.then(|| {
+            let texts = versions.iter().map(|(id, _)| id.clone()).collect();
+            Attachments::begin(&mut step, &self.scene, texts)
+        });
         let mut changed = properties::apply(
             &mut self.scene,
             &mut self.entropy,
@@ -823,8 +830,9 @@ impl Editor {
             &property,
             |scene, id| step.touch(scene, id),
         );
-        if matches!(property, Property::FontSize(_) | Property::TextAlign(_)) {
+        if let Some(attachments) = attachments {
             changed |= self.refit_changed_texts(&versions);
+            attachments.update(&mut self.scene, &mut self.entropy, &mut step);
         }
         if changed {
             self.history.record(step, &self.scene, &self.selection);
@@ -1029,13 +1037,18 @@ impl Editor {
     }
 
     /// Deletes the Selection (the `delete` command), and with it the labels
-    /// of its containers; arrows bound to what is deleted are unbound. One
-    /// undo step, which selects what was deleted again. Does nothing with
-    /// nothing selected, or while a pointer is drawing or moving. See
-    /// [`crate::delete`].
+    /// of its containers; arrows bound to what is deleted are unbound. With
+    /// points of a line or arrow selected, deletes those points instead (see
+    /// [`Editor::selected_points`]). One undo step, which selects what was
+    /// deleted again. Does nothing with nothing selected, or while a pointer
+    /// is drawing or moving. See [`crate::delete`].
     pub fn delete_selection(&mut self) {
         self.finish_placing();
         if self.is_gesturing() || self.selection.is_empty() {
+            return;
+        }
+        if !self.points.indices().is_empty() {
+            self.delete_selected_points();
             return;
         }
         let mut step = Step::begin(&self.selection);
@@ -1223,6 +1236,11 @@ impl Editor {
             }
             return;
         }
+        // Anywhere else, as in Excalidraw's linear editor, a tap unselects
+        // the points, so that `delete` takes the whole line again.
+        if !shift && self.points.clear() {
+            self.overlay_revision += 1;
+        }
         if self.grabbed_handle(tap.x, tap.y, tap.kind).is_some() {
             return;
         }
@@ -1295,10 +1313,10 @@ impl Editor {
     fn label_container_at(&self, at: Point) -> Option<String> {
         self.scene
             .elements()
+            .rev()
             .filter(hit_test::is_selectable)
             .filter(|e| text::takes_label(e.kind()))
-            .filter(|e| Frame::of(e).contains_turned(at, e.angle(), 0.0))
-            .last()
+            .find(|e| Frame::of(e).contains_turned(at, e.angle(), 0.0))
             .map(|e| e.id().to_owned())
     }
 
@@ -1461,23 +1479,18 @@ impl Editor {
     }
 
     /// The indices of the points of the selected line or arrow that are
-    /// selected: tapping a point selects it, shift adds to them, and
-    /// dragging one moves them all. Empty unless a line or arrow is the only
-    /// Element selected.
+    /// selected: tapping a point selects it, shift adds to them, tapping
+    /// anywhere else unselects them, and dragging one moves them all. Empty
+    /// unless a line or arrow is the only Element selected.
     pub fn selected_points(&self) -> &[usize] {
         self.points.indices()
     }
 
-    /// Deletes the selected points of the selected line or arrow (the
-    /// `delete` command when points are selected, which then takes the place
-    /// of deleting the Element). A line or arrow keeps at least two points: if
-    /// fewer would be left, it is deleted. The point before the first one
-    /// deleted is selected next. Does nothing if no point is selected.
-    pub fn delete_selected_points(&mut self) {
-        self.finish_placing();
-        if self.is_gesturing() {
-            return;
-        }
+    /// Deletes the selected points of the selected line or arrow, for
+    /// [`Editor::delete_selection`]. A line or arrow keeps at least two
+    /// points: if fewer would be left, it is deleted with its label. The
+    /// point before the first one deleted is selected next.
+    fn delete_selected_points(&mut self) {
         let Some(handles) = self.point_handles(self.last_pointer) else {
             return;
         };
@@ -1490,9 +1503,12 @@ impl Editor {
         let remaining = handles.without(&deleted);
         let last = handles.points().len() - 1;
         if remaining.len() < 2 {
-            binding::unbind_all(&mut self.scene, &mut self.entropy, &mut step, handles.id());
-            self.scene
-                .mark_deleted(handles.id(), self.entropy.integer());
+            delete::delete(
+                &mut self.scene,
+                &mut self.entropy,
+                &mut step,
+                &self.selection,
+            );
             self.selection.clear();
             self.points.clear();
         } else {

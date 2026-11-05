@@ -241,7 +241,7 @@ impl Scene {
 
     /// The Elements of a type the core understands, deleted ones included, in
     /// z-order (file order).
-    pub fn elements(&self) -> impl Iterator<Item = Element<'_>> {
+    pub fn elements(&self) -> impl DoubleEndedIterator<Item = Element<'_>> {
         self.element_values()
             .iter()
             .enumerate()

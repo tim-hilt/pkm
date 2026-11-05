@@ -920,7 +920,7 @@ fn deleting_the_bound_end_of_an_arrow_unbinds_it() {
     tap(&mut editor, "mouse", (94.0, 62.286), 5.0);
     assert_eq!(editor.selected_points(), [2]);
 
-    editor.delete_selected_points();
+    editor.delete_selection();
 
     let arrow = arrow(&editor);
     assert_eq!(binding(&arrow, "endBinding"), None);
@@ -936,7 +936,7 @@ fn deleting_an_arrow_by_its_points_frees_the_shapes() {
     assert_eq!(editor.selected_points(), [1]);
 
     // An arrow keeps two points at least: it goes.
-    editor.delete_selected_points();
+    editor.delete_selection();
 
     assert_eq!(bound_arrows(&element(&editor, "box")), Vec::<String>::new());
     assert_eq!(editor.selection(), Vec::<String>::new());
@@ -945,4 +945,36 @@ fn deleting_an_arrow_by_its_points_frees_the_shapes() {
 
     assert_eq!(bound_arrows(&element(&editor, "box")).len(), 1);
     assert_eq!(binding(&arrow(&editor), "endBinding").unwrap().0, "box");
+}
+
+// --- Properties -----------------------------------------------------------------
+
+#[test]
+fn a_bound_arrow_follows_a_text_whose_font_size_changes() {
+    struct FixedWidth;
+    impl workingtitle_core::TextMeasurer for FixedWidth {
+        fn line_width(&self, text: &str, font_size: f64) -> f64 {
+            text.chars().count() as f64 * font_size / 2.0
+        }
+    }
+    // Five characters of 10, one line of 25: from (100, 0) to (150, 25).
+    let hello = r#"{"id":"t","type":"text","x":100,"y":0,"width":50,"height":25,
+        "text":"Hello","originalText":"Hello","fontSize":20,"fontFamily":5,"lineHeight":1.25,
+        "textAlign":"left","verticalAlign":"top","containerId":null,"autoResize":true,
+        "boundElements":[{"id":"arrow","type":"arrow"}]}"#;
+    let corner = r#"{"elementId":"t","mode":"inside","fixedPoint":[1,1]}"#;
+    let arrow = excalidraw_arrow("", corner).replace("[94,0]", "[150,-15]");
+    let mut editor = editor_with(&[hello, &arrow]);
+    editor.set_text_measurer(std::sync::Arc::new(FixedWidth));
+    tap(&mut editor, "mouse", (120.0, 5.0), 0.0);
+    assert_eq!(editor.selection(), ["t"]);
+
+    editor.set_property(workingtitle_core::Property::FontSize(
+        workingtitle_core::FontSize::Large,
+    ));
+
+    // Five characters of 14, one line of 35: the corner is at (170, 35).
+    assert_points(&shown(&editor), &[(0.0, 40.0), (170.0, 35.0)]);
+    editor.undo();
+    assert_points(&shown(&editor), &[(0.0, 40.0), (150.0, 25.0)]);
 }

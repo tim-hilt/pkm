@@ -73,13 +73,13 @@ fn place_of(scene: &Scene, id: &str) -> String {
         return id.to_owned();
     };
     let last = if let Some(group) = element.outermost_group() {
-        scene.elements().filter(|e| e.is_in_group(group)).last()
+        scene.elements().rev().find(|e| e.is_in_group(group))
     } else {
         let container = element.container_id().unwrap_or(id);
         scene
             .elements()
-            .filter(|e| e.id() == container || e.container_id() == Some(container))
-            .last()
+            .rev()
+            .find(|e| e.id() == container || e.container_id() == Some(container))
     };
     last.map_or_else(|| id.to_owned(), |e| e.id().to_owned())
 }

@@ -128,10 +128,10 @@ pub(crate) fn hovered(scene: &Scene, at: Point, reach: f64) -> Option<String> {
     let mut candidates: Vec<Candidate> = Vec::new();
     let bindable = scene
         .elements()
+        .rev()
         .filter(|e| !e.is_deleted() && !e.is_locked())
-        .filter_map(|e| Some((Outline::of(&e)?, e)))
-        .collect::<Vec<_>>();
-    for (outline, element) in bindable.into_iter().rev() {
+        .filter_map(|e| Some((Outline::of(&e)?, e)));
+    for (outline, element) in bindable {
         let distance = outline.distance(at);
         if distance >= reach {
             continue;

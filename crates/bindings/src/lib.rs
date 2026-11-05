@@ -614,19 +614,6 @@ impl Editor {
         self.editor().move_in_z_order(how);
     }
 
-    /// The indices of the selected points of the selected line or arrow; see
-    /// [`workingtitle_core::Editor::selected_points`].
-    pub fn selected_points(&self) -> Vec<u64> {
-        let points = self.editor().selected_points().to_vec();
-        points.into_iter().map(|i| i as u64).collect()
-    }
-
-    /// Deletes the selected points of the selected line or arrow; see
-    /// [`workingtitle_core::Editor::delete_selected_points`].
-    pub fn delete_selected_points(&self) {
-        self.editor().delete_selected_points();
-    }
-
     /// Differs from before whenever [`Editor::overlay`] may: read it after
     /// forwarding input and ask for the overlay again if it moved.
     pub fn overlay_revision(&self) -> u64 {

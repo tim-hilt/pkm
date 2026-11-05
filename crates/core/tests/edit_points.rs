@@ -499,7 +499,7 @@ fn deleting_the_selected_point_removes_it() {
     let mut editor = selected("mouse", &[&corner()]);
     tap(&mut editor, "mouse", (150.0, 50.0), 1.0);
 
-    editor.delete_selected_points();
+    editor.delete_selection();
 
     assert_eq!(saved_points(&line(&editor)), [(0.0, 0.0), (100.0, 100.0)]);
     assert_eq!(frame(&line(&editor)), (50.0, 50.0, 100.0, 100.0));
@@ -515,7 +515,7 @@ fn deleting_the_first_point_moves_the_position_to_the_next() {
     let mut editor = selected("mouse", &[&corner()]);
     tap(&mut editor, "mouse", (50.0, 50.0), 1.0);
 
-    editor.delete_selected_points();
+    editor.delete_selection();
 
     // The points left are at (150, 50) and (150, 150).
     let left = line(&editor);
@@ -531,7 +531,7 @@ fn deleting_leaves_a_line_of_two_points_or_nothing() {
     tap(&mut editor, "mouse", (150.0, 50.0), 1.0);
     assert_eq!(editor.selected_points(), [1]);
 
-    editor.delete_selected_points();
+    editor.delete_selection();
 
     // A line needs two points: with one gone there is nothing left.
     assert_eq!(editor.element_count(), 0);
@@ -540,21 +540,51 @@ fn deleting_leaves_a_line_of_two_points_or_nothing() {
 }
 
 #[test]
-fn deleting_without_a_selected_point_does_nothing() {
+fn deleting_without_a_selected_point_deletes_the_line() {
     let mut editor = selected("mouse", &[&corner()]);
-    let before = editor.save();
 
-    editor.delete_selected_points();
+    editor.delete_selection();
 
-    assert_eq!(editor.save(), before);
-    assert!(!editor.can_undo());
+    assert_eq!(editor.element_count(), 0);
+    assert!(editor.selection().is_empty());
+}
+
+#[test]
+fn tapping_the_line_away_from_its_points_unselects_them() {
+    let mut editor = selected("mouse", &[&corner()]);
+    tap(&mut editor, "mouse", (150.0, 50.0), 1.0);
+    assert_eq!(editor.selected_points(), [1]);
+
+    // On the second segment, between its handles.
+    tap(&mut editor, "mouse", (150.0, 120.0), 2.0);
+
+    assert_eq!(editor.selection(), ["a"]);
+    assert!(editor.selected_points().is_empty());
+}
+
+#[test]
+fn deleting_an_arrow_by_its_points_deletes_its_label() {
+    let arrow = r#"{"id":"a","type":"arrow","x":50,"y":50,"width":100,"height":0,
+        "points":[[0,0],[100,0]],"roughness":0,"roundness":null,"strokeWidth":2,
+        "boundElements":[{"id":"t","type":"text"}]}"#;
+    let label = r#"{"id":"t","type":"text","x":90,"y":40,"width":20,"height":20,
+        "text":"Hi","originalText":"Hi","containerId":"a","fontSize":16,
+        "textAlign":"center","verticalAlign":"middle","autoResize":true}"#;
+    let mut editor = editor_with(&[arrow, label]);
+    tap(&mut editor, "mouse", (70.0, 50.0), 0.0);
+    tap(&mut editor, "mouse", (150.0, 50.0), 1.0);
+    assert_eq!(editor.selected_points(), [1]);
+
+    editor.delete_selection();
+
+    assert_eq!(editor.element_count(), 0, "the label goes with its arrow");
 }
 
 #[test]
 fn undoing_a_deleted_point_brings_it_back() {
     let mut editor = selected("mouse", &[&corner()]);
     tap(&mut editor, "mouse", (150.0, 50.0), 1.0);
-    editor.delete_selected_points();
+    editor.delete_selection();
 
     editor.undo();
 
