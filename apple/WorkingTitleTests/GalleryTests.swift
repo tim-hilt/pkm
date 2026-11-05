@@ -273,6 +273,37 @@ import Testing
         #expect(gallery.failure != nil)
     }
 
+    @Test func aFileOpenedFromOutsideIsImportedAndShown() throws {
+        let url = try file("Flowchart.excalidraw", Data(contentsOf: SampleDrawing.url))
+        let gallery = Gallery(store: store)
+        gallery.createDrawing()
+
+        gallery.openFile(at: url)
+
+        #expect(gallery.open?.name == "Flowchart")
+        #expect(gallery.drawings.count == 2, "the Drawing that was open is kept")
+    }
+
+    @Test func aDrawingOfTheGalleryOpenedFromFilesIsShownNotCopied() throws {
+        try store.save(Data(contentsOf: SampleDrawing.url), as: "Flowchart")
+        let gallery = Gallery(store: store)
+
+        gallery.openFile(at: store.directory.appending(path: "Flowchart.excalidraw"))
+
+        #expect(gallery.open?.name == "Flowchart")
+        #expect(gallery.drawings.map(\.name) == ["Flowchart"])
+    }
+
+    @Test func anInvalidFileOpenedFromOutsideLeavesTheGalleryShownAndTellsTheUser() throws {
+        let url = try file("Broken.excalidraw", Data("not json".utf8))
+        let gallery = Gallery(store: store)
+
+        gallery.openFile(at: url)
+
+        #expect(gallery.open == nil)
+        #expect(gallery.failure != nil)
+    }
+
     // MARK: Export
 
     @Test func anExportedDrawingIsItsFileWithTheSameBytes() throws {

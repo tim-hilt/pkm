@@ -385,6 +385,9 @@ final class CanvasController {
     /// it is hidden; the core decides, and the position follows the Selection
     /// through panning and zooming.
     private(set) var actionBar: ActionBar?
+    /// Whether something is selected (and no pointer is drawing or moving):
+    /// exactly when the core shows the Action Bar.
+    var hasSelection: Bool { actionBar != nil }
     /// The size of the Canvas, which keeps the Action Bar inside it.
     private(set) var viewSize = CGSize.zero
 

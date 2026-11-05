@@ -22,8 +22,13 @@ enum PNGExport {
         renderer.setGeometry(export.geometry)
         renderer.viewport = Viewport(origin: SIMD2(Float(export.x), Float(export.y)), zoom: 1)
         return renderer.renderOffscreen(
-            width: Int((export.width * Double(scale)).rounded(.up)),
-            height: Int((export.height * Double(scale)).rounded(.up)), pixelsPerPoint: scale)
+            width: pixels(export.width), height: pixels(export.height), pixelsPerPoint: scale)
+    }
+
+    /// Rounded, not truncated or rounded up, as Excalidraw sizes its export
+    /// canvas (`exportToCanvas`), so that both export at the same size.
+    private static func pixels(_ length: Double) -> Int {
+        max(1, Int((length * Double(scale)).rounded()))
     }
 
     /// The export as PNG file content; nil as for `render`.

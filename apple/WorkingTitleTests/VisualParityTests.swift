@@ -13,15 +13,21 @@ import Testing
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     private static let fixtures = repository.appending(path: "scripts/visual-parity/fixtures")
     private static let output = repository.appending(path: "docs/visual-parity")
-    nonisolated private static let names = ["shapes", "strokes", "lines", "freedraw", "text", "images"]
+    /// Each fixture and the size of the PNG excalidraw.com exports it at
+    /// (docs/visual-parity.md).
+    nonisolated private static let fixtureSizes = [
+        ("shapes", 1400, 1220), ("strokes", 1304, 1209), ("lines", 1163, 1001),
+        ("freedraw", 700, 700), ("text", 1162, 780), ("images", 1289, 809),
+    ]
+    nonisolated private static let names = fixtureSizes.map(\.0)
 
     @Test(arguments: names) func theFixtureExportsAsPNG(name: String) throws {
         let editor = Editor.withExcalifont()
         try editor.load(bytes: Data(contentsOf: Self.fixtures.appending(path: "\(name).excalidraw")))
-        let export = try #require(editor.export(scope: .scene))
         let image = try #require(PNGExport.render(editor, scope: .scene, background: true))
 
-        #expect(image.width == Int((export.width * 2).rounded(.up)))
+        let size = try #require(Self.fixtureSizes.first { $0.0 == name })
+        #expect((image.width, image.height) == (size.1, size.2), "excalidraw.com's size")
         #expect(image.pixel(2, 2) == (255, 255, 255), "the padding is paper")
 
         if ProcessInfo.processInfo.environment["RECORD_VISUAL_PARITY"] != nil {

@@ -281,12 +281,15 @@ impl Editor {
     /// by file id, placement, crop and scale for the client to draw (see
     /// [`crate::image`]).
     pub fn geometry(&self) -> Geometry {
-        self.geometry_of(self.generation, |_| true)
+        // The text view shows the text that is being edited.
+        let editing = self.text.as_ref().map(TextEditing::handle);
+        self.geometry_of(self.generation, |e| editing != Some(e.handle()))
     }
 
     /// What a PNG export of `scope` shows: its geometry and the Scene
     /// rectangle to rasterise, which is the Elements' bounds plus
-    /// Excalidraw's export padding. `None` if there is nothing to export.
+    /// Excalidraw's export padding. A text being edited is in it as typed
+    /// so far. `None` if there is nothing to export.
     pub fn export(&self, scope: ExportScope) -> Option<Export> {
         let included = |element: &Element| match scope {
             ExportScope::Scene => true,
@@ -308,12 +311,7 @@ impl Editor {
         let background = self.scene.view_background_color();
         let containers = Containers::new(&self.scene);
         let measurer = self.measurer.as_ref().map(|m| &*m.0);
-        let editing = self.text.as_ref().map(TextEditing::handle);
         for element in self.shown().filter(|e| include(e)) {
-            // The text view shows the text that is being edited.
-            if editing == Some(element.handle()) {
-                continue;
-            }
             let mark = geometry.mark();
             if element.kind() == ElementType::Text {
                 text::draw(&element, &containers, measurer, &mut geometry);

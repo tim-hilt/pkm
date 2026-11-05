@@ -49,3 +49,8 @@ make visual-parity-app   # the app side only
 Minor differences (1–3 px export size rounding, arrowhead smoothness, bound
 text placement for un-normalised files) are recorded here only. Significant
 ones are filed as issues: **52** (export frame from points).
+
+Since issue 52 (export frame from points) and review R12 (pixel size rounded
+like Excalidraw's `exportToCanvas`, not up), the app exports every fixture at
+excalidraw.com's size; `VisualParityTests` asserts it. The `*-app.png` files
+predate both until `make visual-parity-app` is run again.

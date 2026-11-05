@@ -36,6 +36,17 @@ import Testing
         #expect(image.pixel(2, 2) == (255, 255, 255) && alpha(image, 2, 2) == 255, "the padding is paper")
     }
 
+    @Test func thePixelSizeIsRoundedAsExcalidrawRoundsIt() throws {
+        let editor = Editor.withExcalifont()
+        let drawing =
+            #"{"type":"excalidraw","version":2,"elements":[{"id":"a","type":"rectangle","x":0,"y":0,"width":100.2,"height":50.3,"roundness":null}]}"#
+        try editor.load(bytes: Data(drawing.utf8))
+
+        let image = try #require(PNGExport.render(editor, scope: .scene, background: true))
+
+        #expect(image.width == 240 && image.height == 141, "Math.round of 240.4 x 140.6")
+    }
+
     @Test func withoutBackgroundThePaperIsTransparent() throws {
         let image = try #require(PNGExport.render(try twoRectangles(), scope: .scene, background: false))
 

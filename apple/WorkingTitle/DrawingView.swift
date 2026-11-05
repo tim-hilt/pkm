@@ -67,7 +67,7 @@ struct DrawingView: View {
         ZStack {
             HStack(spacing: 8) {
                 BackControl(action: onBack)
-                MainMenu(drawing: drawing, export: export)
+                MainMenu(drawing: drawing, export: export, controller: controller)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
@@ -104,7 +104,7 @@ struct DrawingView: View {
         ZStack {
             HStack(spacing: 8) {
                 BackControl(action: onBack, size: 32)
-                MainMenu(drawing: drawing, export: export, size: 32)
+                MainMenu(drawing: drawing, export: export, controller: controller, size: 32)
             }
             .padding(12)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -172,6 +172,7 @@ private struct BackControl: View {
 private struct MainMenu: View {
     let drawing: OpenDrawing
     let export: ExportedDrawing
+    let controller: CanvasController
     /// 36 pt on desktop, 32 pt on phones.
     var size: CGFloat = 36
     @State private var background = true
@@ -186,6 +187,7 @@ private struct MainMenu: View {
                 Toggle("Background", isOn: $background)
                 share("Export Scene as PNG", scope: .scene)
                 share("Export Selection as PNG", scope: .selection)
+                    .disabled(!controller.hasSelection)
             }
         } label: {
             Label("Menu", systemImage: "line.3.horizontal")

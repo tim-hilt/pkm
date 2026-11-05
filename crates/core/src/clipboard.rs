@@ -23,9 +23,10 @@ use crate::selection::Selection;
 
 /// The `type` of what Excalidraw puts on the clipboard.
 const CLIPBOARD: &str = "excalidraw/clipboard";
-/// What Excalidraw also takes as Elements to paste: the clipboard of its API,
-/// and a `.excalidraw` file.
-const ACCEPTED: [&str; 3] = [CLIPBOARD, "excalidraw-api/clipboard", "excalidraw"];
+/// What Excalidraw also takes as Elements to paste: a `.excalidraw` file.
+/// Not the clipboard of its API (`excalidraw-api/clipboard`), which holds
+/// Element skeletons that would need `convertToExcalidrawElements`.
+const ACCEPTED: [&str; 2] = [CLIPBOARD, "excalidraw"];
 
 /// The text to put on the clipboard for copying `selection`: its Elements, with
 /// their labels, in z-order, and the files of its images. `None` if that is

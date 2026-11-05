@@ -17,11 +17,7 @@ struct ContentView: View {
                 GalleryView(gallery: gallery)
             }
         }
-        // Share sheet / open-in: the file becomes a new Drawing and is shown.
-        .onOpenURL { url in
-            gallery.close()
-            if let name = gallery.importDrawings(from: [url]).first { gallery.openDrawing(named: name) }
-        }
+        .onOpenURL { url in gallery.openFile(at: url) }
     }
 }
 

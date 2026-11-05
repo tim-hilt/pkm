@@ -14,7 +14,7 @@ import UniformTypeIdentifiers
 extension CanvasMetalView {
     /// Puts the images in `sources` (the bytes of image files, in any format
     /// ImageIO reads) on the Canvas: around `point` (in the Canvas's
-    /// coordinates) where they were dropped, else in the middle of the view.
+    /// coordinates) where they were dropped or pasted, else in the middle of the view.
     /// What is not an image is skipped. The pictures are decoded and shrunk
     /// off the main thread.
     func insertImages(from sources: [Data], at point: CGPoint? = nil) async {
@@ -35,12 +35,15 @@ extension CanvasMetalView {
             registerForDraggedTypes([.fileURL, .png, .tiff])
         }
 
-        /// Edit > Paste (⌘V) while the Canvas has the keyboard.
+        /// Edit > Paste (⌘V) while the Canvas has the keyboard: at the mouse
+        /// pointer, as excalidraw.com pastes on a desktop, or in the middle
+        /// of the view if the pointer is not over the Canvas.
         @objc func paste(_ sender: Any?) {
+            let point = pointerLocation
             // Elements first: Excalidraw's clipboard is text.
-            if pasteElementsFromPasteboard() { return }
+            if pasteElementsFromPasteboard(at: point) { return }
             let sources = Self.imageSources(in: .general)
-            Task { await insertImages(from: sources) }
+            Task { await insertImages(from: sources, at: point) }
         }
 
         override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {

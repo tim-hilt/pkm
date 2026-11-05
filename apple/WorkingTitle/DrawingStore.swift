@@ -266,6 +266,17 @@ struct DrawingStore: Sendable {
         return url
     }
 
+    /// The name of the Drawing whose file `url` is, or `nil` if it is not a
+    /// file of this store (Files hands the app its own Drawings by URL too).
+    func name(of url: URL) -> String? {
+        let folder = url.resolvingSymlinksInPath().deletingLastPathComponent()
+        guard url.pathExtension == Self.fileExtension,
+            folder.path == directory.resolvingSymlinksInPath().path
+        else { return nil }
+        let name = url.deletingPathExtension().lastPathComponent
+        return (try? fileURL(for: name)) == nil ? nil : name
+    }
+
     private func url(for name: String) throws -> URL {
         guard !name.isEmpty, !name.contains("/"), !name.hasPrefix(".") else {
             throw InvalidName(name: name)

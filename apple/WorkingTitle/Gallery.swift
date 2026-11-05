@@ -70,10 +70,21 @@ final class Gallery {
             }
         }
         if !rejected.isEmpty {
-            failure = "Could not import \(rejected.joined(separator: ", ")). It is not a valid Excalidraw file."
+            failure = "Could not import \(rejected.joined(separator: ", ")): not a valid Excalidraw file."
         }
         reload()
         return imported
+    }
+
+    /// Shows the `.excalidraw` file another app hands over (share sheet,
+    /// open-in, Files, Finder) after saving and closing the open Drawing: a
+    /// Drawing of the Gallery's own folder is opened as it is, any other file
+    /// is imported (see `importDrawings`) and the new Drawing opened.
+    func openFile(at url: URL) {
+        close()
+        if let name = store.name(of: url) ?? importDrawings(from: [url]).first {
+            openDrawing(named: name)
+        }
     }
 
     private func importDrawing(from url: URL) throws -> String {

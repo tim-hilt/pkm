@@ -131,19 +131,33 @@ pub(crate) fn exact_curve(element: &Element) -> Option<Vec<Op>> {
 /// takes for the line or arrow: around its sketched stroke, jitter included,
 /// but not the arrowheads. `None` if the stroke has no curves.
 pub(crate) fn drawn_bounds(element: &Element) -> Option<(Point, Point)> {
-    turned_bounds(element, (0.0, 0.0), 0.0)
+    let (x, y) = (element.x(), element.y());
+    let ((x0, y0), (x1, y1)) = curve_bounds(&sketched_outline(element), |p| p)?;
+    Some(((x + x0, y + y0), (x + x1, y + y1)))
 }
 
 /// The corners in the Scene of the smallest box around the line's or arrow's
-/// sketched stroke turned by `angle` about `pivot` (Excalidraw's
-/// `getLinearElementRotatedBounds`): jitter included, arrowheads not. `None`
-/// if the stroke has no curves.
-pub(crate) fn turned_bounds(element: &Element, pivot: Point, angle: f64) -> Option<(Point, Point)> {
+/// sketched stroke turned by its angle about the middle of
+/// [`drawn_bounds`] (Excalidraw's `getLinearElementRotatedBounds`): jitter
+/// included, arrowheads not. `None` if the stroke has no curves.
+pub(crate) fn shown_bounds(element: &Element) -> Option<(Point, Point)> {
+    // Sketched once: this is asked for every line and arrow on each move of
+    // a box-select.
+    let outline = sketched_outline(element);
     let (x, y) = (element.x(), element.y());
+    let ((x0, y0), (x1, y1)) = curve_bounds(&outline, |p| p)?;
+    let angle = element.angle();
+    if angle == 0.0 {
+        return Some(((x + x0, y + y0), (x + x1, y + y1)));
+    }
+    let pivot = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
     let (sin, cos) = angle.sin_cos();
-    curve_bounds(&sketched_outline(element), |(px, py)| {
-        let (dx, dy) = (x + px - pivot.0, y + py - pivot.1);
-        (pivot.0 + dx * cos - dy * sin, pivot.1 + dx * sin + dy * cos)
+    curve_bounds(&outline, |(px, py)| {
+        let (dx, dy) = (px - pivot.0, py - pivot.1);
+        (
+            x + pivot.0 + dx * cos - dy * sin,
+            y + pivot.1 + dx * sin + dy * cos,
+        )
     })
 }
 

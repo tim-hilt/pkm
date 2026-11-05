@@ -3,10 +3,12 @@
 
 use std::collections::BTreeSet;
 
-use workingtitle_core::{Editor, ExportScope};
+use std::sync::Arc;
+
+use workingtitle_core::{Editor, ExportScope, Tool};
 
 mod common;
-use common::{editor_with, tap};
+use common::{FixedWidth, editor_with, tap};
 
 fn rectangle(id: &str, x: f64) -> String {
     format!(
@@ -53,6 +55,24 @@ fn the_selection_is_exported_alone() {
 fn nothing_to_export_gives_none() {
     assert!(Editor::new().export(ExportScope::Scene).is_none());
     assert!(two_rectangles().export(ExportScope::Selection).is_none());
+}
+
+#[test]
+fn a_text_being_edited_is_exported_as_typed_so_far() {
+    // The Canvas leaves it to the text view; the export has no text view.
+    let mut editor = two_rectangles();
+    editor.set_text_measurer(Arc::new(FixedWidth));
+    editor.set_tool(Tool::Text);
+    tap(&mut editor, "mouse", (500.0, 300.0), 0.0);
+    editor.set_editing_text("hello");
+    assert!(editor.text_editor().is_some());
+
+    let export = editor.export(ExportScope::Scene).unwrap();
+
+    let lines = export.geometry.text_lines();
+    assert_eq!(lines.len(), 1);
+    assert_eq!(export.geometry.line_text(&lines[0]), "hello");
+    assert!(export.x + export.width > 500.0 && export.y + export.height > 300.0);
 }
 
 #[test]

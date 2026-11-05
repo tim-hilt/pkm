@@ -403,6 +403,10 @@ fn text_that_is_not_excalidraw_clipboard_json_is_not_pasted() {
         "{\"type\":\"other\",\"elements\":[]}",
         "[1,2,3]",
         "{\"type\":\"excalidraw/clipboard\",\"elements\":[]}",
+        // Element skeletons of Excalidraw's API, which the core does not
+        // turn into Elements (`convertToExcalidrawElements`).
+        r#"{"type":"excalidraw-api/clipboard","elements":[
+            {"id":"s","type":"rectangle","x":0,"y":0,"label":{"text":"lost"}}]}"#,
     ] {
         assert!(!editor.paste(not_clipboard), "{not_clipboard}");
     }
