@@ -13,10 +13,11 @@ import Testing
     private static let delay = Duration.milliseconds(150)
 
     init() throws {
-        directory = FileManager.default.temporaryDirectory
+        let root = FileManager.default.temporaryDirectory
             .appending(path: "AutosaveTests-\(UUID().uuidString)", directoryHint: .isDirectory)
+        directory = root.appending(path: "Documents", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        store = DrawingStore(directory: directory)
+        store = DrawingStore(directory: directory, cacheDirectory: root.appending(path: "Caches"))
     }
 
     private func openNewDrawing() throws -> OpenDrawing {

@@ -13,14 +13,9 @@ struct DrawingStore: Sendable {
     static let fileExtension = "excalidraw"
 
     let directory: URL
+    /// Holds the caches of the Drawings in `directory` and nothing else:
+    /// whatever in it belongs to no Drawing there is removed.
     let cacheDirectory: URL
-
-    init(
-        directory: URL, cacheDirectory: URL = .cachesDirectory.appending(path: "Drawings", directoryHint: .isDirectory)
-    ) {
-        self.directory = directory
-        self.cacheDirectory = cacheDirectory
-    }
 
     /// A Drawing as listed in the Gallery.
     struct Entry: Equatable, Identifiable, Sendable {
@@ -86,6 +81,8 @@ struct DrawingStore: Sendable {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let base = (try? url(for: trimmed)) == nil ? String(localized: "Imported") : trimmed
         let name = try distinctName(from: base)
+        // Left by a Drawing of that name deleted in Files or Finder.
+        try? FileManager.default.removeItem(at: cacheDirectory(for: name))
         try save(contents, as: name)
         return name
     }
@@ -142,6 +139,19 @@ struct DrawingStore: Sendable {
     func delete(_ name: String) throws {
         try FileManager.default.removeItem(at: url(for: name))
         try? FileManager.default.removeItem(at: cacheDirectory(for: name))
+    }
+
+    /// Removes the caches of Drawings that are gone without the store's
+    /// knowing (deleted or renamed in Files or Finder). Only frees disk space:
+    /// a Drawing made under such a name later never picks up its caches anyway.
+    func removeOrphanedCaches() {
+        let folders = (try? FileManager.default.contentsOfDirectory(atPath: cacheDirectory.path)) ?? []
+        for name in folders {
+            let drawing = try? url(for: name)
+            if drawing.map({ FileManager.default.fileExists(atPath: $0.path) }) != true {
+                try? FileManager.default.removeItem(at: cacheDirectory(for: name))
+            }
+        }
     }
 
     /// Where the caches of the Drawing go. The folder may not exist.
@@ -219,11 +229,13 @@ struct DrawingStore: Sendable {
     private static let stampTolerance: TimeInterval = 0.001
 
     /// Caches can be made again, so a failure here costs nothing but time.
+    /// Caches already under `newName` (of a Drawing deleted in Files or
+    /// Finder) are dropped, also when the Drawing has none to move.
     private func moveCache(of name: String, to newName: String) {
         let source = cacheDirectory(for: name)
         let target = cacheDirectory(for: newName)
-        guard FileManager.default.fileExists(atPath: source.path) else { return }
         if !Self.isSameFile(source, target) { try? FileManager.default.removeItem(at: target) }
+        guard FileManager.default.fileExists(atPath: source.path) else { return }
         do { try Self.move(source, to: target) } catch { try? FileManager.default.removeItem(at: source) }
     }
 

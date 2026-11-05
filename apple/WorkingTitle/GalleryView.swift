@@ -168,6 +168,10 @@ private struct Card: View {
                 .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary) }
                 // Restarts when the Drawing changed; ends when the card leaves the screen.
                 .task(id: drawing) { thumbnail = await thumbnails.thumbnail(for: drawing) }
+                // The lazy grid keeps the state of cards scrolled past; without
+                // this, every thumbnail seen would stay in memory. `thumbnails`
+                // still has it in memory for when the card comes back.
+                .onDisappear { thumbnail = nil }
             Text(drawing.name).font(.subheadline).lineLimit(2)
             Text(drawing.modified, format: .dateTime.day().month().year().hour().minute())
                 .font(.caption).foregroundStyle(.secondary)

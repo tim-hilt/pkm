@@ -26,20 +26,23 @@ struct ContentView: View {
 }
 
 extension DrawingStore {
-    /// The app's Documents folder, which Files and Finder show. UI tests ask
-    /// for an empty temporary folder instead.
+    /// The app's Documents folder, which Files and Finder show, with the
+    /// caches in Caches. UI tests ask for empty temporary folders instead.
     static var appDrawings: DrawingStore {
         appDrawings(temporary: ProcessInfo.processInfo.arguments.contains("-UITestingTemporaryStore"))
     }
 
     static func appDrawings(temporary: Bool) -> DrawingStore {
         if temporary {
-            let directory = FileManager.default.temporaryDirectory
+            let root = FileManager.default.temporaryDirectory
                 .appending(path: "WorkingTitleUITests-\(UUID().uuidString)", directoryHint: .isDirectory)
+            let directory = root.appending(path: "Documents", directoryHint: .isDirectory)
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            return DrawingStore(directory: directory)
+            return DrawingStore(directory: directory, cacheDirectory: root.appending(path: "Caches"))
         }
-        return DrawingStore(directory: .documentsDirectory)
+        return DrawingStore(
+            directory: .documentsDirectory,
+            cacheDirectory: .cachesDirectory.appending(path: "Drawings", directoryHint: .isDirectory))
     }
 }
 

@@ -353,6 +353,56 @@ import Testing
         #expect(!hasCache(copy), "caches are made again for the copy, never borrowed")
     }
 
+    // MARK: Caches of Drawings deleted from outside
+
+    private func deleteFromOutside(_ name: String) throws {
+        try FileManager.default.removeItem(at: directory.appending(path: "\(name).excalidraw"))
+    }
+
+    @Test func aNewDrawingUnderTheNameOfOneDeletedFromOutsideStartsWithoutItsCaches() throws {
+        try store.save(Data("old".utf8), as: "Flowchart")
+        try cache("Flowchart", file: "viewport.json")
+        try deleteFromOutside("Flowchart")
+
+        let name = try store.add(Data("new".utf8), named: "Flowchart")
+
+        #expect(name == "Flowchart")
+        #expect(!hasCache("Flowchart", file: "viewport.json"))
+    }
+
+    @Test func renamingOntoTheNameOfOneDeletedFromOutsideDropsItsCaches() throws {
+        try store.save(Data("a".utf8), as: "a")
+        try store.save(Data("b".utf8), as: "b")
+        try cache("b", file: "viewport.json")
+        try deleteFromOutside("b")
+
+        _ = try store.rename("a", to: "b")
+
+        #expect(!hasCache("b", file: "viewport.json"))
+    }
+
+    @Test func orphanedCachesAreRemovedAndOthersKept() throws {
+        try store.save(Data("a".utf8), as: "a")
+        try store.save(Data("b".utf8), as: "b")
+        try cache("a")
+        try cache("b")
+        try deleteFromOutside("b")
+
+        store.removeOrphanedCaches()
+
+        #expect(hasCache("a"))
+        #expect(!hasCache("b"))
+        #expect(try fileNames() == ["a.excalidraw"])
+    }
+
+    @Test func removingOrphanedCachesWithoutAnyCachesDoesNothing() throws {
+        try store.save(Data("a".utf8), as: "a")
+
+        store.removeOrphanedCaches()
+
+        #expect(try fileNames() == ["a.excalidraw"])
+    }
+
     // MARK: Thumbnail cache
 
     private func entry(_ name: String) throws -> DrawingStore.Entry {

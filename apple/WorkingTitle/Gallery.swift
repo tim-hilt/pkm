@@ -20,9 +20,12 @@ final class Gallery {
 
     @ObservationIgnored private let store: DrawingStore
 
+    /// Also clears out the caches of Drawings deleted in Files or Finder
+    /// since the last launch.
     init(store: DrawingStore) {
         self.store = store
         thumbnails = Thumbnails(store: store)
+        store.removeOrphanedCaches()
         reload()
     }
 

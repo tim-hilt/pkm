@@ -8,10 +8,11 @@ import Testing
     private let store: DrawingStore
 
     init() throws {
-        let directory = FileManager.default.temporaryDirectory
+        let root = FileManager.default.temporaryDirectory
             .appending(path: "GalleryTests-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let directory = root.appending(path: "Documents", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        store = DrawingStore(directory: directory)
+        store = DrawingStore(directory: directory, cacheDirectory: root.appending(path: "Caches"))
     }
 
     @Test func startsWithTheStoredDrawingsAndNothingOpen() throws {
@@ -21,6 +22,15 @@ import Testing
 
         #expect(gallery.drawings.map(\.name) == ["one"])
         #expect(gallery.open == nil)
+    }
+
+    @Test func startingRemovesTheCachesOfDrawingsDeletedFromOutside() throws {
+        let orphan = store.cacheDirectory(for: "deleted in Finder")
+        try FileManager.default.createDirectory(at: orphan, withIntermediateDirectories: true)
+
+        _ = Gallery(store: store)
+
+        #expect(!FileManager.default.fileExists(atPath: orphan.path))
     }
 
     @Test func creatingADrawingOpensAnEmptyOne() {
