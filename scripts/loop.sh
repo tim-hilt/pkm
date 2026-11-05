@@ -30,18 +30,32 @@ for path in "$tasks_dir"/*.md; do # glob expansion is sorted
 done
 shopt -u nullglob dotglob
 
-implemented=0
+# Whether the current `**Status:**` line of $1 is one of the statuses in the regex $2.
+has_status() {
+  grep -Eiq $'^\\*{0,2}Status:\\*{0,2}[ \t]*('"$2"$')[ \t]*\r?$' "$1"
+}
 
-for task_file in ${tasks[@]+"${tasks[@]}"}; do
-  # Check the current `**Status:**` line only; earlier implementations may change later tasks.
-  grep -Eiq $'^\\*{0,2}Status:\\*{0,2}[ \t]*ready-for-agent[ \t]*\r?$' "$task_file" || continue
+# The ticket numbers on the `**Blocked by:**` line of $1 that are not yet
+# implemented (Status in-review or done), space-separated; empty if none.
+pending_blockers() {
+  local number blocker pending=""
+  for number in $(grep -Ei '^\*{0,2}Blocked by:' "$1" | grep -oE '\b[0-9]{2}\b'); do
+    blocker=$(compgen -G "$tasks_dir/$number-*.md" | head -n 1)
+    if [[ -z $blocker ]] || ! has_status "$blocker" 'in-review|done'; then
+      pending+="$number "
+    fi
+  done
+  echo "${pending% }"
+}
 
+# Implements $1 with an agent, then gates on the Apple tests.
+implement() {
+  local task_file=$1
   status_set "Implementing $task_file"
 
-  run_pi anthropic claude-opus-5-5 low \
+  run_pi anthropic claude-sonnet-5-5 medium \
     "/skill:tdd implement the task described in @$task_file. This is a headless run: the seams named in the task and its spec are the confirmed seams. Apply software-design best practices during the implementation. Tick off all completed bullet points in $task_file and set its Status line to in-review when you're finished; edit it in place, since .scratch/ is untracked. Commit the implementation using the commit-message 'Implement $task_file'."
 
-  implemented=$((implemented + 1))
   status_stop
   log_section "$task_file implemented in $status_elapsed" "$pi_output"
 
@@ -54,7 +68,38 @@ for task_file in ${tasks[@]+"${tasks[@]}"}; do
     exit 1
   fi
   status_stop
+}
+
+implemented=0
+attempted=" " # tasks already run: one whose Status the agent did not update runs only once
+
+# Passes repeat until one implements nothing, so a task blocked by a
+# later-numbered task runs in the pass after its blocker.
+progress=1
+while ((progress)); do
+  progress=0
+  for task_file in ${tasks[@]+"${tasks[@]}"}; do
+    # Check the current `**Status:**` line only; earlier implementations may change later tasks.
+    has_status "$task_file" 'ready-for-agent' || continue
+    [[ $attempted == *" $task_file "* ]] && continue
+    [[ -z $(pending_blockers "$task_file") ]] || continue
+    attempted+="$task_file "
+    implement "$task_file"
+    implemented=$((implemented + 1))
+    progress=1
+  done
 done
+
+still_blocked=""
+for task_file in ${tasks[@]+"${tasks[@]}"}; do
+  has_status "$task_file" 'ready-for-agent' || continue
+  [[ $attempted == *" $task_file "* ]] && continue
+  still_blocked+="$task_file (waits for $(pending_blockers "$task_file"))"$'\n'
+done
+if [[ -n $still_blocked ]]; then
+  log_section "Still blocked, not implemented" "$still_blocked"
+  printf 'Still blocked, not implemented:\n%s' "$still_blocked" >&2
+fi
 
 if ((implemented == 0)); then
   echo "No ready-for-agent tasks found."
