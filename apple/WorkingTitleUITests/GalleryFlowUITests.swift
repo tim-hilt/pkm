@@ -1,6 +1,7 @@
 import XCTest
 
-/// Gallery → Canvas → back, against an empty temporary Drawings folder.
+/// Gallery → Canvas → back and Gallery → licences, against an empty temporary
+/// Drawings folder.
 @MainActor final class GalleryFlowUITests: XCTestCase {
     private var app: XCUIApplication!
 
@@ -37,5 +38,19 @@ import XCTest
         drawing.tap()
 
         XCTAssertTrue(app.buttons["back-to-gallery"].waitForExistence(timeout: 10))
+    }
+
+    func testTheLicencesOpenFromTheGalleryWithTheirFullText() {
+        let licences = app.descendants(matching: .any)["licenses"]
+        XCTAssertTrue(licences.waitForExistence(timeout: 10))
+
+        licences.tap()
+        let roughjs = app.descendants(matching: .any)["license-rough.js"]
+        XCTAssertTrue(roughjs.waitForExistence(timeout: 10), "the list is shown")
+        roughjs.tap()
+
+        let copyright = NSPredicate(format: "value CONTAINS 'Preet Shihn' OR label CONTAINS 'Preet Shihn'")
+        let text = app.staticTexts.containing(copyright).firstMatch
+        XCTAssertTrue(text.waitForExistence(timeout: 10), "the full text is shown")
     }
 }

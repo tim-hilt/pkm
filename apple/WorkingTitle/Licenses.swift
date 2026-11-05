@@ -1,11 +1,14 @@
 import SwiftUI
 
-/// A third-party work the app ships (Excalifont) or ports (rough.js,
-/// perfect-freehand, Excalidraw as the reference implementation), with its
-/// licence text bundled as a resource.
+/// A third-party work the app ships (Excalifont), links (the Rust crates in
+/// the core's static library) or ports (rough.js, perfect-freehand, Excalidraw
+/// as the reference implementation), with its licence text bundled as a
+/// resource. A new Rust dependency that ends up in the app binary needs an
+/// entry here (`nm` on the app's dSYM lists the crates).
+/// Code that only runs at build time (the bindings generator) does not.
 struct ThirdPartyLicense: Identifiable, Sendable {
     let name: String
-    /// SPDX identifier, shown next to the name.
+    /// SPDX expression, shown next to the name.
     let license: String
     /// Name of the bundled `.txt` resource holding the full licence text.
     let resource: String
@@ -17,6 +20,9 @@ struct ThirdPartyLicense: Identifiable, Sendable {
         ThirdPartyLicense(name: "perfect-freehand", license: "MIT", resource: "LICENSE-perfect-freehand"),
         ThirdPartyLicense(name: "Excalifont", license: "OFL-1.1", resource: "OFL"),
         ThirdPartyLicense(name: "Excalidraw", license: "MIT", resource: "LICENSE-excalidraw"),
+        ThirdPartyLicense(name: "UniFFI", license: "MPL-2.0", resource: "LICENSE-uniffi"),
+        ThirdPartyLicense(
+            name: "Rust standard library, anyhow, bytes", license: "MIT AND Unicode-3.0", resource: "LICENSE-rust"),
     ]
 
     private final class BundleToken {}

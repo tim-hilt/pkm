@@ -17,6 +17,8 @@ required-features = ["bindgen"]
 # The bindings generator pulls in a CLI stack; the library never needs it.
 bindgen = ["uniffi/cli"]
 
+# Every crate linked into the app is listed on its licences screen
+# (apple/WorkingTitle/Licenses.swift); update it when this list changes.
 [dependencies]
 uniffi = "0.32"
 workingtitle-core = { path = "../core" }

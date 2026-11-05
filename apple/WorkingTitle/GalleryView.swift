@@ -5,8 +5,8 @@ import UniformTypeIdentifiers
 /// create a new one. A card shows the Drawing's thumbnail, which is made when
 /// the card comes into view (the grid is lazy) and again after the Drawing
 /// changed, with the name and date below it.
-/// A card's menu (also its context menu) renames, duplicates and deletes the
-/// Drawing, exports it via the share sheet and deletes it; deleting asks first. `.excalidraw` files are imported from Files
+/// A card's menu (also its context menu) renames, duplicates, exports (via the
+/// share sheet) and deletes the Drawing; deleting asks first. `.excalidraw` files are imported from Files
 /// (toolbar) or by dropping them onto the Gallery. The toolbar also opens the
 /// third-party licences.
 struct GalleryView: View {

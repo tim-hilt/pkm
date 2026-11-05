@@ -37,20 +37,23 @@ make visual-parity-app   # the app side only
 
 ## Findings (excalidraw.com, November 2026)
 
+First comparison (issue 50):
+
 | Fixture    | Size app / excalidraw | Result |
 | ---------- | --------------------- | ------ |
 | `shapes`   | 1400 × 1220 / 1400 × 1220 | Identical strokes and fills, seed for seed. |
 | `strokes`  | 1304 × 1210 / 1304 × 1209 | Identical; 1 px rounding of the export height. |
 | `lines`    | 1160 × 1000 / 1163 × 1001 | Same shapes and arrowheads. Export frame 3 px narrower (see issue 52). Dot / circle arrowheads look slightly smoother in the app. |
 | `freedraw` | 700 × 640 / 700 × 700 | **Significant:** the app's export frame ignores points above the first point and clips the top of the waves. Stroke outlines themselves match. → issue 52. |
-| `text`     | 1162 × 780 / 1162 × 780 | Glyphs, sizes, alignment and line height match. The bound label is centred by the app, whereas excalidraw.com draws it at the (inaccurate) stored `x`/`width` of the fixture until it is edited; not a defect. |
+| `text`     | 1162 × 780 / 1162 × 780 | Glyphs, sizes, alignment and line height match. The bound label sat 20 units left of centre on excalidraw.com only: the fixture stored it off-centre, excalidraw.com draws a label at its stored `x`/`y` until it is edited, and the app always centres it. |
 | `images`   | 1290 × 810 / 1289 × 809 | Identical, including opacity, rotation, mirroring and smoothing; 1 px rounding of the export size. |
 
-Minor differences (1–3 px export size rounding, arrowhead smoothness, bound
-text placement for un-normalised files) are recorded here only. Significant
-ones are filed as issues: **52** (export frame from points).
+Significant differences were filed as issues: **52** (export frame from
+points).
 
-Since issue 52 (export frame from points) and review R12 (pixel size rounded
-like Excalidraw's `exportToCanvas`, not up), the app exports every fixture at
-excalidraw.com's size; `VisualParityTests` asserts it. The `*-app.png` files
-predate both until `make visual-parity-app` is run again.
+Current state (review R14, both sides re-exported): since issue 52 and review
+R12 (pixel size rounded like Excalidraw's `exportToCanvas`), every fixture
+exports at excalidraw.com's size, which `VisualParityTests` asserts. The
+`text` fixture now stores the label centred in its box, as Excalidraw writes
+it, and the two `text` exports match. What remains is the slightly smoother
+dot / circle arrowheads in `lines`.

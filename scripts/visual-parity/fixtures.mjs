@@ -167,7 +167,11 @@ const texts = () => {
     text(40, 380, "Coloured äöü ß €", { strokeColor: "#e03131", fontSize: 24 }),
   ];
   const box = base("rectangle", 360, 40, 200, 100, { backgroundColor: "#ffec99", roundness: { type: 3 } });
-  const label = text(380, 77, "Bound label", { containerId: box.id, textAlign: "center", verticalAlign: "middle" });
+  const label = text(0, 0, "Bound label", { containerId: box.id, textAlign: "center", verticalAlign: "middle" });
+  // Centred in the box, as Excalidraw stores a label: excalidraw.com draws it
+  // at its stored x/y until it is edited, the app always centres it.
+  label.x = box.x + (box.width - label.width) / 2;
+  label.y = box.y + (box.height - label.height) / 2;
   box.boundElements = [{ type: "text", id: label.id }];
   return [...out, box, label];
 };
