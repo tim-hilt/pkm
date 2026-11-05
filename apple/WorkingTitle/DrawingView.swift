@@ -204,6 +204,15 @@ private struct MainMenu: View {
     }
 }
 
+#if !os(macOS)
+    /// Whether the chrome offers the Pencil-only drawing setting: on an iPad
+    /// only. An iPhone has no Pencil, so the mode would leave it nothing that
+    /// draws, and the core turns it on by itself only for a Pencil.
+    @MainActor private var offersPencilOnlyDrawing: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+    }
+#endif
+
 /// Excalidraw's toolbar island, in its order: Tool lock, then the Tools.
 struct ToolBar: View {
     let controller: CanvasController
@@ -237,10 +246,12 @@ struct ToolBar: View {
                 }
             }
             #if !os(macOS)
-                divider
-                toolButton(
-                    "Pencil-only drawing", symbol: "applepencil", checked: controller.pencilOnlyDrawing
-                ) { controller.setPencilOnlyDrawing(!controller.pencilOnlyDrawing) }
+                if offersPencilOnlyDrawing {
+                    divider
+                    toolButton(
+                        "Pencil-only drawing", symbol: "applepencil", checked: controller.pencilOnlyDrawing
+                    ) { controller.setPencilOnlyDrawing(!controller.pencilOnlyDrawing) }
+                }
             #endif
         }
         .padding(4)
@@ -271,7 +282,8 @@ struct ToolBar: View {
 /// The phone toolbar island (docs/layout-reference §4.2): one slot per Tool
 /// family, spread over the bar's width; tapping a family's armed Tool again
 /// offers the rest of the family. Tool lock and Pencil-only drawing, which
-/// have no slot on excalidraw.com's phone bar, sit in the ⋮ menu.
+/// have no slot on excalidraw.com's phone bar, sit in the ⋮ menu (Pencil-only
+/// drawing only on an iPad, see `offersPencilOnlyDrawing`).
 private struct MobileToolBar: View {
     let controller: CanvasController
     /// Per slot, the Tool of its family last chosen, so the slot keeps showing it.
@@ -326,10 +338,12 @@ private struct MobileToolBar: View {
                 isOn: Binding(
                     get: { controller.toolLock }, set: { controller.setToolLock($0) }))
             #if !os(macOS)
-                Toggle(
-                    "Pencil-only drawing",
-                    isOn: Binding(
-                        get: { controller.pencilOnlyDrawing }, set: { controller.setPencilOnlyDrawing($0) }))
+                if offersPencilOnlyDrawing {
+                    Toggle(
+                        "Pencil-only drawing",
+                        isOn: Binding(
+                            get: { controller.pencilOnlyDrawing }, set: { controller.setPencilOnlyDrawing($0) }))
+                }
             #endif
         } label: {
             Image(systemName: "ellipsis").rotationEffect(.degrees(90)).controlButton()

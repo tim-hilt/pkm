@@ -2004,8 +2004,9 @@ impl Editor {
     /// [`crate::draw_freedraw`]). The Tool stays after the stroke whatever the
     /// Tool lock says.
     fn draw_stroke(&mut self, event: PointerEvent) {
-        // Two fingers navigate, and a stroke one of them began ends: a short
-        // one was only the finger landing, a longer one is kept as drawn.
+        // Two fingers navigate, and end the stroke being drawn, whichever
+        // pointer draws it (also the Pencil): a short one is dropped as the
+        // mark of a finger landing, a longer one is kept as drawn.
         if self.navigation.is_pinching() {
             if let Some(stroke) = self.stroke.take() {
                 if stroke.is_spike() {
