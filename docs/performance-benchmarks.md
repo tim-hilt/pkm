@@ -24,21 +24,35 @@ Run everything from the repo root, on a Release build.
 | Open 1,000 Elements < 200 ms | `make bench`: loads `scene-1000` and builds its geometry through the `Editor`, best of 10. This is the core's share. For the end-to-end time on a device, open the Scene from the Gallery while recording with Instruments' *Time Profiler* and measure from the tap to the first Canvas frame. |
 | Download < 10 MB | `make ipa`, then check the size of `apple/build/WorkingTitle.ipa` (an unsigned iOS Release build, zipped). App Store thinning only makes it smaller. |
 | < 150 MB memory at 5,000 Elements | Import `scene-5000` on the device, then pan, zoom and draw for 30 s while recording with Instruments' *Allocations* (or Xcode's memory gauge). Record the peak *Persistent* footprint. As a quick core-only check, run `/usr/bin/time -l` on the release `benchmarks` test binary and read *maximum resident set size*. |
-| 120 fps pan/zoom/draw at 5,000 Elements | On iPhone 15 Pro and iPad Pro 4th gen (both ProMotion), import `scene-5000`, then pan, pinch-zoom and draw freedraw strokes for 30 s each while recording with Instruments' *Animation Hitches* template. Target: frame time ≤ 8.3 ms and no hitches. Simulators don't count. |
+| 120 fps pan/zoom/draw at 5,000 Elements | On iPhone 15 Pro and iPad Pro 4th gen (both ProMotion), import `scene-5000`, then pan, pinch-zoom and draw freedraw strokes for 30 s each while recording with Instruments' *Animation Hitches* template. Target: frame time ≤ 8.3 ms and no hitches. Simulators don't count. `make bench` also measures the core's share of one input event in `scene-5000` (a pinch step with one Element selected, and a mouse box-select step that grows the Selection to thousands of Elements), including the queries the client makes after each event; it fails above 8.3 ms. |
+| No work while idle | Open a Drawing in a Release build and watch the process for 10 s with nothing touched: `top -pid <pid> -stats cpu,idlew` shows 0 % CPU and 0 idle wake-ups (no render loop). `CanvasViewTests` checks the same on frame counts. |
 
 ## Results
 
 Recorded 2026-11-03 on a MacBook Air M1 (core and size), rechecked
-2026-11-05 in review R14 (open: 4.9 ms; `.ipa`: 1.2 MB, 3.8 MB `.app`). The
-device runs haven't been recorded yet, as they need the physical devices and
-Instruments.
+2026-11-05 in review R14 (open: 4.9 ms; `.ipa`: 1.2 MB, 3.8 MB `.app`) and
+review R15 (input events, Mac app memory and idle). The device runs haven't
+been recorded yet, as they need the physical devices and Instruments.
+
+R15 on the Mac, Release build, `scene-5000` opened in a 900×450 pt window
+(Retina): footprint (`footprint <pid>`) 110 MB, of which ~37 MB are the
+Canvas's GPU buffers; 0.0 % CPU and 0 idle wake-ups while idle. Before R15 the
+same was 135–148 MB: the 4× multisampled colour and the stencil buffer were
+kept in memory (20 bytes per device pixel, ~110 MB for a full-screen iPad
+Pro); they now live only in tile memory (`CanvasRenderer`, memoryless). A
+box-select step that selects most of `scene-5000` took 34 ms in the core before
+R15 (`Selection::contains` was a linear search, called per Element), 4.4 ms
+after.
 
 | Target | Result | Status |
 | --- | --- | --- |
 | Open 1,000 Elements < 200 ms | 4.4 ms (core: load + geometry, best of 10) | met (core); end-to-end on device not yet measured |
 | Download < 10 MB | 1.2 MB `.ipa` (3.8 MB uncompressed `.app`), iOS Release | met |
-| < 150 MB memory at 5,000 Elements | 35 MB peak RSS (core only, both Scenes loaded with geometry) | met (core); app on device not yet measured |
-| 120 fps pan/zoom/draw at 5,000 Elements | not yet measured | pending device run |
+| < 150 MB memory at 5,000 Elements | 35 MB peak RSS (core only, both Scenes loaded with geometry); 110 MB footprint of the Mac app with `scene-5000` open | met (core, Mac); app on device not yet measured |
+| 120 fps pan/zoom/draw at 5,000 Elements | core's share of an input event: pinch step 2.2 ms, box-select step 4.4 ms (`make bench`); dragging or drawing still regenerates all geometry (8.8 ms, issue 56) and a select-all move takes ~40 ms per step (issue 63) | pending device run; known misses filed |
+| No work while idle | 0.0 % CPU, 0 idle wake-ups (Mac, `scene-5000` open) | met |
 
-No measured result misses a target, so no regression tickets were filed. File
-one under `.scratch/` for any target a later run misses.
+The known misses of the frame budget are filed as issues 56 (geometry
+regenerated for every Element on each change) and 63 (gestures on a large
+Selection). File a ticket under `.scratch/` for any other target a later run
+misses.

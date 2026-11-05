@@ -39,6 +39,12 @@ struct Viewport: Equatable {
 /// Every draw leaves the stencil buffer zero where it touched it, so no
 /// stroke or fill sees what an earlier one did there.
 ///
+/// The multisampled colour and the stencil exist only in the GPU's tile
+/// memory (`memoryless`): each frame is resolved into its single-sampled
+/// target at the end of the pass, and nothing else reads them. Kept in memory
+/// they would cost 20 bytes per device pixel, ~110 MB on a full-screen iPad Pro
+/// and far more for a large PNG export.
+///
 /// Text is filled too: each line of text becomes the outlines of its glyphs
 /// (cached per glyph, see `Excalifont`) in one fill, so it stays sharp at any
 /// zoom.
@@ -57,11 +63,11 @@ struct Viewport: Equatable {
 /// flattening level changes, and not cached per Element.
 @MainActor
 final class CanvasRenderer: NSObject, MTKViewDelegate {
-    /// Samples per pixel; the render target must be multisampled with this count.
-    static let sampleCount = 4
+    /// Samples per pixel of the colour and stencil a frame is drawn into.
+    private static let sampleCount = 4
+    /// The format of the textures frames are rendered into.
     static let pixelFormat = MTLPixelFormat.bgra8Unorm
-    /// The render target needs a stencil attachment in this format.
-    static let stencilFormat = MTLPixelFormat.stencil8
+    private static let stencilFormat = MTLPixelFormat.stencil8
 
     /// Largest tolerated flattening error, in device pixels.
     private static let flatteningTolerancePixels: Float = 0.1
@@ -140,6 +146,9 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
     private(set) var elementsBuilt = 0
     /// Draws the lines of text; nil if the font is missing, which leaves text out.
     private let font = Excalifont.shared
+    /// The memoryless multisampled colour and stencil of the last frame,
+    /// reused while the frame size stays.
+    private var frameTargets: (color: any MTLTexture, stencil: any MTLTexture)?
 
     /// A stroked part's segments on the GPU plus how to draw them.
     private struct StrokeDraw {
@@ -329,23 +338,29 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         onNeedsDisplay?()
     }
 
-    /// Renders one frame into `pass` (whose first colour attachment must be
-    /// `sampleCount`-multisampled in `pixelFormat`) and presents `drawable`
-    /// if given. The target is cleared to the Canvas background first.
+    /// Renders one frame into `target` (a single-sampled 2D texture in
+    /// `pixelFormat` with `.renderTarget` usage, such as a drawable's) and
+    /// presents `drawable` if given. The target is cleared to the Canvas
+    /// background first.
     ///
     /// - Parameter pixelsPerPoint: Device pixels per view point (the screen scale).
     /// - Returns: The submitted work, for callers that read the target back and
-    ///   so must wait for it; nil if there was nothing to render into.
+    ///   so must wait for it; nil if the GPU could not take it.
     @discardableResult
-    func renderFrame(into pass: MTLRenderPassDescriptor, pixelsPerPoint: Float, presenting drawable: (any MTLDrawable)?)
+    func renderFrame(into target: any MTLTexture, pixelsPerPoint: Float, presenting drawable: (any MTLDrawable)?)
         -> (any MTLCommandBuffer)?
     {
-        guard let target = pass.colorAttachments[0].texture,
+        guard let (multisampled, stencil) = frameTargets(width: target.width, height: target.height),
             let commands = queue.makeCommandBuffer()
         else { return nil }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = multisampled
+        pass.colorAttachments[0].resolveTexture = target
         pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].storeAction = .multisampleResolve
         pass.colorAttachments[0].clearColor =
             drawsPaper ? MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1) : MTLClearColor()
+        pass.stencilAttachment.texture = stencil
         pass.stencilAttachment.loadAction = .clear
         pass.stencilAttachment.clearStencil = 0
         pass.stencilAttachment.storeAction = .dontCare
@@ -448,9 +463,32 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
     }
 
     func draw(in view: MTKView) {
-        guard let pass = view.currentRenderPassDescriptor, view.bounds.width > 0 else { return }
+        guard view.bounds.width > 0, let drawable = view.currentDrawable else { return }
         let pixelsPerPoint = Float(view.drawableSize.width / view.bounds.width)
-        renderFrame(into: pass, pixelsPerPoint: pixelsPerPoint, presenting: view.currentDrawable)
+        renderFrame(into: drawable.texture, pixelsPerPoint: pixelsPerPoint, presenting: drawable)
+    }
+
+    /// The multisampled colour and stencil for a frame of `width` x `height`
+    /// pixels; memoryless (see the class comment), so a new size costs only
+    /// two texture objects.
+    private func frameTargets(width: Int, height: Int) -> (any MTLTexture, any MTLTexture)? {
+        if let targets = frameTargets, targets.color.width == width, targets.color.height == height {
+            return targets
+        }
+        func texture(_ format: MTLPixelFormat) -> (any MTLTexture)? {
+            let descriptor = MTLTextureDescriptor()
+            descriptor.textureType = .type2DMultisample
+            descriptor.pixelFormat = format
+            descriptor.width = width
+            descriptor.height = height
+            descriptor.sampleCount = Self.sampleCount
+            descriptor.usage = .renderTarget
+            descriptor.storageMode = .memoryless
+            return device.makeTexture(descriptor: descriptor)
+        }
+        guard let color = texture(Self.pixelFormat), let stencil = texture(Self.stencilFormat) else { return nil }
+        frameTargets = (color, stencil)
+        return (color, stencil)
     }
 
     // MARK: Flattening

@@ -10,7 +10,8 @@ import Testing
 #endif
 
 /// "No continuous render loop": a Canvas that is on screen and idle produces
-/// no frames; only a requested redraw produces exactly one.
+/// no frames; only a requested redraw produces exactly one. And it keeps no
+/// render targets in memory beyond the drawable.
 @MainActor @Suite struct CanvasViewTests {
     /// Lets the main run loop (and with it any display link) run for `seconds`.
     private func idle(for seconds: TimeInterval) async {
@@ -56,5 +57,18 @@ import Testing
 
         await idle(for: 1)
         #expect(renderer.framesRendered == afterChange, "and then stops again")
+    }
+
+    /// The 4x multisampled colour and the stencil of a full-screen Canvas
+    /// would take ~110 MB on the iPad Pro; they must live in tile memory only.
+    @Test func onScreenCanvasKeepsNoMultisampleOrStencilTexture() async throws {
+        let (canvas, renderer, window) = try showCanvas()
+        defer { canvas.removeFromSuperview() }
+        _ = window
+
+        await idle(for: 0.5)
+        #expect(renderer.framesRendered >= 1)
+        #expect(canvas.multisampleColorTexture == nil)
+        #expect(canvas.depthStencilTexture == nil)
     }
 }

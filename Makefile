@@ -98,7 +98,8 @@ visual-parity-app: apple-project
 	TEST_RUNNER_RECORD_VISUAL_PARITY=1 $(XCTEST) -destination 'platform=macOS' ENABLE_APP_SANDBOX=NO \
 		-only-testing:WorkingTitleTests/VisualParityTests
 
-# Measures the core's open time for the 1,000-Element Benchmark Scene.
+# Measures the core's open time for the 1,000-Element Benchmark Scene and its
+# share of one input event in the 5,000-Element one.
 # See docs/performance-benchmarks.md for the full procedure.
 bench:
 	cargo test --release --locked -q -p workingtitle-core --test benchmarks -- --ignored --nocapture
