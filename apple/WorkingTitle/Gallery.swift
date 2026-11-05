@@ -124,7 +124,7 @@ final class Gallery {
 
     /// Saves the open Drawing and returns to the Gallery.
     func close() {
-        open?.saveNow()
+        open?.close()
         open = nil
         reload()
     }

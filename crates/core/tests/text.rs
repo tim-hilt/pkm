@@ -6,17 +6,8 @@ mod common;
 
 use std::sync::Arc;
 
-use common::{editor_with_element, editor_with_fixture};
+use common::{FixedWidth, editor_with_element, editor_with_fixture};
 use workingtitle_core::{Editor, Geometry, TextAlign, TextLine, TextMeasurer};
-
-/// Every character is half as wide as the font is high.
-struct FixedWidth;
-
-impl TextMeasurer for FixedWidth {
-    fn line_width(&self, text: &str, font_size: f64) -> f64 {
-        text.chars().count() as f64 * font_size / 2.0
-    }
-}
 
 fn measured(element: &str) -> Editor {
     let mut editor = editor_with_element(element);

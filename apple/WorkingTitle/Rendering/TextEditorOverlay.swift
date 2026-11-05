@@ -14,12 +14,23 @@ import Foundation
 #endif
 
 #if os(macOS)
-    /// AppKit's text view, which also ends the editing on Escape, as on
-    /// excalidraw.com.
+    /// AppKit's text view, which also ends the editing on Escape and ⌘Return,
+    /// as on excalidraw.com.
     final class TextEditorTextView: NSTextView {
-        var onEscape: (() -> Void)?
+        var onFinish: (() -> Void)?
 
-        override func cancelOperation(_ sender: Any?) { onEscape?() }
+        override func cancelOperation(_ sender: Any?) { onFinish?() }
+
+        override func keyDown(with event: NSEvent) {
+            if Self.returnKeys.contains(event.keyCode) && event.modifierFlags.contains(.command) {
+                onFinish?()
+            } else {
+                super.keyDown(with: event)
+            }
+        }
+
+        /// Return and keypad Enter.
+        private static let returnKeys: Set<UInt16> = [36, 76]
     }
 #else
     /// UIKit's text view, which gives the system keyboard, autocorrect,
@@ -34,8 +45,14 @@ import Foundation
             bounds.insetBy(dx: -Self.reach, dy: -Self.reach).contains(point)
         }
 
+        /// Escape and ⌘Return end the editing, as on excalidraw.com.
         override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-            if presses.contains(where: { $0.key?.keyCode == .keyboardEscape }) {
+            let finishes = presses.contains { press in
+                guard let key = press.key else { return false }
+                return key.keyCode == .keyboardEscape
+                    || (key.keyCode == .keyboardReturnOrEnter && key.modifierFlags.contains(.command))
+            }
+            if finishes {
                 resignFirstResponder()
             } else {
                 super.pressesBegan(presses, with: event)
@@ -61,7 +78,8 @@ final class TextEditorOverlay: NSObject {
     /// What the view says, after every change.
     var onChange: ((String) -> Void)?
     /// The editing ended from the view: it lost the focus (the keyboard was
-    /// dismissed, another control was used) or Escape was pressed.
+    /// dismissed, another control was used), or Escape or ⌘Return was
+    /// pressed.
     var onEnd: (() -> Void)?
 
     /// The text view, while a text is edited.
@@ -102,7 +120,7 @@ final class TextEditorOverlay: NSObject {
         // Taking the focus away is not the editing ending from the view.
         #if os(macOS)
             view.delegate = nil
-            view.onEscape = nil
+            view.onFinish = nil
         #else
             view.delegate = nil
         #endif
@@ -119,7 +137,7 @@ final class TextEditorOverlay: NSObject {
         #if os(macOS)
             let view = TextEditorTextView(frame: .zero)
             view.delegate = self
-            view.onEscape = { [weak self] in self?.onEnd?() }
+            view.onFinish = { [weak self] in self?.onEnd?() }
             view.isRichText = false
             view.drawsBackground = false
             view.isHorizontallyResizable = false

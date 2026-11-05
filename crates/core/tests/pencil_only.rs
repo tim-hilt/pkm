@@ -7,10 +7,10 @@
 
 use std::sync::Arc;
 
-use workingtitle_core::{Editor, TextMeasurer, Tool};
+use workingtitle_core::{Editor, Tool};
 
 mod common;
-use common::{editor_with, replay, saved_elements, tap};
+use common::{FixedWidth, editor_with, replay, saved_elements, tap};
 
 /// A filled rectangle at (100, 100), 100 x 50.
 const RECTANGLE: &str = r##"{"id":"a","type":"rectangle","x":100,"y":100,"width":100,"height":50,
@@ -152,14 +152,6 @@ fn is_deleted(editor: &Editor, id: &str) -> bool {
         e.get("id").and_then(|v| v.as_str()) == Some(id)
             && e.get("isDeleted").and_then(|v| v.as_bool()) == Some(true)
     })
-}
-
-struct FixedWidth;
-
-impl TextMeasurer for FixedWidth {
-    fn line_width(&self, text: &str, font_size: f64) -> f64 {
-        text.chars().count() as f64 * font_size / 2.0
-    }
 }
 
 #[test]

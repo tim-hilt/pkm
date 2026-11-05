@@ -5,10 +5,10 @@
 //! rules for resizing and rotating (`resizeElements.ts`).
 
 use workingtitle_core::json::{Value, parse};
-use workingtitle_core::{Editor, PartKind, TextMeasurer};
+use workingtitle_core::{Editor, PartKind};
 
 mod common;
-use common::{editor_with, replay, tap};
+use common::{FixedWidth, editor_with, replay, tap};
 
 /// A filled rectangle at (100, 100), 100 x 50. Its selection frame is 4
 /// units out, so its handles are centred on (96, 96), (204, 96), (204, 154)
@@ -312,15 +312,6 @@ fn saved_points(editor: &Editor, id: &str) -> Vec<(f64, f64)> {
             (p[0].as_f64().unwrap(), p[1].as_f64().unwrap())
         })
         .collect()
-}
-
-/// Every character is half as wide as the font is high.
-struct FixedWidth;
-
-impl TextMeasurer for FixedWidth {
-    fn line_width(&self, text: &str, font_size: f64) -> f64 {
-        text.chars().count() as f64 * font_size / 2.0
-    }
 }
 
 /// A freedraw stroke from (100, 100) to (200, 150).

@@ -568,26 +568,38 @@ fn resize_single(
     let (flip_x, flip_y) = (next_width < 0.0, next_height < 0.0);
     next_width = next_width.abs();
     next_height = next_height.abs();
+    // Only the handles in the middle of the top and bottom sides leave the
+    // width, which a label's lines wrap to, as it is (`handleBindTextResize`).
+    let rewrap = resize.keep_ratio || !matches!(handle, Handle::N | Handle::S);
+    let wrap = measurer.filter(|_| rewrap);
     let mut label_font = None;
     if let Some(label) = tracked.label() {
-        if resize.keep_ratio {
+        let font = if resize.keep_ratio {
             let font = label.font_size()
                 * (text::label_max_width(orig.kind(), next_width)
                     / text::label_max_width(orig.kind(), orig.width()));
             if font < MIN_FONT_SIZE {
                 return false;
             }
-            label_font = Some(font);
+            font
         } else {
             // The label's font is what it was when the gesture began; only
             // the lines rewrap.
-            label_font = Some(label.font_size());
             if let Some(measurer) = measurer {
                 let (min_width, min_height) = text::min_container_size(&label, measurer);
                 next_width = next_width.max(min_width);
                 next_height = next_height.max(min_height);
             }
+            label.font_size()
+        };
+        // Never lower than its lines: whichever side the pointer pulls, the
+        // shape is as high as its label needs, from the side the anchor
+        // keeps (`handleBindTextResize`).
+        if !orig.kind().is_linear() {
+            next_height =
+                text::height_to_hold(&label, orig.kind(), (next_width, next_height), font, wrap);
         }
+        label_font = Some(font);
     }
     let signed_width = next_width * flip_sign(flip_x);
     let signed_height = next_height * flip_sign(flip_y);
@@ -630,11 +642,7 @@ fn resize_single(
     }
     scene.update(orig.handle(), entropy.integer(), members);
     // The label's font goes on before the lines wrap to the container it
-    // sits in now. Only the handles in the middle of the top and bottom
-    // sides leave the width, which the lines wrap to, as it is
-    // (`handleBindTextResize`).
-    let rewrap = resize.keep_ratio || !matches!(handle, Handle::N | Handle::S);
-    let wrap = measurer.filter(|_| rewrap);
+    // sits in now.
     tracked.refit_label(scene, entropy, label_font, None, wrap);
     true
 }

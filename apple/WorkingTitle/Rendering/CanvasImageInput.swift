@@ -44,7 +44,7 @@ extension CanvasMetalView {
         }
 
         override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
-            Self.imageSources(in: sender.draggingPasteboard).isEmpty ? [] : .copy
+            Self.hasImages(in: sender.draggingPasteboard) ? .copy : []
         }
 
         override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
@@ -59,18 +59,27 @@ extension CanvasMetalView {
         /// Finder if they are images, else the picture itself (what a
         /// screenshot is).
         fileprivate static func imageSources(in pasteboard: NSPasteboard) -> [Data] {
-            let urls =
-                pasteboard.readObjects(
-                    forClasses: [NSURL.self],
-                    options: [
-                        .urlReadingFileURLsOnly: true,
-                        .urlReadingContentsConformToTypes: [UTType.image.identifier],
-                    ]) as? [URL] ?? []
+            let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: imageFiles) as? [URL] ?? []
             let files = urls.compactMap { try? Data(contentsOf: $0) }
             if !files.isEmpty { return files }
-            return [NSPasteboard.PasteboardType.png, .tiff].lazy.compactMap { pasteboard.data(forType: $0) }
-                .first.map { [$0] } ?? []
+            return pictureTypes.lazy.compactMap { pasteboard.data(forType: $0) }.first.map { [$0] } ?? []
         }
+
+        /// Whether `imageSources(in:)` finds anything, without reading it:
+        /// asked on every drag movement and menu validation.
+        fileprivate static func hasImages(in pasteboard: NSPasteboard) -> Bool {
+            pasteboard.canReadObject(forClasses: [NSURL.self], options: imageFiles)
+                || pasteboard.availableType(from: pictureTypes) != nil
+        }
+
+        /// Files that are images, of a pasteboard.
+        private static let imageFiles: [NSPasteboard.ReadingOptionKey: Any] = [
+            .urlReadingFileURLsOnly: true,
+            .urlReadingContentsConformToTypes: [UTType.image.identifier],
+        ]
+
+        /// The picture itself on a pasteboard, best first.
+        private static let pictureTypes: [NSPasteboard.PasteboardType] = [.png, .tiff]
     #else
         /// Makes the Canvas take drops and pastes of images.
         func enableImageInput() {
@@ -114,7 +123,7 @@ extension CanvasMetalView {
             switch item.action {
             case #selector(copy(_:)), #selector(cut(_:)): canCopy
             case #selector(paste(_:)):
-                NSPasteboard.general.string(forType: .string) != nil || !Self.imageSources(in: .general).isEmpty
+                NSPasteboard.general.availableType(from: [.string]) != nil || Self.hasImages(in: .general)
             default: true
             }
         }

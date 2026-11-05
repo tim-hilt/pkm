@@ -46,6 +46,14 @@ final class OpenDrawing {
         }
     }
 
+    /// Leaves the Drawing: a text being edited is committed as typed (its text
+    /// view would end the editing only once the Drawing is gone), and
+    /// everything is saved.
+    func close() {
+        editor.commitText()
+        saveNow()
+    }
+
     /// Saves unsaved changes and the viewport now and drops the delayed save.
     func saveNow() {
         pendingSave?.cancel()

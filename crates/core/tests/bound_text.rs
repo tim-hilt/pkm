@@ -10,18 +10,10 @@
 use std::sync::Arc;
 
 use workingtitle_core::json::Value;
-use workingtitle_core::{Editor, FontSize, Property, TextAlign, TextEditor, TextMeasurer, Tool};
+use workingtitle_core::{Editor, FontSize, Property, TextAlign, TextEditor, Tool};
 
 mod common;
-use common::{editor_with, saved_elements, tap};
-
-struct FixedWidth;
-
-impl TextMeasurer for FixedWidth {
-    fn line_width(&self, text: &str, font_size: f64) -> f64 {
-        text.chars().count() as f64 * font_size / 2.0
-    }
-}
+use common::{FixedWidth, editor_with, saved_elements, tap};
 
 /// An editor whose Scene is the given Elements, with a measurer.
 fn scene(elements: &[&str]) -> Editor {
@@ -173,6 +165,30 @@ fn committing_binds_a_label_to_the_shape() {
     assert_eq!(bound.len(), 1);
     assert_eq!(string(&bound[0], "type"), "text");
     assert_eq!(string(&bound[0], "id"), string(&label, "id"));
+}
+
+#[test]
+fn a_drawing_saved_while_a_new_label_is_edited_has_it_bound_both_ways() {
+    // As Excalidraw lists it when the editing begins: autosave may write the
+    // Drawing at any time, and leaving the app may end with that save.
+    let mut editor = scene_of("rectangle");
+    double_tap(&mut editor, MIDDLE);
+    editor.set_editing_text("Hel");
+
+    let id = string(&label(&editor), "id").to_owned();
+    let shape = saved(&editor, "s");
+    let bound = shape
+        .get("boundElements")
+        .and_then(Value::as_array)
+        .unwrap();
+    assert_eq!(bound.len(), 1);
+    assert_eq!(string(&bound[0], "id"), id);
+
+    // Cancelling, or leaving it empty, takes it off again.
+    editor.cancel_text();
+    let shape = saved(&editor, "s");
+    let before = saved(&scene_of("rectangle"), "s");
+    assert_eq!(shape.get("boundElements"), before.get("boundElements"));
 }
 
 #[test]
@@ -824,6 +840,57 @@ fn resizing_the_shape_wraps_the_label_to_it_again() {
          40.3 up 1 mouse 304 204",
     );
     assert_eq!(lines(&editor), ["hello world foo bar"]);
+}
+
+#[test]
+fn a_shape_made_too_narrow_for_its_label_grows_down_to_hold_the_lines() {
+    let mut editor = labelled("rectangle", 200.0, "aaaa bbbb cccc dddd");
+    tap(&mut editor, "mouse", (150.0, 100.0), 20.0);
+
+    // 60 wide, 50 inside: a word a line, four lines of 25 are 100 high, more
+    // than the 90 inside the shape (`handleBindTextResize`). The top stays.
+    common::replay(
+        &mut editor,
+        "30 down 1 mouse 304 204
+         30.1 move 1 mouse 200 204
+         30.2 move 1 mouse 164 204
+         30.3 up 1 mouse 164 204",
+    );
+
+    let shape = saved(&editor, "s");
+    assert_eq!(number(&shape, "width"), 60.0);
+    assert_eq!(
+        (number(&shape, "y"), number(&shape, "height")),
+        (100.0, 110.0)
+    );
+    assert_eq!(lines(&editor), ["aaaa", "bbbb", "cccc", "dddd"]);
+    assert_eq!(number(&label(&editor), "y"), 105.0);
+}
+
+#[test]
+fn a_shape_made_too_low_for_its_label_keeps_the_height_of_the_lines() {
+    // Two lines of 25 in a shape 100 x 100.
+    let resized = |handle: (f64, f64), to: (f64, f64)| {
+        let mut editor = labelled("rectangle", 100.0, "hello world foo");
+        tap(&mut editor, "mouse", (150.0, 100.0), 20.0);
+        common::replay(
+            &mut editor,
+            &format!(
+                "30 down 1 mouse {} {}
+                 30.1 move 1 mouse {} {}
+                 30.2 up 1 mouse {} {}",
+                handle.0, handle.1, to.0, to.1, to.0, to.1
+            ),
+        );
+        let shape = saved(&editor, "s");
+        (number(&shape, "y"), number(&shape, "height"))
+    };
+
+    // Pulled up by the bottom to 40 high, it is 50 + 2 * 5 padding high, from
+    // its top.
+    assert_eq!(resized((150.0, 204.0), (150.0, 144.0)), (100.0, 60.0));
+    // Pushed down by the top, from its bottom.
+    assert_eq!(resized((150.0, 96.0), (150.0, 156.0)), (140.0, 60.0));
 }
 
 #[test]

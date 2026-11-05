@@ -113,6 +113,25 @@ import Testing
         #expect(try savedElementCount(drawing) == 1)
     }
 
+    @Test func closingKeepsTheTextBeingEditedAsTyped() throws {
+        let drawing = try openNewDrawing()
+        drawing.editor.setTool(tool: .text)
+        drawing.editor.pointer(event: mouse(.down, 50, 50))
+        drawing.editor.pointer(event: mouse(.up, 50, 50))
+        drawing.editor.setEditingText(text: "Hello")
+        drawing.editorDidChange()
+
+        drawing.close()
+
+        // The text view goes away only after the Drawing is left: the text is
+        // committed, not saved half done.
+        #expect(drawing.editor.textEditor() == nil)
+        let saved = Editor()
+        try saved.load(bytes: store.open(drawing.name))
+        #expect(saved.elementCount() == 1)
+        #expect(saved.save() == drawing.editor.save())
+    }
+
     @Test func theDelayedSaveDoesNotRepeatAfterASaveAtOnce() async throws {
         let drawing = try openNewDrawing()
         drawRectangle(in: drawing)

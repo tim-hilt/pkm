@@ -9,8 +9,20 @@ use std::path::PathBuf;
 
 use workingtitle_core::json::{Object, Value, parse};
 use workingtitle_core::{
-    Editor, Geometry, Modifiers, Part, PartKind, PointerEvent, PointerKind, PointerPhase, Verb,
+    Editor, Geometry, Modifiers, Part, PartKind, PointerEvent, PointerKind, PointerPhase,
+    TextMeasurer, Verb,
 };
+
+/// The only `TextMeasurer` of the tests (spec, Testing Decisions): every
+/// character is half as wide as the font is high, so at font size 20 a
+/// character is 10 wide.
+pub struct FixedWidth;
+
+impl TextMeasurer for FixedWidth {
+    fn line_width(&self, text: &str, font_size: f64) -> f64 {
+        text.chars().count() as f64 * font_size / 2.0
+    }
+}
 
 /// An editor that has loaded golden fixture `<name>.excalidraw`.
 pub fn editor_with_fixture(name: &str) -> Editor {

@@ -10,18 +10,10 @@ use std::sync::Arc;
 
 use workingtitle_core::json::Value;
 use workingtitle_core::scene::LineStyle;
-use workingtitle_core::{Editor, FontSize, Property, TextAlign, TextEditor, TextMeasurer, Tool};
+use workingtitle_core::{Editor, FontSize, Property, TextAlign, TextEditor, Tool};
 
 mod common;
-use common::{editor_with, replay, saved_elements, tap};
-
-struct FixedWidth;
-
-impl TextMeasurer for FixedWidth {
-    fn line_width(&self, text: &str, font_size: f64) -> f64 {
-        text.chars().count() as f64 * font_size / 2.0
-    }
-}
+use common::{FixedWidth, editor_with, replay, saved_elements, tap};
 
 fn measured(mut editor: Editor) -> Editor {
     editor.set_text_measurer(Arc::new(FixedWidth));

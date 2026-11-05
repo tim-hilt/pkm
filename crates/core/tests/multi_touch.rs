@@ -9,10 +9,10 @@
 
 use std::sync::Arc;
 
-use workingtitle_core::{Editor, TextMeasurer, Tool};
+use workingtitle_core::{Editor, Tool};
 
 mod common;
-use common::{editor_with, replay, tap};
+use common::{FixedWidth, editor_with, replay, tap};
 
 /// A filled rectangle at (100, 100), 100 x 50. Its transform handles are
 /// centred on (96, 96), (204, 96), (204, 154) and (96, 154), and the rotation
@@ -239,15 +239,6 @@ fn a_second_finger_mid_erase_erases_nothing() {
 
     assert_eq!(Untouched::of(&editor), before);
     assert_eq!(editor.element_count(), 2);
-}
-
-/// Text needs measuring to be edited; any width will do here.
-struct FixedWidth;
-
-impl TextMeasurer for FixedWidth {
-    fn line_width(&self, text: &str, font_size: f64) -> f64 {
-        text.chars().count() as f64 * font_size / 2.0
-    }
 }
 
 /// [`selected`] with the text Tool, able to edit text.

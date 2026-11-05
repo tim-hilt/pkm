@@ -515,6 +515,36 @@ pub(crate) fn container_size_for(
     (width, height)
 }
 
+/// How high a container of `kind` that is to be `(width, height)` has to be
+/// for its `label` set at `font_size`: `height`, unless the lines need more
+/// (Excalidraw's `handleBindTextResize`). With a `measurer` the lines wrap to
+/// the width again; without, they stay as they are.
+pub(crate) fn height_to_hold(
+    label: &Element,
+    kind: ElementType,
+    (width, height): (f64, f64),
+    font_size: f64,
+    measurer: Option<&dyn TextMeasurer>,
+) -> f64 {
+    let lines_height = match measurer {
+        Some(measurer) => {
+            let lines = wrap::wrap_text(
+                &normalized(label.original_text()),
+                font_size,
+                label_max_width(kind, width),
+                measurer,
+            );
+            lines.len() as f64 * font_size * label.line_height()
+        }
+        None => label.height() * font_size / label.font_size(),
+    };
+    if lines_height > inscribed(kind, height) - BOUND_TEXT_PADDING * 2.0 {
+        container_dimension(kind, lines_height)
+    } else {
+        height
+    }
+}
+
 /// How small a container of `label` may get: one character wide and one line
 /// high (Excalidraw's `getApproxMinLineWidth` and `getApproxMinLineHeight`).
 pub(crate) fn min_container_size(label: &Element, measurer: &dyn TextMeasurer) -> (f64, f64) {

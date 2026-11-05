@@ -157,6 +157,9 @@ impl TextEditing {
         let id = id_of(&element);
         step.create(&id);
         let handle = scene.insert_after(container_id, element);
+        // Listed right away, as Excalidraw does, so that a Drawing saved while
+        // the label is edited is whole; cancelling takes it off again.
+        list_label(scene, entropy, container_id, &id, true);
         let mut editing = Self {
             handle,
             id,
@@ -354,20 +357,15 @@ impl TextEditing {
     }
 
     /// Ends the editing with the text as it is. If there is something in it
-    /// the Element stays (a label is listed by its shape), and the step is
-    /// what undoes the editing; an empty text is not kept, which for one
-    /// that was there before deletes it (and takes it off its shape).
+    /// the Element stays, and the step is what undoes the editing; an empty
+    /// text is not kept, which for one that was there before deletes it (and
+    /// takes it off its shape).
     pub fn finish(self, scene: &mut Scene, entropy: &mut Entropy) -> Option<Step> {
         let blank = scene
             .element(self.handle)
             .is_none_or(|element| element.original_text().trim().is_empty());
         match (blank, self.existing) {
-            (false, _) => {
-                if let Some(container) = &self.container {
-                    list_label(scene, entropy, &container.id, &self.id, true);
-                }
-                Some(self.step)
-            }
+            (false, _) => Some(self.step),
             (true, true) => {
                 scene.mark_deleted(&self.id, entropy.integer());
                 if let Some(container) = &self.container {
