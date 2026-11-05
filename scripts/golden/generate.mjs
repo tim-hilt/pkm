@@ -15,9 +15,10 @@ const DEFAULT_CHECKOUT = resolve(here, "../../../../excalidraw/excalidraw");
 const upstream = await loadUpstream(process.argv[2] ?? process.env.EXCALIDRAW_DIR ?? DEFAULT_CHECKOUT);
 
 mkdirSync(OUTPUT_DIR, { recursive: true });
-for (const { name, elements, golden = true } of scenes(upstream)) {
+for (const { name, elements, golden = true, restored = false } of scenes(upstream)) {
   writeFileSync(join(OUTPUT_DIR, `${name}.excalidraw`), sceneJson(elements));
   if (golden) writeFileSync(join(OUTPUT_DIR, `${name}.golden.json`), goldenJson(upstream, elements));
+  if (restored) writeFileSync(join(OUTPUT_DIR, `${name}.restored.json`), restoredJson(upstream, elements));
   console.log(`${name}: ${elements.length} elements`);
 }
 
@@ -48,4 +49,13 @@ function goldenJson(upstream, elements) {
     entries.join(",\n") +
     "\n}\n}\n"
   );
+}
+
+/** What Excalidraw's `restoreElements` makes of the Elements, keyed by id; one Element per line. */
+function restoredJson(upstream, elements) {
+  const lines = upstream.restored(elements).map((element) => {
+    const { updated, ...rest } = element; // the time of the restore
+    return `  ${JSON.stringify(element.id)}: ${JSON.stringify(rest)}`;
+  });
+  return `{\n${lines.join(",\n")}\n}\n`;
 }

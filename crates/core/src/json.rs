@@ -144,6 +144,11 @@ impl Object {
         }
     }
 
+    /// Removes `key`, if present.
+    pub fn remove(&mut self, key: &str) {
+        self.members.retain(|(k, _)| k != key);
+    }
+
     /// Members in insertion order.
     pub fn iter(&self) -> impl ExactSizeIterator<Item = (&str, &Value)> {
         self.members.iter().map(|(k, v)| (k.as_str(), v))
