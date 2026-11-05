@@ -235,6 +235,16 @@ impl Editor {
         self.changed();
     }
 
+    /// Finishes the line being placed point by point, as tapping its last
+    /// point does, and tells whether there was one.
+    fn finish_line_being_placed(&mut self) -> bool {
+        let placing = self.linear.as_ref().is_some_and(LinearDrawing::is_placing);
+        if placing {
+            self.finish_placing();
+        }
+        placing
+    }
+
     /// Carries out `command`, e.g. from a keyboard shortcut (see
     /// [`crate::shortcuts`]), exactly as the matching method does.
     pub fn perform(&mut self, command: Command) {
@@ -253,6 +263,14 @@ impl Editor {
             Command::ZoomOut => self.zoom_out(),
             Command::ResetZoom => self.reset_zoom(),
             Command::ZoomToFit => self.zoom_to_fit(),
+            Command::FinishLine => {
+                self.finish_line_being_placed();
+            }
+            Command::FinishLineOrEditText => {
+                if !self.finish_line_being_placed() {
+                    self.edit_selected_text();
+                }
+            }
         }
     }
 

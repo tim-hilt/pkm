@@ -25,10 +25,16 @@ pub enum Command {
     ZoomOut,
     ResetZoom,
     ZoomToFit,
+    /// Escape: finishes the line or arrow being placed; otherwise nothing.
+    FinishLine,
+    /// Enter: finishes the line or arrow being placed; otherwise edits the
+    /// text of the Selection.
+    FinishLineOrEditText,
 }
 
 /// A key that performs a Command. `key` is the character the key types
-/// without Shift (`"r"`, `"1"`, `"["`), or `"backspace"` / `"delete"`.
+/// without Shift (`"r"`, `"1"`, `"["`), or `"backspace"`, `"delete"`, `"escape"`,
+/// `"enter"` (Return and keypad Enter).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Shortcut {
     pub key: String,
@@ -78,6 +84,8 @@ const TABLE: &[(&str, Modifiers, Command)] = &[
     ("d", CMD, Command::Duplicate),
     ("backspace", NONE, Command::Delete),
     ("delete", NONE, Command::Delete),
+    ("escape", NONE, Command::FinishLine),
+    ("enter", NONE, Command::FinishLineOrEditText),
     ("g", CMD, Command::Group),
     ("g", CMD_SHIFT, Command::Ungroup),
     ("]", CMD, Command::MoveInZOrder(ZOrder::Forward)),

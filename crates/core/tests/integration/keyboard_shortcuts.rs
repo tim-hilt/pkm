@@ -208,3 +208,80 @@ fn every_key_and_modifier_combination_is_bound_once() {
         }
     }
 }
+
+// --- Escape and Enter finish a line being placed -------------------------------
+
+/// Three taps with `tool`: two points placed, the third being placed.
+fn place_points(editor: &mut Editor, tool: Tool) {
+    editor.set_tool(tool);
+    common::tap(editor, "mouse", (0.0, 0.0), 0.0);
+    common::tap(editor, "mouse", (50.0, 0.0), 1.0);
+    common::tap(editor, "mouse", (50.0, 50.0), 2.0);
+}
+
+#[test]
+fn escape_and_enter_finish_a_line_and_an_arrow_with_the_points_so_far() {
+    for key in ["escape", "enter"] {
+        for (tool, kind) in [(Tool::Line, "line"), (Tool::Arrow, "arrow")] {
+            let mut editor = Editor::new();
+            place_points(&mut editor, tool);
+
+            press(&mut editor, key, NONE);
+
+            let elements = common::saved_elements(&editor);
+            assert_eq!(elements.len(), 1, "{key} {kind}");
+            assert_eq!(
+                elements[0]
+                    .get("type")
+                    .and_then(workingtitle_core::json::Value::as_str),
+                Some(kind)
+            );
+            assert_eq!(
+                common::saved_points(&elements[0]),
+                [(0.0, 0.0), (50.0, 0.0), (50.0, 50.0)],
+                "{key} {kind}"
+            );
+            assert_eq!(editor.tool(), Tool::Selection, "{key} {kind}");
+        }
+    }
+}
+
+#[test]
+fn finishing_with_a_key_is_one_undo_step_and_respects_the_tool_lock() {
+    let mut editor = Editor::new();
+    editor.set_tool_lock(true);
+    place_points(&mut editor, Tool::Line);
+
+    press(&mut editor, "escape", NONE);
+    assert_eq!(editor.tool(), Tool::Line, "locked Tool stays");
+
+    editor.undo();
+    assert_eq!(editor.element_count(), 0);
+    assert!(!editor.can_undo());
+}
+
+#[test]
+fn escape_with_nothing_being_placed_changes_nothing() {
+    let mut editor = editor_with(&[&rect("a", 0.0)]);
+    editor.select_all();
+    editor.set_tool(Tool::Rectangle);
+    let before = editor.save();
+
+    press(&mut editor, "escape", NONE);
+
+    assert_eq!(editor.save(), before);
+    assert_eq!(editor.tool(), Tool::Rectangle);
+    assert_eq!(editor.selection().len(), 1);
+}
+
+#[test]
+fn enter_with_nothing_being_placed_edits_the_selected_text() {
+    let mut editor = editor_with(&[&rect("a", 0.0)]);
+    editor.set_text_measurer(std::sync::Arc::new(common::FixedWidth));
+    common::tap(&mut editor, "mouse", (5.0, 5.0), 0.0);
+    assert_eq!(editor.selection(), ["a"]);
+
+    press(&mut editor, "enter", NONE);
+
+    assert!(editor.text_editor().is_some());
+}

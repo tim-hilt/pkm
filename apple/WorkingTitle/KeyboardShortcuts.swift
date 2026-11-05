@@ -26,6 +26,8 @@ struct MenuShortcut {
             switch shortcut.key {
             case "backspace": .delete
             case "delete": .deleteForward
+            case "escape": .escape
+            case "enter": .return
             default: KeyEquivalent(Character(shortcut.key))
             }
         var modifiers: EventModifiers = []
@@ -108,6 +110,8 @@ struct CanvasCommands: Commands {
         case .zoomOut: "Zoom Out"
         case .resetZoom: "Reset Zoom"
         case .zoomToFit: "Zoom to Fit"
+        case .finishLine: "Finish Line"
+        case .finishLineOrEditText: "Finish Line or Edit Text"
         }
     }
 }

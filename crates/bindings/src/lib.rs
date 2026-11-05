@@ -218,6 +218,8 @@ pub enum Command {
     ZoomOut,
     ResetZoom,
     ZoomToFit,
+    FinishLine,
+    FinishLineOrEditText,
 }
 
 #[uniffi::remote(Record)]

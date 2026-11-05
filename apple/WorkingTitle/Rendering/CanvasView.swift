@@ -205,14 +205,11 @@ final class CanvasMetalView: MTKView {
 
         override var acceptsFirstResponder: Bool { true }
 
-        /// Enter edits the text of the selected shape or text, as on
-        /// excalidraw.com; the core decides what that is.
+        /// Keys the menus do not list (see `pressKey`): Escape finishes a
+        /// line being placed; Enter does too, and otherwise edits the text
+        /// of the Selection, as on excalidraw.com. The core decides.
         override func keyDown(with event: NSEvent) {
-            switch event.keyCode {
-            case Self.returnKey, Self.keypadEnterKey: perform { $0.editSelectedText() }
-            default:
-                if !pressKey(Self.keyName(of: event), Modifiers(event.modifierFlags)) { super.keyDown(with: event) }
-            }
+            if !pressKey(Self.keyName(of: event), Modifiers(event.modifierFlags)) { super.keyDown(with: event) }
         }
 
         /// The key as `Shortcut.key` names it: the character it types without
@@ -222,6 +219,8 @@ final class CanvasMetalView: MTKView {
             switch event.keyCode {
             case backspaceKey: "backspace"
             case forwardDeleteKey: "delete"
+            case escapeKey: "escape"
+            case returnKey, keypadEnterKey: "enter"
             default: event.characters(byApplyingModifiers: [])?.lowercased() ?? ""
             }
         }
@@ -229,6 +228,7 @@ final class CanvasMetalView: MTKView {
         private static let backspaceKey: UInt16 = 51
         private static let forwardDeleteKey: UInt16 = 117
 
+        private static let escapeKey: UInt16 = 53
         private static let returnKey: UInt16 = 36
         private static let keypadEnterKey: UInt16 = 76
 
@@ -268,6 +268,8 @@ final class CanvasMetalView: MTKView {
                     switch key.keyCode {
                     case .keyboardDeleteOrBackspace: "backspace"
                     case .keyboardDeleteForward: "delete"
+                    case .keyboardEscape: "escape"
+                    case .keyboardReturnOrEnter, .keypadEnter: "enter"
                     default: key.charactersIgnoringModifiers.lowercased()
                     }
                 if !pressKey(name, Modifiers(key.modifierFlags)) { unhandled.insert(press) }
