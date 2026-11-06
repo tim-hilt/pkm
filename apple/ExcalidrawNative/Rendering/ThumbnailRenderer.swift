@@ -8,10 +8,15 @@ struct ThumbnailScene: Sendable {
     let editor: Editor
     let geometry: Geometry
     let viewport: Viewport
+    /// The Canvas colour of the appearance, as `0xRRGGBBAA`.
+    let paperColor: UInt32
+    let isDark: Bool
 
     /// Nil if `drawing` (a `.excalidraw` file's bytes) is not a valid Drawing.
-    init?(drawing: Data) {
+    /// With `dark`, the Scene is shown as the dark Canvas shows it (ADR-0010).
+    init?(drawing: Data, dark: Bool = false) {
         let editor = Editor.withExcalifont()
+        editor.setDarkMode(on: dark)
         guard (try? editor.load(bytes: drawing)) != nil else { return nil }
         // The core frames the Scene in a view as big as the thumbnail less its
         // margin; the margin is put back by moving the viewport.
@@ -24,12 +29,14 @@ struct ThumbnailScene: Sendable {
         self.editor = editor
         self.geometry = editor.geometry()
         self.viewport = viewport
+        self.paperColor = editor.canvasColor()
+        self.isDark = dark
     }
 }
 
 /// Draws thumbnails of Drawings for the Gallery with the Canvas's own Metal
 /// renderer, offscreen (ADR-0002): the whole Scene, framed like "zoom to fit"
-/// (never enlarged past 100 %), on the Canvas's white paper.
+/// (never enlarged past 100 %), on the Canvas's paper, white or, in dark mode, dark.
 ///
 /// One renderer is kept for all thumbnails, as making it is costly; it holds
 /// on to the last Drawing's draws until the next one replaces them.
@@ -56,6 +63,8 @@ final class ThumbnailRenderer {
 
     func render(_ scene: ThumbnailScene) -> RenderedImage? {
         renderer.files = scene.editor
+        renderer.isDark = scene.isDark
+        renderer.paperColor = scene.paperColor
         renderer.setGeometry(scene.geometry)
         renderer.viewport = scene.viewport
         let image = renderer.renderOffscreen(width: Self.width, height: Self.height)
@@ -64,7 +73,7 @@ final class ThumbnailRenderer {
     }
 
     /// Nil if `drawing` is not a valid Drawing or the GPU failed.
-    func render(drawing: Data) -> RenderedImage? {
-        ThumbnailScene(drawing: drawing).flatMap(render)
+    func render(drawing: Data, dark: Bool = false) -> RenderedImage? {
+        ThumbnailScene(drawing: drawing, dark: dark).flatMap(render)
     }
 }

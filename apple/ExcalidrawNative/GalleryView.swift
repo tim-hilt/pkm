@@ -120,6 +120,13 @@ private struct Card: View {
     let drawing: DrawingStore.Entry
     let thumbnails: Thumbnails
     @State private var thumbnail: Thumbnails.Thumbnail?
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// What a thumbnail is made for; a change of either restarts the task.
+    private struct Request: Equatable {
+        let drawing: DrawingStore.Entry
+        let dark: Bool
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -143,8 +150,12 @@ private struct Card: View {
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary) }
-                // Restarts when the Drawing changed; ends when the card leaves the screen.
-                .task(id: drawing) { thumbnail = await thumbnails.thumbnail(for: drawing) }
+                // Restarts when the Drawing or the appearance changed (the card
+                // never shows the other appearance's thumbnail); ends when the
+                // card leaves the screen.
+                .task(id: Request(drawing: drawing, dark: colorScheme == .dark)) {
+                    thumbnail = await thumbnails.thumbnail(for: drawing, dark: colorScheme == .dark)
+                }
                 // The lazy grid keeps the state of cards scrolled past; without
                 // this, every thumbnail seen would stay in memory. `thumbnails`
                 // still has it in memory for when the card comes back.

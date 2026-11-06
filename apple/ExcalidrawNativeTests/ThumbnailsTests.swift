@@ -146,4 +146,59 @@ import Testing
 
         #expect(thumbnails.rendered == 0)
     }
+
+    /// The blue channel of the picture's corner pixel: the paper.
+    private func paper(_ image: CGImage) throws -> UInt8 {
+        let rendered = try #require(RenderedImage(cgImage: image))
+        return rendered.bgra[0]
+    }
+
+    @Test func aDarkThumbnailShowsTheDarkCanvas() async throws {
+        try store.save(sampleBytes(), as: "sample")
+        let thumbnails = Thumbnails(store: store)
+
+        let light = try await #require(thumbnails.thumbnail(for: entry("sample")).image)
+        let dark = try await #require(thumbnails.thumbnail(for: entry("sample"), dark: true).image)
+
+        #expect(try paper(light) == 255)
+        #expect(try paper(dark) < 60)
+        #expect(thumbnails.rendered == 2)
+    }
+
+    @Test func eachAppearanceIsCachedOnceAndSurvivesARestart() async throws {
+        try store.save(sampleBytes(), as: "sample")
+        let listed = try entry("sample")
+        let first = Thumbnails(store: store)
+        _ = await first.thumbnail(for: listed, dark: true)
+        #expect(store.thumbnail(for: listed) == nil, "the light one is made when first needed")
+        _ = await first.thumbnail(for: listed)
+
+        let later = Thumbnails(store: store)
+        let dark = try await #require(later.thumbnail(for: listed, dark: true).image)
+        let light = try await #require(later.thumbnail(for: listed).image)
+
+        #expect(try paper(dark) < 60 && paper(light) == 255)
+        #expect(later.rendered == 0)
+    }
+
+    @Test func aChangedDrawingInvalidatesBothAppearances() async throws {
+        try store.save(Editor().save(), as: "a")
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 1000)],
+            ofItemAtPath: directory.appending(path: "a.excalidraw").path)
+        let thumbnails = Thumbnails(store: store)
+        let before = try entry("a")
+        _ = await thumbnails.thumbnail(for: before)
+        _ = await thumbnails.thumbnail(for: before, dark: true)
+
+        try store.save(sampleBytes(), as: "a")
+        let changed = try entry("a")
+
+        #expect(store.thumbnail(for: changed) == nil && store.thumbnail(for: changed, dark: true) == nil)
+        let light = try await #require(thumbnails.thumbnail(for: changed).image)
+        let dark = try await #require(thumbnails.thumbnail(for: changed, dark: true).image)
+        #expect(try hasInk(light))
+        #expect(try paper(dark) < 60)
+        #expect(thumbnails.rendered == 4)
+    }
 }
