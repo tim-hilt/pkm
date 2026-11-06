@@ -58,7 +58,9 @@ targets:
         LOCALIZATION_PREFERS_STRING_CATALOGS: YES
         STRING_CATALOG_GENERATE_SYMBOLS: NO
         GENERATE_INFOPLIST_FILE: YES
-        # Assets.xcassets holds only the launch colour; the app has no icon set.
+        # Assets.xcassets holds the launch colour and the accent colour (the
+        # global accent, Excalidraw's purple); the app has no icon set.
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         ASSETCATALOG_COMPILER_APPICON_NAME: ""
         INFOPLIST_FILE: Config/Info.plist
         INFOPLIST_KEY_CFBundleDisplayName: Excalidraw Native

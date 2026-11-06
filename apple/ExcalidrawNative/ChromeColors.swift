@@ -11,6 +11,13 @@ import SwiftUI
 /// The chrome's hand-picked colours: Excalidraw's light values and, from its
 /// dark theme (`theme.scss`), the values for Dark mode. The system picks the
 /// variant, so a change of appearance needs no code.
+///
+/// The accent (Excalidraw's primary purple, `#6965db` light / `#a8a5ff` dark)
+/// is not here: it is the `AccentColor` colour set in Assets.xcassets,
+/// registered as the global accent in project.yml, so system controls and
+/// `Color.accentColor` use it. A redesign changes the accent in both places:
+/// the colour set, and `optionSelected` and the checked colours below, which
+/// are derived from it.
 enum Chrome {
     /// Island and sheet surface: `--island-bg-color`.
     static let island = adaptive(light: 0xFFFFFF, dark: 0x232329)

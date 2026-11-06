@@ -24,6 +24,11 @@ import Testing
         #expect(rgb(Chrome.checkedGlyph, dark: true) == [0xE0, 0xDF, 0xFF])
     }
 
+    @Test func theAccentIsExcalidrawsPurpleInBothAppearances() {
+        #expect(rgb(Color.accentColor, dark: false) == [0x69, 0x65, 0xDB])
+        #expect(rgb(Color.accentColor, dark: true) == [0xA8, 0xA5, 0xFF])
+    }
+
     /// `color` as the given appearance resolves it, as RGB bytes.
     private func rgb(_ color: Color, dark: Bool) -> [Int] {
         #if canImport(UIKit)
