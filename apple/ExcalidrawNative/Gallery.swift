@@ -52,51 +52,6 @@ final class Gallery {
         }
     }
 
-    /// Makes a new Drawing of each `.excalidraw` file (share sheet, Files,
-    /// drag & drop), named after the file and made distinct if that name is
-    /// taken; the files themselves are left alone. A file that cannot be read
-    /// or is not a valid Drawing is skipped and the user is told. Returns the
-    /// names of the new Drawings.
-    @discardableResult
-    func importDrawings(from urls: [URL]) -> [String] {
-        failure = nil
-        var imported: [String] = []
-        var rejected: [String] = []
-        for url in urls {
-            if let name = try? importDrawing(from: url) {
-                imported.append(name)
-            } else {
-                rejected.append("“\(url.lastPathComponent)”")
-            }
-        }
-        if !rejected.isEmpty {
-            failure = String(
-                localized: "Could not import \(rejected.joined(separator: ", ")): not a valid Excalidraw file.")
-        }
-        reload()
-        return imported
-    }
-
-    /// Shows the `.excalidraw` file another app hands over (share sheet,
-    /// open-in, Files, Finder) after saving and closing the open Drawing: a
-    /// Drawing of the Gallery's own folder is opened as it is, any other file
-    /// is imported (see `importDrawings`) and the new Drawing opened.
-    func openFile(at url: URL) {
-        close()
-        if let name = store.name(of: url) ?? importDrawings(from: [url]).first {
-            openDrawing(named: name)
-        }
-    }
-
-    private func importDrawing(from url: URL) throws -> String {
-        // Files from other apps (open-in, Files picker) need this; others ignore it.
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        let contents = try Data(contentsOf: url)
-        try Editor().load(bytes: contents)
-        return try store.add(contents, named: url.deletingPathExtension().lastPathComponent)
-    }
-
     /// The Drawing's `.excalidraw` file to share, exactly as stored, so it
     /// opens unchanged on excalidraw.com. The open Drawing is saved first.
     /// Tells the user and returns `nil` if there is no such file.

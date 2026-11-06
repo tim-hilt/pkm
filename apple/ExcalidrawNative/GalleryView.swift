@@ -6,8 +6,7 @@ import UniformTypeIdentifiers
 /// the card comes into view (the grid is lazy) and again after the Drawing
 /// changed, with the name and date below it.
 /// A card's menu (also its context menu) renames, duplicates, exports (via the
-/// share sheet) and deletes the Drawing; deleting asks first. `.excalidraw` files are imported from Files
-/// (toolbar) or by dropping them onto the Gallery.
+/// share sheet) and deletes the Drawing; deleting asks first.
 struct GalleryView: View {
     let gallery: Gallery
 
@@ -15,7 +14,6 @@ struct GalleryView: View {
     @State private var renaming: DrawingStore.Entry?
     @State private var newName = ""
     @State private var deleting: DrawingStore.Entry?
-    @State private var isImporting = false
 
     private let columns = [GridItem(.adaptive(minimum: 160, maximum: 260), spacing: 16)]
 
@@ -53,23 +51,8 @@ struct GalleryView: View {
             }
             .navigationTitle("Drawings")
             .toolbar {
-                Button("Import", systemImage: "square.and.arrow.down") { isImporting = true }
-                    .accessibilityIdentifier("import-drawing")
                 Button("New Drawing", systemImage: "plus") { gallery.createDrawing() }
                     .accessibilityIdentifier("new-drawing")
-            }
-            .fileImporter(isPresented: $isImporting, allowedContentTypes: [.excalidraw], allowsMultipleSelection: true)
-            { result in
-                switch result {
-                case .success(let urls): gallery.importDrawings(from: urls)
-                case .failure: break  // cancelled or nothing chosen
-                }
-            }
-            .dropDestination(for: URL.self) { urls, _ in
-                let files = urls.filter { $0.isFileURL }
-                guard !files.isEmpty else { return false }
-                gallery.importDrawings(from: files)
-                return true
             }
             .overlay {
                 if gallery.drawings.isEmpty {

@@ -73,14 +73,11 @@ struct DrawingStore: Sendable {
         try add(contents, named: "Untitled \(Self.format(date, in: timeZone))")
     }
 
-    /// Makes a new Drawing holding `contents` (an imported file, say) named
-    /// `name`, or "<name> 2", "<name> 3", … if that is taken, and returns the
-    /// name. Never replaces another Drawing. A name that cannot be used
-    /// becomes "Imported".
+    /// Makes a new Drawing holding `contents` named `name`, or "<name> 2",
+    /// "<name> 3", … if that is taken, and returns the name. Never replaces
+    /// another Drawing.
     func add(_ contents: Data, named name: String) throws -> String {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let base = (try? url(for: trimmed)) == nil ? String(localized: "Imported") : trimmed
-        let name = try distinctName(from: base)
+        let name = try distinctName(from: name.trimmingCharacters(in: .whitespacesAndNewlines))
         // Left by a Drawing of that name deleted in Files or Finder.
         try? FileManager.default.removeItem(at: cacheDirectory(for: name))
         try save(contents, as: name)
@@ -307,17 +304,6 @@ struct DrawingStore: Sendable {
         let url = try url(for: name)
         guard FileManager.default.fileExists(atPath: url.path) else { throw CocoaError(.fileNoSuchFile) }
         return url
-    }
-
-    /// The name of the Drawing whose file `url` is, or `nil` if it is not a
-    /// file of this store (Files hands the app its own Drawings by URL too).
-    func name(of url: URL) -> String? {
-        let folder = url.resolvingSymlinksInPath().deletingLastPathComponent()
-        guard url.pathExtension == Self.fileExtension,
-            folder.path == directory.resolvingSymlinksInPath().path
-        else { return nil }
-        let name = url.deletingPathExtension().lastPathComponent
-        return (try? fileURL(for: name)) == nil ? nil : name
     }
 
     private func url(for name: String) throws -> URL {
