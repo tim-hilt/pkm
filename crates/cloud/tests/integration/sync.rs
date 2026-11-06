@@ -609,6 +609,55 @@ fn an_upload_that_another_device_overwrote_is_written_again_and_all_devices_conv
 }
 
 #[test]
+fn a_local_save_that_lacks_newer_versions_the_cloud_holds_does_not_take_them_back() {
+    // The open Drawing kept its own version of `a` while the user dragged it
+    // (or its autosave raced Sync's write), and saved over the newer one.
+    let (cloud, phone, tablet) = two_devices_apart();
+    tablet.write(
+        "Sketch.excalidraw",
+        &drawing(&[element("a", 5, "a0", 50), element("b", 1, "a1", 0)]),
+    );
+    tablet.sync(&cloud);
+    phone.sync(&cloud);
+    phone.write(
+        "Sketch.excalidraw",
+        &drawing(&[element("a", 2, "a0", 9), element("b", 2, "a1", 7)]),
+    );
+
+    phone.sync(&cloud);
+
+    let merged = [e("a", 5, false), e("b", 2, false)];
+    assert_eq!(
+        elements_of(&cloud.read("Sketch.excalidraw").unwrap()),
+        merged
+    );
+    assert_eq!(
+        elements_of(&phone.read("Sketch.excalidraw").unwrap()),
+        merged
+    );
+}
+
+#[test]
+fn a_file_that_cant_be_parsed_never_replaces_a_drawing_on_the_other_side() {
+    let (cloud, phone, tablet) = two_devices_apart();
+    let before = phone.read("Sketch.excalidraw").unwrap();
+    cloud.write("Sketch.excalidraw", b"{broken");
+
+    assert!(phone.sync(&cloud).is_empty());
+    assert_eq!(phone.read("Sketch.excalidraw").unwrap(), before);
+    assert_eq!(cloud.read("Sketch.excalidraw").unwrap(), b"{broken");
+
+    // The other way round: broken here, the cloud unchanged.
+    cloud.write("Sketch.excalidraw", &before);
+    phone.sync(&cloud);
+    tablet.sync(&cloud);
+    tablet.write("Sketch.excalidraw", b"{broken");
+    tablet.sync(&cloud);
+    assert_eq!(cloud.read("Sketch.excalidraw").unwrap(), before);
+    assert_eq!(tablet.read("Sketch.excalidraw").unwrap(), b"{broken");
+}
+
+#[test]
 fn a_one_sided_change_stays_byte_for_byte_as_the_other_tool_wrote_it() {
     let (cloud, phone, _) = two_devices_apart();
     let theirs = br#"{ "type": "excalidraw", "elements": [ {"id":"a","version":5,"versionNonce":1,"index":"a0","isDeleted":false},{"id":"b","type":"rectangle","version":1,"versionNonce":7,"index":"a1","isDeleted":false,"x":0} ], "appState": {"z":1,"a":2}, "files": {} }"#;

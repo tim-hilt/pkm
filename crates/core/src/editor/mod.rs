@@ -290,9 +290,9 @@ impl Editor {
     /// on excalidraw.com). Nothing here is an undo step, and the history,
     /// Selection (less Elements now deleted), text view, tool and viewport
     /// are kept. An Element in an unfinished drag, stroke, point edit or text
-    /// edit keeps the local version; Sync brings the remote one on its next
-    /// round, after the interaction ended. If `bytes` are not a Drawing
-    /// nothing changes.
+    /// edit keeps the local version; once the interaction ended and the
+    /// Drawing was saved, Sync merges that save with the version it holds by
+    /// the normal rule. If `bytes` are not a Drawing nothing changes.
     pub fn merge_synced(&mut self, bytes: &[u8]) -> Result<(), MergeSyncedError> {
         let busy = self.elements_in_interaction();
         let merged = merge::merge_keeping_local(&self.save(), bytes, |id| busy.contains(id))?;

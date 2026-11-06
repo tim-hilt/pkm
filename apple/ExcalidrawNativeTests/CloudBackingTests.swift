@@ -14,12 +14,10 @@ import Testing
 
     private func model(
         checking check: @escaping @Sendable (String, String, String) throws -> Void = { _, _, _ in },
-        iCloudDriveOn: Bool = true,
         signInPage: @escaping @MainActor (URL, String) async throws -> URL = { _, _ in throw CancellationError() }
     ) -> CloudBackingModel {
         CloudBackingModel(
-            credentials: credentials, checkWebDAV: check, isICloudDriveOn: { iCloudDriveOn },
-            showSignInPage: signInPage)
+            credentials: credentials, checkWebDAV: check, showSignInPage: signInPage)
     }
 
     /// A folder standing in for iCloud Drive's root, removed by the caller.
@@ -230,11 +228,8 @@ import Testing
         #expect(credentials.loadBookmark() == nil)
     }
 
-    @Test func iCloudDriveBeingOffIsReportedBeforeThePickerIsShown() {
-        #expect(throws: ConnectError.ICloudDriveUnavailable) {
-            try model(iCloudDriveOn: false).prepareICloudDriveConnect()
-        }
-        #expect(throws: Never.self) { try model().prepareICloudDriveConnect() }
+    @Test func pickingAnotherFolderSaysToTurnOnICloudDriveIfItIsMissing() {
+        #expect(ConnectError.WrongFolder.message.contains("turn it on in Settings"))
     }
 
     @Test func aLostGrantShowsAccessLostAndGrantingAgainResumes() async throws {
@@ -327,6 +322,45 @@ import Testing
         #expect(credentials.load()?.password == "new")
         #expect(cloud.connection?.detail == "https://dav.example.com")
         credentials.forget()
+    }
+
+    /// A Sync state folder that remembers one Drawing, and the file that says so.
+    private func rememberingSyncState() throws -> (directory: URL, file: URL) {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let file = directory.appending(path: "markers/Sketch.excalidraw")
+        try FileManager.default.createDirectory(
+            at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("1".utf8).write(to: file)
+        return (directory, file)
+    }
+
+    /// What Sync remembers of another account would make it delete every
+    /// Drawing that account's cloud lacks.
+    @Test func connectingForgetsWhatSyncRememberedOfAnotherConnection() async throws {
+        let state = try rememberingSyncState()
+        let cloud = model()
+        cloud.startSyncing(
+            drawings: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
+            stateDirectory: state.directory, onChanged: { _ in })
+
+        try await cloud.connect(url: "https://dav.example.com", username: "me", password: "pw")
+
+        #expect(!FileManager.default.fileExists(atPath: state.file.path))
+        cloud.disconnect()
+    }
+
+    @Test func reconnectingKeepsWhatSyncRemembered() async throws {
+        try await model().connect(url: "https://dav.example.com", username: "me", password: "old")
+        let state = try rememberingSyncState()
+        let cloud = model()
+        cloud.startSyncing(
+            drawings: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
+            stateDirectory: state.directory, onChanged: { _ in })
+
+        try await cloud.reconnect(password: "new")
+
+        #expect(FileManager.default.fileExists(atPath: state.file.path))
+        cloud.disconnect()
     }
 
     @Test func theStatusTextNamesTheProblem() async throws {

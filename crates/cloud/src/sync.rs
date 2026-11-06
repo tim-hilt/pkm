@@ -11,11 +11,16 @@
 //! kept and the local one is renamed to the next free name ("Sketch 2").
 //!
 //! A Drawing changed on both sides is merged (`merge_drawings`) and the result
-//! written to both. The same merge runs when only the cloud changed, since the
-//! change may be another Device's upload overwriting ours without having seen
-//! it (there is no conditional write): what the cloud then lacks is uploaded
-//! again. A Drawing that can't be parsed is skipped, and left as it is on both
-//! sides.
+//! written to both. The same merge runs when only one side changed:
+//! - the cloud, since the change may be another Device's upload overwriting
+//!   ours without having seen it (there is no conditional write): what the
+//!   cloud then lacks is uploaded again;
+//! - this Device, against the last-Synced bytes the cloud still holds, since
+//!   the open Drawing may have saved over newer versions Sync wrote (it keeps
+//!   its own version of an Element being dragged): they are not taken back.
+//!
+//! A file that can't be parsed never replaces a Drawing on the other side: it
+//! is skipped, and left as it is on both sides.
 
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
@@ -23,7 +28,7 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 
-use excalidraw_native_core::{are_same_drawing, merge_drawings};
+use excalidraw_native_core::{are_same_drawing, is_drawing, merge_drawings};
 
 use crate::storage::{Storage, write_file_atomically};
 
@@ -187,16 +192,23 @@ impl Step<'_> {
         files.extend(file_names(self.drawings)?);
         files.extend(self.state.files()?);
 
-        for file in &files {
+        // Each Drawing is read once when nothing is to be done with it.
+        let mut pending = Vec::new();
+        for file in files {
             self.check_cancelled()?;
-            let (local, remote, base) = self.facts(file)?;
-            if decide(local.as_deref(), remote.as_deref(), base.as_ref()).is_transfer() {
+            let (local, remote, base) = self.facts(&file)?;
+            let action = decide(local.as_deref(), remote.as_deref(), base.as_ref());
+            if action.is_transfer() {
                 self.total += 1;
+            }
+            if action != Action::Idle {
+                pending.push(file);
             }
         }
         self.report();
 
-        for file in files {
+        // Read again: the app may have written a Drawing meanwhile.
+        for file in pending {
             self.check_cancelled()?;
             if let Err(error) = self.sync_drawing(&file) {
                 // Whatever the error, cancelling is why the transfer failed.
@@ -246,7 +258,7 @@ impl Step<'_> {
             .storage
             .list()?
             .into_iter()
-            .filter(|blob| is_drawing(&blob.name))
+            .filter(|blob| is_drawing_file(&blob.name))
             .map(|blob| (blob.name, blob.marker))
             .collect())
     }
@@ -274,6 +286,9 @@ impl Step<'_> {
         let action = decide(local.as_deref(), remote.as_deref(), base.as_ref());
         let result = match (action, local, remote, base) {
             (Action::Forget, ..) => self.state.remove(file),
+            (Action::Upload, Some(local), Some(marker), Some(base)) => {
+                self.upload_onto_base(file, &marker, local, &base)
+            }
             (Action::Upload, Some(local), ..) => self.upload(file, local),
             (Action::Download, _, Some(marker), _) => self.download(file, &marker, None),
             (Action::FirstMeeting, Some(local), Some(marker), _) => {
@@ -322,18 +337,50 @@ impl Step<'_> {
         let Some(remote) = self.fetch(file)? else {
             return Ok(()); // deleted since the listing
         };
-        let merged = match merge_drawings(Some(&base.bytes), &local, &remote) {
-            Ok(merged) => merged,
-            // Not a Drawing on one side: skipped when both changed, else the
-            // cloud's file is copied as it is.
-            Err(_) if local_changed => return Ok(()),
-            Err(_) => return self.write_local(file, &remote, marker, Some(&local)),
-        };
-        if merged != local && !self.replace_local(file, &merged, Some(&local))? {
+        match merge_drawings(Some(&base.bytes), &local, &remote) {
+            Ok(merged) => self.write_merged(file, marker, &local, &remote, merged),
+            // Not a Drawing on one side. The cloud's file replaces the local
+            // one only if that is unchanged and no Drawing either. Until then
+            // every step downloads it again.
+            Err(_) if local_changed || is_drawing(&local) => Ok(()),
+            Err(_) => self.write_local(file, &remote, marker, Some(&local)),
+        }
+    }
+
+    /// The local Drawing changed, the cloud's did not: it still holds
+    /// `base`. The local one is merged with it before the upload.
+    fn upload_onto_base(
+        &mut self,
+        file: &str,
+        marker: &str,
+        local: Vec<u8>,
+        base: &Synced,
+    ) -> io::Result<()> {
+        match merge_drawings(Some(&base.bytes), &local, &base.bytes) {
+            Ok(merged) => self.write_merged(file, marker, &local, &base.bytes, merged),
+            // Not a Drawing on one side: it replaces the cloud's file only if
+            // that is no Drawing either.
+            Err(_) if is_drawing(&base.bytes) => Ok(()),
+            Err(_) => self.upload(file, local),
+        }
+    }
+
+    /// Writes `merged`, what `local` and `remote` (the cloud's Drawing with
+    /// `marker`) merge to, to each side that doesn't hold it yet. Leaves it
+    /// for the next step if the app wrote the local file meanwhile.
+    fn write_merged(
+        &mut self,
+        file: &str,
+        marker: &str,
+        local: &[u8],
+        remote: &[u8],
+        merged: Vec<u8>,
+    ) -> io::Result<()> {
+        if merged != local && !self.replace_local(file, &merged, Some(local))? {
             return Ok(());
         }
         if merged == remote {
-            self.state.set(file, &remote, marker)
+            self.state.set(file, remote, marker)
         } else {
             self.upload(file, merged)
         }
@@ -351,14 +398,7 @@ impl Step<'_> {
             Err(_) => Ok(()),
             Ok(true) => {
                 let merged = merge_drawings(None, &local, &remote).map_err(io::Error::other)?;
-                if merged != local && !self.replace_local(file, &merged, Some(&local))? {
-                    return Ok(());
-                }
-                if merged == remote {
-                    self.state.set(file, &remote, marker)
-                } else {
-                    self.upload(file, merged)
-                }
+                self.write_merged(file, marker, &local, &remote, merged)
             }
             Ok(false) => {
                 let renamed = self.next_free_name(file)?;
@@ -559,7 +599,7 @@ impl<R: Read> Read for Cancellable<'_, R> {
     }
 }
 
-fn is_drawing(file: &str) -> bool {
+fn is_drawing_file(file: &str) -> bool {
     file.len() > EXTENSION.len() && file.ends_with(EXTENSION) && !file.starts_with('.')
 }
 
@@ -577,5 +617,5 @@ fn file_names(dir: &Path) -> io::Result<Vec<String>> {
             names.push(name);
         }
     }
-    Ok(names.into_iter().filter(|n| is_drawing(n)).collect())
+    Ok(names.into_iter().filter(|n| is_drawing_file(n)).collect())
 }

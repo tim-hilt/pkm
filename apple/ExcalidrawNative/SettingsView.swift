@@ -115,7 +115,7 @@ struct CloudBackingSection: View {
             if let error {
                 Text(error).foregroundStyle(.red).accessibilityIdentifier("cloud-error")
             }
-            Button("Reconnect") { signIn(to: connection.provider, reconnecting: true) }
+            Button("Reconnect") { signIn(to: connection.provider) }
                 .disabled(isConnecting)
                 .accessibilityIdentifier("cloud-reconnect")
         } else if cloud.status == .accessLost {
@@ -175,7 +175,7 @@ struct CloudBackingSection: View {
         if let error {
             Text(error).foregroundStyle(.red).accessibilityIdentifier("cloud-error")
         }
-        Button("Connect") { signIn(to: .googleDrive, reconnecting: false) }
+        Button("Connect") { signIn(to: .googleDrive) }
             .disabled(isConnecting)
             .accessibilityIdentifier("cloud-connect")
     }
@@ -188,22 +188,22 @@ struct CloudBackingSection: View {
         if let error {
             Text(error).foregroundStyle(.red).accessibilityIdentifier("cloud-error")
         }
-        Button("Connect") { signIn(to: .oneDrive, reconnecting: false) }
+        Button("Connect") { signIn(to: .oneDrive) }
             .disabled(isConnecting)
             .accessibilityIdentifier("cloud-connect")
     }
 
-    /// Signs in to Google Drive or OneDrive. Closing the sign-in page does nothing.
-    private func signIn(to provider: CloudProvider, reconnecting: Bool) {
+    /// Signs in to Google Drive or OneDrive, to Connect or Reconnect. Closing
+    /// the sign-in page does nothing.
+    private func signIn(to provider: CloudProvider) {
         Task {
             isConnecting = true
             defer { isConnecting = false }
             do {
-                switch (provider, reconnecting) {
-                case (.oneDrive, true): try await cloud.reconnectOneDrive()
-                case (.oneDrive, false): try await cloud.connectOneDrive()
-                case (_, true): try await cloud.reconnectGoogleDrive()
-                case (_, false): try await cloud.connectGoogleDrive()
+                if provider == .oneDrive {
+                    try await cloud.connectOneDrive()
+                } else {
+                    try await cloud.connectGoogleDrive()
                 }
                 error = nil
             } catch let failure as ConnectError {
@@ -214,17 +214,9 @@ struct CloudBackingSection: View {
         }
     }
 
-    /// Shows the folder picker, unless iCloud Drive is off.
     private func pickFolder() {
-        do {
-            try cloud.prepareICloudDriveConnect()
-            error = nil
-            isPickingFolder = true
-        } catch let failure as ConnectError {
-            error = failure.message
-        } catch {
-            self.error = error.localizedDescription
-        }
+        error = nil
+        isPickingFolder = true
     }
 
     /// The user picked a folder, or backed out of the picker, which does nothing.

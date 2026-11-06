@@ -114,6 +114,11 @@ pub fn merge_keeping_local(
     merge_drawings(None, local, trimmed.as_bytes())
 }
 
+/// Whether `bytes` are a Drawing that `merge_drawings` can merge.
+pub fn is_drawing(bytes: &[u8]) -> bool {
+    parse(bytes).is_ok()
+}
+
 /// Whether two same-named Drawings with no Sync history between them are one
 /// Drawing: they are if they share at least one Element id, or both have no
 /// Elements. Otherwise they are unrelated and must both be kept.

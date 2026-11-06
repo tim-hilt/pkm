@@ -60,8 +60,11 @@ extension ConnectError {
         case .NotHttps: "URL must start with https://, so your password never travels in plain text"
         case .NotWebDav: "Not a WebDAV server"
         case .ICloudDriveUnavailable: "Turn on iCloud Drive in Settings"
+        // Without the paid iCloud capability the app can't tell whether iCloud
+        // Drive is on (`ubiquityIdentityToken` is always nil); when it is off,
+        // the picker doesn't offer it.
         case .WrongFolder:
-            "Pick iCloud Drive itself, not a folder in it, so your Drawings end up in iCloud Drive/ExcalidrawNative"
+            "Pick iCloud Drive itself, not a folder in it, so your Drawings end up in iCloud Drive/ExcalidrawNative. If iCloud Drive is missing, turn it on in Settings."
         case .UnsupportedAccount: "Work and school accounts are not supported. Use a personal Microsoft account."
         case .AccessDenied: "Access denied"
         case .SignInFailed: "Sign-in failed. Try again."
@@ -177,7 +180,6 @@ final class CloudBackingModel {
 
     @ObservationIgnored private let credentials: CloudCredentials
     @ObservationIgnored private let checkWebDAV: @Sendable (String, String, String) throws -> Void
-    @ObservationIgnored private let isICloudDriveOn: () -> Bool
     @ObservationIgnored private let showSignInPage: @MainActor (URL, String) async throws -> URL
 
     /// Where Drawings are Synced, once the Gallery says so (`startSyncing`).
@@ -198,22 +200,19 @@ final class CloudBackingModel {
 
     /// Cloud Backing keeping its credentials in `credentials`. The Connection
     /// saved there is shown again without contacting the server, so launching
-    /// offline works. `checkWebDAV` is the core's Connect and `isICloudDriveOn`
-    /// tells whether the user is signed in to iCloud Drive; `showSignInPage`
+    /// offline works. `checkWebDAV` is the core's Connect and `showSignInPage`
     /// shows a provider's sign-in page and returns the redirect; tests replace them.
     init(
         credentials: CloudCredentials = .app,
         checkWebDAV: @escaping @Sendable (String, String, String) throws -> Void = {
             try connectWebdav(url: $0, username: $1, password: $2)
         },
-        isICloudDriveOn: @escaping () -> Bool = { FileManager.default.ubiquityIdentityToken != nil },
         showSignInPage: @escaping @MainActor (URL, String) async throws -> URL = {
             try await ExcalidrawNative.showSignInPage(url: $0, callbackScheme: $1)
         }
     ) {
         self.credentials = credentials
         self.checkWebDAV = checkWebDAV
-        self.isICloudDriveOn = isICloudDriveOn
         self.showSignInPage = showSignInPage
         if let google = credentials.loadGoogle() {
             connection = CloudConnection(provider: .googleDrive, detail: google.email)
@@ -229,12 +228,6 @@ final class CloudBackingModel {
     private static let iCloudFolder = "ExcalidrawNative"
     private static let iCloudConnection = CloudConnection(provider: .iCloudDrive, detail: iCloudFolder)
 
-    /// Checks that iCloud Drive is on, before the folder picker is shown.
-    /// Throws `ConnectError.ICloudDriveUnavailable` if it is not.
-    func prepareICloudDriveConnect() throws {
-        guard isICloudDriveOn() else { throw ConnectError.ICloudDriveUnavailable }
-    }
-
     /// Connects iCloud Drive through `granted`, the folder the user picked
     /// (also to Reconnect after the grant was lost). Throws a `ConnectError`
     /// if it is not iCloud Drive's root; then nothing is kept. Creates
@@ -246,11 +239,27 @@ final class CloudBackingModel {
         let path = granted.path(percentEncoded: false)
         try await Task.detached { _ = try connectIcloudDrive(grantedDirectory: path) }.value
         let bookmark = try ICloudGrant.bookmark(for: granted)
-        // What was Synced with another Cloud Provider says nothing about this one.
-        if let old = connection, old.provider != .iCloudDrive { clearSyncState() }
-        credentials.saveBookmark(bookmark)
-        connection = Self.iCloudConnection
-        restartSync()
+        try adopt(Self.iCloudConnection) {
+            credentials.saveBookmark(bookmark)
+            return true
+        }
+    }
+
+    /// Shows `new` as Connected once `save` kept its credentials (throws
+    /// `CredentialsNotSaved` if it could not) and Syncs with it. Sync carries
+    /// on where it stopped if `new` is what was Connected already (a
+    /// Reconnect), handed the new credentials by `resume` if given, else
+    /// restarted. Otherwise what it remembered is forgotten: it is the history
+    /// of another cloud (or of one whose credentials were lost), and would
+    /// make Sync delete here every Drawing that this cloud lacks.
+    private func adopt(
+        _ new: CloudConnection, resume: ((CloudSync) -> Void)? = nil, save: () -> Bool
+    ) throws {
+        let reconnecting = connection == new
+        guard save() else { throw CredentialsNotSaved() }
+        if !reconnecting { clearSyncState() }
+        connection = new
+        if reconnecting, let sync, let resume { resume(sync) } else { restartSync() }
     }
 
     /// Shows the sign-in page at `url` and returns the redirect it ends with.
@@ -287,54 +296,35 @@ final class CloudBackingModel {
     /// `My Drive/ExcalidrawNative` is created if missing. Does nothing if the
     /// user closes the page; throws a `ConnectError` if it fails, and then
     /// nothing is kept. Keeps the refresh token in the Keychain until
-    /// `disconnect`.
+    /// `disconnect`. Also Reconnects after Sync lost access (revoked on
+    /// Google's side): with the same account Sync resumes where it stopped.
     func connectGoogleDrive() async throws {
         guard let account = try await signInToGoogle() else { return }
-        // What was Synced with another account or Cloud Provider says nothing about this one.
-        if let old = connection, old.provider != .googleDrive || old.detail != account.email {
-            clearSyncState()
-        }
-        guard credentials.saveGoogle(account) else { throw CredentialsNotSaved() }
-        connection = CloudConnection(provider: .googleDrive, detail: account.email)
-        restartSync()
-    }
-
-    /// Signs in again after Sync lost access (revoked on Google's side), and
-    /// lets Sync resume where it stopped. Does nothing if the user closes the page.
-    func reconnectGoogleDrive() async throws {
-        guard let account = try await signInToGoogle() else { return }
-        guard credentials.saveGoogle(account) else { throw CredentialsNotSaved() }
-        connection = CloudConnection(provider: .googleDrive, detail: account.email)
-        sync?.reconnectGoogleDrive(
-            clientId: GoogleOAuth.clientID, refreshToken: account.refreshToken,
-            tokens: RotatedTokens.google(credentials))
+        let tokens = RotatedTokens.google(credentials)
+        try adopt(
+            CloudConnection(provider: .googleDrive, detail: account.email),
+            resume: {
+                $0.reconnectGoogleDrive(
+                    clientId: GoogleOAuth.clientID, refreshToken: account.refreshToken, tokens: tokens)
+            },
+            save: { credentials.saveGoogle(account) })
     }
 
     /// Connects OneDrive: the user signs in on Microsoft's page, and Drawings
     /// go to `Apps/ExcalidrawNative`. Does nothing if the user closes the
     /// page; throws a `ConnectError` if it fails, and then nothing is kept.
-    /// Keeps the refresh token in the Keychain until `disconnect`.
+    /// Keeps the refresh token in the Keychain until `disconnect`. Also
+    /// Reconnects, as `connectGoogleDrive` does.
     func connectOneDrive() async throws {
         guard let account = try await signInToOneDrive() else { return }
-        // What was Synced with another account or Cloud Provider says nothing about this one.
-        if let old = connection, old.provider != .oneDrive || old.detail != account.email {
-            clearSyncState()
-        }
-        guard credentials.saveOneDrive(account) else { throw CredentialsNotSaved() }
-        connection = CloudConnection(provider: .oneDrive, detail: account.email)
-        restartSync()
-    }
-
-    /// Signs in again after Sync lost access (revoked on Microsoft's side),
-    /// and lets Sync resume where it stopped. Does nothing if the user closes
-    /// the page.
-    func reconnectOneDrive() async throws {
-        guard let account = try await signInToOneDrive() else { return }
-        guard credentials.saveOneDrive(account) else { throw CredentialsNotSaved() }
-        connection = CloudConnection(provider: .oneDrive, detail: account.email)
-        sync?.reconnectOneDrive(
-            clientId: OneDriveOAuth.clientID, refreshToken: account.refreshToken,
-            tokens: RotatedTokens.oneDrive(credentials))
+        let tokens = RotatedTokens.oneDrive(credentials)
+        try adopt(
+            CloudConnection(provider: .oneDrive, detail: account.email),
+            resume: {
+                $0.reconnectOneDrive(
+                    clientId: OneDriveOAuth.clientID, refreshToken: account.refreshToken, tokens: tokens)
+            },
+            save: { credentials.saveOneDrive(account) })
     }
 
     /// Connects to the WebDAV server at `url`: checks it and creates the
@@ -347,11 +337,10 @@ final class CloudBackingModel {
         try await Task.detached { try check(url, username, password) }.value
         let account = WebDAVAccount(
             url: url.trimmingCharacters(in: .whitespaces), username: username, password: password)
-        guard credentials.save(account) else { throw CredentialsNotSaved() }
-        // What was Synced with another server says nothing about this one.
-        if let old = connection, old.detail != account.url { clearSyncState() }
-        connection = CloudConnection(provider: .webDAV, detail: account.url)
-        restartSync()
+        try adopt(
+            CloudConnection(provider: .webDAV, detail: account.url),
+            resume: { try? $0.reconnectWebdav(url: account.url, username: username, password: password) },
+            save: { credentials.save(account) })
     }
 
     /// Syncs the Drawings in `drawings` while Connected, and calls `onChanged`
@@ -467,13 +456,7 @@ final class CloudBackingModel {
     /// still refused, and then lets Sync resume where it stopped.
     func reconnect(password: String) async throws {
         guard let account = credentials.load() else { return }
-        let check = checkWebDAV
-        try await Task.detached { try check(account.url, account.username, password) }.value
-        let renewed = WebDAVAccount(url: account.url, username: account.username, password: password)
-        guard credentials.save(renewed) else { throw CredentialsNotSaved() }
-        if let sync {
-            try? sync.reconnectWebdav(url: renewed.url, username: renewed.username, password: password)
-        }
+        try await connect(url: account.url, username: account.username, password: password)
     }
 
     /// The user picked `provider` while Connected to another: to be confirmed.

@@ -71,12 +71,12 @@ impl MoveGesture {
         self.step
     }
 
-    /// The pointer that moves the Selection.
     /// The handles of the Elements that move.
     pub fn handles(&self) -> Vec<u32> {
         self.moving.iter().map(|&(handle, _)| handle).collect()
     }
 
+    /// The pointer that moves the Selection.
     pub fn pointer(&self) -> u64 {
         self.pointer
     }

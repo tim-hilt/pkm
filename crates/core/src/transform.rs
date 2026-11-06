@@ -268,12 +268,12 @@ impl TransformGesture {
         }
     }
 
-    /// The pointer that transforms the Selection.
     /// The handles of the Elements being transformed.
     pub fn handles(&self) -> Vec<u32> {
         self.tracked.iter().map(|t| t.handle).collect()
     }
 
+    /// The pointer that transforms the Selection.
     pub fn pointer(&self) -> u64 {
         self.pointer
     }
