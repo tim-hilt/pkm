@@ -47,8 +47,15 @@ final class CanvasMetalView: MTKView {
         guard let editor else { return }
         let changed = editor.darkMode() != isDark
         editor.setDarkMode(on: isDark)
+        renderer?.isDark = isDark
         renderer?.paperColor = editor.canvasColor()
-        if changed { renderer?.setGeometry(editor.geometry()) }
+        if changed {
+            renderer?.setGeometry(editor.geometry())
+            // The overlay and the Text view have the colours of the new
+            // appearance; what is typed in the latter stays.
+            syncOverlay()
+            syncTextEditor()
+        }
     }
 
     /// Called after input or a command reached the editor, for chrome that

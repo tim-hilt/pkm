@@ -744,26 +744,41 @@ impl Editor {
     /// from the Elements as they are because of the zoom it was made for.
     pub fn overlay(&self) -> Geometry {
         let zoom = self.navigation.viewport().zoom();
+        let colors = overlay::Colors::of(self.dark_mode);
         let mut geometry = overlay::selection(
             &self.scene,
             &self.selection,
             self.editing_group.as_deref(),
             zoom,
+            colors,
         );
         if let Some(boxing) = &self.box_selecting {
-            overlay::box_select(&mut geometry, &boxing.bounds(), zoom);
+            overlay::box_select(&mut geometry, &boxing.bounds(), zoom, colors);
         } else if let Some(transform_box) = TransformBox::of(&self.scene, &self.selection) {
-            overlay::transform_handles(&mut geometry, &transform_box, self.last_pointer, zoom);
+            overlay::transform_handles(
+                &mut geometry,
+                &transform_box,
+                self.last_pointer,
+                zoom,
+                colors,
+            );
         } else if let Some(handles) = self.point_handles(self.last_pointer) {
             let selected = self.points.indices();
-            overlay::point_handles(&mut geometry, &handles, selected, self.last_pointer, zoom);
+            overlay::point_handles(
+                &mut geometry,
+                &handles,
+                selected,
+                self.last_pointer,
+                zoom,
+                colors,
+            );
         }
         if let Some(outline) = self
             .highlight
             .as_deref()
             .and_then(|id| binding::highlight(&self.scene, id))
         {
-            overlay::binding_highlight(&mut geometry, &outline, zoom);
+            overlay::binding_highlight(&mut geometry, &outline, zoom, colors);
         }
         geometry
     }

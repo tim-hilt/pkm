@@ -13,9 +13,15 @@ impl Editor {
     /// command. Needs a [`Editor::set_text_measurer`]: without one no text
     /// can be edited.
     pub fn text_editor(&self) -> Option<TextEditor> {
-        self.text
+        let mut editor = self
+            .text
             .as_ref()?
-            .editor(&self.scene, self.navigation.viewport())
+            .editor(&self.scene, self.navigation.viewport())?;
+        // The Scene keeps the colour it has; the view shows the Canvas's.
+        if self.dark_mode {
+            editor.color = dark_mode(editor.color);
+        }
+        Some(editor)
     }
 
     /// Tells the core what the text view says now: the text is laid out

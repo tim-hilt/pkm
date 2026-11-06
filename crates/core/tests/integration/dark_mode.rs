@@ -6,7 +6,7 @@
 use excalidraw_native_core::{Editor, ExportScope, Property, TextMeasurer, Tool, dark_mode_color};
 use std::sync::Arc;
 
-use crate::common::{FixedWidth, editor_with, tap};
+use crate::common::{FixedWidth, editor_with, replay, tap};
 
 #[test]
 fn colours_are_transformed_like_excalidraws_dark_mode_filter() {
@@ -203,4 +203,125 @@ fn toggling_gives_the_geometry_another_generation_so_clients_drop_their_caches()
     assert_ne!(before, dark);
     editor.set_dark_mode(true);
     assert_eq!(editor.geometry().generation(), dark);
+}
+
+// --- The overlay and the Text view ------------------------------------------------
+
+fn overlay_colours(editor: &Editor) -> Vec<u32> {
+    editor.overlay().parts().iter().map(|p| p.color).collect()
+}
+
+fn selected_rectangle() -> Editor {
+    let mut editor = shapes();
+    editor.set_tool(Tool::Selection);
+    tap(&mut editor, "finger", (20.0, 10.0), 0.0);
+    editor
+}
+
+#[test]
+fn the_overlay_uses_excalidraws_dark_selection_colours() {
+    // Light: `--color-selection` #6965db and white handles. Dark: #b4b0ff
+    // (theme.scss) and the white handles' transform, #121212.
+    let mut editor = selected_rectangle();
+    let light = overlay_colours(&editor);
+    assert!(light.contains(&0x6965_dbff) && light.contains(&0xffff_ffff));
+    let revision = editor.overlay_revision();
+    editor.set_dark_mode(true);
+    assert_ne!(editor.overlay_revision(), revision, "clients redraw it");
+    let dark = overlay_colours(&editor);
+    assert_eq!(dark.len(), light.len());
+    assert!(dark.contains(&0xb4b0_ffff) && dark.contains(&0x1212_12ff));
+    assert!(!dark.contains(&0x6965_dbff) && !dark.contains(&0xffff_ffff));
+}
+
+#[test]
+fn group_frames_are_light_on_the_dark_canvas() {
+    let mut editor = editor_with(&[
+        r##"{"id":"a","type":"rectangle","x":0,"y":0,"width":40,"height":20,
+            "groupIds":["g"],"roundness":null,"index":null,"seed":1,"version":1,"versionNonce":1}"##,
+        r##"{"id":"b","type":"rectangle","x":100,"y":0,"width":40,"height":20,
+            "groupIds":["g"],"roundness":null,"index":null,"seed":2,"version":1,"versionNonce":1}"##,
+    ]);
+    editor.set_tool(Tool::Selection);
+    tap(&mut editor, "finger", (20.0, 10.0), 0.0);
+    assert!(overlay_colours(&editor).contains(&0x0000_00ff), "black");
+    editor.set_dark_mode(true);
+    // Excalidraw's `groupSelectionColor`, `getThemedColor("#000")`.
+    assert!(overlay_colours(&editor).contains(&0xeded_edff));
+}
+
+#[test]
+fn the_box_select_rectangle_follows_the_dark_theme() {
+    let mut editor = shapes();
+    editor.set_tool(Tool::Selection);
+    editor.set_dark_mode(true);
+    replay(
+        &mut editor,
+        "0 down 1 finger 200 200\n0.1 move 1 finger 250 250\n0.2 move 1 finger 300 300",
+    );
+    let colours = overlay_colours(&editor);
+    // The fill `rgba(0, 0, 200, 0.04)` through `getThemedColor`, and the
+    // stroke in the dark selection colour.
+    assert!(colours.contains(&0xb4b0_ffff));
+    let fill = dark_mode_color("#0000c8");
+    let fill = u32::from_str_radix(&fill[1..], 16).unwrap() << 8 | 0xff;
+    assert!(colours.contains(&fill), "{colours:x?}");
+}
+
+#[test]
+fn the_binding_highlight_is_excalidraws_dark_one() {
+    let mut editor = shapes();
+    editor.set_dark_mode(true);
+    editor.set_tool(Tool::Arrow);
+    replay(
+        &mut editor,
+        "0 down 1 finger 300 300\n0.1 move 1 finger 100 50\n0.2 move 1 finger 20 10",
+    );
+    let colours = overlay_colours(&editor);
+    // `BINDING_HIGHLIGHT_RGB[DARK]` is 104, 182, 240.
+    assert!(colours.contains(&0x68b6_f0ff), "{colours:x?}");
+}
+
+#[test]
+fn the_text_view_shows_the_display_colour_and_the_scene_keeps_its_own() {
+    let mut editor = editor_with(&[
+        r##"{"id":"t","type":"text","x":0,"y":0,"width":20,"height":25,"text":"hi",
+            "originalText":"hi","fontSize":20,"fontFamily":1,"strokeColor":"#e03131",
+            "textAlign":"left","verticalAlign":"top","lineHeight":1.25,
+            "index":null,"seed":1,"version":1,"versionNonce":1}"##,
+    ]);
+    editor.set_text_measurer(Arc::new(FixedWidth) as Arc<dyn TextMeasurer>);
+    editor.set_tool(Tool::Text);
+    tap(&mut editor, "finger", (5.0, 5.0), 0.0);
+    assert_eq!(editor.text_editor().unwrap().color, 0xe031_31ff);
+    let revision = editor.revision();
+    editor.set_dark_mode(true);
+    // Switching while the view is open keeps the edit.
+    let open = editor.text_editor().expect("still editing");
+    assert_eq!(open.color, 0xff83_83ff);
+    assert_eq!(open.text, "hi");
+    assert_eq!(editor.revision(), revision);
+    editor.set_editing_text("hi there");
+    editor.commit_text();
+    let saved = editor.save();
+    let saved = String::from_utf8_lossy(&saved);
+    assert!(saved.contains("#e03131") && !saved.contains("#ff8383"));
+}
+
+#[test]
+fn the_erase_preview_shows_faded_elements_in_their_dark_colours() {
+    let mut editor = shapes();
+    editor.set_dark_mode(true);
+    editor.set_tool(Tool::Eraser);
+    replay(
+        &mut editor,
+        "0.0 down 1 mouse 20 -10\n0.1 move 1 mouse 20 30",
+    );
+    let parts = editor.geometry().parts().to_vec();
+    let faded: Vec<_> = parts.iter().filter(|p| p.element == 0).collect();
+    assert!(!faded.is_empty());
+    for part in faded {
+        assert_eq!(part.opacity, 0.2);
+        assert!([0xff83_83ff, 0x5a2c_2cff].contains(&part.color));
+    }
 }

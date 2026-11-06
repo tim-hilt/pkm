@@ -12,13 +12,16 @@ enum ImagePlaceholder {
         var path: SVGPathData
     }
 
-    private static let backgroundColor: UInt32 = 0xe7e7_e7ff
+    /// Excalidraw's light and dark placeholder backgrounds. The icon is a
+    /// picture of its own there, the same in both.
+    private static func backgroundColor(dark: Bool) -> UInt32 { dark ? 0x2e2e_2eff : 0xe7e7_e7ff }
     private static let iconColor: UInt32 = 0x8888_88ff
     /// The icon is at most this large, in Scene units.
     private static let largestIcon: Float = 100
 
     /// The fills for a `width` x `height` box, background first.
-    static func fills(width: Float, height: Float, failed: Bool) -> [Fill] {
+    static func fills(width: Float, height: Float, failed: Bool, dark: Bool = false) -> [Fill] {
+        let backgroundColor = backgroundColor(dark: dark)
         let box = SVGPathData(
             verbs: [GeometryVerb.move, .line, .line, .line].map(\.rawValue),
             coords: [0, 0, width, 0, width, height, 0, height])

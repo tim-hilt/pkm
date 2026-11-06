@@ -6,6 +6,7 @@
 //! at any zoom, so they are made for one zoom; clients ask again when it
 //! changes (see `Editor::overlay_revision`).
 
+use crate::color::dark_mode;
 use crate::edit_points::PointHandles;
 use std::collections::HashSet;
 
@@ -18,16 +19,53 @@ use crate::scene::{ElementType, Scene};
 use crate::selection::Selection;
 use crate::transform_handles::{Grip, TransformBox};
 
-/// Excalidraw's selection colour (`--color-selection`), opaque.
-const SELECTION_COLOR: u32 = 0x6965_dbff;
+/// The colours of the overlay in one theme, as Excalidraw's
+/// `interactiveScene.ts` has them: the dark ones are its dark-theme
+/// `--color-selection`, its dark binding highlight, and the transform
+/// (`getThemedColor`) of the light colours it themes that way.
+#[derive(Clone, Copy)]
+pub(crate) struct Colors {
+    /// `--color-selection`, opaque.
+    selection: u32,
+    /// `groupSelectionColor`.
+    group: u32,
+    /// The fill of handles.
+    handle: u32,
+    /// The highlight of the shape an arrow would bind to.
+    highlight: u32,
+    /// The fill of the box-select rectangle (`rgba(0, 0, 200, 0.04)`; its
+    /// opacity is separate).
+    box_fill: u32,
+}
+
+impl Colors {
+    pub(crate) fn of(dark: bool) -> Self {
+        if dark {
+            Self {
+                selection: 0xb4b0_ffff,
+                group: dark_mode(0x0000_00ff),
+                handle: dark_mode(0xffff_ffff),
+                highlight: 0x68b6_f0ff,
+                box_fill: dark_mode(0x0000_c8ff),
+            }
+        } else {
+            Self {
+                selection: 0x6965_dbff,
+                group: 0x0000_00ff,
+                handle: 0xffff_ffff,
+                highlight: 0x1971_c2ff,
+                box_fill: 0x0000_c8ff,
+            }
+        }
+    }
+}
+
 /// Excalidraw's `DEFAULT_TRANSFORM_HANDLE_SPACING * 2`: how far in view
 /// points a selection frame keeps from its Element.
 const FRAME_PADDING: f64 = 4.0;
 /// The line width of a selection frame in view points.
 const FRAME_WIDTH: f64 = 1.0;
 
-/// Excalidraw's `groupSelectionColor` (black in the light theme).
-const GROUP_COLOR: u32 = 0x0000_00ff;
 /// The dash of a group frame in view points: `8` drawn, `4` skipped.
 const GROUP_DASH: (f64, f64) = (8.0, 4.0);
 
@@ -41,6 +79,7 @@ pub(crate) fn selection(
     selection: &Selection,
     editing: Option<&str>,
     zoom: f64,
+    colors: Colors,
 ) -> Geometry {
     let groups = group::selected_members(scene, selection, editing);
     let in_group: HashSet<&str> = groups.iter().flatten().copied().collect();
@@ -56,7 +95,7 @@ pub(crate) fn selection(
             _ => FRAME_PADDING / zoom,
         };
         let style = StrokeStyle {
-            color: SELECTION_COLOR,
+            color: colors.selection,
             width: (FRAME_WIDTH / zoom) as f32,
             opacity: 1.0,
             dash: None,
@@ -75,16 +114,16 @@ pub(crate) fn selection(
     });
     for members in selected.chain(entered) {
         if let Some(bounds) = members.iter().map(Frame::shown).reduce(Frame::union) {
-            group_frame(&mut geometry, &bounds, zoom);
+            group_frame(&mut geometry, &bounds, zoom, colors);
         }
     }
     geometry
 }
 
 /// A dashed frame around `bounds`, not turned.
-fn group_frame(geometry: &mut Geometry, bounds: &Frame, zoom: f64) {
+fn group_frame(geometry: &mut Geometry, bounds: &Frame, zoom: f64, colors: Colors) {
     let style = StrokeStyle {
-        color: GROUP_COLOR,
+        color: colors.group,
         width: (FRAME_WIDTH / zoom) as f32,
         opacity: 1.0,
         dash: Some(Dash {
@@ -96,9 +135,6 @@ fn group_frame(geometry: &mut Geometry, bounds: &Frame, zoom: f64) {
     trace(&mut geometry.stroke(NO_ELEMENT, 0, style), corners);
 }
 
-/// Excalidraw's handle colour: white squares with the selection colour
-/// around them.
-const HANDLE_COLOR: u32 = 0xffff_ffff;
 /// What overlay parts that belong to no Element (transform handles, the
 /// box-select rectangle) name in its place: clients do not cache the overlay
 /// by Element (see [`Editor::overlay`]).
@@ -112,6 +148,7 @@ pub(crate) fn transform_handles(
     transform_box: &TransformBox,
     kind: PointerKind,
     zoom: f64,
+    colors: Colors,
 ) {
     let half = Grip::of(kind).visual / zoom / 2.0;
     let (sin, cos) = transform_box.angle().sin_cos();
@@ -123,13 +160,13 @@ pub(crate) fn transform_handles(
                     (cy + dx * sin + dy * cos) as f32,
                 )
             });
-        framed(geometry, corners, HANDLE_COLOR, zoom);
+        framed(geometry, corners, colors.handle, zoom, colors);
     }
 }
 
 /// `corners` filled with `fill` and framed in the selection colour, one view
 /// point wide at any zoom: what a handle looks like.
-fn framed(geometry: &mut Geometry, corners: [(f32, f32); 4], fill: u32, zoom: f64) {
+fn framed(geometry: &mut Geometry, corners: [(f32, f32); 4], fill: u32, zoom: f64, colors: Colors) {
     // A writer holds the geometry, so the fill is finished before the stroke
     // around it begins.
     {
@@ -148,7 +185,7 @@ fn framed(geometry: &mut Geometry, corners: [(f32, f32); 4], fill: u32, zoom: f6
         NO_ELEMENT,
         0,
         StrokeStyle {
-            color: SELECTION_COLOR,
+            color: colors.selection,
             width: (FRAME_WIDTH / zoom) as f32,
             opacity: 1.0,
             dash: None,
@@ -167,18 +204,25 @@ pub(crate) fn point_handles(
     selected: &[usize],
     kind: PointerKind,
     zoom: f64,
+    colors: Colors,
 ) {
     let half = Grip::of(kind).visual / zoom / 2.0;
     for (index, &at) in handles.points().iter().enumerate() {
         let fill = if selected.contains(&index) {
-            SELECTION_COLOR
+            colors.selection
         } else {
-            HANDLE_COLOR
+            colors.handle
         };
-        framed(geometry, square(at, half), fill, zoom);
+        framed(geometry, square(at, half), fill, zoom, colors);
     }
     for at in handles.middles() {
-        framed(geometry, square(at, half / 2.0), HANDLE_COLOR, zoom);
+        framed(
+            geometry,
+            square(at, half / 2.0),
+            colors.handle,
+            zoom,
+            colors,
+        );
     }
 }
 
@@ -189,9 +233,6 @@ fn square((cx, cy): Point, half: f64) -> [(f32, f32); 4] {
         .map(|(dx, dy)| ((cx + dx) as f32, (cy + dy) as f32))
 }
 
-/// The colour of the highlight of a shape an arrow would bind to: a blue that
-/// sets it apart from the selection colour (Excalidraw's `#1971c2`).
-const HIGHLIGHT_COLOR: u32 = 0x1971_c2ff;
 /// The line width of the highlight of a shape in view points: thicker than
 /// a selection frame, as it marks where an arrow would bind.
 const HIGHLIGHT_WIDTH: f64 = 3.0;
@@ -199,7 +240,12 @@ const HIGHLIGHT_OPACITY: f32 = 0.6;
 
 /// The highlight of the shape an arrow end would bind to: its `outline`, a
 /// closed polygon in the Scene.
-pub(crate) fn binding_highlight(geometry: &mut Geometry, outline: &[Point], zoom: f64) {
+pub(crate) fn binding_highlight(
+    geometry: &mut Geometry,
+    outline: &[Point],
+    zoom: f64,
+    colors: Colors,
+) {
     let Some(&(x, y)) = outline.first() else {
         return;
     };
@@ -207,7 +253,7 @@ pub(crate) fn binding_highlight(geometry: &mut Geometry, outline: &[Point], zoom
         NO_ELEMENT,
         0,
         StrokeStyle {
-            color: HIGHLIGHT_COLOR,
+            color: colors.highlight,
             width: (HIGHLIGHT_WIDTH / zoom) as f32,
             opacity: HIGHLIGHT_OPACITY,
             dash: None,
@@ -219,20 +265,18 @@ pub(crate) fn binding_highlight(geometry: &mut Geometry, outline: &[Point], zoom
     }
 }
 
-/// Excalidraw's box-select fill (`rgba(0, 0, 200, 0.04)`).
-const BOX_FILL: u32 = 0x0000_c8ff;
 const BOX_FILL_OPACITY: f32 = 0.04;
 
 /// The rectangle of a box-select drag over `bounds`: faintly filled, framed
 /// in the selection colour, one view point wide at any zoom.
-pub(crate) fn box_select(geometry: &mut Geometry, bounds: &Frame, zoom: f64) {
+pub(crate) fn box_select(geometry: &mut Geometry, bounds: &Frame, zoom: f64, colors: Colors) {
     let corners = corners(bounds, 0.0, 0.0);
     {
         let mut fill = geometry.fill(
             NO_ELEMENT,
             0,
             FillStyle {
-                color: BOX_FILL,
+                color: colors.box_fill,
                 opacity: BOX_FILL_OPACITY,
                 rule: FillRule::NonZero,
             },
@@ -243,7 +287,7 @@ pub(crate) fn box_select(geometry: &mut Geometry, bounds: &Frame, zoom: f64) {
         NO_ELEMENT,
         0,
         StrokeStyle {
-            color: SELECTION_COLOR,
+            color: colors.selection,
             width: (FRAME_WIDTH / zoom) as f32,
             opacity: 1.0,
             dash: None,

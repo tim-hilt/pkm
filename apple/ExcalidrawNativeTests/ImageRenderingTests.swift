@@ -137,6 +137,19 @@ import Testing
         #expect(icon.count > 500, "the picture icon in the middle: \(icon.count)")
     }
 
+    @Test func placeholdersUseExcalidrawsDarkColoursOnTheDarkCanvas() throws {
+        let scene = scene(TestScenes.image("i", 50, 50, (100, 100), file: "gone"))
+        let renderer = try OffscreenRender.makeRenderer()
+        renderer.files = scene.editor
+        renderer.isDark = true
+        renderer.setGeometry(scene.geometry)
+        let frame = OffscreenRender.draw(with: renderer, size: 200)
+
+        #expect(frame.rgb(52, 52) == [0x2e, 0x2e, 0x2e])
+        renderer.isDark = false
+        #expect(OffscreenRender.draw(with: renderer, size: 200).rgb(52, 52) == placeholderGrey, "and back")
+    }
+
     @Test func anImageWithoutAFileAndOneThatIsNoPictureAlsoGetThePlaceholder() throws {
         let noFile = try render(
             scene(#"{"id":"i","type":"image","x":50,"y":50,"width":100,"height":100,"fileId":null}"#))

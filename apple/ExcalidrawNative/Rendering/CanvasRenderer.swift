@@ -91,6 +91,17 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         didSet { if paperColor != oldValue { onNeedsDisplay?() } }
     }
 
+    /// Whether the Canvas is dark: image placeholders have their dark colours
+    /// then. The Scene's own colours come from the core already transformed.
+    var isDark = false {
+        didSet {
+            guard isDark != oldValue else { return }
+            cache.removeAll()
+            drawsAreStale = true
+            onNeedsDisplay?()
+        }
+    }
+
     private let queue: any MTLCommandQueue
     private let pipeline: any MTLRenderPipelineState
     /// The fill shaders: into the stencil buffer only, and onto the colour target.
@@ -580,7 +591,8 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
             return [.image(ImageDraw(texture: texture, uniforms: ImageUniforms(image)))]
         }
         let failed = image.imageStatus == .error || textures.isUndecodable(id)
-        return ImagePlaceholder.fills(width: image.width, height: image.height, failed: failed).compactMap { fill in
+        return ImagePlaceholder.fills(width: image.width, height: image.height, failed: failed, dark: isDark).compactMap
+        { fill in
             // The placeholder is made in the box's frame; the image's
             // placement takes it into the Scene.
             var coords = fill.path.coords

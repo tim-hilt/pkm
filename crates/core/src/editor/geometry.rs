@@ -128,6 +128,7 @@ impl Editor {
     pub fn set_dark_mode(&mut self, on: bool) {
         if self.dark_mode != on {
             self.dark_mode = on;
+            self.overlay_revision += 1;
             // What clients cached per Element has the old colours.
             self.generation = next_generation();
         }
