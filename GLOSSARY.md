@@ -83,3 +83,29 @@ _Avoid_: Theme, dark theme, night mode
 **Properties panel**:
 The panel that sets stroke colour, background colour, fill style, stroke width, stroke style, sloppiness, edges and opacity (and, for text, font size and text alignment) on the Selection, and, with an empty Selection, as the style of the next Element. It shows the Selection's current values, or none chosen where they are mixed.
 _Avoid_: Inspector, style bar, sidebar
+
+### Cloud
+
+**Device**:
+One installation of the app.
+_Avoid_: Client, installation
+
+**Cloud Backing**:
+Keeping the Drawings in the user's cloud storage as well, so that all their Devices share them.
+_Avoid_: Cloud sync, backup
+
+**Cloud Provider**:
+The service that holds the Drawings for Cloud Backing: WebDAV, iCloud Drive, Google Drive or OneDrive. Only one is Connected at a time.
+_Avoid_: Backend, storage, service
+
+**Connect**:
+Starting Cloud Backing with a Cloud Provider. Its opposite is **Disconnect**, which stops it and keeps every Drawing on the Device.
+_Avoid_: Sign in, link, log out
+
+**Reconnect**:
+Giving a Connected Cloud Provider access again after it lost it, e.g. a revoked sign-in or a changed password.
+_Avoid_: Sign in again, re-authenticate
+
+**Sync**:
+Exchanging changes to the Drawings with the Cloud Provider.
+_Avoid_: Backup, upload
