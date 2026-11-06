@@ -191,7 +191,7 @@ impl Editor {
     /// as Excalidraw does: see [`crate::group`]. Tapping any of them then
     /// selects them all. One undo step. Does nothing unless two or more
     /// Elements are selected and not all of them in a group already (see
-    /// the long-press's `can_group`), or while a pointer is drawing or moving.
+    /// [`Editor::can_group`]), or while a pointer is drawing or moving.
     pub fn group(&mut self) {
         self.finish_placing();
         if self.is_gesturing() {
@@ -212,10 +212,24 @@ impl Editor {
         self.changed();
     }
 
+    /// Whether the group command would do anything: two or more Elements are
+    /// selected and no group holds all of them already. The Element menu and
+    /// the Canvas's accessibility custom actions offer Group exactly then.
+    pub fn can_group(&self) -> bool {
+        group::can_group(&self.scene, &self.selection, self.editing_group.as_deref())
+    }
+
+    /// Whether the ungroup command would do anything: a group is selected.
+    /// The Element menu and the Canvas's accessibility custom actions offer
+    /// Ungroup exactly then.
+    pub fn can_ungroup(&self) -> bool {
+        group::can_ungroup(&self.scene, &self.selection, self.editing_group.as_deref())
+    }
+
     /// Dissolves the groups that are selected (the `ungroup` command): the
     /// Elements stay selected, now without them. Groups inside and outside
     /// those stay. One undo step. Does nothing unless a group is selected
-    /// (see the long-press's `can_ungroup`), or while a pointer is drawing or
+    /// (see [`Editor::can_ungroup`]), or while a pointer is drawing or
     /// moving.
     pub fn ungroup(&mut self) {
         self.finish_placing();

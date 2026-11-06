@@ -74,6 +74,7 @@ final class CanvasMetalView: MTKView {
         textOverlay.onEnd = { [weak self] in self?.perform { $0.commitText() } }
         #if !os(macOS)
             isMultipleTouchEnabled = true
+            accessibilityLabel = String(localized: "Canvas")
             enablePencilInput()
             enableContextMenu()
             observeKeyboard()
@@ -83,6 +84,34 @@ final class CanvasMetalView: MTKView {
 
     @available(*, unavailable)
     required init(coder: NSCoder) { fatalError("CanvasMetalView is created in code") }
+
+    #if !os(macOS)
+        /// The Canvas is a single element for assistive technology only while
+        /// it offers the Element menu's actions. While a text is edited, the
+        /// text view inside must stay reachable instead.
+        override var isAccessibilityElement: Bool {
+            get { editor?.selection().isEmpty == false && textOverlay.view == nil }
+            set { super.isAccessibilityElement = newValue }
+        }
+
+        /// The Element menu's actions while a Selection exists, for VoiceOver
+        /// and Switch Control (see `CanvasAccessibilityActions`); none without
+        /// one.
+        override var accessibilityCustomActions: [UIAccessibilityCustomAction]? {
+            get {
+                let actions = accessibleActions
+                guard !actions.isEmpty else { return nil }
+                return actions.map { action in
+                    UIAccessibilityCustomAction(name: action.name) { [weak self] _ in
+                        guard let self else { return false }
+                        MainActor.assumeIsolated { action.run(self) }
+                        return true
+                    }
+                }
+            }
+            set { super.accessibilityCustomActions = newValue }
+        }
+    #endif
 
     // MARK: Commands
 

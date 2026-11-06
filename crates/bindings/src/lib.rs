@@ -511,6 +511,18 @@ impl Editor {
         self.editor().selection().to_vec()
     }
 
+    /// Whether grouping the Selection would do anything; the Element menu and
+    /// the Canvas's accessibility custom actions offer Group exactly then.
+    pub fn can_group(&self) -> bool {
+        self.editor().can_group()
+    }
+
+    /// Whether ungrouping the Selection would do anything; see
+    /// [`Editor::can_group`].
+    pub fn can_ungroup(&self) -> bool {
+        self.editor().can_ungroup()
+    }
+
     /// What the properties panel shows; see
     /// [`excalidraw_native_core::Editor::properties`]. Read it after forwarding
     /// input or a command.

@@ -705,16 +705,8 @@ impl Editor {
             None => return Some(ContextMenu::Canvas),
         }
         Some(ContextMenu::Element {
-            can_group: group::can_group(
-                &self.scene,
-                &self.selection,
-                self.editing_group.as_deref(),
-            ),
-            can_ungroup: group::can_ungroup(
-                &self.scene,
-                &self.selection,
-                self.editing_group.as_deref(),
-            ),
+            can_group: self.can_group(),
+            can_ungroup: self.can_ungroup(),
         })
     }
 }

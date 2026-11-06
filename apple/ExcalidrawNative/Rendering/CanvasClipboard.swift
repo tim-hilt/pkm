@@ -85,6 +85,13 @@ extension CanvasMetalView {
             }
         }
 
+        /// Pastes what the pasteboard holds in the middle of the view: the
+        /// accessibility action has no press point (the menu remembers one).
+        func pasteFromPasteboard() {
+            contextMenuPoint = nil
+            paste(itemProviders: UIPasteboard.general.itemProviders)
+        }
+
         /// The Elements among the pasted `providers`, if any, around `point`
         /// as for `pasteClipboardText`.
         func pasteElements(from providers: [NSItemProvider], at point: CGPoint? = nil) async -> Bool {

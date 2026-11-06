@@ -76,6 +76,23 @@ fn can_ungroup(editor: &mut Editor, id: &str) -> bool {
     group_flags(editor, id).1
 }
 
+#[test]
+fn group_availability_is_readable_without_a_press() {
+    let mut editor = four(["", "", "", ""]);
+    select_all_of(&mut editor, &["a", "b"]);
+    assert!(editor.can_group());
+    assert!(!editor.can_ungroup());
+
+    editor.group();
+    assert!(!editor.can_group());
+    assert!(editor.can_ungroup());
+
+    // A lone Element is neither a group nor something to group.
+    select(&mut editor, "c", 10.0);
+    assert!(!editor.can_group());
+    assert!(!editor.can_ungroup());
+}
+
 fn select_with_shift(editor: &mut Editor, id: &str, t: f64) {
     let (x, y) = centre(id);
     replay(

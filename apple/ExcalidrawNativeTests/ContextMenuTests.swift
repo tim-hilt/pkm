@@ -28,9 +28,10 @@ import Testing
         private func makeSetup() throws -> Setup {
             let setup = Setup()
             _ = try #require(setup.canvas.renderer)
-            setup.editor.setViewSize(width: 800, height: 600)
             try setup.editor.load(bytes: Data(Self.drawing.utf8))
             setup.canvas.editor = setup.editor
+            // The Canvas reports its own (zero) size when it gets the editor.
+            setup.editor.setViewSize(width: 800, height: 600)
             return setup
         }
 
@@ -175,6 +176,107 @@ import Testing
             try action("Cut", in: menu).performWithSender(nil, target: nil)
             #expect(UIPasteboard.general.string?.contains("excalidraw/clipboard") == true)
             #expect(setup.editor.elementCount() == 1)
+        }
+
+        // MARK: Accessibility custom actions
+
+        private func accessibilityNames(_ setup: Setup) -> [String] {
+            setup.canvas.accessibilityCustomActions?.map(\.name) ?? []
+        }
+
+        private func runAction(_ name: String, on setup: Setup) throws {
+            let action = try #require(setup.canvas.accessibleActions.first { $0.name == name })
+            action.run(setup.canvas)
+        }
+
+        @Test func theCustomActionsAreTheElementMenusActionsInOrder() throws {
+            let setup = try makeSetup()
+            setup.editor.perform(command: .selectAll)
+
+            #expect(
+                accessibilityNames(setup) == [
+                    "Cut", "Copy", "Paste", "Duplicate", "Group",
+                    "Bring to Front", "Bring Forward", "Send Backward", "Send to Back", "Delete",
+                ])
+            #expect(setup.canvas.isAccessibilityElement)
+        }
+
+        @Test func groupAndUngroupAreOfferedOnlyWhereTheyApply() throws {
+            let setup = try makeSetup()
+            _ = try #require(press(setup, at: CGPoint(x: 150, y: 125)))
+
+            // One Element: neither grouping nor ungrouping would do anything.
+            #expect(!accessibilityNames(setup).contains("Group"))
+            #expect(!accessibilityNames(setup).contains("Ungroup"))
+
+            setup.editor.perform(command: .selectAll)
+            #expect(accessibilityNames(setup).contains("Group"))
+            #expect(!accessibilityNames(setup).contains("Ungroup"))
+
+            setup.canvas.perform { $0.group() }
+            #expect(!accessibilityNames(setup).contains("Group"))
+            #expect(accessibilityNames(setup).contains("Ungroup"))
+        }
+
+        @Test func thereAreNoCustomActionsWithoutASelection() throws {
+            let setup = try makeSetup()
+
+            #expect(setup.canvas.accessibleActions.isEmpty)
+            #expect(accessibilityNames(setup).isEmpty)
+            #expect(!setup.canvas.isAccessibilityElement)
+        }
+
+        @Test func theActionsRunTheElementMenusCommands() async throws {
+            let setup = try makeSetup()
+            setup.editor.perform(command: .selectAll)
+
+            try runAction("Duplicate", on: setup)
+            #expect(setup.editor.elementCount() == 4)
+
+            try runAction("Delete", on: setup)
+            #expect(setup.editor.elementCount() == 2)
+
+            setup.editor.perform(command: .selectAll)
+            try runAction("Cut", on: setup)
+            #expect(setup.editor.elementCount() == 0)
+            #expect(UIPasteboard.general.string?.contains("excalidraw/clipboard") == true)
+        }
+
+        @Test func theArrangeActionsMoveTheSelectionInZOrder() throws {
+            let setup = try makeSetup()
+            _ = try #require(press(setup, at: CGPoint(x: 150, y: 125)))
+
+            try runAction("Bring to Front", on: setup)
+
+            let saved = String(decoding: setup.editor.save(), as: UTF8.self)
+            let (a, b) = (saved.range(of: #""id": "a""#), saved.range(of: #""id": "b""#))
+            #expect(try #require(b).lowerBound < #require(a).lowerBound)
+        }
+
+        @Test func theGroupActionsRunTheElementMenusCommands() throws {
+            let setup = try makeSetup()
+            setup.editor.perform(command: .selectAll)
+
+            try runAction("Group", on: setup)
+            #expect(accessibilityNames(setup).contains("Ungroup"))
+            setup.editor.perform(command: .selectAll)
+            #expect(setup.editor.selection().count == 2)
+
+            try runAction("Ungroup", on: setup)
+            #expect(!accessibilityNames(setup).contains("Ungroup"))
+        }
+
+        @Test func pasteFromTheActionsLandsInTheMiddleOfTheView() async throws {
+            let setup = try makeSetup()
+            setup.editor.perform(command: .selectAll)
+            try runAction("Copy", on: setup)
+
+            try runAction("Paste", on: setup)
+
+            #expect(await eventually { setup.editor.elementCount() == 4 })
+            // The two rectangles span 300 wide, centred on the view's middle.
+            let saved = String(decoding: setup.editor.save(), as: UTF8.self)
+            #expect(saved.contains(#""x": 250"#) || saved.contains(#""x": 250."#))
         }
     }
 #endif
