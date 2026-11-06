@@ -6,3 +6,9 @@ HTTP, OAuth and the four Cloud Providers (WebDAV, iCloud Drive, Google Drive, On
 
 - **In the core, as in Leaf**: breaks ADR-0009's intent.
 - **Swift with URLSession**: smaller, but every platform would write it again.
+
+## Consequences
+
+- Release build of the macOS app executable, before → after the crate (WebDAV storage, directory storage, ureq on the system's TLS) and the Settings screen: 3,998,704 → 5,099,888 bytes (+1,101,184, +27.5%). Almost all of it is ureq, `native-tls` and the XML parser; the OAuth providers and the Sync engine will add to it. Measured with `xcodebuild -configuration Release -destination 'platform=macOS'`, as the executable inside the `.app`.
+- On Apple platforms TLS is the Security framework's and the Device's trust store, so a certificate from a CA the Device trusts works. The framework refuses a certificate valid longer than 825 days or without the `serverAuth` extended key usage, so self-hosters issue theirs accordingly. The WebDAV tests generate a 30-day certificate with `openssl` and serve it with `rclone serve webdav`; they skip without either tool.
+- rclone cannot list a folder while a file in it is being written, so WebDAV uploads go to a hidden `.incoming` folder inside `ExcalidrawNative` and are moved into place.

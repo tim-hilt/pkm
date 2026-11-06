@@ -4,6 +4,7 @@
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use excalidraw_native_cloud::{ConnectError, WebDavStorage};
 use excalidraw_native_core::scene::{FillPattern, LineStyle};
 use excalidraw_native_core::{
     Command, ContextMenu, Cursor, Edges, ExportScope, FontSize, ImageFile, MagnifyEvent, Modifiers,
@@ -12,6 +13,26 @@ use excalidraw_native_core::{
 };
 
 uniffi::setup_scaffolding!("ExcalidrawNativeCore");
+
+// Cloud Backing (ADR-0012): the Cloud Providers live in their own crate.
+
+/// Why Connecting to a Cloud Provider failed; the client words the message.
+#[uniffi::remote(Error)]
+pub enum ConnectError {
+    WrongCredentials,
+    Unreachable,
+    NotHttps,
+    NotWebDav,
+}
+
+/// Connects to the WebDAV server at `url` as `username` with `password`, which
+/// checks the server and creates the `ExcalidrawNative` folder under `url` if
+/// it is missing. Blocks while it talks to the server, so call it off the main
+/// thread. Keeps nothing: the client keeps the credentials.
+#[uniffi::export]
+pub fn connect_webdav(url: String, username: String, password: String) -> Result<(), ConnectError> {
+    WebDavStorage::connect(&url, &username, &password).map(drop)
+}
 
 /// Why a file could not be opened as a Drawing, in words fit for a user.
 #[derive(Debug, uniffi::Error)]
@@ -1271,6 +1292,13 @@ mod tests {
                 can_ungroup: false
             })
         );
+    }
+
+    #[test]
+    fn connecting_to_an_http_url_is_refused_before_any_request() {
+        let result = connect_webdav("http://example.com".into(), "u".into(), "p".into());
+
+        assert_eq!(result.unwrap_err(), ConnectError::NotHttps);
     }
 
     #[test]

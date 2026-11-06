@@ -117,7 +117,7 @@ clean:
 	rm -rf apple/ExcalidrawNative.xcodeproj apple/build apple/Generated target
 
 # Screenshot of the Canvas with the sample Drawing open, for looking at layout:
-# make screenshot DEVICE=mac|ipad|iphone [OUT=/tmp/wt-<device>.png]
+# make screenshot DEVICE=mac|ipad|iphone [SCREEN=canvas|settings] [OUT=/tmp/wt-<device>.png]
 DEVICE ?= iphone
 screenshot: apple-project
-	DEVICE=$(DEVICE) OUT='$(OUT)' scripts/screenshot.sh
+	DEVICE=$(DEVICE) SCREEN='$(SCREEN)' OUT='$(OUT)' scripts/screenshot.sh

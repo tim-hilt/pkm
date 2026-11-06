@@ -1,0 +1,741 @@
+//! The WebDAV storage: the Cloud Provider for self-hosting (ADR-0012). Any WebDAV server works, e.g. `rclone serve webdav`.
+//!
+//! HTTPS only, Basic auth, blocking (no async runtime). Everything lives in an
+//! `ExcalidrawNative` folder inside the Server URL. Blobs are uploaded to a hidden
+//! temporary name and then moved into place, so a half-written blob is never
+//! visible under its final name.
+
+use crate::http::tls_config;
+use crate::percent::{decode, encode};
+use crate::storage::{Blob, ConnectError, Storage, check_name, unique_name};
+use base64::prelude::{BASE64_STANDARD, Engine};
+use quick_xml::events::Event;
+use quick_xml::reader::Reader;
+use std::fmt;
+use std::io::{self, Read};
+use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use ureq::http::{Request, Response};
+use ureq::{Agent, Body, SendBody};
+
+/// The folder in the Server URL that holds everything the app stores.
+const FOLDER: &str = "ExcalidrawNative";
+
+/// The folder where blobs are uploaded before they are moved into place. It
+/// starts with a dot, so it is no valid blob name and never listed. It is not
+/// the folder of the blobs: some servers (rclone) can't list a folder while a
+/// file in it is being written.
+const INCOMING: &str = ".incoming";
+
+/// The `ExcalidrawNative` folder of a WebDAV server. A rejected login (HTTP 401) is an
+/// `io::ErrorKind::PermissionDenied` error, a full server (507) is
+/// `StorageFull`, anything else that fails to connect is another kind.
+pub struct WebDavStorage {
+    agent: Agent,
+    /// The Server URL, without a trailing slash.
+    base: String,
+    /// The URL of the `ExcalidrawNative` folder inside it.
+    root: String,
+    /// The `Authorization` header value.
+    auth: String,
+    /// Whether the `INCOMING` folder is known to exist.
+    incoming_exists: AtomicBool,
+}
+
+impl fmt::Debug for WebDavStorage {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // No credentials.
+        f.debug_struct("WebDavStorage")
+            .field("root", &self.root)
+            .finish_non_exhaustive()
+    }
+}
+
+impl WebDavStorage {
+    /// Connects to the WebDAV server at `url` and checks the details. Creates
+    /// the `ExcalidrawNative` folder inside `url` if it's missing; uses it if not.
+    pub fn connect(url: &str, username: &str, password: &str) -> Result<Self, ConnectError> {
+        Self::connect_with(url, username, password, tls_config())
+    }
+
+    /// The storage of a server that was connected before, e.g. at the last
+    /// launch. Contacts nobody, so it works offline; errors show on use.
+    pub fn resume(url: &str, username: &str, password: &str) -> Result<Self, ConnectError> {
+        Self::new(url, username, password, tls_config())
+    }
+
+    fn connect_with(
+        url: &str,
+        username: &str,
+        password: &str,
+        tls: ureq::tls::TlsConfig,
+    ) -> Result<Self, ConnectError> {
+        let storage = Self::new(url, username, password, tls)?;
+
+        // The URL itself must be a WebDAV collection.
+        let answer = storage
+            .propfind(&storage.base, "0")
+            .map_err(|e| match e.kind() {
+                io::ErrorKind::PermissionDenied => ConnectError::WrongCredentials,
+                _ => ConnectError::Unreachable,
+            })?;
+        match answer.status().as_u16() {
+            207 => {}
+            500..=599 => return Err(ConnectError::Unreachable),
+            _ => return Err(ConnectError::NotWebDav),
+        }
+
+        // Its folder is there, or is created now.
+        let status = storage
+            .propfind(&storage.root, "0")
+            .map_err(|_| ConnectError::Unreachable)?
+            .status()
+            .as_u16();
+        match status {
+            207 => {}
+            404 => storage
+                .make_dir(&storage.root)
+                .map_err(|_| ConnectError::NotWebDav)?,
+            _ => return Err(ConnectError::NotWebDav),
+        }
+        Ok(storage)
+    }
+
+    /// The storage for `url`, which must be https, without any request.
+    fn new(
+        url: &str,
+        username: &str,
+        password: &str,
+        tls: ureq::tls::TlsConfig,
+    ) -> Result<Self, ConnectError> {
+        let url = url.trim();
+        if !url
+            .get(..8)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"))
+        {
+            return Err(ConnectError::NotHttps);
+        }
+        let config = Agent::config_builder()
+            .https_only(true)
+            // PROPFIND, MKCOL and MOVE.
+            .allow_non_standard_methods(true)
+            .http_status_as_error(false)
+            .tls_config(tls)
+            .timeout_connect(Some(Duration::from_secs(10)))
+            .timeout_recv_response(Some(Duration::from_secs(30)))
+            .build();
+        let base = url.trim_end_matches('/').to_owned();
+        Ok(Self {
+            agent: Agent::new_with_config(config),
+            root: format!("{base}/{FOLDER}"),
+            base,
+            auth: basic_auth(username, password),
+            incoming_exists: AtomicBool::new(false),
+        })
+    }
+
+    /// The URL of the blob `name` in the folder.
+    fn url(&self, name: &str) -> String {
+        format!("{}/{}", self.root, encode(name))
+    }
+
+    /// Sends a request with `body`. Any answer is returned, whatever its
+    /// status, except for a rejected login.
+    fn send(
+        &self,
+        method: &str,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: SendBody,
+    ) -> io::Result<Response<Body>> {
+        let mut request = Request::builder()
+            .method(method)
+            .uri(url)
+            .header("Authorization", &self.auth);
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        let request = request.body(body).map_err(io::Error::other)?;
+        let response = self.agent.run(request).map_err(ureq::Error::into_io)?;
+        refuse(response.status().as_u16())?;
+        Ok(response)
+    }
+
+    fn call(&self, method: &str, url: &str, headers: &[(&str, &str)]) -> io::Result<u16> {
+        let response = self.send(method, url, headers, SendBody::none())?;
+        Ok(response.status().as_u16())
+    }
+
+    fn propfind(&self, url: &str, depth: &str) -> io::Result<Response<Body>> {
+        const WANTED: &str = r#"<?xml version="1.0"?><propfind xmlns="DAV:"><prop><resourcetype/><getcontentlength/><getetag/><getlastmodified/></prop></propfind>"#;
+        let mut body = WANTED.as_bytes();
+        self.send(
+            "PROPFIND",
+            url,
+            &[("Depth", depth), ("Content-Type", "application/xml")],
+            SendBody::from_reader(&mut body),
+        )
+    }
+
+    /// Creates the directory at `url`; fine if it exists already.
+    fn make_dir(&self, url: &str) -> io::Result<()> {
+        match self.call("MKCOL", url, &[])? {
+            200..=299 | 405 => Ok(()),
+            status => Err(unexpected("MKCOL", status)),
+        }
+    }
+
+    /// Deletes what is at `url`; fine if there is nothing.
+    fn remove(&self, url: &str) -> io::Result<()> {
+        match self.call("DELETE", url, &[])? {
+            200..=299 | 404 => Ok(()),
+            status => Err(unexpected("DELETE", status)),
+        }
+    }
+
+    /// Uploads `data` to `temp`, then moves it over `name`.
+    fn upload_and_move(&self, temp: &str, name: &str, data: &mut dyn Read) -> io::Result<()> {
+        let uploaded = self.send("PUT", temp, &[], SendBody::from_reader(data))?;
+        match uploaded.status().as_u16() {
+            200..=299 => {}
+            status => return Err(unexpected("PUT", status)),
+        }
+        let destination = self.url(name);
+        match self.call(
+            "MOVE",
+            temp,
+            &[("Destination", &destination), ("Overwrite", "T")],
+        )? {
+            200..=299 => Ok(()),
+            status => Err(unexpected("MOVE", status)),
+        }
+    }
+}
+
+/// The errors every request shares: 401 is `PermissionDenied`, and 507
+/// Insufficient Storage is `StorageFull`.
+fn refuse(status: u16) -> io::Result<()> {
+    match status {
+        401 => Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "401 Unauthorized",
+        )),
+        507 => Err(io::Error::new(
+            io::ErrorKind::StorageFull,
+            "507 Insufficient Storage",
+        )),
+        _ => Ok(()),
+    }
+}
+
+fn unexpected(method: &str, status: u16) -> io::Error {
+    io::Error::other(format!("{method} answered with status {status}"))
+}
+
+impl Storage for WebDavStorage {
+    fn put(&self, name: &str, data: &mut dyn Read) -> io::Result<()> {
+        check_name(name)?;
+        let incoming = format!("{}/{INCOMING}", self.root);
+        if !self.incoming_exists.load(Relaxed) {
+            self.make_dir(&incoming)?;
+            self.incoming_exists.store(true, Relaxed);
+        }
+        // The temporary names of all Devices share one folder.
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |t| t.as_nanos());
+        let temp = format!("{incoming}/{nanos}-{}", unique_name());
+        let result = self.upload_and_move(&temp, name, data);
+        if result.is_err() {
+            let _ = self.remove(&temp);
+            // Maybe the folder was removed from outside.
+            self.incoming_exists.store(false, Relaxed);
+        }
+        result
+    }
+
+    fn get(&self, name: &str) -> io::Result<Option<Box<dyn Read + Send>>> {
+        check_name(name)?;
+        let response = self.send("GET", &self.url(name), &[], SendBody::none())?;
+        match response.status().as_u16() {
+            200..=299 => Ok(Some(Box::new(response.into_body().into_reader()))),
+            404 => Ok(None),
+            status => Err(unexpected("GET", status)),
+        }
+    }
+
+    fn list(&self) -> io::Result<Vec<Blob>> {
+        let response = self.propfind(&self.root, "1")?;
+        match response.status().as_u16() {
+            207 => {}
+            404 => return Ok(Vec::new()),
+            status => return Err(unexpected("PROPFIND", status)),
+        }
+        let mut xml = String::new();
+        response
+            .into_body()
+            .into_reader()
+            .read_to_string(&mut xml)?;
+        parse_listing(&xml).map_err(io::Error::other)
+    }
+
+    fn delete(&self, name: &str) -> io::Result<()> {
+        check_name(name)?;
+        self.remove(&self.url(name))
+    }
+}
+
+/// The blobs in a `PROPFIND` answer: its files, but no directories (the
+/// listed one included) and no hidden files. The marker is the ETag, or the
+/// modified time and size for a server without ETags.
+fn parse_listing(xml: &str) -> Result<Vec<Blob>, quick_xml::Error> {
+    #[derive(PartialEq, Clone, Copy)]
+    enum Reading {
+        Nothing,
+        Href,
+        Length,
+        Etag,
+        Modified,
+    }
+    #[derive(Default)]
+    struct Entry {
+        href: String,
+        size: String,
+        etag: String,
+        modified: String,
+        is_dir: bool,
+    }
+    let mut reader = Reader::from_str(xml);
+    let mut blobs = Vec::new();
+    let mut entry = Entry::default();
+    let mut reading = Reading::Nothing;
+    let mut text = String::new();
+    loop {
+        match reader.read_event()? {
+            Event::Start(tag) | Event::Empty(tag) => {
+                let started = match tag.local_name().as_ref() {
+                    "response" => {
+                        entry = Entry::default();
+                        None
+                    }
+                    "href" => Some(Reading::Href),
+                    "getcontentlength" => Some(Reading::Length),
+                    "getetag" => Some(Reading::Etag),
+                    "getlastmodified" => Some(Reading::Modified),
+                    "collection" => {
+                        entry.is_dir = true;
+                        None
+                    }
+                    _ => None,
+                };
+                if let Some(started) = started {
+                    (reading, text) = (started, String::new());
+                }
+            }
+            Event::Text(t) if reading != Reading::Nothing => text.push_str(&t.xml10_content()),
+            Event::CData(t) if reading != Reading::Nothing => text.push_str(&t.xml10_content()),
+            Event::GeneralRef(r) if reading != Reading::Nothing => {
+                match (r.resolve_char_ref()?, &*r) {
+                    (Some(c), _) => text.push(c),
+                    (None, "amp") => text.push('&'),
+                    (None, "lt") => text.push('<'),
+                    (None, "gt") => text.push('>'),
+                    (None, "quot") => text.push('"'),
+                    (None, "apos") => text.push('\''),
+                    _ => {}
+                }
+            }
+            Event::End(tag) => match tag.local_name().as_ref() {
+                "href" | "getcontentlength" | "getetag" | "getlastmodified" => {
+                    // A missing value (a 404 `propstat`) stays as it was.
+                    let value = text.trim().to_owned();
+                    match reading {
+                        Reading::Href => entry.href = decode(&value),
+                        Reading::Length => entry.size = value,
+                        Reading::Etag => entry.etag = value,
+                        Reading::Modified => entry.modified = value,
+                        Reading::Nothing => {}
+                    }
+                    reading = Reading::Nothing;
+                }
+                "response" => {
+                    let href = entry.href.trim_end_matches('/');
+                    let name = href.rsplit('/').next().unwrap_or("");
+                    if !entry.is_dir && !name.is_empty() && !name.starts_with('.') {
+                        let marker = if entry.etag.is_empty() {
+                            format!("{}-{}", entry.modified, entry.size)
+                        } else {
+                            entry.etag.clone()
+                        };
+                        blobs.push(Blob {
+                            name: name.to_owned(),
+                            marker,
+                        });
+                    }
+                }
+                _ => {}
+            },
+            Event::Eof => return Ok(blobs),
+            _ => {}
+        }
+    }
+}
+
+/// The `Authorization` header value for Basic auth (RFC 7617).
+fn basic_auth(username: &str, password: &str) -> String {
+    format!(
+        "Basic {}",
+        BASE64_STANDARD.encode(format!("{username}:{password}"))
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::contract::{Scratch, storage_contract_tests};
+    use std::fs;
+    use std::net::TcpListener;
+    use std::process::{Child, Command, Stdio};
+    use std::thread::sleep;
+
+    const USER: &str = "reader";
+    const PASSWORD: &str = "s3cret";
+
+    /// An `rclone serve` process on localhost with a fresh self-signed
+    /// certificate, serving a directory. None when rclone or openssl isn't
+    /// installed, so tests skip. The certificate is short-lived because Apple's
+    /// TLS refuses long validity periods.
+    struct Rclone {
+        child: Child,
+        url: String,
+        cert: String,
+        dir: Scratch,
+        _certs: Scratch,
+    }
+
+    impl Rclone {
+        fn start(protocol: &str) -> Option<Self> {
+            let installed = |tool: &str, arg: &str| {
+                Command::new(tool)
+                    .arg(arg)
+                    .stdout(Stdio::null())
+                    .status()
+                    .is_ok_and(|status| status.success())
+            };
+            if !installed("rclone", "version") || !installed("openssl", "version") {
+                eprintln!("skipped: rclone or openssl is not installed");
+                return None;
+            }
+            let port = TcpListener::bind("127.0.0.1:0")
+                .unwrap()
+                .local_addr()
+                .unwrap()
+                .port();
+            let dir = Scratch::new("webdav-served");
+            let certs = Scratch::new("webdav-certs");
+            let cert = certs.0.join("localhost.crt");
+            let key = certs.0.join("localhost.key");
+            let made = Command::new("openssl")
+                .args(["req", "-x509", "-newkey", "ec", "-pkeyopt"])
+                .args(["ec_paramgen_curve:prime256v1", "-nodes", "-days", "30"])
+                .args(["-subj", "/CN=localhost"])
+                .args(["-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1"])
+                .args(["-addext", "extendedKeyUsage=serverAuth"])
+                .arg("-keyout")
+                .arg(&key)
+                .arg("-out")
+                .arg(&cert)
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
+            assert!(made.success(), "openssl could not make a certificate");
+            let child = Command::new("rclone")
+                .args(["serve", protocol])
+                .arg(&dir.0)
+                .args(["--addr", &format!("127.0.0.1:{port}")])
+                .args(["--user", USER, "--pass", PASSWORD])
+                .arg("--cert")
+                .arg(&cert)
+                .arg("--key")
+                .arg(&key)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            let server = Self {
+                child,
+                url: format!("https://127.0.0.1:{port}"),
+                cert: fs::read_to_string(&cert).unwrap(),
+                dir,
+                _certs: certs,
+            };
+            for _ in 0..200 {
+                if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                    return Some(server);
+                }
+                sleep(Duration::from_millis(25));
+            }
+            panic!("rclone did not start");
+        }
+
+        fn webdav() -> Option<Self> {
+            Self::start("webdav")
+        }
+
+        fn connect(&self) -> Result<WebDavStorage, ConnectError> {
+            self.connect_as(USER, PASSWORD)
+        }
+
+        fn connect_as(&self, user: &str, pass: &str) -> Result<WebDavStorage, ConnectError> {
+            let tls = trusting(&self.cert);
+            WebDavStorage::connect_with(&self.url, user, pass, tls)
+        }
+
+        fn stop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    impl Drop for Rclone {
+        fn drop(&mut self) {
+            self.stop();
+        }
+    }
+
+    fn trusting(cert: &str) -> ureq::tls::TlsConfig {
+        let der = pem_to_der(cert);
+        let roots = ureq::tls::RootCerts::new_with_certs(&[
+            ureq::tls::Certificate::from_der(&der).to_owned()
+        ]);
+        ureq::tls::TlsConfig::builder()
+            .provider(tls_config().provider())
+            .root_certs(roots)
+            .build()
+    }
+
+    /// The DER bytes of the one certificate in `pem`.
+    fn pem_to_der(pem: &str) -> Vec<u8> {
+        let body: String = pem.lines().filter(|l| !l.starts_with("-----")).collect();
+        let mut out = Vec::new();
+        let mut bits = 0u32;
+        let mut count = 0;
+        for c in body.bytes().filter(|c| *c != b'=') {
+            let value = match c {
+                b'A'..=b'Z' => c - b'A',
+                b'a'..=b'z' => c - b'a' + 26,
+                b'0'..=b'9' => c - b'0' + 52,
+                b'+' => 62,
+                _ => 63,
+            };
+            bits = bits << 6 | u32::from(value);
+            count += 6;
+            if count >= 8 {
+                count -= 8;
+                out.push((bits >> count) as u8);
+            }
+        }
+        out
+    }
+
+    fn webdav_storage() -> Option<(Rclone, WebDavStorage)> {
+        let server = Rclone::webdav()?;
+        let storage = server.connect().unwrap();
+        Some((server, storage))
+    }
+
+    mod webdav_storage {
+        use super::*;
+        storage_contract_tests!(webdav_storage);
+    }
+
+    #[test]
+    fn rejected_credentials_and_a_full_server_differ_from_being_offline() {
+        let rejected = refuse(401).unwrap_err();
+        assert_eq!(rejected.kind(), io::ErrorKind::PermissionDenied);
+        let full = refuse(507).unwrap_err();
+        assert_eq!(full.kind(), io::ErrorKind::StorageFull);
+        for status in [200, 207, 404, 409, 500, 503] {
+            assert!(refuse(status).is_ok(), "{status}");
+        }
+    }
+
+    #[test]
+    fn basic_auth_is_base64_of_user_and_password() {
+        // RFC 7617's example, and each padding length.
+        assert_eq!(
+            basic_auth("Aladdin", "open sesame"),
+            "Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ=="
+        );
+        assert_eq!(basic_auth("a", "b"), "Basic YTpi");
+        assert_eq!(basic_auth("ab", "c"), "Basic YWI6Yw==");
+        assert_eq!(basic_auth("a", ""), "Basic YTo=");
+    }
+
+    #[test]
+    fn listing_gives_files_but_no_directories_hidden_files_or_the_listed_directory() {
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+            <D:multistatus xmlns:D="DAV:">
+              <D:response><D:href>/dav/ExcalidrawNative/</D:href>
+                <D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop></D:propstat>
+              </D:response>
+              <D:response><D:href>/dav/ExcalidrawNative/a%20b&amp;c.excalidraw</D:href>
+                <D:propstat><D:prop><D:resourcetype/><D:getcontentlength>12</D:getcontentlength><D:getetag>"e1"</D:getetag></D:prop></D:propstat>
+              </D:response>
+              <response xmlns="DAV:"><href>https://host/dav/ExcalidrawNative/sub/</href>
+                <propstat><prop><resourcetype><collection></collection></resourcetype></prop></propstat>
+              </response>
+              <D:response><D:href>/dav/ExcalidrawNative/.incoming-1</D:href>
+                <D:propstat><D:prop><D:getcontentlength>3</D:getcontentlength></D:prop></D:propstat>
+              </D:response>
+              <D:response><D:href>/dav/ExcalidrawNative/x</D:href>
+                <D:propstat><D:prop><D:getcontentlength>7</D:getcontentlength><D:getlastmodified>Mon, 01 Jan 2024 10:00:00 GMT</D:getlastmodified></D:prop></D:propstat>
+                <D:propstat><D:prop><D:foo/></D:prop><D:status>HTTP/1.1 404 Not Found</D:status></D:propstat>
+              </D:response>
+            </D:multistatus>"#;
+
+        let blobs = parse_listing(xml).unwrap();
+
+        // The ETag is the marker; without one, modified time and size are.
+        let expected = [
+            ("a b&c.excalidraw", "\"e1\""),
+            ("x", "Mon, 01 Jan 2024 10:00:00 GMT-7"),
+        ];
+        let listed: Vec<_> = blobs
+            .iter()
+            .map(|b| (b.name.as_str(), b.marker.as_str()))
+            .collect();
+        assert_eq!(listed, expected);
+    }
+
+    #[test]
+    fn connecting_needs_an_https_url() {
+        for url in [
+            "http://example.com",
+            "example.com",
+            "ftp://x",
+            "",
+            "https:/x",
+        ] {
+            let error = WebDavStorage::connect(url, "u", "p").unwrap_err();
+            assert_eq!(error, ConnectError::NotHttps, "{url:?}");
+        }
+    }
+
+    #[test]
+    fn resuming_needs_an_https_url_but_contacts_no_server() {
+        assert_eq!(
+            WebDavStorage::resume("http://example.com", "u", "p").unwrap_err(),
+            ConnectError::NotHttps
+        );
+        // Nobody listens there: resuming works offline, using it fails.
+        let storage = WebDavStorage::resume("https://127.0.0.1:1", "u", "p").unwrap();
+        assert!(storage.list().is_err());
+    }
+
+    #[test]
+    fn connecting_to_nothing_is_unreachable() {
+        let port = TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let url = format!("https://127.0.0.1:{port}");
+        let error = WebDavStorage::connect(&url, "u", "p").unwrap_err();
+        assert_eq!(error, ConnectError::Unreachable);
+    }
+
+    #[test]
+    fn connecting_with_a_wrong_password_or_user_is_wrong_credentials() {
+        let Some(server) = Rclone::webdav() else {
+            return;
+        };
+        for (user, pass) in [(USER, "nope"), ("nobody", PASSWORD), ("", "")] {
+            let error = server.connect_as(user, pass).unwrap_err();
+            assert_eq!(error, ConnectError::WrongCredentials, "{user:?}");
+        }
+    }
+
+    #[test]
+    fn connecting_to_a_server_that_is_no_webdav_server_is_not_webdav() {
+        let Some(server) = Rclone::start("http") else {
+            return;
+        };
+        assert_eq!(server.connect().unwrap_err(), ConnectError::NotWebDav);
+    }
+
+    #[test]
+    fn a_certificate_nobody_vouches_for_is_unreachable() {
+        let Some(server) = Rclone::webdav() else {
+            return;
+        };
+        let error = WebDavStorage::connect(&server.url, USER, PASSWORD).unwrap_err();
+        assert_eq!(error, ConnectError::Unreachable);
+    }
+
+    #[test]
+    fn connecting_creates_the_excalidraw_native_folder_and_reuses_it() {
+        let Some(server) = Rclone::webdav() else {
+            return;
+        };
+        let folder = server.dir.0.join(FOLDER);
+        assert!(!folder.exists());
+
+        let first = server.connect().unwrap();
+        assert!(folder.is_dir());
+        first.put("blob", &mut &b"kept"[..]).unwrap();
+
+        let second = server.connect().unwrap();
+        assert_eq!(
+            crate::storage::get_bytes(&second, "blob").unwrap().unwrap(),
+            b"kept"
+        );
+        assert_eq!(fs::read(folder.join("blob")).unwrap(), b"kept");
+    }
+
+    #[test]
+    fn a_url_with_a_path_keeps_everything_inside_it() {
+        let Some(server) = Rclone::webdav() else {
+            return;
+        };
+        fs::create_dir(server.dir.0.join("my files")).unwrap();
+
+        let url = format!("{}/my%20files/", server.url);
+        let storage =
+            WebDavStorage::connect_with(&url, USER, PASSWORD, trusting(&server.cert)).unwrap();
+        storage.put("blob", &mut &b"x"[..]).unwrap();
+
+        assert!(
+            server
+                .dir
+                .0
+                .join("my files/ExcalidrawNative/blob")
+                .is_file()
+        );
+    }
+
+    #[test]
+    fn rejected_credentials_during_use_differ_from_being_offline() {
+        let Some((mut server, mut storage)) = webdav_storage() else {
+            return;
+        };
+        storage.put("blob", &mut &b"x"[..]).unwrap();
+
+        // The password changed on the server.
+        storage.auth = basic_auth(USER, "changed");
+        for error in [
+            storage.list().unwrap_err(),
+            storage.get("blob").map(|_| ()).unwrap_err(),
+            storage.put("other", &mut &b"y"[..]).unwrap_err(),
+            storage.delete("blob").unwrap_err(),
+        ] {
+            assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        }
+
+        // The server went away.
+        storage.auth = basic_auth(USER, PASSWORD);
+        server.stop();
+        let error = storage.list().unwrap_err();
+        assert_ne!(error.kind(), io::ErrorKind::PermissionDenied);
+    }
+}

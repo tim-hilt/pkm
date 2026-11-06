@@ -14,6 +14,9 @@ struct GalleryView: View {
     @State private var renaming: DrawingStore.Entry?
     @State private var newName = ""
     @State private var deleting: DrawingStore.Entry?
+    #if os(iOS)
+        @State private var isShowingSettings = Gallery.opensSettingsAtLaunch
+    #endif
 
     private let columns = [GridItem(.adaptive(minimum: 160, maximum: 260), spacing: 16)]
 
@@ -52,9 +55,20 @@ struct GalleryView: View {
             }
             .navigationTitle("Drawings")
             .toolbar {
-                Button("New Drawing", systemImage: "plus") { gallery.createDrawing() }
-                    .accessibilityIdentifier("new-drawing")
+                #if os(iOS)
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Settings", systemImage: "gearshape") { isShowingSettings = true }
+                            .accessibilityIdentifier("settings")
+                    }
+                #endif
+                ToolbarItem {
+                    Button("New Drawing", systemImage: "plus") { gallery.createDrawing() }
+                        .accessibilityIdentifier("new-drawing")
+                }
             }
+            #if os(iOS)
+                .sheet(isPresented: $isShowingSettings) { SettingsSheet() }
+            #endif
             .overlay {
                 if gallery.drawings.isEmpty {
                     ContentUnavailableView(

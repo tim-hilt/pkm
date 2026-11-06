@@ -20,3 +20,4 @@ bindgen = ["uniffi/cli"]
 [dependencies]
 uniffi = "0.32"
 excalidraw-native-core = { path = "../core" }
+excalidraw-native-cloud = { path = "../cloud" }
