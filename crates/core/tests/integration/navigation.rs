@@ -404,51 +404,87 @@ fn a_new_gesture_continues_from_the_current_viewport() {
     assert_close(origin(&editor), (-30.0, 0.0));
 }
 
-#[test]
-fn a_third_finger_neither_jumps_nor_takes_over() {
-    let mut editor = Editor::new();
-    replay(
-        &mut editor,
-        "down 1 finger 100 100
-         down 2 finger 200 100",
-    );
-    let before = editor.viewport();
-
-    replay(&mut editor, "down 3 finger 400 400");
-    assert_eq!(editor.viewport(), before, "landing does not move anything");
-
-    replay(&mut editor, "move 3 finger 450 450");
-    assert_eq!(editor.viewport(), before, "the third finger is ignored");
-
-    replay(&mut editor, "move 1 finger 110 100");
-    assert_ne!(editor.viewport(), before, "the first two still drive");
-}
+// Three fingers are the system's undo and redo gestures (swipe, double-tap):
+// they must not navigate.
 
 #[test]
-fn when_a_driving_finger_lifts_the_third_takes_its_place_without_a_jump() {
+fn three_fingers_do_not_navigate() {
     let mut editor = Editor::new();
     replay(
         &mut editor,
         "down 1 finger 100 100
          down 2 finger 200 100
          down 3 finger 300 100
-         up 1 finger 100 100",
+         move 1 finger 0 100
+         move 2 finger 100 100
+         move 3 finger 200 100
+         up 1 finger 0 100
+         up 2 finger 100 100
+         up 3 finger 200 100",
     );
-    let before = editor.viewport();
 
-    // Fingers 2 and 3 now drive; moving both by 10 pans by 10.
+    assert_eq!(editor.viewport(), Editor::new().viewport());
+}
+
+#[test]
+fn a_third_finger_takes_back_what_the_first_two_moved() {
+    let mut editor = Editor::new();
     replay(
         &mut editor,
-        "move 2 finger 210 100
-         move 3 finger 310 100",
+        "down 1 finger 100 100
+         down 2 finger 200 100
+         move 1 finger 50 120
+         move 2 finger 250 120",
     );
+    assert_ne!(editor.viewport(), Editor::new().viewport());
 
-    assert_eq!(
-        before,
-        Editor::new().viewport(),
-        "taking over does not jump"
+    replay(&mut editor, "down 3 finger 300 100");
+
+    assert_eq!(editor.viewport(), Editor::new().viewport());
+}
+
+#[test]
+fn after_three_fingers_none_navigate_until_all_have_lifted() {
+    let mut editor = Editor::new();
+    replay(
+        &mut editor,
+        "down 1 finger 100 100
+         down 2 finger 200 100
+         down 3 finger 300 100
+         up 3 finger 300 100
+         move 1 finger 110 100
+         move 2 finger 210 100
+         up 1 finger 110 100
+         move 2 finger 400 300",
+    );
+    assert_eq!(editor.viewport(), Editor::new().viewport());
+
+    replay(
+        &mut editor,
+        "up 2 finger 400 300
+         down 4 finger 100 100
+         down 5 finger 200 100
+         move 4 finger 110 100
+         move 5 finger 210 100",
     );
     assert_close(origin(&editor), (-10.0, 0.0));
+}
+
+#[test]
+fn a_third_finger_ends_a_hand_tool_drag() {
+    let mut editor = Editor::new();
+    editor.set_tool(excalidraw_native_core::Tool::Hand);
+    replay(
+        &mut editor,
+        "down 1 finger 100 100
+         down 2 finger 200 100
+         down 3 finger 300 100
+         up 3 finger 300 100
+         up 2 finger 200 100
+         move 1 finger 150 150",
+    );
+
+    assert_eq!(editor.viewport(), Editor::new().viewport());
 }
 
 #[test]

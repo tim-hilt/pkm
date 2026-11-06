@@ -4,7 +4,9 @@
 //!   excalidraw.com. A trackpad pinch zooms.
 //! * Touch: two fingers pan and pinch-zoom around their centre. The gesture
 //!   is recognised here from raw finger events, so every client behaves the
-//!   same.
+//!   same. Three fingers are the system's undo and redo gestures (swipe,
+//!   double-tap): the third one takes back what the first two had moved, and
+//!   no finger navigates again until all have lifted.
 //! * Hand Tool: one pointer of any kind (finger, Pencil, mouse) drags the
 //!   Canvas. A second finger turns it into the two-finger gesture above.
 //!   Without the hand Tool, Pencil and mouse never navigate. Fingers drag the
@@ -42,6 +44,9 @@ pub(crate) struct Navigation {
     fingers: Vec<Finger>,
     /// Set while the first two of `fingers` are navigating.
     pinch: Option<Pinch>,
+    /// Set from a third finger landing until every finger has lifted: the
+    /// fingers are making a system gesture, not navigating.
+    three_fingers: bool,
     /// Set while a pointer is dragging the Canvas.
     drag: Option<Drag>,
     /// Whether the pan key (space) is held.
@@ -97,6 +102,8 @@ struct Finger {
 #[derive(Debug, Clone, Copy)]
 struct Pinch {
     ids: [u64; 2],
+    /// The viewport before the gesture, for a third finger to go back to.
+    start_viewport: Viewport,
     /// The Scene point at the fingers' centre when the gesture started; it
     /// stays under the centre for the whole gesture.
     scene_at_centre: (f64, f64),
@@ -116,7 +123,7 @@ impl Navigation {
             self.track_finger(event);
         }
         // Two fingers belong to the pinch, which takes a drag over.
-        if self.pinch.is_some() {
+        if self.is_pinching() {
             self.drag = None;
         }
         self.follow_drag(event, hand_tool);
@@ -169,10 +176,11 @@ impl Navigation {
         self.viewport.pin(centre, (width / 2.0, height / 2.0), zoom);
     }
 
-    /// Whether two or more fingers are down: they pan and zoom, and no other
-    /// input may act on what they touch.
+    /// Whether two or more fingers are down, or fingers are left of three:
+    /// two pan and zoom, three are a system gesture, and no other input may
+    /// act on what they touch.
     pub fn is_pinching(&self) -> bool {
-        self.pinch.is_some()
+        self.pinch.is_some() || self.three_fingers
     }
 
     /// Whether a drag of space, the wheel button or the right button is in
@@ -225,7 +233,7 @@ impl Navigation {
             PointerPhase::Down => {
                 let others = self.fingers.iter().filter(|f| f.id != event.id).count();
                 // Only a pointer that is alone on the Canvas can start a drag.
-                if self.drag.is_none() && self.pinch.is_none() && others == 0 {
+                if self.drag.is_none() && !self.is_pinching() && others == 0 {
                     self.drag = self.drag_source(event, hand_tool).map(|source| Drag {
                         id: event.id,
                         x: event.x,
@@ -278,6 +286,12 @@ impl Navigation {
                     x: event.x,
                     y: event.y,
                 });
+                if self.fingers.len() >= 3 && !self.three_fingers {
+                    self.three_fingers = true;
+                    if let Some(pinch) = self.pinch.take() {
+                        self.viewport = pinch.start_viewport;
+                    }
+                }
                 // Re-anchor: the finger may have been part of the pinch.
                 self.pinch = None;
                 self.retarget_pinch();
@@ -291,6 +305,9 @@ impl Navigation {
             }
             PointerPhase::Up | PointerPhase::Cancel => {
                 self.fingers.retain(|f| f.id != event.id);
+                if self.fingers.is_empty() {
+                    self.three_fingers = false;
+                }
                 self.retarget_pinch();
             }
         }
@@ -349,11 +366,13 @@ impl Navigation {
         self.viewport.zoom_at(x, y, zoom - step / 100.0 + boost);
     }
 
-    /// Makes the first two fingers down the pinch, if that is not already so.
+    /// Makes the first two fingers down the pinch, if that is not already so
+    /// and no three-finger gesture is under way.
     /// A new pair starts from the viewport as it is now, so the view never
     /// jumps when fingers come and go.
     fn retarget_pinch(&mut self) {
-        let &[a, b, ..] = self.fingers.as_slice() else {
+        let (&[a, b, ..], false) = (self.fingers.as_slice(), self.three_fingers) else {
+            // Fewer than two fingers, or a system gesture: nothing navigates.
             self.pinch = None;
             return;
         };
@@ -363,6 +382,7 @@ impl Navigation {
         let centre = centre(a, b);
         self.pinch = Some(Pinch {
             ids: [a.id, b.id],
+            start_viewport: self.viewport,
             scene_at_centre: self.viewport.scene_at(centre.0, centre.1),
             start_zoom: self.viewport.zoom(),
             start_distance: distance(a, b),
