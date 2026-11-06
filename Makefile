@@ -49,7 +49,7 @@ test: apple-project
 test-ios: apple-project sim
 	$(XCTEST) -destination 'platform=iOS Simulator,name=$(SIM)'
 
-# XCUITests (Gallery → Canvas → back, Gallery → licences); kept out of `make test`, as UI tests on
+# XCUITests (Gallery → Canvas → back); kept out of `make test`, as UI tests on
 # macOS need the Accessibility permission.
 test-ui: apple-project sim
 	SCHEME=ExcalidrawNativeUITests LOG=/tmp/excalidraw-native-ui-test.log $(XCTEST) -destination 'platform=iOS Simulator,name=$(SIM)'
