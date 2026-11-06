@@ -24,6 +24,12 @@ final class Gallery {
     /// deleted here or outside the app), so that Cloud Backing can Sync.
     @ObservationIgnored var onLocalChange: (() -> Void)?
 
+    /// Whether Cloud Backing is on: a Drawing deleted by Sync while open then
+    /// stays open (an edit wins over a delete).
+    @ObservationIgnored var isCloudBacked = false {
+        didSet { open?.keepsDeletedDrawingOpen = isCloudBacked }
+    }
+
     /// Also clears out the caches of Drawings deleted in Files or Finder
     /// since the last launch.
     init(store: DrawingStore) {
@@ -55,6 +61,7 @@ final class Gallery {
     /// thumbnails of changed ones follow their new modification dates) and
     /// clears the caches of Drawings that are gone.
     func syncDidChange(_ names: [String]) {
+        open?.syncDidChange(names)
         store.removeOrphanedCaches()
         reload()
     }
@@ -120,6 +127,7 @@ final class Gallery {
 
     private func show(_ drawing: OpenDrawing) {
         // Deleted outside the app: back to the Gallery, without saving.
+        drawing.keepsDeletedDrawingOpen = isCloudBacked
         drawing.onSaved = { [weak self] in self?.onLocalChange?() }
         drawing.onDeleted = { [weak self, weak drawing] in
             guard let self, open === drawing else { return }

@@ -23,6 +23,7 @@ struct ContentView: View {
             }
         }
         .task { attachCloudBacking() }
+        .onChange(of: cloud.connection != nil, initial: true) { gallery.isCloudBacked = cloud.connection != nil }
         .onChange(of: scenePhase) { cloud.appBecame(inFront: scenePhase == .active) }
         #if os(macOS)
             .task { if Gallery.opensSettingsAtLaunch { openSettings() } }

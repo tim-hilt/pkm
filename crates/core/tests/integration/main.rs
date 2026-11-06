@@ -36,6 +36,7 @@ mod json;
 mod keyboard_shortcuts;
 mod lines_and_arrows;
 mod merge;
+mod merge_synced;
 mod mouse_pan;
 mod move_selection;
 mod multi_touch;

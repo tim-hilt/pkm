@@ -118,6 +118,13 @@ pub fn forget_sync_state(state_directory: String) {
     let _ = SyncState::forget(state_directory.as_ref());
 }
 
+/// Whether two Drawings are one Drawing: they share an Element, or both have
+/// none. Bytes that are not a Drawing are no Drawing's.
+#[uniffi::export]
+pub fn are_same_drawing(a: Vec<u8>, b: Vec<u8>) -> bool {
+    excalidraw_native_core::are_same_drawing(&a, &b).unwrap_or(false)
+}
+
 /// Why a file could not be opened as a Drawing, in words fit for a user.
 #[derive(Debug, uniffi::Error)]
 pub enum LoadError {
@@ -511,6 +518,17 @@ impl Editor {
     /// The Scene as `.excalidraw` file content.
     pub fn save(&self) -> Vec<u8> {
         self.editor().save()
+    }
+
+    /// Merges `bytes`, the Drawing as Sync rewrote its file, into the open
+    /// Scene without reloading; see
+    /// [`excalidraw_native_core::Editor::merge_synced`].
+    pub fn merge_synced(&self, bytes: Vec<u8>) -> Result<(), LoadError> {
+        self.editor()
+            .merge_synced(&bytes)
+            .map_err(|e| LoadError::Invalid {
+                message: e.to_string(),
+            })
     }
 
     /// Number of Elements shown in the Scene.

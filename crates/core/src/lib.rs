@@ -64,7 +64,7 @@ mod z_order;
 pub use color::dark_mode_color;
 pub use context_menu::ContextMenu;
 pub use cursor::Cursor;
-pub use editor::{Editor, Export, ExportScope};
+pub use editor::{Editor, Export, ExportScope, MergeSyncedError};
 pub use geometry::{
     Dash, FillRule, FillStyle, Geometry, Image, ImageStatus, Part, PartKind, PartWriter,
     StrokeStyle, TextAlign, TextLine, TextStyle, Verb,
@@ -73,7 +73,7 @@ pub use input::{
     MagnifyEvent, Modifiers, PointerButton, PointerEvent, PointerKind, PointerPhase, ScrollEvent,
 };
 pub use insert_image::ImageFile;
-pub use merge::{MergeError, are_same_drawing, merge_drawings};
+pub use merge::{MergeError, are_same_drawing, merge_drawings, merge_keeping_local};
 pub use pencil_double_tap::PencilDoubleTap;
 pub use properties::{Properties, Property, Sections};
 pub use scene::LoadError;

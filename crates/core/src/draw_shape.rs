@@ -74,6 +74,11 @@ impl ShapeGesture {
     }
 
     /// The pointer that draws this shape.
+    /// The handle of the shape being drawn.
+    pub fn handle(&self) -> u32 {
+        self.handle
+    }
+
     pub fn pointer(&self) -> u64 {
         self.pointer
     }

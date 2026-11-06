@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -43,7 +44,7 @@ use crate::transform::TransformGesture;
 use crate::transform_handles::{Handle, TransformBox};
 use crate::viewport::Viewport;
 use crate::z_order::{self, ZOrder};
-use crate::{image, shape};
+use crate::{image, merge, shape};
 
 mod commands;
 mod cursor;
@@ -52,6 +53,38 @@ mod geometry;
 use geometry::{GeometryCache, bounds_of};
 mod selection_tool;
 mod text_entry;
+
+/// Why Synced bytes were not merged into the open Drawing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MergeSyncedError {
+    /// A side is not a Drawing.
+    Merge(merge::MergeError),
+    /// The merged bytes did not load.
+    Load(LoadError),
+}
+
+impl From<merge::MergeError> for MergeSyncedError {
+    fn from(e: merge::MergeError) -> Self {
+        Self::Merge(e)
+    }
+}
+
+impl From<LoadError> for MergeSyncedError {
+    fn from(e: LoadError) -> Self {
+        Self::Load(e)
+    }
+}
+
+impl fmt::Display for MergeSyncedError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Merge(e) => e.fmt(f),
+            Self::Load(e) => e.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for MergeSyncedError {}
 
 /// Hands out [`Geometry::generation`]s; unique across all editors.
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -249,6 +282,54 @@ impl Editor {
         self.sync_highlight();
         self.changed();
         Ok(())
+    }
+
+    /// Takes in `bytes`, the Drawing as Sync rewrote its file, without
+    /// reloading: the two are merged Element by Element (see
+    /// [`crate::merge_drawings`]; the remote wins an equal version's tie as
+    /// on excalidraw.com). Nothing here is an undo step, and the history,
+    /// Selection (less Elements now deleted), text view, tool and viewport
+    /// are kept. An Element in an unfinished drag, stroke, point edit or text
+    /// edit keeps the local version; Sync brings the remote one on its next
+    /// round, after the interaction ended. If `bytes` are not a Drawing
+    /// nothing changes.
+    pub fn merge_synced(&mut self, bytes: &[u8]) -> Result<(), MergeSyncedError> {
+        let busy = self.elements_in_interaction();
+        let merged = merge::merge_keeping_local(&self.save(), bytes, |id| busy.contains(id))?;
+        if !self
+            .scene
+            .replace_keeping_handles(&merged, &mut self.entropy)?
+        {
+            return Ok(());
+        }
+        let selected = std::mem::take(&mut self.selection);
+        self.selection = history::without_gone(selected, &self.scene);
+        self.sync_editing();
+        self.sync_points();
+        self.sync_highlight();
+        self.overlay_revision += 1;
+        self.changed();
+        Ok(())
+    }
+
+    /// The ids of the Elements that a gesture or the text view is changing
+    /// right now.
+    fn elements_in_interaction(&self) -> HashSet<String> {
+        let handles = self
+            .shape
+            .iter()
+            .map(|g| vec![g.handle()])
+            .chain(self.linear.iter().map(|g| vec![g.handle()]))
+            .chain(self.stroke.iter().map(|g| vec![g.handle()]))
+            .chain(self.point_dragging.iter().map(|g| vec![g.element_handle()]))
+            .chain(self.moving.iter().map(MoveGesture::handles))
+            .chain(self.transforming.iter().map(TransformGesture::handles))
+            .chain(self.text.iter().map(TextEditing::handles));
+        handles
+            .flatten()
+            .filter_map(|handle| self.scene.element_id(handle))
+            .map(str::to_owned)
+            .collect()
     }
 
     /// The Scene as the content of a `.excalidraw` file. Deleted Elements and

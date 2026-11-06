@@ -92,6 +92,28 @@ pub fn merge_drawings(
     }
 }
 
+/// Merges `remote`, bytes that Sync wrote, into `local`, the open Drawing,
+/// for the Elements whose id `keeps_local` accepts take no part from the
+/// remote side: they stay as they are in `local` (those are being dragged,
+/// drawn or typed into). With no Sync history to go on, the remote wins
+/// every `appState` key.
+pub fn merge_keeping_local(
+    local: &[u8],
+    remote: &[u8],
+    keeps_local: impl Fn(&str) -> bool,
+) -> Result<Vec<u8>, MergeError> {
+    let mut remote_doc = parse(remote)?;
+    let Some(Value::Array(elements)) = remote_doc.root.get_mut("elements") else {
+        return merge_drawings(None, local, remote);
+    };
+    if !elements.iter().any(|e| id_of(e).is_some_and(&keeps_local)) {
+        return merge_drawings(None, local, remote);
+    }
+    elements.retain(|e| !id_of(e).is_some_and(&keeps_local));
+    let trimmed = Value::Object(remote_doc.root).to_json_pretty();
+    merge_drawings(None, local, trimmed.as_bytes())
+}
+
 /// Whether two same-named Drawings with no Sync history between them are one
 /// Drawing: they are if they share at least one Element id, or both have no
 /// Elements. Otherwise they are unrelated and must both be kept.

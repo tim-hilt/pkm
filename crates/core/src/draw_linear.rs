@@ -152,6 +152,11 @@ impl LinearDrawing {
     }
 
     /// The shape an end of the arrow is on, which is highlighted.
+    /// The handle of the line being drawn.
+    pub fn handle(&self) -> u32 {
+        self.handle
+    }
+
     pub fn highlight(&self) -> Option<&str> {
         self.highlight.as_deref()
     }

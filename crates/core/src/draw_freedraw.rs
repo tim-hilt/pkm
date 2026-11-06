@@ -84,6 +84,11 @@ impl StrokeDrawing {
     }
 
     /// The pointer that draws this stroke.
+    /// The handle of the stroke being drawn.
+    pub fn handle(&self) -> u32 {
+        self.handle
+    }
+
     pub fn pointer(&self) -> u64 {
         self.pointer
     }

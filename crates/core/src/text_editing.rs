@@ -196,6 +196,14 @@ impl TextEditing {
         }
     }
 
+    /// The handles of everything the editing changes: the text and the
+    /// shape it labels.
+    pub fn handles(&self) -> Vec<u32> {
+        std::iter::once(self.handle)
+            .chain(self.container.as_ref().map(|c| c.handle))
+            .collect()
+    }
+
     /// The handle of the Element being edited.
     pub fn handle(&self) -> u32 {
         self.handle

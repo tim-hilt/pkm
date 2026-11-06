@@ -12,9 +12,12 @@ import Observation
 /// The folder is the single source of truth, so the file may change under an
 /// open Drawing; `syncWithFile` (run before every save, and by whoever notices
 /// the app coming back or the folder changing) follows it: a file changed
-/// outside is reloaded unless there are unsaved edits (then ours win and the
-/// next save overwrites it), a file renamed outside is followed, and a file
-/// deleted outside is never written again.
+/// outside (by Sync, Files, Finder) is merged into the Scene live, without
+/// undo steps and keeping Selection, Text view and viewport, so that unsaved
+/// edits and the changes outside both survive; a file renamed outside is
+/// followed, and a file deleted outside is never written again, unless
+/// Cloud Backing is on (`keepsDeletedDrawingOpen`): then the Drawing stays
+/// open and the next edit brings it back, as an edit wins over a delete.
 @MainActor @Observable
 final class OpenDrawing {
     /// Follows a rename outside the app.
@@ -25,6 +28,9 @@ final class OpenDrawing {
     @ObservationIgnored var onDeleted: (() -> Void)?
     /// Called after every save of the Drawing's file.
     @ObservationIgnored var onSaved: (() -> Void)?
+    /// Whether a file deleted outside leaves the Drawing open (Cloud Backing
+    /// deletes files when another Device did) instead of closing it.
+    @ObservationIgnored var keepsDeletedDrawingOpen = false
 
     @ObservationIgnored private let store: DrawingStore
     @ObservationIgnored private let autosaveDelay: Duration
@@ -40,10 +46,12 @@ final class OpenDrawing {
     /// What `syncWithFile` found.
     enum Outcome: Equatable {
         case unchanged
-        /// The Scene was replaced by the file's.
-        case reloaded
+        /// The file's changes were merged into the Scene.
+        case merged
         case renamed(to: String)
         case deleted
+        /// The file is gone but the Drawing stays open (`keepsDeletedDrawingOpen`).
+        case removed
     }
 
     /// Throws if the Drawing cannot be read or is not a valid Drawing; it is
@@ -82,13 +90,32 @@ final class OpenDrawing {
         guard !isDeleted else { return .deleted }
         guard let stamp = store.stamp(of: name) else { return followRename() }
         guard stamp != savedStamp else { return .unchanged }
-        // A text being edited is an unsaved edit: its commit will save and win.
-        guard !hasUnsavedChanges, editor.textEditor() == nil, let bytes = try? store.open(name),
-            (try? editor.load(bytes: bytes)) != nil
-        else { return .unchanged }
-        savedRevision = editor.revision()
+        guard let bytes = try? store.open(name) else { return .unchanged }
+        let wasSaved = !hasUnsavedChanges
+        // A file that is not a Drawing is left alone; our next save replaces it.
+        guard (try? editor.mergeSynced(bytes: bytes)) != nil else { return .unchanged }
+        // With nothing of ours unsaved the Scene now is what the file holds;
+        // otherwise the next save writes the merged Scene.
+        if wasSaved { savedRevision = editor.revision() }
         savedStamp = stamp
-        return .reloaded
+        return .merged
+    }
+
+    /// Sync wrote or deleted the files of `names`: if it renamed this Drawing
+    /// (its file is gone and exactly one of the files Sync wrote is the same
+    /// Drawing) it is followed to the new name and merged with it.
+    func syncDidChange(_ names: [String]) {
+        guard store.stamp(of: name) == nil, !isDeleted else { return }
+        let ours = editor.save()
+        let same = names.filter { candidate in
+            candidate != name && store.stamp(of: candidate) != nil
+                && ((try? store.open(candidate)).map { areSameDrawing(a: ours, b: $0) } ?? false)
+        }
+        guard same.count == 1, let newName = same.first else { return }
+        store.moveCaches(of: name, to: newName)
+        name = newName
+        savedStamp = nil  // so that the next sync merges the new file
+        syncWithFile()
     }
 
     /// The file is gone from `name`: renamed if it is in the folder under
@@ -99,6 +126,8 @@ final class OpenDrawing {
             name = newName
             return .renamed(to: newName)
         }
+        savedStamp = nil
+        if keepsDeletedDrawingOpen { return .removed }
         isDeleted = true
         pendingSave?.cancel()
         pendingSave = nil

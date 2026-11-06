@@ -285,6 +285,11 @@ pub(crate) struct PointDrag {
 }
 
 impl PointDrag {
+    /// The handle of the line or arrow whose points are dragged.
+    pub fn element_handle(&self) -> u32 {
+        self.handle
+    }
+
     /// The pointer that drags the points.
     pub fn pointer(&self) -> u64 {
         self.pointer

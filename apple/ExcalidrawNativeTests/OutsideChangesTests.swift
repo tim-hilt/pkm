@@ -54,15 +54,29 @@ import Testing
         #expect(drawing.syncWithFile() == .unchanged)
     }
 
-    @Test func aChangeOutsideWithoutEditsReloadsTheSceneAndNoSaveOverwritesIt() throws {
+    @Test func aChangeOutsideWithoutEditsIsMergedAndNoSaveOverwritesIt() throws {
         let drawing = try openNewDrawing()
         try store.save(sample(), as: drawing.name)
 
-        #expect(drawing.syncWithFile() == .reloaded)
+        #expect(drawing.syncWithFile() == .merged)
         #expect(drawing.editor.elementCount() == 8)
         drawing.saveNow()
         #expect(try savedElementCount(drawing.name) == 8)
         #expect(drawing.syncWithFile() == .unchanged)
+    }
+
+    @Test func aMergedChangeIsNoUndoStep() throws {
+        let drawing = try openNewDrawing()
+        drawRectangle(in: drawing)
+        drawing.saveNow()
+        try store.save(sample(), as: drawing.name)
+        drawing.syncWithFile()
+
+        drawing.editor.undo()
+
+        // Undo took back our rectangle, not the arrival of the sample's.
+        #expect(drawing.editor.elementCount() == 8)
+        #expect(!drawing.editor.canUndo())
     }
 
     @Test func theViewportSurvivesAReload() throws {
@@ -75,15 +89,15 @@ import Testing
         #expect(drawing.editor.viewport() == ViewportState(originX: 30, originY: 40, zoom: 2))
     }
 
-    @Test func aChangeOutsideWithUnsavedEditsLosesToOurSave() throws {
+    @Test func aChangeOutsideWithUnsavedEditsIsMergedWithThemAndBothAreSaved() throws {
         let drawing = try openNewDrawing()
         drawRectangle(in: drawing)
         try store.save(sample(), as: drawing.name)
 
-        #expect(drawing.syncWithFile() == .unchanged)
+        #expect(drawing.syncWithFile() == .merged)
         drawing.saveNow()
 
-        #expect(try savedElementCount(drawing.name) == 1)
+        #expect(try savedElementCount(drawing.name) == 9)
         #expect(drawing.syncWithFile() == .unchanged)
     }
 
@@ -114,7 +128,44 @@ import Testing
         #expect(store.viewport(for: drawing.name) == nil)
     }
 
+    @Test func aDeletedFileLeavesTheDrawingOpenWhenCloudBackingIsOnAndEditingBringsItBack() throws {
+        let drawing = try openNewDrawing()
+        drawing.keepsDeletedDrawingOpen = true
+        var deleted = 0
+        drawing.onDeleted = { deleted += 1 }
+        try FileManager.default.removeItem(at: file(drawing.name))
+
+        #expect(drawing.syncWithFile() == .removed)
+        #expect(deleted == 0)
+        drawRectangle(in: drawing)
+        drawing.saveNow()
+
+        #expect(try savedElementCount(drawing.name) == 1)
+        #expect(drawing.syncWithFile() == .unchanged)
+    }
+
     // MARK: Renamed
+
+    @Test func aRenameBySyncIsFollowedAndTheNewFileMerged() throws {
+        let drawing = try openNewDrawing()
+        drawing.keepsDeletedDrawingOpen = true
+        try store.save(sample(), as: drawing.name)
+        drawing.syncWithFile()
+        let old = drawing.name
+        // Sync writes the file elsewhere under the new name and deletes the old.
+        try FileManager.default.removeItem(at: file(old))
+        try store.save(sample(), as: "Renamed")
+        #expect(drawing.syncWithFile() == .removed)
+
+        drawing.syncDidChange([old, "Renamed"])
+
+        #expect(drawing.name == "Renamed")
+        #expect(drawing.editor.elementCount() == 8)
+        drawRectangle(in: drawing)
+        drawing.saveNow()
+        #expect(try savedElementCount("Renamed") == 9)
+        #expect(!FileManager.default.fileExists(atPath: file(old).path))
+    }
 
     @Test func aRenamedFileIsFollowedAndSavesGoToTheNewName() throws {
         let drawing = try openNewDrawing()

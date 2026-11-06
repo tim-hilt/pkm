@@ -227,6 +227,32 @@ impl Handles {
         }
     }
 
+    /// The handles for a file of Elements with these ids: those that have
+    /// one keep it, the others get new ones, and those gone are removed.
+    fn carried_over(&self, ids: &[&str]) -> Self {
+        let mut next = Self {
+            by_position: Vec::with_capacity(ids.len()),
+            position: vec![Self::ABSENT; self.position.len()],
+            by_id: self.by_id.clone(),
+        };
+        for (at, &id) in ids.iter().enumerate() {
+            let known = next
+                .by_id
+                .get(id)
+                .copied()
+                .filter(|&handle| next.position[handle as usize] == Self::ABSENT);
+            let handle = known.unwrap_or_else(|| {
+                next.position.push(Self::ABSENT);
+                let handle = (next.position.len() - 1) as u32;
+                next.by_id.entry(id.to_owned()).or_insert(handle);
+                handle
+            });
+            next.position[handle as usize] = at as u32;
+            next.by_position.push(handle);
+        }
+        next
+    }
+
     /// The position in the file of the Element with `id`.
     fn position_of_id(&self, id: &str) -> Option<usize> {
         self.position_of(*self.by_id.get(id)?)
@@ -331,6 +357,26 @@ impl Scene {
         restore::restore_elements(elements, entropy);
         let handles = Handles::new(elements.iter().map(|e| e.as_object().map_or("", id_of)));
         Ok(Scene { root, handles })
+    }
+
+    /// Replaces the document with the Drawing in `bytes`, keeping the handle
+    /// of every Element that is still there (and giving new ones new
+    /// handles), so that what clients and gestures hold by handle stays
+    /// valid. If the bytes are not a Drawing the Scene is kept. Returns
+    /// whether the document changed.
+    pub(crate) fn replace_keeping_handles(
+        &mut self,
+        bytes: &[u8],
+        entropy: &mut Entropy,
+    ) -> Result<bool, LoadError> {
+        let loaded = Scene::from_bytes(bytes, entropy)?;
+        if loaded == *self {
+            return Ok(false);
+        }
+        let ids: Vec<&str> = loaded.raw_elements().map(id_of).collect();
+        self.handles = self.handles.carried_over(&ids);
+        self.root = loaded.root;
+        Ok(true)
     }
 
     /// The `.excalidraw` file content, in excalidraw.com's layout.
