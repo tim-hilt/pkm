@@ -38,8 +38,9 @@ struct DrawingView: View {
         // Whatever leaves the Drawing (background, closing the window, quitting)
         // saves it at once.
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { drawing.saveNow() }
+            if phase != .active { drawing.saveNow() } else { drawing.syncWithFile() }
         }
+        .task { await drawing.followChangesFromOutside() }
         .onDisappear { drawing.saveNow() }
         #if os(macOS)
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in

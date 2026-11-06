@@ -98,6 +98,49 @@ struct DrawingStore: Sendable {
         try contents.write(to: url(for: name), options: .atomic)
     }
 
+    /// Which file a Drawing was, by the identity and modification date it had
+    /// when the app last read or wrote it. Writing a file atomically (as the
+    /// store, Files and sync clients do) makes it another file, so a stamp
+    /// that no longer matches means the Drawing was changed by someone else.
+    struct FileStamp: Equatable {
+        fileprivate let identity: any NSObjectProtocol
+        let modified: Date
+
+        static func == (a: Self, b: Self) -> Bool {
+            a.identity.isEqual(b.identity) && a.modified == b.modified
+        }
+    }
+
+    /// The stamp of the Drawing's file now, or nil if there is no such file.
+    func stamp(of name: String) -> FileStamp? {
+        guard let url = try? url(for: name) else { return nil }
+        return Self.stamp(of: url)
+    }
+
+    /// The name of the Drawing whose file is the one `stamp` stamped, if it
+    /// now has another name (renamed in Files or Finder); nil if there is
+    /// none, which is also what a deleted Drawing looks like.
+    func name(matching stamp: FileStamp) -> String? {
+        let files =
+            (try? FileManager.default.contentsOfDirectory(
+                at: directory, includingPropertiesForKeys: nil, options: .skipsHiddenFiles)) ?? []
+        return files.first { $0.pathExtension == Self.fileExtension && Self.stamp(of: $0) == stamp }
+            .map { $0.deletingPathExtension().lastPathComponent }
+    }
+
+    private static func stamp(of url: URL) -> FileStamp? {
+        guard let values = try? url.resourceValues(forKeys: [.fileResourceIdentifierKey, .contentModificationDateKey]),
+            let identity = values.fileResourceIdentifier, let modified = values.contentModificationDate
+        else { return nil }
+        return FileStamp(identity: identity, modified: modified)
+    }
+
+    /// Moves the caches of a Drawing that was renamed outside the app along
+    /// with it. (`rename` does this for renames by the store.)
+    func moveCaches(of name: String, to newName: String) {
+        moveCache(of: name, to: newName)
+    }
+
     /// Gives the Drawing another name and returns it (the given one without
     /// surrounding whitespace). Throws `NameTaken` rather than replace another
     /// Drawing; the same name, or only another case of it, is fine.

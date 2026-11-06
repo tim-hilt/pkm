@@ -48,7 +48,7 @@ final class Gallery {
     func createDrawing() {
         attempt("Could not create a Drawing.") {
             let name = try store.create(contents: Editor().save())
-            open = try OpenDrawing(name: name, store: store)
+            show(try OpenDrawing(name: name, store: store))
         }
     }
 
@@ -133,8 +133,18 @@ final class Gallery {
 
     func openDrawing(named name: String) {
         attempt("Could not open “\(name)”.") {
-            open = try OpenDrawing(name: name, store: store)
+            show(try OpenDrawing(name: name, store: store))
         }
+    }
+
+    private func show(_ drawing: OpenDrawing) {
+        // Deleted outside the app: back to the Gallery, without saving.
+        drawing.onDeleted = { [weak self, weak drawing] in
+            guard let self, open === drawing else { return }
+            open = nil
+            reload()
+        }
+        open = drawing
     }
 
     /// Saves the open Drawing and returns to the Gallery.
