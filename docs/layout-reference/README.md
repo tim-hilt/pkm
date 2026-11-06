@@ -254,7 +254,7 @@ excalidraw.com's phone UI does **not** use a bottom sheet: every property group 
 | Font picker | 240×231 at `x = 8` | "In this scene" / "Available fonts" list (no search field on phone) | `…-font-picker` |
 | Main menu | 232 wide, from `12,52` | as §2.6, full list | `…-main-menu` |
 
-The user story "properties in a sheet" (69) is therefore a deliberate native adaptation: use a native sheet/popover that offers the same groups and option sets as these popovers.
+This app follows these popovers rather than user story 69's "properties in a sheet": the Action row's triggers open custom popovers with the same groups and option sets. A Canvas touch while one is open only closes it (ADR-0013).
 
 Phone `rect-selected` also shows touch-sized selection handles (§6).
 

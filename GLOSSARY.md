@@ -81,8 +81,12 @@ The dark look of the app's screens (Canvas, chrome and Gallery), following the s
 _Avoid_: Theme, dark theme, night mode
 
 **Properties panel**:
-The panel that sets stroke colour, background colour, fill style, stroke width, stroke style, sloppiness, edges and opacity (and, for text, font size and text alignment) on the Selection, and, with an empty Selection, as the style of the next Element. It shows the Selection's current values, or none chosen where they are mixed.
-_Avoid_: Inspector, style bar, sidebar
+The panel that sets stroke colour, background colour, fill style, stroke width, stroke style, sloppiness, edges and opacity (and, for text, font size and text alignment) on the Selection, and, with an empty Selection, as the style of the next Element. It shows the Selection's current values, or none chosen where they are mixed. Shown as a panel beside the Canvas on wide screens; on a phone it is split by concern into popovers opened from the Action row.
+_Avoid_: Inspector, style bar, sidebar, property popover
+
+**Action row**:
+The row above the phone toolbar holding the Properties panel's triggers and the Selection's actions.
+_Avoid_: Style bar, bottom bar (that is the Action row and toolbar together)
 
 ### Cloud
 
