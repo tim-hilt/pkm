@@ -12,30 +12,10 @@ set -uo pipefail
 source "$(dirname "$0")/lib/loop-common.sh"
 
 directory=${1:-} # kept as given, so paths stay relative to the cwd
-if [[ -z $directory ]]; then
-  echo "Usage: scripts/review-loop.sh <review-directory>" >&2
-  exit 2
-fi
-
+init_loop "$directory"
 tickets_dir="$directory/issues"
 plan_file="$directory/spec.md"
-for required in "$tickets_dir" "$plan_file"; do
-  if [[ ! -e $required ]]; then
-    echo "No such file or directory: $required" >&2
-    exit 1
-  fi
-done
-
-# Every agent commit goes through the pre-commit guardrail (make lint + Rust tests).
-git config core.hooksPath .githooks
-
-review_name=$(basename "$(cd "$directory" && pwd)")
-mkdir -p "logs/$review_name"
-log_file="logs/$review_name.loop.log"
-state_file="${log_file%.log}.state"
-load_interrupted_session
-
-status_pattern() { printf '^\\*{0,2}Status:\\*{0,2}[ \t]*%s[ \t]*\r?$' "$1"; }
+mkdir -p "logs/$name"
 
 # Prints the issue paths listed under the ticket's `## Reviews` heading.
 reviewed_issues() {
@@ -74,37 +54,23 @@ shopt -u nullglob
 reviewed=0
 
 for ticket in ${tickets[@]+"${tickets[@]}"}; do
-  grep -Eiq "$(status_pattern ready-for-agent)" "$ticket" || continue
+  has_status "$ticket" ready-for-agent || continue
 
-  context_file="logs/$review_name/$(basename "$ticket" .md).context.log"
+  context_file="logs/$name/$(basename "$ticket" .md).context.log"
   write_context "$ticket" "$context_file"
 
-  quota_await_headroom
-  status_set "Reviewing $ticket"
-
-  run_pi anthropic claude-opus-5-5 medium \
-    "/skill:software-design review the implementation described in @$ticket, following the review procedure in @$plan_file. The implementation notes of the reviewed issues are in @$context_file. This is a headless run: don't ask questions; record open decisions in the ticket instead. Pay special attention to correctness and simplicity, and **fix found issues right away**. Update the ticket and the reviewed issue files in place (.scratch/ is untracked), set the ticket's Status line to done when you're finished, and commit your changes using the commit-message 'Review $ticket'." \
-    "$(session_name review "$review_name" "$(basename "$ticket" .md)")"
-
-  reviewed=$((reviewed + 1))
-  status_stop
+  run_pi "Reviewing $ticket" claude-opus-5-5 medium "review-$name-$(basename "$ticket" .md)" \
+    "/skill:software-design review the implementation described in @$ticket, following the review procedure in @$plan_file. The implementation notes of the reviewed issues are in @$context_file. This is a headless run: don't ask questions; record open decisions in the ticket instead. Pay special attention to correctness and simplicity, and **fix found issues right away**. Update the ticket and the reviewed issue files in place (.scratch/ is untracked), set the ticket's Status line to done when you're finished, and commit your changes using the commit-message 'Review $ticket'."
   log_section "$ticket reviewed in $status_elapsed" "$pi_output"
+  reviewed=$((reviewed + 1))
 
   # A ticket still waiting for an agent means the session gave up; don't pile more reviews on top.
-  if grep -Eiq "$(status_pattern ready-for-agent)" "$ticket"; then
+  if has_status "$ticket" ready-for-agent; then
     printf '%s is still ready-for-agent after its session; stopping (see %s)\n' "$ticket" "$log_file" >&2
     exit 1
   fi
 
-  # Guardrail: the pre-commit hook skips the Apple tests, so gate on them here.
-  status_set "Testing after $ticket"
-  if ! test_output=$(make test 2>&1); then
-    status_stop
-    log_section "make test failed after $ticket" "$test_output"
-    printf 'make test failed after %s; stopping (see %s)\n\n%s\n' "$ticket" "$log_file" "$(tail -n 40 <<<"$test_output")" >&2
-    exit 1
-  fi
-  status_stop
+  gate_on_tests "$ticket"
 done
 
 if ((reviewed == 0)); then

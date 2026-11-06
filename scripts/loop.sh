@@ -1,43 +1,23 @@
 #!/usr/bin/env bash
 # Usage: scripts/loop.sh <project-directory>
+#
+# Implements the ready-for-agent tasks in <project-directory>/issues/ one pi session
+# each, in file order and after their blockers, then reviews them all against
+# <project-directory>/spec.md.
 
 set -uo pipefail
 
 source "$(dirname "$0")/lib/loop-common.sh"
 
 directory=${1:-} # kept as given, so paths stay relative to the cwd
-if [[ -z $directory ]]; then
-  echo "Usage: scripts/loop.sh <project-directory>" >&2
-  exit 2
-fi
-
+init_loop "$directory"
 tasks_dir="$directory/issues"
-if [[ ! -d $tasks_dir ]]; then
-  echo "No such directory: $tasks_dir" >&2
-  exit 1
-fi
+spec_file="$directory/spec.md"
+review_session="review-$name"
 
-# Every agent commit goes through the pre-commit guardrail (make lint + Rust tests).
-git config core.hooksPath .githooks
-
-mkdir -p logs
-project=$(basename "$(cd "$directory" && pwd)")
-log_file="logs/$project.loop.log"
-state_file="${log_file%.log}.state"
-review_session=$(session_name review "$project")
-load_interrupted_session
-
-shopt -s nullglob dotglob
-tasks=()
-for path in "$tasks_dir"/*.md; do # glob expansion is sorted
-  [[ -f $path ]] && tasks+=("$path")
-done
-shopt -u nullglob dotglob
-
-# Whether the current `**Status:**` line of $1 is one of the statuses in the regex $2.
-has_status() {
-  grep -Eiq $'^\\*{0,2}Status:\\*{0,2}[ \t]*('"$2"$')[ \t]*\r?$' "$1"
-}
+shopt -s nullglob
+tasks=("$tasks_dir"/*.md) # glob expansion is sorted
+shopt -u nullglob
 
 # The ticket numbers on the `**Blocked by:**` line of $1 that are not yet
 # implemented (Status in-review or done), space-separated; empty if none.
@@ -52,30 +32,6 @@ pending_blockers() {
   echo "${pending% }"
 }
 
-# Implements $1 with an agent, then gates on the Apple tests.
-implement() {
-  local task_file=$1
-  quota_await_headroom
-  status_set "Implementing $task_file"
-
-  run_pi anthropic claude-sonnet-5-5 medium \
-    "/skill:tdd implement the task described in @$task_file. This is a headless run: the seams named in the task and its spec are the confirmed seams. Apply software-design best practices during the implementation. Tick off all completed bullet points in $task_file and set its Status line to in-review when you're finished; edit it in place, since .scratch/ is untracked. Commit the implementation using the commit-message 'Implement $task_file'." \
-    "$(session_name loop "$project" "$(basename "$task_file" .md)")"
-
-  status_stop
-  log_section "$task_file implemented in $status_elapsed" "$pi_output"
-
-  # Guardrail: the pre-commit hook skips the Apple tests, so gate on them here.
-  status_set "Testing after $task_file"
-  if ! test_output=$(make test 2>&1); then
-    status_stop
-    log_section "make test failed after $task_file" "$test_output"
-    printf 'make test failed after %s; stopping (see %s)\n\n%s\n' "$task_file" "$log_file" "$(tail -n 40 <<<"$test_output")" >&2
-    exit 1
-  fi
-  status_stop
-}
-
 implemented=0
 attempted=" " # tasks already run: one whose Status the agent did not update runs only once
 
@@ -85,12 +41,17 @@ progress=1
 while ((progress)); do
   progress=0
   for task_file in ${tasks[@]+"${tasks[@]}"}; do
-    # Check the current `**Status:**` line only; earlier implementations may change later tasks.
+    # Re-read the Status every time; earlier implementations may change later tasks.
     has_status "$task_file" 'ready-for-agent' || continue
     [[ $attempted == *" $task_file "* ]] && continue
     [[ -z $(pending_blockers "$task_file") ]] || continue
     attempted+="$task_file "
-    implement "$task_file"
+
+    run_pi "Implementing $task_file" claude-sonnet-5-5 medium "loop-$name-$(basename "$task_file" .md)" \
+      "/skill:tdd implement the task described in @$task_file. This is a headless run: the seams named in the task and its spec are the confirmed seams. Apply software-design best practices during the implementation. Tick off all completed bullet points in $task_file and set its Status line to in-review when you're finished; edit it in place, since .scratch/ is untracked. Commit the implementation using the commit-message 'Implement $task_file'."
+    log_section "$task_file implemented in $status_elapsed" "$pi_output"
+    gate_on_tests "$task_file"
+
     implemented=$((implemented + 1))
     progress=1
   done
@@ -107,21 +68,14 @@ if [[ -n $still_blocked ]]; then
   printf 'Still blocked, not implemented:\n%s' "$still_blocked" >&2
 fi
 
+# An interrupted review is finished even when there is nothing new to review.
 if ((implemented == 0)) && [[ $resume_session != "$review_session" ]]; then
   echo "No ready-for-agent tasks found."
   exit 0
 fi
 
-spec_file="$directory/spec.md"
-
-quota_await_headroom
-status_set "Reviewing $spec_file"
-
-run_pi anthropic claude-opus-5-5 high \
-  "/skill:software-design the last commits implemented the tickets in @$tasks_dir. Please review these commits according to @$spec_file. Also consider @$log_file to understand how we got to the current state. Pay special attention to correctness and simplicity. Fix found issues right away. If an issue is fully implemented, then please set its Status line to 'done'. Commit your changes using the commit-message 'Reviewed $spec_file'." \
-  "$review_session"
-
-status_stop
+run_pi "Reviewing $spec_file" claude-opus-5-5 high "$review_session" \
+  "/skill:software-design the last commits implemented the tickets in @$tasks_dir. Please review these commits according to @$spec_file. Also consider @$log_file to understand how we got to the current state. Pay special attention to correctness and simplicity. Fix found issues right away. If an issue is fully implemented, then please set its Status line to 'done'. Commit your changes using the commit-message 'Reviewed $spec_file'."
 log_section "$spec_file reviewed in $status_elapsed" "$pi_output"
 
 if [[ -n $resume_session ]]; then
