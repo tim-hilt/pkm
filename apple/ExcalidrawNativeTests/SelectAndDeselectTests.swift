@@ -27,7 +27,6 @@ import Testing
         let setup = Setup()
         _ = try #require(setup.canvas.renderer)
         try setup.editor.load(bytes: Self.drawing)
-        setup.renderer.setGeometry(setup.editor.geometry())
         setup.canvas.editor = setup.editor
         return setup
     }

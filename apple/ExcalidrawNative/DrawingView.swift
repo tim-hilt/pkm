@@ -7,19 +7,8 @@ struct DrawingView: View {
     /// The Drawing as a `.excalidraw` file for the share sheet.
     let export: ExportedDrawing
     let onBack: () -> Void
-    /// Requested once: panning and zooming move the viewport, never the
-    /// geometry, so nothing here depends on the viewport and this view is not
-    /// re-evaluated while navigating.
-    @State private var geometry: Geometry
     @State private var controller = CanvasController()
     @Environment(\.scenePhase) private var scenePhase
-
-    init(drawing: OpenDrawing, export: ExportedDrawing, onBack: @escaping () -> Void) {
-        self.drawing = drawing
-        self.export = export
-        self.onBack = onBack
-        _geometry = State(initialValue: drawing.editor.geometry())
-    }
 
     var body: some View {
         // On iPhone and iPad the system's navigation bar carries the Gallery
@@ -57,7 +46,7 @@ struct DrawingView: View {
 
     private var canvas: some View {
         CanvasView(
-            editor: drawing.editor, geometry: geometry, controller: controller,
+            editor: drawing.editor, controller: controller,
             onSceneChange: { drawing.editorDidChange() }
         )
         .ignoresSafeArea()

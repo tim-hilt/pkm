@@ -19,16 +19,19 @@ fn generated_by(
 /// regenerates only what changed instead of every Element.
 ///
 /// An entry is valid for the key
-/// `(generation, handle, version, background, measurer)`:
+/// `(generation, handle, version, background, dark, measurer)`:
 ///
 /// * `generation` and `handle`: handles are only stable while the same
-///   Drawing is open ([`Geometry::generation`]); a load empties the cache.
+///   Drawing is open ([`Geometry::generation`]); a load or a switch of dark
+///   mode empties the cache.
 /// * `version`: changes whenever the Element's drawing does. For a text that
 ///   is the version it is drawn with, which also changes with its container.
 /// * `background`: the colour of the Canvas, which fills outline arrowheads;
 ///   a change empties the cache.
 /// * `dark`: whether colours are the dark display colours; a change empties
-///   the cache.
+///   the cache. Besides a switch of dark mode, that is an [`Editor::export`]
+///   (always light) while dark mode is on, which costs one regeneration of
+///   each.
 /// * `measurer`: what texts are laid out with; setting one empties the cache.
 ///
 /// The eraser fade is not in the key: entries are cached unfaded and the fade
@@ -119,7 +122,8 @@ impl GeometryCache {
 
 impl Editor {
     /// Shows colours as Excalidraw's dark theme does (ADR-0010) in
-    /// [`Editor::geometry`] and [`Editor::canvas_color`]; off by default.
+    /// [`Editor::geometry`], [`Editor::overlay`], [`Editor::text_editor`] and
+    /// [`Editor::canvas_color`]; off by default.
     /// Clients set it from the system appearance. It changes only what is
     /// shown: the Scene, [`Editor::revision`], the Selection, the history,
     /// [`Editor::properties`] and [`Editor::export`] stay as they are, so

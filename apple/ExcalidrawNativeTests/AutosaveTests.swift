@@ -289,7 +289,6 @@ import Testing
         let canvas = CanvasMetalView()
         let renderer = try #require(canvas.renderer)
         let reopened = try OpenDrawing(name: name, store: store)
-        renderer.setGeometry(reopened.editor.geometry())
         canvas.editor = reopened.editor
 
         #expect(renderer.viewport == Viewport(left))
@@ -314,7 +313,6 @@ import Testing
         let canvas = CanvasMetalView()
         let editor = Editor()
         _ = try #require(canvas.renderer)
-        canvas.renderer?.setGeometry(editor.geometry())
         canvas.editor = editor
         var changes = 0
         canvas.onSceneChange = { changes += 1 }

@@ -17,7 +17,6 @@ import Testing
     private func makeSetup() throws -> Setup {
         let setup = Setup()
         _ = try #require(setup.canvas.renderer)
-        setup.renderer.setGeometry(setup.editor.geometry())
         setup.canvas.editor = setup.editor
         setup.controller.canvas = setup.canvas
         return setup

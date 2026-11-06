@@ -32,26 +32,6 @@ enum Chrome {
     /// Checkerboard behind transparent swatches.
     static let checkerboard = adaptive(light: 0xFFFFFF, dark: 0x232329)
 
-    /// The colour as the given appearance resolves it, as RGB bytes.
-    static func rgb(_ color: Color, dark: Bool) -> [Int] {
-        let traits = ChromeNativeColor(color)
-        #if canImport(UIKit)
-            let resolved = traits.resolvedColor(
-                with: UITraitCollection(userInterfaceStyle: dark ? .dark : .light))
-            var (r, g, b, a) = (CGFloat(0), CGFloat(0), CGFloat(0), CGFloat(0))
-            resolved.getRed(&r, green: &g, blue: &b, alpha: &a)
-        #else
-            var (r, g, b) = (CGFloat(0), CGFloat(0), CGFloat(0))
-            NSAppearance(named: dark ? .darkAqua : .aqua)!.performAsCurrentDrawingAppearance {
-                let c = traits.usingColorSpace(.sRGB)!
-                r = c.redComponent
-                g = c.greenComponent
-                b = c.blueComponent
-            }
-        #endif
-        return [r, g, b].map { Int(($0 * 255).rounded()) }
-    }
-
     private static func adaptive(light: UInt32, dark: UInt32) -> Color {
         #if canImport(UIKit)
             Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: dark) : UIColor(hex: light) })

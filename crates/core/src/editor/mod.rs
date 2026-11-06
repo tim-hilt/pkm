@@ -95,9 +95,8 @@ fn next_generation() -> u64 {
 #[derive(Debug)]
 pub struct Editor {
     scene: Scene,
-    /// Changes whenever a Drawing is loaded and handles are
-    /// reassigned, see
-    /// [`Geometry::generation`].
+    /// Changes whenever a Drawing is loaded (handles are reassigned) or dark
+    /// mode is switched (colours change), see [`Geometry::generation`].
     generation: u64,
     /// What [`Editor::geometry`] generated for shapes, see `GeometryCache`.
     geometry_cache: RefCell<GeometryCache>,
@@ -298,7 +297,8 @@ impl Editor {
     /// path. Text is not made of paths but described as lines of text for the
     /// client to set in Excalifont (see [`crate::text`]). Images are described
     /// by file id, placement, crop and scale for the client to draw (see
-    /// [`crate::image`]).
+    /// [`crate::image`]). Colours are the displayed ones, see
+    /// [`Editor::set_dark_mode`].
     pub fn geometry(&self) -> Geometry {
         // The text view shows the text that is being edited.
         let editing = self.text.as_ref().map(TextEditing::handle);

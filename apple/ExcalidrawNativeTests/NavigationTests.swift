@@ -6,13 +6,11 @@ import Testing
 /// Input reaching the core through the bindings and the viewport coming back
 /// to the renderer. What a gesture means is tested in the core.
 @MainActor @Suite struct NavigationTests {
-    private func makeCanvas() throws -> (CanvasMetalView, CanvasRenderer, Geometry) {
+    private func makeCanvas() throws -> (CanvasMetalView, CanvasRenderer, any GeometrySource) {
         let canvas = CanvasMetalView()
         let renderer = try #require(canvas.renderer)
-        let editor = try SampleDrawing.makeEditor()
-        let geometry = editor.geometry()
-        renderer.setGeometry(geometry)
-        canvas.editor = editor
+        canvas.editor = try SampleDrawing.makeEditor()
+        let geometry = try #require(renderer.geometry)
         return (canvas, renderer, geometry)
     }
 

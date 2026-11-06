@@ -116,7 +116,10 @@ targets:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: $(inherited)
         "CODE_SIGN_IDENTITY[sdk=macosx*]": "-"
-        # macOS app bundles keep the executable under Contents/MacOS.
+        # The app's product name has a space, which the default test host
+        # lacks; macOS app bundles keep the executable under Contents/MacOS.
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Excalidraw Native.app/Excalidraw Native"
+        BUNDLE_LOADER: "$(TEST_HOST)"
         "TEST_HOST[sdk=macosx*]": "$(BUILT_PRODUCTS_DIR)/Excalidraw Native.app/Contents/MacOS/Excalidraw Native"
         "BUNDLE_LOADER[sdk=macosx*]": "$(TEST_HOST)"
 schemes:

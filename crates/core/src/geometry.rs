@@ -374,8 +374,9 @@ impl Geometry {
 
     /// Tells clients whether their per-Element caches, keyed by
     /// `(Part::element, Part::version)`, are still valid: it changes whenever
-    /// an [`Part::element`] handle may stand for another Element than before.
-    /// That is only the case when a Drawing is loaded: an Element keeps its
+    /// an [`Part::element`] handle may stand for another Element than before,
+    /// or an unchanged Element may look different. That is only the case when
+    /// a Drawing is loaded or dark mode is switched: an Element keeps its
     /// handle while the Scene is open, whatever is added, removed, reordered,
     /// undone or pasted, and a handle is never given to another Element.
     /// While it stays the same, an Element with an unchanged version has

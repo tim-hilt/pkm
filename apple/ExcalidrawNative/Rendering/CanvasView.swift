@@ -17,14 +17,14 @@ final class CanvasMetalView: MTKView {
     let renderer: CanvasRenderer?
 
     /// Receives all input and supplies the image files. Set before input
-    /// arrives; setting it shows the editor's current viewport. The renderer
-    /// is expected to show the editor's Scene as it is when this is set (see
-    /// `CanvasRenderer.setGeometry`); changes from then on are picked up here.
+    /// arrives; setting it shows the editor's Scene in the appearance
+    /// (`isDark`) and its current viewport; changes from then on are picked
+    /// up here.
     var editor: Editor? {
         didSet {
             renderer?.files = editor
-            applyAppearance()
             shownRevision = editor?.revision()
+            showScene()
             shownOverlayRevision = nil
             reportViewSize()
             syncViewport()
@@ -36,26 +36,27 @@ final class CanvasMetalView: MTKView {
     /// Whether the system appearance is dark. The Canvas shows the Scene in
     /// Excalidraw's dark colours then (ADR-0010); changing it keeps the
     /// Selection, the Text view and the undo history.
+    /// Set it before `editor`, so that a Drawing opened in dark mode is
+    /// generated once, in its dark colours.
     var isDark = false {
-        didSet { if isDark != oldValue { applyAppearance() } }
-    }
-
-    /// Tells the editor the appearance and shows what it reports for it: the
-    /// geometry again (other colours) and the Canvas colour. Does nothing
-    /// that the editor does not already show.
-    private func applyAppearance() {
-        guard let editor else { return }
-        let changed = editor.darkMode() != isDark
-        editor.setDarkMode(on: isDark)
-        renderer?.isDark = isDark
-        renderer?.paperColor = editor.canvasColor()
-        if changed {
-            renderer?.setGeometry(editor.geometry())
+        didSet {
+            guard isDark != oldValue else { return }
+            showScene()
             // The overlay and the Text view have the colours of the new
             // appearance; what is typed in the latter stays.
             syncOverlay()
             syncTextEditor()
         }
+    }
+
+    /// Hands the renderer the editor's Scene as it is now, in the colours of
+    /// the appearance: its geometry and the Canvas colour.
+    private func showScene() {
+        guard let editor else { return }
+        editor.setDarkMode(on: isDark)
+        renderer?.isDark = isDark
+        renderer?.setGeometry(editor.geometry())
+        renderer?.paperColor = editor.canvasColor()
     }
 
     /// Called after input or a command reached the editor, for chrome that
@@ -301,8 +302,7 @@ final class CanvasMetalView: MTKView {
     private func syncScene() {
         guard let editor, editor.revision() != shownRevision else { return }
         shownRevision = editor.revision()
-        renderer?.setGeometry(editor.geometry())
-        renderer?.paperColor = editor.canvasColor()
+        showScene()
         onSceneChange?()
     }
 
@@ -574,9 +574,6 @@ final class CanvasMetalView: MTKView {
 /// iOS and macOS except for the representable protocol it adopts.
 struct CanvasView {
     let editor: Editor
-    /// The editor's geometry when it is handed over; the Canvas keeps it up
-    /// to date from then on.
-    let geometry: Geometry
     let controller: CanvasController
     /// Called when the Scene changed.
     var onSceneChange: (() -> Void)?
@@ -588,14 +585,10 @@ struct CanvasView {
     }
 
     @MainActor private func update(_ canvas: CanvasMetalView, isDark: Bool) {
-        // SwiftUI updates this view for reasons that have nothing to do with
-        // the Scene (a chrome state change); the Canvas must not be reset to
-        // the geometry of the hand-over then.
-        if canvas.editor !== editor {
-            canvas.renderer?.setGeometry(geometry)
-            canvas.editor = editor
-        }
         canvas.isDark = isDark
+        // SwiftUI updates this view for reasons that have nothing to do with
+        // the Scene (a chrome state change); the Canvas is not reset then.
+        if canvas.editor !== editor { canvas.editor = editor }
         canvas.onSceneChange = onSceneChange
         controller.canvas = canvas
     }
