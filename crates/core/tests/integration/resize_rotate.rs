@@ -547,7 +547,7 @@ fn the_handles_are_larger_for_a_finger_than_for_a_mouse() {
     tap(&mut editor, "finger", (150.0, 125.0), 1.0);
     let finger_sizes = handle_sizes(&editor);
     assert!(
-        finger_sizes.iter().all(|size| (size - 28.0).abs() < 1e-3),
+        finger_sizes.iter().all(|size| (size - 14.0).abs() < 1e-3),
         "{finger_sizes:?}"
     );
 }

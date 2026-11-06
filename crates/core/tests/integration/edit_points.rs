@@ -161,10 +161,10 @@ fn the_handles_of_a_mouse_are_small_and_those_of_a_finger_touch_sized() {
         sides
     };
 
-    // Points are 8 view points wide for a mouse and 28 for a finger; the
+    // Points are 8 view points wide for a mouse and 14 for a finger; the
     // handles in the middle of segments are half as big.
     assert_eq!(sides(&mouse), [4.0, 8.0]);
-    assert_eq!(sides(&finger), [14.0, 28.0]);
+    assert_eq!(sides(&finger), [7.0, 14.0]);
 }
 
 #[test]

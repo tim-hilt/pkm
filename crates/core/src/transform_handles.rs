@@ -91,7 +91,9 @@ pub(crate) struct Grip {
     /// The side of the square that is drawn.
     pub visual: f64,
     /// The side of the square that takes hold: Apple's 44 points for a
-    /// finger, which is a lot less precise than a mouse.
+    /// finger, which is a lot less precise than a mouse. Drawn that big (or
+    /// as big as Excalidraw's 28), the handles crowd a phone's screen, so a
+    /// finger's are drawn smaller than they take hold.
     pub hit: f64,
 }
 
@@ -107,7 +109,7 @@ impl Grip {
                 hit: 16.0,
             },
             PointerKind::Finger => Grip {
-                visual: 28.0,
+                visual: 14.0,
                 hit: 44.0,
             },
         }
