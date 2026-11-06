@@ -11,6 +11,7 @@ struct ColorPickerView: View {
     /// The colour of the Selection; `nil` if its Elements do not share one.
     let selected: String?
     let onPick: (String) -> Void
+    @Environment(\.colorScheme) private var colorScheme
     @State private var isOpen = false
     @State private var hex = ""
     @State private var hexIsInvalid = false
@@ -24,7 +25,7 @@ struct ColorPickerView: View {
                 Button {
                     withAnimation(.snappy(duration: 0.2)) { isOpen.toggle() }
                 } label: {
-                    ColorSwatch(color: selected ?? "transparent", size: 26)
+                    ColorSwatch(color: display(selected ?? "transparent"), size: 26)
                         .overlay(Selection(size: 26).opacity(isOpen ? 1 : 0))
                         .frame(width: 26, height: 26)
                         .frame(minWidth: 30, minHeight: 36)
@@ -94,6 +95,10 @@ struct ColorPickerView: View {
         }
     }
 
+    private func display(_ color: String) -> String {
+        ColorPalette.displayColor(color, dark: colorScheme == .dark)
+    }
+
     private func commitHex() {
         if hex == Self.hexDigits(of: selected) {
             hexIsInvalid = false
@@ -115,7 +120,7 @@ struct ColorPickerView: View {
         Button {
             onPick(color)
         } label: {
-            ColorSwatch(color: color, size: size)
+            ColorSwatch(color: display(color), size: size)
                 .overlay(Selection(size: size).opacity(color == selected ? 1 : 0))
                 .frame(width: size, height: size)
                 .frame(maxWidth: .infinity, minHeight: 36)

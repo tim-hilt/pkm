@@ -52,6 +52,13 @@ enum ColorPalette {
         return hues.first { $0.shades.contains(color) }?.shades
     }
 
+    /// The colour a swatch is drawn in: the colour itself, or in dark mode
+    /// the core's display colour, as on the dark Canvas (ADR-0010). Only the
+    /// drawing is affected; the chosen value and its spoken name stay `color`.
+    static func displayColor(_ color: String, dark: Bool) -> String {
+        dark ? darkModeColor(css: color) : color
+    }
+
     /// The colour a typed hex code stands for, `#` optional; `nil` if it
     /// is not 3, 4, 6 or 8 hex digits (Excalidraw's rule).
     static func color(fromHex input: String) -> String? {

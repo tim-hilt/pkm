@@ -64,4 +64,20 @@ import Testing
             }
         }
     }
+
+    @Test func swatchesShowThePlainColourInLightMode() {
+        #expect(ColorPalette.displayColor("#1e1e1e", dark: false) == "#1e1e1e")
+        #expect(ColorPalette.displayColor("transparent", dark: false) == "transparent")
+    }
+
+    @Test func swatchesShowTheCoresDarkColourInDarkMode() {
+        for color in ["#1e1e1e", "#ffffff", "#e03131", "transparent", "#ff000080"] {
+            #expect(ColorPalette.displayColor(color, dark: true) == darkModeColor(css: color), "\(color)")
+        }
+        #expect(ColorPalette.displayColor("#1e1e1e", dark: true) != "#1e1e1e")
+    }
+
+    @Test func spokenNamesAreThoseOfTheUntransformedColours() {
+        #expect(ColorPalette.name("#1e1e1e").key == "Black")
+    }
 }
