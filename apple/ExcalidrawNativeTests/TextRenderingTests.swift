@@ -74,6 +74,22 @@ import Testing
         #expect(between * 4 < inked, "a thin fringe of anti-aliasing, not a blur: \(between) of \(inked)")
     }
 
+    @Test func anArrowLeavesAGapForItsLabel() throws {
+        // A straight arrow along y = 200 with a "." label at its middle
+        // (200, 200): the gap is the label's box and 5 around, so at least
+        // 7 either side of the middle, where the dot is not.
+        let arrow =
+            ##"{"id":"a","type":"arrow","x":50,"y":200,"width":300,"height":0,"points":[[0,0],[300,0]],"roughness":0,"strokeWidth":2,"endArrowhead":null,"boundElements":[{"type":"text","id":"t"}]}"##
+        let label = TestScenes.text(
+            "t", 0, 0, (5, 25), ".", #","containerId":"a","textAlign":"center","verticalAlign":"middle""#)
+
+        let frame = try render(drawing(arrow, label))
+
+        #expect(frame.red(150, 200) < 60, "the arrow away from its label")
+        #expect(frame.red(194, 200) == 255, "left of the dot")
+        #expect(frame.red(206, 200) == 255, "right of the dot")
+    }
+
     @Test func textIsNotRebuiltWhileNothingChanges() throws {
         let renderer = try OffscreenRender.makeRenderer()
         renderer.setGeometry(drawing(hello))

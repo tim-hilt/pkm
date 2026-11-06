@@ -21,7 +21,17 @@ struct PartUniforms {
     // 1: draw only the pixels the stroke covers completely (the first of the
     // two passes that draw a translucent stroke without double blending).
     float interiorOnly;
+    // Min x, min y, max x, max y of an upright rectangle in Scene
+    // coordinates where nothing is drawn (an arrow's gap for its label);
+    // empty for none.
+    float4 hole;
 };
+
+// Whether the device pixel centre `pixel` is in the part's hole.
+static bool in_hole(float2 pixel, constant FrameUniforms &frame, constant PartUniforms &part) {
+    float2 scene = pixel / frame.scale + frame.origin;
+    return all(scene > part.hole.xy) && all(scene < part.hole.zw);
+}
 
 struct StrokeVertexOut {
     float4 position [[position]];
@@ -73,9 +83,13 @@ vertex StrokeVertexOut stroke_vertex(
 // pixel straddling the capsule's edge.
 fragment float4 stroke_fragment(
     StrokeVertexOut in [[stage_in]],
+    constant FrameUniforms &frame [[buffer(1)]],
     constant PartUniforms &part [[buffer(2)]]
 ) {
     float2 p = in.position.xy;
+    if (in_hole(p, frame, part)) {
+        discard_fragment();
+    }
     float2 ab = in.b - in.a;
     float t = clamp(dot(p - in.a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
     float distance = length(p - in.a - ab * t);
@@ -107,7 +121,14 @@ vertex FillVertexOut fill_vertex(
     return out;
 }
 
-fragment float4 fill_fragment(constant PartUniforms &part [[buffer(2)]]) {
+fragment float4 fill_fragment(
+    FillVertexOut in [[stage_in]],
+    constant FrameUniforms &frame [[buffer(1)]],
+    constant PartUniforms &part [[buffer(2)]]
+) {
+    if (in_hole(in.position.xy, frame, part)) {
+        discard_fragment();
+    }
     return part.color;
 }
 

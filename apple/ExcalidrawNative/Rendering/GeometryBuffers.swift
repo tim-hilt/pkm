@@ -31,6 +31,20 @@ struct GeometryPart {
     var dashOff: Float
     /// A `GeometryFillRule` number; 0 for strokes.
     var fillRule: UInt32 = 0
+    /// Upright rectangle in Scene coordinates (top left, size) where nothing
+    /// of the part is drawn: the gap an arrow leaves for its label. A zero
+    /// width or height is no hole.
+    var holeX: Float = 0
+    var holeY: Float = 0
+    var holeWidth: Float = 0
+    var holeHeight: Float = 0
+
+    /// The hole as min x, min y, max x, max y; empty (nothing is inside) if
+    /// there is none.
+    var hole: SIMD4<Float> {
+        holeWidth > 0 && holeHeight > 0
+            ? SIMD4(holeX, holeY, holeX + holeWidth, holeY + holeHeight) : SIMD4(0, 0, 0, 0)
+    }
 
     /// How a fill treats overlapping stretches of its path.
     var rule: GeometryFillRule? { GeometryFillRule(rawValue: fillRule) }

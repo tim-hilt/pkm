@@ -1,5 +1,6 @@
 use super::*;
 use crate::geometry::Sizes;
+use std::cell::OnceCell;
 use std::collections::{HashMap, hash_map};
 
 /// What `generate` makes, kept small; counted in `generated`.
@@ -185,6 +186,8 @@ impl Editor {
         cache.begin(self.generation, background, dark);
         let mut geometry = Geometry::with_capacity(generation, cache.sizes);
         let containers = Containers::new(&self.scene);
+        // Found the first time an arrow has a label: most Scenes have none.
+        let labels = OnceCell::new();
         let measurer = self.measurer.as_ref().map(|m| &*m.0);
         // Elements are drawn in their own colours (outline arrowheads in the
         // Canvas colour as written) and transformed as a whole, once.
@@ -212,6 +215,25 @@ impl Editor {
                     image::draw(&element, &mut drawn);
                     drawn
                 }),
+                ElementType::Arrow if element.has_bound_text() => {
+                    let label = labels
+                        .get_or_init(|| text::labels(&self.scene))
+                        .get(element.id());
+                    // The arrow looks different when its label does.
+                    let version = label.map_or(element.version(), |label| {
+                        text::version(label, Some(&element))
+                    });
+                    cache.get(handle, version, |background| {
+                        let mut drawn = Geometry::new();
+                        shape::draw(&element, background, &mut drawn);
+                        if let Some(hole) = label
+                            .and_then(|label| text::arrow_label_hole(label, &element, measurer))
+                        {
+                            drawn.cut(hole, version);
+                        }
+                        shown(drawn)
+                    })
+                }
                 _ => cache.get(handle, element.version(), |background| {
                     let mut drawn = Geometry::new();
                     shape::draw(&element, background, &mut drawn);

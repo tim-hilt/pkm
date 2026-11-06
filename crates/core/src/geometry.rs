@@ -164,6 +164,24 @@ pub struct Part {
     pub dash_off: f32,
     /// A [`FillRule`] number; `0` for strokes, which have no use for it.
     pub fill_rule: u32,
+    /// A rectangle in Scene coordinates, upright, where nothing of the part is
+    /// drawn: the gap an arrow leaves for its label, as Excalidraw clips it.
+    /// Its top left corner is `(hole_x, hole_y)`; a `hole_width` or
+    /// `hole_height` of `0` means no hole.
+    pub hole_x: f32,
+    pub hole_y: f32,
+    pub hole_width: f32,
+    pub hole_height: f32,
+}
+
+/// An upright rectangle in Scene coordinates that parts leave out, see
+/// [`Part::hole_x`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Hole {
+    pub(crate) x: f32,
+    pub(crate) y: f32,
+    pub(crate) width: f32,
+    pub(crate) height: f32,
 }
 
 /// Where a line of text sits relative to its [`TextLine::x`]. Numbers are
@@ -415,6 +433,16 @@ impl Geometry {
         }
     }
 
+    /// Leaves `hole` out of every part, which are then at `version`: clients
+    /// cache by version, and the hole is part of what they cache.
+    pub(crate) fn cut(&mut self, hole: Hole, version: u32) {
+        for part in &mut self.parts {
+            (part.hole_x, part.hole_y) = (hole.x, hole.y);
+            (part.hole_width, part.hole_height) = (hole.width, hole.height);
+            part.version = version;
+        }
+    }
+
     /// Replaces the colour of every part and line of text by `f` of it.
     pub(crate) fn map_colors(&mut self, f: impl Fn(u32) -> u32) {
         for part in &mut self.parts {
@@ -509,6 +537,10 @@ impl Geometry {
             dash_on: 0.0,
             dash_off: 0.0,
             fill_rule: FillRule::NonZero as u32,
+            hole_x: 0.0,
+            hole_y: 0.0,
+            hole_width: 0.0,
+            hole_height: 0.0,
         }
     }
 

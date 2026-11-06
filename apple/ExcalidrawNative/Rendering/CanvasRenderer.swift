@@ -215,6 +215,8 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         var color: SIMD4<Float>
         var width: Float
         var interiorOnly: Float = 0
+        /// See `GeometryPart.hole`.
+        var hole: SIMD4<Float> = .zero
     }
 
     /// Mirrors `ImageUniforms` in StrokeShaders.metal.
@@ -467,6 +469,8 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         var uniforms = fill.uniforms
         let coverStart = fill.fanVertexCount
         encoder.setVertexBuffer(fill.vertices, offset: 0, index: 0)
+        // Both passes leave out the hole, so the stencil stays zero there.
+        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<PartUniforms>.stride, index: 2)
         encoder.setRenderPipelineState(fillStencilPipeline)
         encoder.setStencilReferenceValue(0)
         encoder.setDepthStencilState(fill.rule == .evenOdd ? windingEvenOdd : windingNonZero)
@@ -474,7 +478,6 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
 
         encoder.setRenderPipelineState(fillCoverPipeline)
         encoder.setDepthStencilState(paintInside)
-        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<PartUniforms>.stride, index: 2)
         encoder.drawPrimitives(type: .triangle, vertexStart: coverStart, vertexCount: 6)
     }
 
@@ -628,7 +631,7 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         let color = premultipliedColor(of: part)
         return StrokeDraw(
             segments: buffer, segmentCount: segments.count,
-            uniforms: PartUniforms(color: color, width: part.width), isTranslucent: color.w < 1)
+            uniforms: PartUniforms(color: color, width: part.width, hole: part.hole), isTranslucent: color.w < 1)
     }
 
     private func makeDraw(for line: GeometryTextLine, in buffers: GeometryBuffers, tolerance: Float) -> Draw? {
@@ -646,10 +649,12 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         guard let rule = part.rule,
             let mesh = FillMesh.mesh(of: part, in: buffers, tolerance: tolerance)
         else { return nil }
-        return fillDraw(mesh, color: premultipliedColor(of: part), rule: rule)
+        return fillDraw(mesh, color: premultipliedColor(of: part), rule: rule, hole: part.hole)
     }
 
-    private func fillDraw(_ mesh: FillMesh, color: SIMD4<Float>, rule: GeometryFillRule) -> FillDraw? {
+    private func fillDraw(
+        _ mesh: FillMesh, color: SIMD4<Float>, rule: GeometryFillRule, hole: SIMD4<Float> = .zero
+    ) -> FillDraw? {
         let vertices = mesh.triangles + mesh.cover
         guard
             let buffer = vertices.withUnsafeBytes({
@@ -658,7 +663,7 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         else { return nil }
         return FillDraw(
             vertices: buffer, fanVertexCount: mesh.triangles.count,
-            uniforms: PartUniforms(color: color, width: 0), rule: rule)
+            uniforms: PartUniforms(color: color, width: 0, hole: hole), rule: rule)
     }
 
     private func premultipliedColor(of part: GeometryPart) -> SIMD4<Float> {

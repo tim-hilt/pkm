@@ -40,7 +40,7 @@ fn parts_follow_each_other_in_the_shared_buffers() {
 
 #[test]
 fn record_layout_is_the_c_layout_clients_read_directly() {
-    assert_eq!(size_of::<Part>(), 48);
+    assert_eq!(size_of::<Part>(), 64);
     assert_eq!(offset_of!(Part, element), 0);
     assert_eq!(offset_of!(Part, version), 4);
     assert_eq!(offset_of!(Part, kind), 8);
@@ -53,6 +53,10 @@ fn record_layout_is_the_c_layout_clients_read_directly() {
     assert_eq!(offset_of!(Part, dash_on), 36);
     assert_eq!(offset_of!(Part, dash_off), 40);
     assert_eq!(offset_of!(Part, fill_rule), 44);
+    assert_eq!(offset_of!(Part, hole_x), 48);
+    assert_eq!(offset_of!(Part, hole_y), 52);
+    assert_eq!(offset_of!(Part, hole_width), 56);
+    assert_eq!(offset_of!(Part, hole_height), 60);
 }
 
 #[test]

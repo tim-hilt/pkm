@@ -333,6 +333,61 @@ fn the_drawn_label_follows_a_changed_path() {
     assert_eq!(editor.geometry().text_lines()[0].x, 250.0);
 }
 
+// --- The gap in the arrow -----------------------------------------------------------
+
+/// The holes of the parts of `editor`'s geometry, as `(x, y, width, height)`.
+fn holes(editor: &Editor) -> Vec<(f32, f32, f32, f32)> {
+    editor
+        .geometry()
+        .parts()
+        .iter()
+        .map(|p| (p.hole_x, p.hole_y, p.hole_width, p.hole_height))
+        .collect()
+}
+
+#[test]
+fn an_arrow_is_cut_where_its_label_is() {
+    let mut editor = scene(&[&arrow()]);
+    double_tap(&mut editor, ON_ARROW);
+    editor.set_editing_text("Hello");
+    editor.commit_text();
+
+    // "Hello" is 50 by 25, centred on (250, 100), with 5 of padding around
+    // (`BOUND_TEXT_PADDING`), as Excalidraw clips the arrow.
+    let holes = holes(&editor);
+    assert!(!holes.is_empty());
+    assert!(
+        holes.iter().all(|&h| h == (220.0, 82.5, 60.0, 35.0)),
+        "{holes:?}"
+    );
+}
+
+#[test]
+fn an_arrow_without_a_label_is_not_cut() {
+    let editor = scene(&[&arrow()]);
+
+    let holes = holes(&editor);
+    assert!(!holes.is_empty());
+    assert!(holes.iter().all(|h| h.2 == 0.0 && h.3 == 0.0), "{holes:?}");
+}
+
+#[test]
+fn the_cut_follows_an_edited_label() {
+    let mut editor = scene(&[&arrow()]);
+    double_tap(&mut editor, ON_ARROW);
+    editor.set_editing_text("Hello");
+    editor.commit_text();
+    let before = editor.geometry().parts()[0].version;
+
+    editor.edit_selected_text();
+    editor.set_editing_text("Hi");
+    editor.commit_text();
+
+    // Clients cache the arrow by version: it must change with the hole.
+    assert_ne!(editor.geometry().parts()[0].version, before);
+    assert_eq!(holes(&editor)[0], (235.0, 82.5, 30.0, 35.0));
+}
+
 // --- Undo, cancel, empty ------------------------------------------------------------
 
 #[test]

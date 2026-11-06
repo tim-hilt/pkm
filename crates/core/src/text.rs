@@ -8,7 +8,7 @@ use std::cell::OnceCell;
 use std::collections::HashMap;
 
 use crate::color::parse_color;
-use crate::geometry::{Geometry, TextAlign, TextStyle};
+use crate::geometry::{Geometry, Hole, TextAlign, TextStyle};
 use crate::json::Value;
 use crate::linear;
 use crate::scene::{Element, ElementType, Scene, VerticalAlign};
@@ -162,6 +162,26 @@ pub(crate) fn draw(
             block.angle as f32,
         );
     }
+}
+
+/// Where the `arrow` that `label` is bound to is cut so that it does not run
+/// through the label: the label's box with padding around, as Excalidraw
+/// clips arrows (`renderElement`). `None` if the label shows nothing.
+pub(crate) fn arrow_label_hole(
+    label: &Element,
+    arrow: &Element,
+    measurer: Option<&dyn TextMeasurer>,
+) -> Option<Hole> {
+    let block = layout(label, Some(arrow), measurer);
+    if block.lines.iter().all(String::is_empty) {
+        return None;
+    }
+    Some(Hole {
+        x: (block.x - BOUND_TEXT_PADDING) as f32,
+        y: (block.y - BOUND_TEXT_PADDING) as f32,
+        width: (block.width + 2.0 * BOUND_TEXT_PADDING) as f32,
+        height: (block.height + 2.0 * BOUND_TEXT_PADDING) as f32,
+    })
 }
 
 /// The version `text` is drawn with: lines change with the container as well
