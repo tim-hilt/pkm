@@ -420,9 +420,23 @@ impl Editor {
 
     /// Starts resizing or rotating the Selection if the drag began on a
     /// transform handle of it.
-    pub(super) fn begin_transform(&mut self, origin: Origin, event: PointerEvent) {
-        let Some((transform_box, handle)) = self.grabbed_handle(origin.x, origin.y, origin.kind)
-        else {
+    pub(super) fn begin_transform(
+        &mut self,
+        transform_box: Option<TransformBox>,
+        origin: Origin,
+        event: PointerEvent,
+    ) {
+        let Some(handle) = transform_box.and_then(|transform_box| {
+            let viewport = self.navigation.viewport();
+            transform_box.grab(
+                viewport.scene_at(origin.x, origin.y),
+                origin.kind,
+                viewport.zoom(),
+            )
+        }) else {
+            return;
+        };
+        let Some(transform_box) = transform_box else {
             return;
         };
         let viewport = self.navigation.viewport();
@@ -486,7 +500,9 @@ impl Editor {
     /// on empty Canvas it box-selects. `event` is the step that turned the
     /// press into a drag.
     pub(super) fn begin_drag(&mut self, origin: Origin, event: PointerEvent) {
-        self.begin_transform(origin, event);
+        // Asked once: it is dear for a Selection of thousands of Elements.
+        let transform_box = TransformBox::of(&self.scene, &self.selection);
+        self.begin_transform(transform_box, origin, event);
         if self.transforming.is_some() {
             return;
         }
@@ -494,7 +510,7 @@ impl Editor {
         if self.point_dragging.is_some() {
             return;
         }
-        if self.in_selection_box(origin) {
+        if self.in_selection_box(transform_box, origin) {
             return self.begin_move(None, origin, event);
         }
         match self.hit(origin.x, origin.y, origin.kind) {
@@ -508,12 +524,16 @@ impl Editor {
     /// (Excalidraw's `isHittingCommonBoundingBoxOfSelectedElements`). A
     /// single Element's box is part of hitting it, see
     /// [`hit_test::topmost`].
-    pub(super) fn in_selection_box(&self, origin: Origin) -> bool {
+    pub(super) fn in_selection_box(
+        &self,
+        transform_box: Option<TransformBox>,
+        origin: Origin,
+    ) -> bool {
         if self.selection.ids().len() < 2 {
             return false;
         }
         let viewport = self.navigation.viewport();
-        TransformBox::of(&self.scene, &self.selection).is_some_and(|transform_box| {
+        transform_box.is_some_and(|transform_box| {
             transform_box.encloses(viewport.scene_at(origin.x, origin.y), viewport.zoom())
         })
     }

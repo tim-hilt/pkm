@@ -172,6 +172,9 @@ impl fmt::Display for LoadError {
 
 impl std::error::Error for LoadError {}
 
+/// Some members of an Element, by key: `None` for one it does not have.
+pub(crate) type Members = Vec<(&'static str, Option<Value>)>;
+
 /// The open Drawing's content.
 #[derive(Debug, Clone)]
 pub struct Scene {
@@ -201,21 +204,32 @@ struct Handles {
     by_position: Vec<u32>,
     /// The position of each handle, `ABSENT` if its Element was removed.
     position: Vec<u32>,
-    /// The handles of removed Elements, by id.
-    removed: std::collections::HashMap<String, u32>,
+    /// The handle of each Element ever in the Scene, by id (of the first, if
+    /// a file repeats an id); kept for removed Elements so that they get it
+    /// back, and to find an Element by id without searching the file.
+    by_id: std::collections::HashMap<String, u32>,
 }
 
 impl Handles {
     const ABSENT: u32 = u32::MAX;
 
-    /// For a file of `count` Elements.
-    fn new(count: usize) -> Self {
-        let count = u32::try_from(count).unwrap_or(Self::ABSENT - 1);
+    /// For a file of Elements with these ids.
+    fn new<'a>(ids: impl ExactSizeIterator<Item = &'a str>) -> Self {
+        let count = u32::try_from(ids.len()).unwrap_or(Self::ABSENT - 1);
+        let mut by_id = std::collections::HashMap::with_capacity(ids.len());
+        for (handle, id) in (0..count).zip(ids) {
+            by_id.entry(id.to_owned()).or_insert(handle);
+        }
         Self {
             by_position: (0..count).collect(),
             position: (0..count).collect(),
-            removed: Default::default(),
+            by_id,
         }
+    }
+
+    /// The position in the file of the Element with `id`.
+    fn position_of_id(&self, id: &str) -> Option<usize> {
+        self.position_of(*self.by_id.get(id)?)
     }
 
     fn position_of(&self, handle: u32) -> Option<usize> {
@@ -232,9 +246,16 @@ impl Handles {
     /// Records an Element with `id` inserted at `position`; returns its
     /// handle.
     fn insert(&mut self, position: usize, id: &str) -> u32 {
-        let handle = self.removed.remove(id).unwrap_or_else(|| {
+        let old = self
+            .by_id
+            .get(id)
+            .copied()
+            .filter(|&handle| self.position[handle as usize] == Self::ABSENT);
+        let handle = old.unwrap_or_else(|| {
             self.position.push(Self::ABSENT);
-            (self.position.len() - 1) as u32
+            let handle = (self.position.len() - 1) as u32;
+            self.by_id.entry(id.to_owned()).or_insert(handle);
+            handle
         });
         self.by_position.insert(position, handle);
         if position + 1 == self.by_position.len() {
@@ -246,10 +267,9 @@ impl Handles {
     }
 
     /// Records that the Element with `id` at `position` is gone.
-    fn remove(&mut self, position: usize, id: &str) {
+    fn remove(&mut self, position: usize) {
         let handle = self.by_position.remove(position);
         self.position[handle as usize] = Self::ABSENT;
-        self.removed.insert(id.to_owned(), handle);
         self.reindex();
     }
 
@@ -284,7 +304,7 @@ impl Scene {
         root.insert("files".into(), Value::Object(Object::new()));
         Scene {
             root,
-            handles: Handles::new(0),
+            handles: Handles::new(std::iter::empty()),
         }
     }
 
@@ -309,7 +329,7 @@ impl Scene {
             return Err(not_a_drawing(&format!("element {index} is not an object")));
         }
         restore::restore_elements(elements, entropy);
-        let handles = Handles::new(elements.len());
+        let handles = Handles::new(elements.iter().map(|e| e.as_object().map_or("", id_of)));
         Ok(Scene { root, handles })
     }
 
@@ -515,13 +535,8 @@ impl Scene {
         let Some(position) = self.handles.position_of(handle) else {
             return;
         };
-        let removed = self.element_values_mut().remove(position);
-        let id = removed
-            .as_object()
-            .map(id_of)
-            .unwrap_or_default()
-            .to_owned();
-        self.handles.remove(position, &id);
+        self.element_values_mut().remove(position);
+        self.handles.remove(position);
     }
 
     /// The Element with `id` as it is now, whatever its type, deleted or
@@ -529,6 +544,36 @@ impl Scene {
     pub(crate) fn snapshot(&self, id: &str) -> Option<Object> {
         let index = self.index_of(id)?;
         self.element_values()[index].as_object().cloned()
+    }
+
+    /// The members `keys` of the Element with `id` as they are now, `None`
+    /// for those it does not have; `None` if the Scene has no such Element.
+    pub(crate) fn members(&self, id: &str, keys: &[&'static str]) -> Option<Members> {
+        let element = self.element_values()[self.index_of(id)?].as_object()?;
+        Some(keys.iter().map(|&k| (k, element.get(k).cloned())).collect())
+    }
+
+    /// Sets the `members` of the Element with `id` as they are, and makes it
+    /// a new version of itself, see [`Scene::update`].
+    pub(crate) fn restore_members(&mut self, id: &str, members: &Members, nonce: f64) {
+        let Some(index) = self.index_of(id) else {
+            return;
+        };
+        let Some(element) = self.element_values_mut()[index].as_object_mut() else {
+            return;
+        };
+        let version = element
+            .get("version")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        for (key, value) in members {
+            match value {
+                Some(value) => element.insert((*key).into(), value.clone()),
+                None => element.remove(key),
+            }
+        }
+        element.insert("version".into(), Value::Number(version + 1.0));
+        element.insert("versionNonce".into(), Value::Number(nonce));
     }
 
     /// Makes the Element `element` the one of its `id`, in the place of the
@@ -564,13 +609,7 @@ impl Scene {
 
     /// The position in the file of the Element with `id`.
     fn index_of(&self, id: &str) -> Option<usize> {
-        self.element_values().iter().position(|value| {
-            value
-                .as_object()
-                .and_then(|o| o.get("id"))
-                .and_then(Value::as_str)
-                == Some(id)
-        })
+        self.handles.position_of_id(id)
     }
 
     /// Moves and resizes the Element with `handle`, and makes it a new

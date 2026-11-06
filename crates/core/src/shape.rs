@@ -166,6 +166,12 @@ pub(crate) fn write_ops(path: &mut PartWriter, ops: &[Op], placement: &Placement
 // --- Options (generateRoughOptions) --------------------------------------
 
 pub(crate) fn style_of(element: &Element, size: (f64, f64)) -> Style {
+    style_with_fill(element, size, fill_of(element))
+}
+
+/// [`style_of`] with a `fill` that the caller has already worked out, or knows
+/// it does not need.
+pub(crate) fn style_with_fill(element: &Element, size: (f64, f64), fill: Option<Fill>) -> Style {
     Style {
         roughness: adjusted_roughness(element, size),
         // Rounded corners are one continuous path, which must stay connected;
@@ -179,7 +185,7 @@ pub(crate) fn style_of(element: &Element, size: (f64, f64)) -> Style {
         } else {
             0.95
         },
-        fill: fill_of(element),
+        fill,
     }
 }
 

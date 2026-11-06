@@ -51,7 +51,7 @@ impl MoveGesture {
                 || (e.kind() == ElementType::Text
                     && e.container_id().is_some_and(|id| selection.contains(id)))
             {
-                step.touch(scene, e.id());
+                step.touch_members(scene, e.id(), &["x", "y"]);
                 moving.push((e.handle(), (e.x(), e.y())));
                 ids.push(e.id().to_owned());
             }

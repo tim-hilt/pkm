@@ -13,7 +13,7 @@ use crate::path::{Point, is_loop};
 use crate::rough::{Drawing, FillOps, Op, Sketcher, Style};
 use crate::scene::{Arrowhead, Element, ElementType, LineStyle};
 use crate::shape::{
-    Paint, Placement, Target, dash_of, emit, fill_of, fill_weight, stroke_width, style_of,
+    Paint, Placement, Target, dash_of, emit, fill_of, fill_weight, stroke_width, style_with_fill,
 };
 
 /// Adds the strokes of the line or arrow `element` to `geometry`.
@@ -87,10 +87,7 @@ fn sketch(element: &Element, points: &[Point]) -> Sketch {
     } else {
         None
     };
-    let style = Style {
-        fill,
-        ..style_of(element, extent(points))
-    };
+    let style = style_with_fill(element, extent(points), fill);
 
     let mut sketcher = Sketcher::new(element.seed(), style);
     let drawing = if curved {

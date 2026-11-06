@@ -17,6 +17,13 @@ pub(crate) fn parse_color(css: &str) -> u32 {
 }
 
 fn read(css: &str) -> Option<u32> {
+    // What Excalidraw writes (`#ffc9c9`) needs neither trimming nor
+    // lower-casing; this is asked for every Element drawn or measured.
+    if let Some(digits) = css.strip_prefix('#')
+        && let Some(colour) = hex(digits)
+    {
+        return Some(colour);
+    }
     let css = css.trim().to_lowercase();
     if css == "transparent" {
         return Some(0);

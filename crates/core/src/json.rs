@@ -24,7 +24,9 @@
 //! - Nesting deeper than [`MAX_DEPTH`] is rejected so hostile files cannot
 //!   overflow the stack.
 
+use std::collections::HashMap;
 use std::fmt::{self, Write as _};
+use std::sync::Arc;
 
 /// Deepest array/object nesting [`parse`] accepts.
 pub const MAX_DEPTH: usize = 512;
@@ -115,9 +117,13 @@ impl Value {
 ///
 /// Lookup is a linear scan. Excalidraw objects are small (an Element has
 /// about thirty members), where that beats hashing and keeps order for free.
+///
+/// Keys are shared: a parsed document keeps one copy of each distinct key
+/// (`x`, `strokeColor`, ...) however many objects use it, so that an Element
+/// is cheap to copy and to keep.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Object {
-    members: Vec<(String, Value)>,
+    members: Vec<(Arc<str>, Value)>,
 }
 
 impl Object {
@@ -126,18 +132,29 @@ impl Object {
     }
 
     pub fn get(&self, key: &str) -> Option<&Value> {
-        self.members.iter().find(|(k, _)| k == key).map(|(_, v)| v)
+        self.members
+            .iter()
+            .find(|(k, _)| &**k == key)
+            .map(|(_, v)| v)
     }
 
     pub fn get_mut(&mut self, key: &str) -> Option<&mut Value> {
         self.members
             .iter_mut()
-            .find(|(k, _)| k == key)
+            .find(|(k, _)| &**k == key)
             .map(|(_, v)| v)
     }
 
     /// Sets `key`. An existing key keeps its position; a new key goes last.
     pub fn insert(&mut self, key: String, value: Value) {
+        match self.members.iter_mut().find(|(k, _)| **k == *key) {
+            Some((_, existing)) => *existing = value,
+            None => self.members.push((key.into(), value)),
+        }
+    }
+
+    /// [`Object::insert`] for a key that is already shared.
+    fn insert_shared(&mut self, key: Arc<str>, value: Value) {
         match self.members.iter_mut().find(|(k, _)| *k == key) {
             Some((_, existing)) => *existing = value,
             None => self.members.push((key, value)),
@@ -146,12 +163,12 @@ impl Object {
 
     /// Removes `key`, if present.
     pub fn remove(&mut self, key: &str) {
-        self.members.retain(|(k, _)| k != key);
+        self.members.retain(|(k, _)| &**k != key);
     }
 
     /// Members in insertion order.
     pub fn iter(&self) -> impl ExactSizeIterator<Item = (&str, &Value)> {
-        self.members.iter().map(|(k, v)| (k.as_str(), v))
+        self.members.iter().map(|(k, v)| (&**k, v))
     }
 
     pub fn len(&self) -> usize {
@@ -203,7 +220,11 @@ impl std::error::Error for ParseError {}
 
 /// Parses one complete JSON document.
 pub fn parse(input: &str) -> Result<Value, ParseError> {
-    let mut parser = Parser { input, pos: 0 };
+    let mut parser = Parser {
+        input,
+        pos: 0,
+        keys: HashMap::new(),
+    };
     parser.skip_whitespace();
     let value = parser.parse_value(0)?;
     parser.skip_whitespace();
@@ -216,6 +237,8 @@ pub fn parse(input: &str) -> Result<Value, ParseError> {
 struct Parser<'a> {
     input: &'a str,
     pos: usize,
+    /// Every distinct key met so far, to share it between objects.
+    keys: HashMap<String, Arc<str>>,
 }
 
 impl Parser<'_> {
@@ -332,7 +355,15 @@ impl Parser<'_> {
             self.skip_whitespace();
             self.expect(b':')?;
             self.skip_whitespace();
-            object.insert(key, self.parse_value(depth)?);
+            let key = match self.keys.get(&key) {
+                Some(shared) => Arc::clone(shared),
+                None => {
+                    let shared: Arc<str> = Arc::from(key.as_str());
+                    self.keys.insert(key, Arc::clone(&shared));
+                    shared
+                }
+            };
+            object.insert_shared(key, self.parse_value(depth)?);
             self.skip_whitespace();
             match self.peek() {
                 Some(b',') => self.pos += 1,

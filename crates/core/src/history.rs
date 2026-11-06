@@ -19,30 +19,52 @@
 //! and the Selection comes along with them, restored to what it was before
 //! the action when undoing and to what it was after when redoing.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::json::Object;
 use crate::random::Entropy;
-use crate::scene::Scene;
+use crate::scene::{Members, Scene};
 use crate::selection::Selection;
 
 /// Members that change with every revision of an Element without being
 /// part of what the user did.
 const VERSIONING: [&str; 2] = ["version", "versionNonce"];
 
+/// How an Element was or became, as far as an action touched it.
+#[derive(Debug)]
+enum State {
+    /// The Element did not exist.
+    Absent,
+    /// All of the Element.
+    Element(Object),
+    /// Only the members the action changes: much cheaper to keep for a
+    /// Selection of thousands of Elements that all move.
+    Members(Members),
+}
+
+impl State {
+    /// Makes the Element `id` of the Scene as this, as a new version of it.
+    fn apply(&self, scene: &mut Scene, id: &str, nonce: f64) {
+        match self {
+            State::Absent => scene.mark_deleted(id, nonce),
+            State::Element(element) => scene.put(element.clone(), nonce),
+            State::Members(members) => scene.restore_members(id, members, nonce),
+        }
+    }
+}
+
 /// An action that is in progress: the Elements it touches and the Selection
 /// before it began.
 #[derive(Debug)]
 pub(crate) struct Step {
     selection: Selection,
-    /// Each touched Element's id with how it was before, `None` if it did not
-    /// exist.
-    before: Vec<(String, Option<Object>)>,
+    /// Each touched Element's id with how it was before.
+    before: Vec<(String, State)>,
     /// The ids of all Elements in z-order before the action, if it reorders
     /// them.
     order: Option<Vec<String>>,
-    /// The ids in `before`, to tell in constant time whether one is there.
-    tracked: HashSet<String>,
+    /// The place in `before` of each id in it, to find one in constant time.
+    tracked: HashMap<String, usize>,
 }
 
 impl Step {
@@ -52,7 +74,7 @@ impl Step {
             selection: selection.clone(),
             before: Vec::new(),
             order: None,
-            tracked: HashSet::new(),
+            tracked: HashMap::new(),
         }
     }
 
@@ -64,8 +86,49 @@ impl Step {
     /// Notes that the action is about to change the Element `id` of the
     /// Scene, which is as it was before.
     pub fn touch(&mut self, scene: &Scene, id: &str) {
-        if self.track(id) {
-            self.before.push((id.to_owned(), scene.snapshot(id)));
+        match self.tracked.get(id) {
+            None => {
+                let before = scene.snapshot(id).map_or(State::Absent, State::Element);
+                self.track(id, before);
+            }
+            Some(&at) => {
+                // Only the members noted so far have changed: the others are
+                // still as they were, so the whole Element can be made up.
+                if let State::Members(members) = &self.before[at].1
+                    && let Some(mut element) = scene.snapshot(id)
+                {
+                    for (key, value) in members {
+                        match value {
+                            Some(value) => element.insert((*key).into(), value.clone()),
+                            None => element.remove(key),
+                        }
+                    }
+                    self.before[at].1 = State::Element(element);
+                }
+            }
+        }
+    }
+
+    /// Like [`Step::touch`], for an action that changes nothing of the Element
+    /// `id` but its `keys` (and its version): only those are kept, which is
+    /// much less to copy than the Element.
+    pub fn touch_members(&mut self, scene: &Scene, id: &str, keys: &[&'static str]) {
+        match self.tracked.get(id) {
+            None => {
+                let before = scene
+                    .members(id, keys)
+                    .map_or(State::Absent, State::Members);
+                self.track(id, before);
+            }
+            Some(&at) => {
+                if let State::Members(members) = &mut self.before[at].1 {
+                    for &key in keys {
+                        if members.iter().all(|(m, _)| *m != key) {
+                            members.extend(scene.members(id, &[key]).into_iter().flatten());
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -77,8 +140,8 @@ impl Step {
 
     /// Notes that the action created the Element `id`.
     pub fn create(&mut self, id: &str) {
-        if self.track(id) {
-            self.before.push((id.to_owned(), None));
+        if !self.tracked.contains_key(id) {
+            self.track(id, State::Absent);
         }
     }
 
@@ -88,19 +151,17 @@ impl Step {
         if let Some(order) = &self.order {
             scene.arrange(order);
         }
-        for (id, before) in self.before {
-            match before {
-                Some(before) => scene.put(before, entropy.integer()),
-                None => scene.mark_deleted(&id, entropy.integer()),
-            }
+        for (id, before) in &self.before {
+            before.apply(scene, id, entropy.integer());
         }
     }
 
-    /// Starts tracking `id`; returns whether it was not tracked yet. A set
-    /// rather than a search of `before`: a Selection of thousands of
-    /// Elements touches each of them once.
-    fn track(&mut self, id: &str) -> bool {
-        !self.tracked.contains(id) && self.tracked.insert(id.to_owned())
+    /// Starts tracking `id`, which was `before`. A map rather than a search of
+    /// `before`: a Selection of thousands of Elements touches each of them
+    /// once.
+    fn track(&mut self, id: &str, before: State) {
+        self.tracked.insert(id.to_owned(), self.before.len());
+        self.before.push((id.to_owned(), before));
     }
 }
 
@@ -118,8 +179,8 @@ struct Entry {
 #[derive(Debug)]
 struct Change {
     id: String,
-    before: Option<Object>,
-    after: Object,
+    before: State,
+    after: State,
 }
 
 impl Entry {
@@ -131,8 +192,14 @@ impl Entry {
             .before
             .into_iter()
             .filter_map(|(id, before)| {
-                let after = scene.snapshot(&id)?;
-                if before.as_ref().is_some_and(|b| same_content(b, &after)) {
+                let after = match &before {
+                    State::Members(members) => {
+                        let keys: Vec<&'static str> = members.iter().map(|(k, _)| *k).collect();
+                        State::Members(scene.members(&id, &keys)?)
+                    }
+                    _ => State::Element(scene.snapshot(&id)?),
+                };
+                if same_content(&before, &after) {
                     return None;
                 }
                 Some(Change { id, before, after })
@@ -168,12 +235,19 @@ fn reordered(before: Vec<String>, after: Vec<String>) -> Option<(Vec<String>, Ve
     Some((before[first..=last].to_vec(), after[first..=last].to_vec()))
 }
 
-/// Whether two versions of an Element are the same apart from their version.
-fn same_content(a: &Object, b: &Object) -> bool {
-    let content = |o: &Object| o.iter().filter(|(k, _)| !VERSIONING.contains(k)).count();
-    content(a) == content(b)
-        && a.iter()
-            .all(|(key, value)| VERSIONING.contains(&key) || b.get(key) == Some(value))
+/// Whether an Element as it was and as it became are the same apart from
+/// their version.
+fn same_content(before: &State, after: &State) -> bool {
+    match (before, after) {
+        (State::Element(a), State::Element(b)) => {
+            let content = |o: &Object| o.iter().filter(|(k, _)| !VERSIONING.contains(k)).count();
+            content(a) == content(b)
+                && a.iter()
+                    .all(|(key, value)| VERSIONING.contains(&key) || b.get(key) == Some(value))
+        }
+        (State::Members(a), State::Members(b)) => a == b,
+        _ => false,
+    }
 }
 
 /// What can be undone and redone.
@@ -213,10 +287,7 @@ impl History {
     pub fn undo(&mut self, scene: &mut Scene, entropy: &mut Entropy) -> Option<Selection> {
         let entry = self.undo.pop()?;
         for change in &entry.changes {
-            match &change.before {
-                Some(before) => scene.put(before.clone(), entropy.integer()),
-                None => scene.mark_deleted(&change.id, entropy.integer()),
-            }
+            change.before.apply(scene, &change.id, entropy.integer());
         }
         if let Some((before, _)) = &entry.order {
             scene.arrange(before);
@@ -231,7 +302,7 @@ impl History {
     pub fn redo(&mut self, scene: &mut Scene, entropy: &mut Entropy) -> Option<Selection> {
         let entry = self.redo.pop()?;
         for change in &entry.changes {
-            scene.put(change.after.clone(), entropy.integer());
+            change.after.apply(scene, &change.id, entropy.integer());
         }
         if let Some((_, after)) = &entry.order {
             scene.arrange(after);

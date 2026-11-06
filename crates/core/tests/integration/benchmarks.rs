@@ -192,3 +192,161 @@ fn geometry_after_a_one_element_change_in_5000_elements_takes_well_under_a_frame
     );
     assert!(slowest < Duration::from_millis(4), "took {slowest:?}");
 }
+
+/// The scene bounds of every Element as saved: `(min x, min y, max x, max y)`.
+fn scene_bounds(editor: &Editor) -> (f64, f64, f64, f64) {
+    use workingtitle_core::json::{Value, parse};
+    let drawing = parse(&String::from_utf8(editor.save()).unwrap()).unwrap();
+    let number = |e: &Value, key: &str| e.get(key).and_then(Value::as_f64).unwrap_or(0.0);
+    let mut bounds = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+    for e in drawing.get("elements").and_then(Value::as_array).unwrap() {
+        let (x, y) = (number(e, "x"), number(e, "y"));
+        let (w, h) = (number(e, "width"), number(e, "height"));
+        bounds = (
+            bounds.0.min(x).min(x + w),
+            bounds.1.min(y).min(y + h),
+            bounds.2.max(x).max(x + w),
+            bounds.3.max(y).max(y + h),
+        );
+    }
+    bounds
+}
+
+/// Where the Selection's south-east and rotation handles are in the view:
+/// the corner and the middle of the top side, 4 and 20 points out.
+fn handle_positions(editor: &Editor) -> ((f64, f64), (f64, f64)) {
+    let (min_x, min_y, max_x, max_y) = scene_bounds(editor);
+    let viewport = editor.viewport();
+    let (origin, zoom) = (viewport.origin(), viewport.zoom());
+    let view = |x: f64, y: f64| ((x - origin.0) * zoom, (y - origin.1) * zoom);
+    let corner = view(max_x, max_y);
+    let top = view((min_x + max_x) / 2.0, min_y);
+    ((corner.0 + 4.0, corner.1 + 4.0), (top.0, top.1 - 20.0))
+}
+
+/// How long the steps of a gesture and its undo take, in the core and with
+/// the client's queries after each.
+struct GestureTimes {
+    /// The step that turns the press into a drag: it also sets the gesture
+    /// up (what each Element was, for the transform and the undo), once.
+    start: Duration,
+    /// The slowest of the steps after it.
+    steady: Duration,
+    undo: Duration,
+}
+
+/// Select-all, then a gesture of `steps` pointer steps from the view point
+/// that `grab` picks, each moving the pointer by `travel(step)` from there.
+fn select_all_gesture(
+    grab: impl Fn(&Editor) -> (f64, f64),
+    travel: impl Fn(usize) -> (f64, f64),
+    steps: usize,
+) -> GestureTimes {
+    use PointerKind::Mouse;
+    use PointerPhase::{Down, Move, Up};
+    let mut editor = open(&benchmark_scene(5000));
+    editor.set_view_size(1024.0, 1366.0);
+    editor.zoom_to_fit();
+    editor.select_all();
+    let mut overlay_revision = u64::MAX;
+    client_refresh(&editor, &mut overlay_revision);
+    let before = editor.save();
+    let bounds = scene_bounds(&editor);
+    let (x, y) = grab(&editor);
+    editor.pointer(pointer(1, Down, (x, y), Mouse, 0.0));
+    let mut timed = Vec::new();
+    let mut started = None;
+    for step in 0..steps {
+        let (dx, dy) = travel(step);
+        let revision = editor.revision();
+        let start = Instant::now();
+        editor.pointer(pointer(
+            1,
+            Move,
+            (x + dx, y + dy),
+            Mouse,
+            (step + 1) as f64 / 120.0,
+        ));
+        client_refresh(&editor, &mut overlay_revision);
+        timed.push(start.elapsed());
+        if started.is_none() && editor.revision() != revision {
+            started = Some(step);
+        }
+    }
+    let started = started.expect("the gesture never began");
+    let (dx, dy) = travel(steps - 1);
+    editor.pointer(pointer(1, Up, (x + dx, y + dy), Mouse, 1.0));
+    assert_ne!(editor.save(), before, "the gesture changed nothing");
+    assert!(editor.can_undo());
+    let start = Instant::now();
+    editor.undo();
+    client_refresh(&editor, &mut overlay_revision);
+    let undo = start.elapsed();
+    assert_eq!(
+        scene_bounds(&editor),
+        bounds,
+        "undo did not restore the Scene"
+    );
+    GestureTimes {
+        start: timed[started],
+        steady: timed[started + 1..]
+            .iter()
+            .copied()
+            .max()
+            .unwrap_or_default(),
+        undo,
+    }
+}
+
+#[test]
+#[ignore = "measurement; run in release, see docs/performance-benchmarks.md"]
+fn gestures_on_a_selection_of_5000_elements_take_under_a_frame_per_step() {
+    let frame = Duration::from_micros(8_333);
+
+    // A press on the corner of the Selection's box that no Element covers
+    // is as good as one on an Element: inside the box, a drag moves.
+    let moved = select_all_gesture(
+        |editor| {
+            let (min_x, min_y, max_x, max_y) = scene_bounds(editor);
+            let viewport = editor.viewport();
+            let (origin, zoom) = (viewport.origin(), viewport.zoom());
+            (
+                ((min_x + max_x) / 2.0 - origin.0) * zoom,
+                ((min_y + max_y) / 2.0 - origin.1) * zoom,
+            )
+        },
+        |step| (step as f64 + 1.0, step as f64 + 1.0),
+        6,
+    );
+    let resized = select_all_gesture(
+        |editor| handle_positions(editor).0,
+        |step| (-(step as f64) - 1.0, -(step as f64) - 1.0),
+        6,
+    );
+    let rotated = select_all_gesture(
+        |editor| handle_positions(editor).1,
+        |step| (step as f64 * 2.0 + 5.0, 0.0),
+        6,
+    );
+
+    for (name, times) in [("move", &moved), ("resize", &resized), ("rotate", &rotated)] {
+        println!(
+            "select-all {name}, scene-5000: start {:?}, later steps (slowest) {:?}, undo {:?}",
+            times.start, times.steady, times.undo
+        );
+    }
+    for (name, times) in [("move", moved), ("resize", resized), ("rotate", rotated)] {
+        // Setting a gesture up takes at most two frames, once.
+        assert!(
+            times.start < frame * 2,
+            "{name} start took {:?}",
+            times.start
+        );
+        assert!(times.steady < frame, "{name} step took {:?}", times.steady);
+        assert!(
+            times.undo < Duration::from_millis(100),
+            "{name} undo took {:?}",
+            times.undo
+        );
+    }
+}

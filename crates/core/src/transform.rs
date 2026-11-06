@@ -24,6 +24,7 @@
 //! transformed like any other line here, points and all, where Excalidraw
 //! re-routes it; the core keeps its points as the file has them.
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
 
 use crate::binding::Attachments;
@@ -45,6 +46,25 @@ pub(crate) const SHIFT_LOCKING_ANGLE: f64 = std::f64::consts::PI / 12.0;
 /// than this does not happen.
 const MIN_FONT_SIZE: f64 = 1.0;
 const TWO_PI: f64 = std::f64::consts::TAU;
+
+/// The members a transform may change of an Element or its label (the only
+/// ones its undo step keeps).
+const TRANSFORMED: [&str; 10] = [
+    "x",
+    "y",
+    "width",
+    "height",
+    "angle",
+    "points",
+    "fontSize",
+    "scale",
+    "text",
+    "autoResize",
+];
+
+/// The members that rotating may change of an Element or its label: the
+/// points and the font stay as they are, which spares copying them.
+const ROTATED: [&str; 6] = ["x", "y", "width", "height", "angle", "text"];
 
 /// An Element the gesture transforms, as it was when the gesture began
 /// (Excalidraw's `originalElements`), with its label. Resizing follows the
@@ -176,6 +196,10 @@ pub(crate) struct TransformGesture {
     /// The turn of the last rotation, to tell one that changed the angle
     /// from one that snapped to the same.
     turned: Option<f64>,
+    /// What is the same at every step of a resize, worked out from `tracked`
+    /// at the first: the Elements as they began do not change, and there may
+    /// be thousands.
+    resizing: OnceCell<Resizing>,
     attachments: Attachments,
     step: Step,
 }
@@ -193,6 +217,11 @@ impl TransformGesture {
         handle: Handle,
         origin: Point,
     ) -> Self {
+        let changes: &[&'static str] = if handle == Handle::Rotation {
+            &ROTATED
+        } else {
+            &TRANSFORMED
+        };
         let targets: Vec<Element> = crate::transform_handles::targets(scene, selection).collect();
         let index: HashMap<&str, usize> = targets
             .iter()
@@ -205,7 +234,7 @@ impl TransformGesture {
                 continue;
             };
             if let Some(snapshot) = scene.snapshot(element.id()) {
-                step.touch(scene, element.id());
+                step.touch_members(scene, element.id(), changes);
                 labels[i] = Some(Label {
                     handle: element.handle(),
                     snapshot,
@@ -216,7 +245,7 @@ impl TransformGesture {
         let mut ids = Vec::with_capacity(targets.len());
         for (element, label) in targets.iter().zip(labels) {
             if let Some(snapshot) = scene.snapshot(element.id()) {
-                step.touch(scene, element.id());
+                step.touch_members(scene, element.id(), changes);
                 ids.push(element.id().to_owned());
                 tracked.push(Tracked {
                     handle: element.handle(),
@@ -233,6 +262,7 @@ impl TransformGesture {
             tracked,
             applied: None,
             turned: None,
+            resizing: OnceCell::new(),
             attachments: Attachments::begin(&mut step, scene, ids),
             step,
         }
@@ -288,14 +318,14 @@ impl TransformGesture {
         changed
     }
 
+    fn resizing(&self) -> &Resizing {
+        self.resizing.get_or_init(|| Resizing::of(&self.tracked))
+    }
+
     /// Whether the Selection keeps the ratio of its sides: Selections with an
     /// image do of themselves and Shift frees them; any other needs Shift.
     fn keeps_ratio(&self, shift: bool) -> bool {
-        let images = self
-            .tracked
-            .iter()
-            .any(|t| t.element().is_some_and(|e| e.kind() == ElementType::Image));
-        images != shift
+        self.resizing().has_image != shift
     }
 
     // --- Rotation -----------------------------------------------------------
@@ -358,7 +388,7 @@ impl TransformGesture {
         resize: Resize,
         measurer: Option<&dyn TextMeasurer>,
     ) -> bool {
-        let Some(bounds) = self.common_bounds() else {
+        let Some(bounds) = self.resizing().common_bounds else {
             return false;
         };
         let (width, height) = (bounds.width(), bounds.height());
@@ -403,14 +433,7 @@ impl TransformGesture {
         };
         // Turned Elements, texts and groups keep the ratio of their sides,
         // so that angles, fonts and groups do not skew.
-        let keeps = resize.keep_ratio
-            || self.tracked.iter().any(|t| {
-                t.element().is_some_and(|e| {
-                    e.angle() != 0.0
-                        || e.kind() == ElementType::Text
-                        || e.group_ids().next().is_some()
-                })
-            });
+        let keeps = resize.keep_ratio || self.resizing().keeps_ratio_anyway;
         let (scale_x, scale_y) = if keeps {
             (scale, scale)
         } else {
@@ -478,21 +501,51 @@ impl TransformGesture {
         }
         true
     }
+}
 
-    /// The box around everything the gesture transforms, as it began, with
-    /// the labels of lines and arrows included (Excalidraw's
-    /// `getCommonBoundingBox`).
-    fn common_bounds(&self) -> Option<Frame> {
-        let mut frames = Vec::with_capacity(self.tracked.len());
-        for tracked in &self.tracked {
-            let orig = tracked.element()?;
-            frames.push(Frame::shown(&orig));
-            if let Some(label) = tracked.label().filter(|_| orig.kind().is_linear()) {
-                frames.push(Frame::shown(&label));
-            }
+/// What a resize works out once from the Elements as they began.
+#[derive(Debug)]
+struct Resizing {
+    /// The box around everything.
+    common_bounds: Option<Frame>,
+    /// Whether the Selection keeps the ratio of its sides whatever the keys
+    /// held: turned Elements, texts and groups do, so that angles, fonts and
+    /// groups do not skew.
+    keeps_ratio_anyway: bool,
+    /// Whether an image is in the Selection.
+    has_image: bool,
+}
+
+impl Resizing {
+    fn of(tracked: &[Tracked]) -> Self {
+        Self {
+            common_bounds: common_bounds(tracked),
+            keeps_ratio_anyway: tracked.iter().any(|t| {
+                t.element().is_some_and(|e| {
+                    e.angle() != 0.0
+                        || e.kind() == ElementType::Text
+                        || e.group_ids().next().is_some()
+                })
+            }),
+            has_image: tracked
+                .iter()
+                .any(|t| t.element().is_some_and(|e| e.kind() == ElementType::Image)),
         }
-        frames.into_iter().reduce(Frame::union)
     }
+}
+
+/// The box around everything the gesture transforms, as it began, with the
+/// labels of lines and arrows included (Excalidraw's `getCommonBoundingBox`).
+fn common_bounds(tracked: &[Tracked]) -> Option<Frame> {
+    let mut frames = Vec::with_capacity(tracked.len());
+    for tracked in tracked {
+        let orig = tracked.element()?;
+        frames.push(Frame::shown(&orig));
+        if let Some(label) = tracked.label().filter(|_| orig.kind().is_linear()) {
+            frames.push(Frame::shown(&label));
+        }
+    }
+    frames.into_iter().reduce(Frame::union)
 }
 
 // --- Resizing one Element ---------------------------------------------------
