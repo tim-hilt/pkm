@@ -67,14 +67,17 @@ import Testing
         #expect(later.rendered == 0)
     }
 
-    @Test func askingAgainReturnsTheSameImage() async throws {
+    /// Not the same object: the system may drop an image from memory at any
+    /// time (the tests run beside each other), and the disk cache then answers.
+    @Test func askingAgainDoesNotDrawAgain() async throws {
         try store.save(sampleBytes(), as: "sample")
         let thumbnails = Thumbnails(store: store)
 
         let first = try await thumbnails.thumbnail(for: entry("sample")).image
         let second = try await thumbnails.thumbnail(for: entry("sample")).image
 
-        #expect(first != nil && first === second)
+        #expect(first != nil && second != nil)
+        #expect(first?.width == second?.width && first?.height == second?.height)
         #expect(thumbnails.rendered == 1)
     }
 

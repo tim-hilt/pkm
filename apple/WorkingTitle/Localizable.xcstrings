@@ -1276,6 +1276,28 @@
           }
         }
       }
+    },
+    "Finish Line": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finish Line"
+          }
+        }
+      }
+    },
+    "Finish Line or Edit Text": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finish Line or Edit Text"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
