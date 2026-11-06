@@ -41,7 +41,6 @@ const ENTRY = `
     getBoundTextMaxWidth,
   } from "@excalidraw/element/textElement";
   export { getFontString } from "@excalidraw/common";
-  export { restoreElements } from "@excalidraw/excalidraw/data/restore";
 `;
 
 /**
@@ -116,10 +115,6 @@ export async function loadUpstream(checkoutDir) {
         return [{ ...label, width, height }];
       }
       return [make(text, {})];
-    },
-    /** What Excalidraw's `restoreElements` makes of (old) `elements`. */
-    restored(elements) {
-      return upstream.restoreElements(structuredClone(elements), null);
     },
     newElement(type, opts) {
       const construct = constructors[type];

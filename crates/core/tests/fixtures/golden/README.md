@@ -17,13 +17,6 @@ Each fixture `<name>` is a pair:
 | `arrowhead-turns` | every arrowhead at the start and end of arrows whose last segment is short and turns away; thick and curved variants |
 | `freedraw`     | simulated and real (stylus) pressure; thick, precise, dot, short, closed and filled strokes |
 | `text`         | text Elements laid out by Excalidraw itself (see below): alignments, rotation, font families, fixed-width wrapping (hyphens, spaces, long words, CJK), labels in rectangles, ellipses and diamonds, and on arrows (straight, multi-point, curved; wrapped to the arrow's width) |
-| `legacy`       | Elements as files from before 2023 saved them (`strokeSharpness`, `boundElementIds`, a text's `font`) and the edge cases of Excalidraw's `restoreElement` for them; see below |
-
-## `legacy`
-
-Has no `.golden.json` but `legacy.restored.json`: what Excalidraw's
-`restoreElements` makes of each Element of `legacy.excalidraw`, keyed by id
-(without `updated`, the time of the restore).
 
 ## `text.excalidraw`
 

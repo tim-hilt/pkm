@@ -34,8 +34,6 @@ export function scenes(upstream) {
     { name: "freedraw", elements: freedraw(upstream) },
     // Excalidraw's own layout is the expected output: the file is its own golden.
     { name: "text", elements: texts(upstream), golden: false },
-    // Old files: Excalidraw's `restoreElements` of them is the expected output.
-    { name: "legacy", elements: legacy(), golden: false, restored: true },
   ];
 }
 
@@ -407,56 +405,4 @@ function fractionalIndex(i) {
 
 function round2(n) {
   return Math.round(n * 100) / 100;
-}
-
-// --- legacy properties: what files from before 2023 carry ---------------------
-
-/**
- * Elements written as old versions of Excalidraw saved them, as plain objects
- * (not made by the constructors, which never write these properties).
- */
-function legacy() {
-  const element = (id, type, extra) => ({
-    id, type, x: 10, y: 20, width: 100, height: 50, angle: 0, strokeColor: "#1e1e1e",
-    backgroundColor: "transparent", fillStyle: "solid", strokeWidth: 2, strokeStyle: "solid",
-    roughness: 1, opacity: 100, groupIds: [], frameId: null, roundness: null,
-    seed: 1 + id.length, version: 1, versionNonce: 0, index: null, isDeleted: false,
-    updated: 1, link: null, locked: false, ...extra,
-  });
-  const text = (id, extra) =>
-    element(id, "text", {
-      text: "Hello", originalText: "Hello", textAlign: "left", verticalAlign: "top",
-      containerId: null, lineHeight: 1.25, ...extra,
-    });
-  const out = [];
-  // strokeSharpness
-  for (const type of ["rectangle", "diamond", "ellipse"]) {
-    out.push(element(`${type}-round`, type, { strokeSharpness: "round" }));
-  }
-  for (const type of ["line", "arrow"]) {
-    out.push(element(`${type}-round`, type, { strokeSharpness: "round", points: [[0, 0], [100, 50]] }));
-  }
-  out.push(element("rectangle-sharp", "rectangle", { strokeSharpness: "sharp" }));
-  out.push(element("rectangle-round-missing-roundness", "rectangle", { strokeSharpness: "round", roundness: undefined }));
-  out.push(element("rectangle-round-has-roundness", "rectangle", { strokeSharpness: "round", roundness: { type: 3 } }));
-  out.push(element("diamond-round-has-roundness", "diamond", { strokeSharpness: "round", roundness: { type: 2, value: 7 } }));
-  out.push(element("rectangle-round-zero-roundness", "rectangle", { strokeSharpness: "round", roundness: 0 }));
-  out.push(element("rectangle-unknown-sharpness", "rectangle", { strokeSharpness: "other" }));
-  // boundElementIds
-  out.push(element("bound-ids", "rectangle", { boundElementIds: ["a1", "a2"], boundElements: undefined }));
-  out.push(element("bound-ids-empty", "rectangle", { boundElementIds: [] }));
-  out.push(element("bound-ids-over-elements", "rectangle", { boundElementIds: ["a1"], boundElements: [{ type: "text", id: "t1" }] }));
-  out.push(element("bound-elements-only", "rectangle", { boundElements: [{ type: "arrow", id: "a9" }] }));
-  out.push(element("bound-ids-null", "ellipse", { boundElementIds: null, boundElements: [{ type: "text", id: "t2" }] }));
-  // font
-  for (const font of [
-    "20px Virgil", "28px Helvetica", "16px Cascadia", "36px Excalifont", "12.5px Nunito",
-    "20px Nonexistent", "20px Comic Shanns", "20px", "px Virgil", "abc", "",
-  ]) {
-    out.push(text(`font-${font.replace(/\W+/g, "-")}`, { font, fontSize: undefined, fontFamily: undefined }));
-  }
-  out.push(text("font-over-size", { font: "28px Helvetica", fontSize: 12, fontFamily: 3 }));
-  out.push(text("font-no-line-height", { font: "20px Helvetica", lineHeight: undefined, height: 46 }));
-  out.push(text("font-unit-in-em", { font: "2em Virgil", fontSize: undefined, fontFamily: undefined }));
-  return out;
 }

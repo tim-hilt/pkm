@@ -242,16 +242,6 @@ fn a_text_without_size_or_text_gets_empty_text_and_the_fonts_line_height() {
 }
 
 #[test]
-fn a_text_without_line_height_detects_it_from_its_height() {
-    // Two lines of 10 px text in a 30 px box: 30 / 2 / 10 = 1.5.
-    let editor = editor_with(&drawing_with_element(
-        r#""id":"t","type":"text","height":30,"fontSize":10,"text":"a\r\nb""#,
-    ));
-
-    assert_eq!(json_of(&saved_element(&editor, 0), "lineHeight"), "1.5");
-}
-
-#[test]
 fn linear_elements_default_to_a_straight_two_point_path() {
     let line = editor_with(&drawing_with_element(
         r#""id":"l","type":"line","x":0,"y":0,"width":30,"height":40"#,

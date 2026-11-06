@@ -32,7 +32,6 @@ mod images;
 mod insert_images;
 mod json;
 mod keyboard_shortcuts;
-mod legacy_properties;
 mod lines_and_arrows;
 mod mouse_pan;
 mod move_selection;

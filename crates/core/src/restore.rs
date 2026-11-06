@@ -8,8 +8,8 @@
 //! alone so that files written by excalidraw.com come back unchanged. The
 //! readers in [`crate::scene::Element`] cope with invalid values instead.
 //!
-//! Old files' properties are migrated first ([`migrate_legacy`]):
-//! `strokeSharpness`, `boundElementIds` and a text's `font`.
+//! Only the current file format is supported: properties of older formats
+//! (`strokeSharpness`, `boundElementIds`, a text's `font`) are not migrated.
 //!
 //! Not restored: `updated` (the current time; nothing in the core reads it),
 //! repairs of invalid values and binding repair (the core tolerates bindings
@@ -54,131 +54,11 @@ pub(crate) fn restore_elements(elements: &mut [Value], entropy: &mut Entropy) {
             taken.insert(id.clone());
             element.insert("id".into(), Value::String(id));
         }
-        migrate_legacy(element, kind);
         fill_missing(element, kind);
         if kind.is_linear() {
             delete_if_oversized(element);
         }
     }
-}
-
-/// Excalidraw's `ROUNDNESS` types that old files' `strokeSharpness: "round"`
-/// becomes: the legacy radius where the type now has an adaptive one.
-const ROUNDNESS_LEGACY: f64 = 1.0;
-const ROUNDNESS_PROPORTIONAL_RADIUS: f64 = 2.0;
-
-/// Replaces the properties of files from before 2023 by what Excalidraw's
-/// `restoreElement` makes of them. The legacy properties are dropped, except
-/// a text's `font`, which Excalidraw keeps too.
-fn migrate_legacy(element: &mut Object, kind: ElementType) {
-    if element.get("strokeSharpness").is_some() {
-        let round = element.get("strokeSharpness").and_then(Value::as_str) == Some("round");
-        if round && !is_truthy(element.get("roundness")) {
-            let adaptive = matches!(kind, ElementType::Rectangle | ElementType::Image);
-            let ty = if adaptive {
-                ROUNDNESS_LEGACY
-            } else {
-                ROUNDNESS_PROPORTIONAL_RADIUS
-            };
-            let mut roundness = Object::new();
-            roundness.insert("type".into(), Value::Number(ty));
-            element.insert("roundness".into(), Value::Object(roundness));
-        }
-        element.remove("strokeSharpness");
-    }
-    if let Some(ids) = element.get("boundElementIds") {
-        if let Value::Array(ids) = ids {
-            let bound = ids.iter().map(|id| {
-                let mut bound = Object::new();
-                bound.insert("type".into(), Value::String("arrow".into()));
-                bound.insert("id".into(), id.clone());
-                Value::Object(bound)
-            });
-            let bound = Value::Array(bound.collect());
-            element.insert("boundElements".into(), bound);
-        }
-        element.remove("boundElementIds");
-    }
-    if kind == ElementType::Text {
-        migrate_font(element);
-    }
-}
-
-/// JavaScript truthiness of an Element member.
-fn is_truthy(value: Option<&Value>) -> bool {
-    match value {
-        None | Some(Value::Null) => false,
-        Some(Value::Bool(b)) => *b,
-        Some(Value::Number(n)) => *n != 0.0 && !n.is_nan(),
-        Some(Value::String(s)) => !s.is_empty(),
-        Some(_) => true,
-    }
-}
-
-/// A text's `font` (`"20px Virgil"`) becomes `fontSize` and `fontFamily`,
-/// which it overrides; a size that is no number is the default, and a family
-/// that is not a name in `FONT_FAMILY` (as one word) is Excalifont.
-fn migrate_font(text: &mut Object) {
-    let Some(font) = text.get("font").and_then(Value::as_str) else {
-        return;
-    };
-    let mut parts = font.split(' ');
-    let size = parts
-        .next()
-        .and_then(parse_float)
-        .filter(|size| size.is_finite())
-        .unwrap_or(DEFAULT_FONT_SIZE);
-    let family = parts.next().and_then(font_family_by_name);
-    text.insert("fontSize".into(), Value::Number(size));
-    let family = family.unwrap_or(DEFAULT_FONT_FAMILY);
-    text.insert("fontFamily".into(), Value::Number(family));
-}
-
-/// `FONT_FAMILY[name]`, for the names that are one word.
-fn font_family_by_name(name: &str) -> Option<f64> {
-    Some(match name {
-        "Virgil" => 1.0,
-        "Helvetica" => 2.0,
-        "Cascadia" => 3.0,
-        "Excalifont" => 5.0,
-        "Nunito" => 6.0,
-        "Assistant" => 10.0,
-        _ => return None,
-    })
-}
-
-/// JavaScript's `parseFloat` for decimal numbers: the longest numeric prefix
-/// after leading whitespace.
-fn parse_float(text: &str) -> Option<f64> {
-    let text = text.trim_start();
-    let bytes = text.as_bytes();
-    let digits = |from: usize| {
-        bytes[from..]
-            .iter()
-            .take_while(|b| b.is_ascii_digit())
-            .count()
-    };
-    let mut end = usize::from(matches!(bytes.first(), Some(b'+' | b'-')));
-    let int = digits(end);
-    end += int;
-    let mut fraction = 0;
-    if bytes.get(end) == Some(&b'.') {
-        fraction = digits(end + 1);
-        if int > 0 || fraction > 0 {
-            end += 1 + fraction;
-        }
-    }
-    if int == 0 && fraction == 0 {
-        return None;
-    }
-    if matches!(bytes.get(end), Some(b'e' | b'E')) {
-        let sign = usize::from(matches!(bytes.get(end + 1), Some(b'+' | b'-')));
-        let exponent = digits(end + 1 + sign);
-        if exponent > 0 {
-            end += 1 + sign + exponent;
-        }
-    }
-    text[..end].parse().ok()
 }
 
 /// Members every Element has, in Excalidraw's order, as JSON text.
@@ -209,7 +89,6 @@ const COMMON: &[(&str, &str)] = &[
     ("locked", "false"),
 ];
 
-const DEFAULT_FONT_SIZE: f64 = 20.0;
 /// Excalifont.
 const DEFAULT_FONT_FAMILY: f64 = 5.0;
 
@@ -260,54 +139,14 @@ fn fill_text(element: &mut Object) {
     }
     fill(element, &[("autoResize", "true")]);
     if element.get("lineHeight").is_none() {
-        let line_height = line_height(element);
+        let family = element.get("fontFamily").and_then(Value::as_f64);
+        let line_height = font_line_height(family.unwrap_or(DEFAULT_FONT_FAMILY));
         element.insert("lineHeight".into(), Value::Number(line_height));
     }
     fill(
         element,
         &[("labelPosition", "null"), ("baseFontSize", "null")],
     );
-}
-
-/// The line height of a text Element that has none: detected from its height
-/// (as old files need), else the font's own.
-fn line_height(text: &Object) -> f64 {
-    let finite = |key: &str| {
-        text.get(key)
-            .and_then(Value::as_f64)
-            .filter(|n| n.is_finite())
-    };
-    let font_size = finite("fontSize").unwrap_or(DEFAULT_FONT_SIZE);
-    let lines = text
-        .get("text")
-        .and_then(Value::as_str)
-        .map_or(1, line_count);
-    let detected = finite("height")
-        .filter(|&height| height != 0.0)
-        .map(|height| height / lines as f64 / font_size);
-    match detected {
-        Some(detected) if detected.is_finite() && detected > 0.0 => detected,
-        _ => font_line_height(finite("fontFamily").unwrap_or(DEFAULT_FONT_FAMILY)),
-    }
-}
-
-/// Lines in `text`, where `\r\n`, `\n` and `\r` all end one.
-fn line_count(text: &str) -> usize {
-    let mut lines = 1;
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '\r' => {
-                if chars.peek() == Some(&'\n') {
-                    chars.next();
-                }
-                lines += 1;
-            }
-            '\n' => lines += 1,
-            _ => {}
-        }
-    }
-    lines
 }
 
 /// `FONT_METADATA[family].metrics.lineHeight`; unknown families use
