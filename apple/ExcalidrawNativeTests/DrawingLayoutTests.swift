@@ -80,3 +80,44 @@ import Testing
         #expect(shapes.shownTool(current: .hand, last: nil) == .rectangle)
     }
 }
+
+/// The phone's custom popover (ADR-0013): centred on its anchor, 8 pt from the
+/// container's edges, its bottom 12 pt above the bar it belongs to.
+@Suite struct PopoverGeometryTests {
+    private let portrait = CGSize(width: 393, height: 852)
+    private let landscape = CGSize(width: 852, height: 393)
+    private let content = CGSize(width: 130, height: 52)
+
+    @Test func itIsCentredOnItsAnchorAndSitsTwelvePointsAboveTheBar() {
+        let anchor = CGRect(x: 150, y: 760, width: 36, height: 36)
+        let p = DrawingLayout.popoverPlacement(anchor: anchor, content: content, container: portrait, barTop: 750)
+        #expect(p.origin == CGPoint(x: 103, y: 750 - 12 - 52))
+        #expect(p.pointerX == 168)
+    }
+
+    @Test func itIsClampedEightPointsFromTheLeftEdgeWithTheTipStillOnTheAnchor() {
+        let anchor = CGRect(x: 10, y: 760, width: 36, height: 36)
+        let p = DrawingLayout.popoverPlacement(anchor: anchor, content: content, container: portrait, barTop: 750)
+        #expect(p.origin.x == 8)
+        #expect(p.pointerX == 28)
+    }
+
+    @Test func itIsClampedEightPointsFromTheRightEdgeWithTheTipStillOnTheAnchor() {
+        let anchor = CGRect(x: 350, y: 760, width: 36, height: 36)
+        let p = DrawingLayout.popoverPlacement(anchor: anchor, content: content, container: portrait, barTop: 750)
+        #expect(p.origin.x == 255)
+        #expect(p.pointerX == 368)
+    }
+
+    @Test func itsMaxHeightIsTheRoomAboveTheBarLessItsGapAndTheTopMargin() {
+        let anchor = CGRect(x: 150, y: 760, width: 36, height: 36)
+        let tall = CGSize(width: 130, height: 2000)
+        let up = DrawingLayout.popoverPlacement(anchor: anchor, content: tall, container: portrait, barTop: 750)
+        #expect(up.maxHeight == 730)
+        #expect(up.origin.y == 8)
+        let side = DrawingLayout.popoverPlacement(
+            anchor: CGRect(x: 400, y: 340, width: 36, height: 36), content: tall, container: landscape, barTop: 330)
+        #expect(side.maxHeight == 310)
+        #expect(side.origin.y == 8)
+    }
+}

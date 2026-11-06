@@ -47,6 +47,38 @@ extension DrawingLayout {
     }
 }
 
+/// Where a phone popover sits (ADR-0013).
+struct PopoverPlacement: Equatable {
+    /// The popover's top-left corner, in the container.
+    let origin: CGPoint
+    /// The pointer tip's x in the container: always on the anchor's centre.
+    let pointerX: CGFloat
+    /// The tallest the popover may be; it scrolls beyond.
+    let maxHeight: CGFloat
+}
+
+extension DrawingLayout {
+    /// Least distance of a popover from the container's edges.
+    static let popoverEdgeMargin: CGFloat = 8
+    /// Gap between a popover's bottom and the bar it belongs to.
+    static let popoverGap: CGFloat = 12
+
+    /// A popover as wide as its content, centred on the anchor but kept
+    /// `popoverEdgeMargin` from the container's edges, its bottom
+    /// `popoverGap` above the bar. `barTop` is the bar's top in the container.
+    static func popoverPlacement(
+        anchor: CGRect, content: CGSize, container: CGSize, barTop: CGFloat
+    ) -> PopoverPlacement {
+        let maxHeight = max(0, barTop - popoverGap - popoverEdgeMargin)
+        let height = min(content.height, maxHeight)
+        let widest = max(0, container.width - 2 * popoverEdgeMargin)
+        let width = min(content.width, widest)
+        let x = min(max(anchor.midX - width / 2, popoverEdgeMargin), popoverEdgeMargin + widest - width)
+        return PopoverPlacement(
+            origin: CGPoint(x: x, y: barTop - popoverGap - height), pointerX: anchor.midX, maxHeight: maxHeight)
+    }
+}
+
 /// One button of the mobile toolbar (docs/layout-reference §4.2). The phone
 /// bar has no room for every Tool, so a family of Tools shares a slot: tapping
 /// the slot's armed Tool again offers the others of its family.

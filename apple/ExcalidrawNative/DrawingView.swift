@@ -10,6 +10,9 @@ struct DrawingView: View {
     @State private var controller = CanvasController()
     /// Measured so the desktop panel can tell whether it fits beside the toolbar.
     @State private var toolbarWidth: CGFloat = 0
+    /// The phone toolbar's Tool family picker, and the toolbar's top it sits above.
+    @State private var family = FamilyPopoverState()
+    @State private var toolbarTop: CGFloat = 0
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -119,12 +122,29 @@ struct DrawingView: View {
     private func mobileChrome(in size: CGSize) -> some View {
         VStack(spacing: 4) {
             MobileActionRow(controller: controller, showsProperties: showsProperties)
-            MobileToolBar(controller: controller)
+            MobileToolBar(controller: controller, family: $family)
+                .onGeometryChange(for: CGFloat.self, of: { $0.frame(in: .named(Self.chromeSpace)).minY }) {
+                    toolbarTop = $0
+                }
         }
         .frame(width: DrawingLayout.bottomBarWidth(containerWidth: size.width))
         .padding(.bottom, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .overlay {
+            if let open = family.open, let anchor = family.anchors[open] {
+                PhonePopover(anchor: anchor, container: size, barTop: toolbarTop, onClose: closePopover) {
+                    FamilyPicker(controller: controller, family: $family, slot: open)
+                }
+            }
+        }
+        .animation(.easeOut(duration: 0.15), value: family.open)
+        .popoverScrim(isOpen: family.open != nil, onClose: closePopover)
+        .coordinateSpace(name: Self.chromeSpace)
     }
+
+    private static let chromeSpace = "chrome"
+
+    private func closePopover() { family.open = nil }
 
     /// The core decides when there is something to style.
     private var showsProperties: Bool { controller.properties != nil }
@@ -271,9 +291,7 @@ struct ToolBar: View {
 /// drawing sits in the main menu (iPad only, see `offersPencilOnlyDrawing`).
 private struct MobileToolBar: View {
     let controller: CanvasController
-    /// Per slot, the Tool of its family last chosen, so the slot keeps showing it.
-    @State private var lastChosen: [Int: Tool] = [:]
-    @State private var familyShown: Int?
+    @Binding var family: FamilyPopoverState
 
     var body: some View {
         HStack(spacing: 4) {
@@ -289,31 +307,18 @@ private struct MobileToolBar: View {
 
     private func slot(_ index: Int) -> some View {
         let slot = MobileToolSlot.all[index]
-        let shown = slot.shownTool(current: controller.tool, last: lastChosen[index])
+        let shown = slot.shownTool(current: controller.tool, last: family.lastChosen[index])
         let armed = controller.tool == shown
         return MobileToolButton(tool: shown, checked: armed) {
             if armed && slot.tools.count > 1 {
-                familyShown = index
+                family.open = family.open == index ? nil : index
             } else {
                 controller.setTool(shown)
             }
         }
-        .popover(
-            isPresented: Binding(
-                get: { familyShown == index }, set: { if !$0 { familyShown = nil } })
-        ) {
-            HStack(spacing: 4) {
-                ForEach(slot.tools, id: \.self) { tool in
-                    MobileToolButton(tool: tool, checked: controller.tool == tool) {
-                        lastChosen[index] = tool
-                        controller.setTool(tool)
-                        familyShown = nil
-                    }
-                }
-            }
-            .padding(8)
-            .presentationCompactAdaptation(.popover)
-        }
+        .onGeometryChange(
+            for: CGRect.self, of: { $0.frame(in: .named("chrome")) },
+            action: { family.anchors[index] = $0 })
     }
 
     private var lockButton: some View {
@@ -331,6 +336,36 @@ private struct MobileToolBar: View {
         .buttonPointer()
         .accessibilityLabel("Keep tool selected")
         .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}
+
+/// Which Tool family picker is open on the phone toolbar, where its slots are,
+/// and the Tool each family last chose.
+struct FamilyPopoverState: Equatable {
+    /// The open picker's slot.
+    var open: Int?
+    /// Per slot, its button's frame in the chrome.
+    var anchors: [Int: CGRect] = [:]
+    /// Per slot, the Tool of its family last chosen, so the slot keeps showing it.
+    var lastChosen: [Int: Tool] = [:]
+}
+
+/// The Tools of a family, offered in a popover; choosing one arms it and closes the popover.
+private struct FamilyPicker: View {
+    let controller: CanvasController
+    @Binding var family: FamilyPopoverState
+    let slot: Int
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(MobileToolSlot.all[slot].tools, id: \.self) { tool in
+                MobileToolButton(tool: tool, checked: controller.tool == tool) {
+                    family.lastChosen[slot] = tool
+                    controller.setTool(tool)
+                    family.open = nil
+                }
+            }
+        }
     }
 }
 
