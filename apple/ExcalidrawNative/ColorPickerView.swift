@@ -1,0 +1,188 @@
+import SwiftUI
+
+/// A colour row of the properties panel: the five top picks and, at the end,
+/// a button showing the current colour that opens the full picker below the
+/// row: Excalidraw's palette grid, the shades of the current colour and a hex
+/// code field. Everything is a tap target of the row's width, so the full
+/// palette is reachable with a finger.
+struct ColorPickerView: View {
+    let kind: ColorPalette.Kind
+    let topPicks: [String]
+    /// The colour of the Selection; `nil` if its Elements do not share one.
+    let selected: String?
+    let onPick: (String) -> Void
+    @State private var isOpen = false
+    @State private var hex = ""
+    @State private var hexIsInvalid = false
+    @FocusState private var hexIsFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 0) {
+                ForEach(topPicks, id: \.self) { swatch($0, size: 26) }
+                Button {
+                    withAnimation(.snappy(duration: 0.2)) { isOpen.toggle() }
+                } label: {
+                    ColorSwatch(color: selected ?? "transparent", shape: RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.accentColor, lineWidth: isOpen ? 3 : 0))
+                        .frame(width: 26, height: 26)
+                        .frame(maxWidth: .infinity, minHeight: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text("More colours"))
+                .accessibilityValue(selected.map { Text(ColorPalette.name($0)) } ?? Text(""))
+                .accessibilityAddTraits(isOpen ? .isSelected : [])
+            }
+            if isOpen { picker }
+        }
+        .onChange(of: selected, initial: true) { _, color in
+            guard !hexIsFocused else { return }
+            hex = Self.hexDigits(of: color)
+            hexIsInvalid = false
+        }
+    }
+
+    private var picker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            heading("Colors")
+            let grid = ColorPalette.grid(for: kind)
+            ForEach(0..<3, id: \.self) { row in
+                HStack(spacing: 0) {
+                    ForEach(grid[row * 5..<row * 5 + 5], id: \.self) { swatch($0, size: 30) }
+                }
+            }
+            heading("Shades")
+            if let shades = ColorPalette.shades(of: selected) {
+                HStack(spacing: 0) {
+                    ForEach(shades, id: \.self) { swatch($0, size: 30) }
+                }
+            } else {
+                Text("No shades available for this color").font(.caption).foregroundStyle(.secondary)
+            }
+            heading("Hex code")
+            hexField
+        }
+    }
+
+    private var hexField: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 2) {
+                Text("#").foregroundStyle(.secondary)
+                TextField("Hex code", text: $hex)
+                    .focused($hexIsFocused)
+                    .autocorrectionDisabled()
+                    #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.asciiCapable)
+                    #endif
+                    .submitLabel(.done)
+                    .onSubmit(commitHex)
+                    .onChange(of: hexIsFocused) { _, focused in if !focused { commitHex() } }
+            }
+            .padding(.horizontal, 8)
+            .frame(minHeight: 36)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+            if hexIsInvalid {
+                Text("Not a valid color").font(.caption).foregroundStyle(.red)
+            }
+        }
+    }
+
+    private func commitHex() {
+        if hex == Self.hexDigits(of: selected) {
+            hexIsInvalid = false
+        } else if let color = ColorPalette.color(fromHex: hex) {
+            hexIsInvalid = false
+            onPick(color)
+        } else {
+            hexIsInvalid = !hex.isEmpty
+        }
+    }
+
+    private func heading(_ title: LocalizedStringResource) -> some View {
+        Text(title).font(.caption).foregroundStyle(.secondary)
+    }
+
+    /// A swatch in a cell that shares the row's width, so that it is a
+    /// touch target well beyond its drawn size.
+    private func swatch(_ color: String, size: CGFloat) -> some View {
+        Button {
+            onPick(color)
+        } label: {
+            ColorSwatch(color: color, shape: Circle())
+                .overlay(Circle().stroke(Color.accentColor, lineWidth: 3).opacity(color == selected ? 1 : 0))
+                .frame(width: size, height: size)
+                .frame(maxWidth: .infinity, minHeight: 36)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(ColorPalette.name(color)))
+        .accessibilityAddTraits(color == selected ? .isSelected : [])
+    }
+
+    /// The digits a hex field shows for `color`: none for transparent.
+    private static func hexDigits(of color: String?) -> String {
+        guard let color, color.hasPrefix("#") else { return "" }
+        return String(color.dropFirst())
+    }
+}
+
+/// A colour filled into `shape`, ringed so that white shows; transparent
+/// is a checkerboard, as in Excalidraw.
+private struct ColorSwatch<S: InsettableShape>: View {
+    let color: String
+    let shape: S
+
+    var body: some View {
+        shape.fill(Color(hex: color))
+            .background {
+                if Color.isTransparent(color) { Checkerboard().clipShape(shape) }
+            }
+            .overlay(shape.strokeBorder(.secondary.opacity(0.6), lineWidth: 1))
+    }
+}
+
+private struct Checkerboard: View {
+    var body: some View {
+        Canvas { context, size in
+            let cell = size.width / 3
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.white))
+            for row in 0..<3 {
+                for column in 0..<3 where (row + column) % 2 == 0 {
+                    context.fill(
+                        Path(CGRect(x: CGFloat(column) * cell, y: CGFloat(row) * cell, width: cell, height: cell)),
+                        with: .color(.gray.opacity(0.35)))
+                }
+            }
+        }
+    }
+}
+
+extension Color {
+    /// A colour from `#rgb`, `#rgba`, `#rrggbb` or `#rrggbbaa`; `transparent`
+    /// and anything unreadable is clear.
+    init(hex: String) {
+        var digits = hex.hasPrefix("#") ? String(hex.dropFirst()) : ""
+        if digits.count == 3 || digits.count == 4 { digits = digits.flatMap { [$0, $0] }.map(String.init).joined() }
+        guard digits.count == 6 || digits.count == 8, let value = UInt32(digits, radix: 16) else {
+            self = .clear
+            return
+        }
+        let rgba = digits.count == 6 ? value << 8 | 0xFF : value
+        self.init(
+            red: Double(rgba >> 24 & 0xFF) / 255, green: Double(rgba >> 16 & 0xFF) / 255,
+            blue: Double(rgba >> 8 & 0xFF) / 255, opacity: Double(rgba & 0xFF) / 255)
+    }
+
+    /// Whether `color` draws nothing: `transparent` or a zero alpha.
+    static func isTransparent(_ color: String) -> Bool {
+        guard color.hasPrefix("#") else { return true }
+        let digits = color.dropFirst()
+        switch digits.count {
+        case 4: return digits.last == "0"
+        case 8: return digits.suffix(2) == "00"
+        default: return false
+        }
+    }
+}

@@ -1,6 +1,17 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@, shade %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@, shade %lld"
+          }
+        }
+      }
+    },
     "Actions for %@": {
       "extractionState": "manual",
       "localizations": {
@@ -122,6 +133,17 @@
         }
       }
     },
+    "Bronze": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bronze"
+          }
+        }
+      }
+    },
     "Cancel": {
       "extractionState": "manual",
       "localizations": {
@@ -173,6 +195,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Center"
+          }
+        }
+      }
+    },
+    "Colors": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Colors"
           }
         }
       }
@@ -294,6 +327,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Cut"
+          }
+        }
+      }
+    },
+    "Cyan": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cyan"
           }
         }
       }
@@ -551,6 +595,28 @@
         }
       }
     },
+    "Grape": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Grape"
+          }
+        }
+      }
+    },
+    "Gray": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gray"
+          }
+        }
+      }
+    },
     "Green": {
       "extractionState": "manual",
       "localizations": {
@@ -602,6 +668,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Hand"
+          }
+        }
+      }
+    },
+    "Hex code": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hex code"
           }
         }
       }
@@ -782,6 +859,17 @@
         }
       }
     },
+    "More colours": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "More colours"
+          }
+        }
+      }
+    },
     "Name": {
       "extractionState": "manual",
       "localizations": {
@@ -815,6 +903,28 @@
         }
       }
     },
+    "No shades available for this color": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No shades available for this color"
+          }
+        }
+      }
+    },
+    "Not a valid color": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not a valid color"
+          }
+        }
+      }
+    },
     "Opacity": {
       "extractionState": "manual",
       "localizations": {
@@ -844,6 +954,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Pencil-only drawing"
+          }
+        }
+      }
+    },
+    "Pink": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pink"
           }
         }
       }
@@ -1035,6 +1156,17 @@
         }
       }
     },
+    "Shades": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shades"
+          }
+        }
+      }
+    },
     "Sharp": {
       "extractionState": "manual",
       "localizations": {
@@ -1119,6 +1251,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tap + to start sketching."
+          }
+        }
+      }
+    },
+    "Teal": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Teal"
           }
         }
       }
@@ -1233,6 +1376,28 @@
         }
       }
     },
+    "Violet": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Violet"
+          }
+        }
+      }
+    },
+    "White": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "White"
+          }
+        }
+      }
+    },
     "XL": {
       "extractionState": "manual",
       "localizations": {
@@ -1240,6 +1405,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "XL"
+          }
+        }
+      }
+    },
+    "Yellow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yellow"
           }
         }
       }

@@ -20,8 +20,11 @@ import Testing
     }
 
     @Test func colourSwatchesHaveSpokenNamesInTheStringCatalog() {
-        for color in PropertiesPanel.strokeColors + PropertiesPanel.backgroundColors {
-            let name = PropertiesPanel.colorName(color)
+        let colors = [ColorPalette.Kind.stroke, .background].flatMap { kind in
+            ColorPalette.grid(for: kind).flatMap { ColorPalette.shades(of: $0) ?? [$0] }
+        }
+        for color in PropertiesPanel.strokeColors + PropertiesPanel.backgroundColors + colors {
+            let name = ColorPalette.name(color)
             #expect(!name.key.hasPrefix("#"), "\(color) is read out as its hex value")
             #expect(isInCatalog(name), "\(color): \(name.key)")
         }

@@ -19,39 +19,23 @@ struct PropertiesPanel: View {
         "transparent", "#ffc9c9", "#b2f2bb", "#a5d8ff", "#ffec99",
     ]
 
-    /// What VoiceOver reads for a swatch, Excalidraw's colour names.
-    static func colorName(_ hex: String) -> LocalizedStringResource {
-        switch hex {
-        case "transparent": "Transparent"
-        case "#1e1e1e": "Black"
-        case "#e03131": "Red"
-        case "#2f9e44": "Green"
-        case "#1971c2": "Blue"
-        case "#f08c00": "Orange"
-        case "#ffc9c9": "Light red"
-        case "#b2f2bb": "Light green"
-        case "#a5d8ff": "Light blue"
-        case "#ffec99": "Light yellow"
-        default: "Colour \(hex)"
-        }
-    }
-
     var body: some View {
         if let shown = controller.properties {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     if shown.sections.strokeColor {
                         section("Stroke") {
-                            swatches(Self.strokeColors, selected: shown.strokeColor) {
-                                .strokeColor($0)
-                            }
+                            ColorPickerView(
+                                kind: .stroke, topPicks: Self.strokeColors, selected: shown.strokeColor
+                            ) { controller.setProperty(.strokeColor($0)) }
                         }
                     }
                     if shown.sections.backgroundColor {
                         section("Background") {
-                            swatches(Self.backgroundColors, selected: shown.backgroundColor) {
-                                .backgroundColor($0)
-                            }
+                            ColorPickerView(
+                                kind: .background, topPicks: Self.backgroundColors,
+                                selected: shown.backgroundColor
+                            ) { controller.setProperty(.backgroundColor($0)) }
                         }
                     }
                     if shown.sections.fillStyle {
@@ -149,30 +133,6 @@ struct PropertiesPanel: View {
         }
     }
 
-    private func swatches(
-        _ colors: [String], selected: String?, property: @escaping (String) -> Property
-    ) -> some View {
-        HStack {
-            ForEach(colors, id: \.self) { color in
-                Button {
-                    controller.setProperty(property(color))
-                } label: {
-                    Circle()
-                        .fill(Color(hex: color))
-                        .overlay(Circle().stroke(.secondary, lineWidth: 1))
-                        .overlay(
-                            Circle().stroke(Color.accentColor, lineWidth: 3)
-                                .opacity(color == selected ? 1 : 0)
-                        )
-                        .frame(width: 28, height: 28)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(Text(Self.colorName(color)))
-                .accessibilityAddTraits(color == selected ? .isSelected : [])
-            }
-        }
-    }
-
     /// A segmented control of `options`; VoiceOver reads an option's
     /// `spoken` name where its shown name is an abbreviation.
     private func options<Value: Hashable>(
@@ -192,19 +152,5 @@ struct PropertiesPanel: View {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-    }
-}
-
-extension Color {
-    /// A colour from `#rrggbb`; `transparent` and anything unreadable is clear.
-    fileprivate init(hex: String) {
-        guard hex.hasPrefix("#"), let value = UInt32(hex.dropFirst(), radix: 16) else {
-            self = .clear
-            return
-        }
-        self.init(
-            red: Double((value >> 16) & 0xFF) / 255,
-            green: Double((value >> 8) & 0xFF) / 255,
-            blue: Double(value & 0xFF) / 255)
     }
 }
