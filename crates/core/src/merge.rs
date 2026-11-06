@@ -92,6 +92,19 @@ pub fn merge_drawings(
     }
 }
 
+/// Whether two same-named Drawings with no Sync history between them are one
+/// Drawing: they are if they share at least one Element id, or both have no
+/// Elements. Otherwise they are unrelated and must both be kept.
+pub fn are_same_drawing(a: &[u8], b: &[u8]) -> Result<bool, MergeError> {
+    let (a, b) = (parse(a)?, parse(b)?);
+    let (a, b) = (a.elements(), b.elements());
+    if a.is_empty() && b.is_empty() {
+        return Ok(true);
+    }
+    let ids: std::collections::HashSet<&str> = a.iter().filter_map(id_of).collect();
+    Ok(b.iter().filter_map(id_of).any(|id| ids.contains(id)))
+}
+
 /// A parsed Drawing.
 struct Doc {
     /// The whole document, as read.

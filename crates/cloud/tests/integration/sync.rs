@@ -675,3 +675,206 @@ fn a_cancelled_step_changes_nothing_and_says_so() {
     assert_eq!(outcome.error.unwrap().kind(), io::ErrorKind::Interrupted);
     assert!(tablet.files().is_empty());
 }
+
+// --- First Connect, same names, deletes -------------------------------------
+
+fn ids(bytes: &[u8]) -> Vec<String> {
+    elements_of(bytes).into_iter().map(|e| e.0).collect()
+}
+
+#[test]
+fn first_connect_copies_drawings_only_one_side_has() {
+    let cloud = Cloud::new();
+    let phone = Device::new();
+    cloud.write("Cloudy.excalidraw", &drawing(&[element("c", 1, "a0", 0)]));
+    phone.write("Local.excalidraw", &drawing(&[element("l", 1, "a0", 0)]));
+    assert_eq!(phone.sync(&cloud), ["Cloudy"]);
+    assert_eq!(phone.files(), ["Cloudy.excalidraw", "Local.excalidraw"]);
+    assert!(cloud.read("Local.excalidraw").is_some());
+}
+
+#[test]
+fn same_named_related_drawings_are_merged_without_a_base() {
+    let cloud = Cloud::new();
+    let phone = Device::new();
+    cloud.write(
+        "Sketch.excalidraw",
+        &drawing(&[element("a", 1, "a0", 0), element("b", 3, "a1", 0)]),
+    );
+    phone.write(
+        "Sketch.excalidraw",
+        &drawing(&[element("a", 2, "a0", 5), element("c", 1, "a2", 0)]),
+    );
+    phone.sync(&cloud);
+    let expected = vec![e("a", 2, false), e("b", 3, false), e("c", 1, false)];
+    assert_eq!(
+        elements_of(&phone.read("Sketch.excalidraw").unwrap()),
+        expected
+    );
+    assert_eq!(
+        elements_of(&cloud.read("Sketch.excalidraw").unwrap()),
+        expected
+    );
+    assert_eq!(phone.files(), ["Sketch.excalidraw"]);
+}
+
+#[test]
+fn same_named_unrelated_drawings_are_both_kept_and_the_local_one_renamed() {
+    let cloud = Cloud::new();
+    let phone = Device::new();
+    cloud.write("Sketch.excalidraw", &drawing(&[element("r", 1, "a0", 0)]));
+    phone.write("Sketch.excalidraw", &drawing(&[element("l", 1, "a0", 0)]));
+    phone.write("Sketch 2.excalidraw", &drawing(&[element("m", 1, "a0", 0)]));
+    assert_eq!(phone.sync(&cloud), ["Sketch", "Sketch 3"]);
+    assert_eq!(
+        phone.files(),
+        [
+            "Sketch 2.excalidraw",
+            "Sketch 3.excalidraw",
+            "Sketch.excalidraw"
+        ]
+    );
+    assert_eq!(ids(&phone.read("Sketch.excalidraw").unwrap()), ["r"]);
+    assert_eq!(ids(&phone.read("Sketch 3.excalidraw").unwrap()), ["l"]);
+    assert_eq!(ids(&cloud.read("Sketch.excalidraw").unwrap()), ["r"]);
+    assert_eq!(ids(&cloud.read("Sketch 3.excalidraw").unwrap()), ["l"]);
+    assert_eq!(phone.sync(&cloud), Vec::<String>::new());
+}
+
+#[test]
+fn the_next_free_name_also_avoids_names_only_the_cloud_has() {
+    let cloud = Cloud::new();
+    let phone = Device::new();
+    cloud.write("Sketch.excalidraw", &drawing(&[element("r", 1, "a0", 0)]));
+    cloud.write("Sketch 2.excalidraw", &drawing(&[element("s", 1, "a0", 0)]));
+    phone.write("Sketch.excalidraw", &drawing(&[element("l", 1, "a0", 0)]));
+    phone.sync(&cloud);
+    assert_eq!(ids(&phone.read("Sketch 3.excalidraw").unwrap()), ["l"]);
+    assert_eq!(ids(&phone.read("Sketch 2.excalidraw").unwrap()), ["s"]);
+}
+
+#[test]
+fn two_devices_creating_the_same_name_offline_follow_the_same_rule() {
+    let cloud = Cloud::new();
+    let (phone, tablet, mac) = (Device::new(), Device::new(), Device::new());
+    for (device, id) in [(&phone, "p"), (&tablet, "t")] {
+        device.write("Untitled.excalidraw", &drawing(&[element(id, 1, "a0", 0)]));
+    }
+    mac.write("Untitled.excalidraw", &drawing(&[]));
+    phone.sync(&cloud);
+    tablet.sync(&cloud);
+    assert_eq!(ids(&tablet.read("Untitled.excalidraw").unwrap()), ["p"]);
+    assert_eq!(ids(&tablet.read("Untitled 2.excalidraw").unwrap()), ["t"]);
+    phone.sync(&cloud);
+    assert_eq!(phone.files(), tablet.files());
+
+    // Empty on one side and drawn on the other are unrelated; no pointless copy
+    // when both are empty.
+    let (a, b) = (Device::new(), Device::new());
+    let cloud = Cloud::new();
+    a.write("Blank.excalidraw", &drawing(&[]));
+    b.write("Blank.excalidraw", &drawing(&[]));
+    a.sync(&cloud);
+    b.sync(&cloud);
+    assert_eq!(b.files(), ["Blank.excalidraw"]);
+    mac.sync(&cloud);
+}
+
+#[test]
+fn connecting_again_merges_without_duplicates_also_after_both_sides_changed() {
+    let (cloud, phone, tablet) = two_devices_apart();
+    SyncState::forget(&phone.state.0).unwrap();
+    phone.write(
+        "Sketch.excalidraw",
+        &drawing(&[element("a", 2, "a0", 10), element("b", 1, "a1", 0)]),
+    );
+    tablet.write(
+        "Sketch.excalidraw",
+        &drawing(&[element("a", 1, "a0", 0), element("b", 2, "a1", 9)]),
+    );
+    tablet.sync(&cloud);
+    phone.sync(&cloud);
+    tablet.sync(&cloud);
+    for side in [
+        phone.read("Sketch.excalidraw"),
+        tablet.read("Sketch.excalidraw"),
+    ] {
+        assert_eq!(
+            elements_of(&side.unwrap()),
+            [e("a", 2, false), e("b", 2, false)]
+        );
+    }
+    assert_eq!(phone.files(), ["Sketch.excalidraw"]);
+    assert_eq!(tablet.files(), ["Sketch.excalidraw"]);
+}
+
+#[test]
+fn switching_cloud_provider_merges_without_duplicates() {
+    let (old_cloud, phone, _tablet) = two_devices_apart();
+    // A second directory storage with the same Drawing, uploaded by another Device.
+    let new_cloud = Cloud::new();
+    let other = Device::new();
+    other.sync(&old_cloud);
+    other.write(
+        "Sketch.excalidraw",
+        &drawing(&[element("a", 1, "a0", 0), element("b", 4, "a1", 0)]),
+    );
+    other.sync(&new_cloud);
+
+    SyncState::forget(&phone.state.0).unwrap();
+    phone.sync(&new_cloud);
+    assert_eq!(phone.files(), ["Sketch.excalidraw"]);
+    assert_eq!(
+        elements_of(&phone.read("Sketch.excalidraw").unwrap()),
+        [e("a", 1, false), e("b", 4, false)]
+    );
+    assert!(new_cloud.read("Sketch 2.excalidraw").is_none());
+}
+
+#[test]
+fn a_drawing_deleted_on_one_side_and_changed_on_the_other_comes_back_with_the_change() {
+    let (cloud, phone, tablet) = two_devices_apart();
+    phone.remove("Sketch.excalidraw");
+    let edited = drawing(&[element("a", 2, "a0", 3), element("b", 1, "a1", 0)]);
+    tablet.write("Sketch.excalidraw", &edited);
+    phone.sync(&cloud);
+    tablet.sync(&cloud);
+    phone.sync(&cloud);
+    assert_eq!(phone.read("Sketch.excalidraw").unwrap(), edited);
+    assert_eq!(cloud.read("Sketch.excalidraw").unwrap(), edited);
+    assert_eq!(tablet.read("Sketch.excalidraw").unwrap(), edited);
+}
+
+#[test]
+fn a_drawing_deleted_on_one_side_and_unchanged_on_the_other_is_deleted_there() {
+    let (cloud, phone, tablet) = two_devices_apart();
+    phone.remove("Sketch.excalidraw");
+    phone.sync(&cloud);
+    assert!(cloud.read("Sketch.excalidraw").is_none());
+    assert_eq!(tablet.sync(&cloud), ["Sketch"]);
+    assert!(tablet.files().is_empty());
+}
+
+#[test]
+fn a_rename_crossing_an_edit_leaves_both_drawings_everywhere() {
+    let (cloud, phone, tablet) = two_devices_apart();
+    phone.rename("Sketch.excalidraw", "Renamed.excalidraw");
+    let edited = drawing(&[element("a", 2, "a0", 3), element("b", 1, "a1", 0)]);
+    tablet.write("Sketch.excalidraw", &edited);
+    phone.sync(&cloud);
+    tablet.sync(&cloud);
+    phone.sync(&cloud);
+    for device in [&phone, &tablet] {
+        assert_eq!(device.files(), ["Renamed.excalidraw", "Sketch.excalidraw"]);
+        assert_eq!(device.read("Sketch.excalidraw").unwrap(), edited);
+    }
+}
+
+#[test]
+fn a_drawing_deleted_while_disconnected_comes_back_on_the_next_connect() {
+    let (cloud, phone, _tablet) = two_devices_apart();
+    SyncState::forget(&phone.state.0).unwrap();
+    phone.remove("Sketch.excalidraw");
+    assert_eq!(phone.sync(&cloud), ["Sketch"]);
+    assert_eq!(phone.files(), ["Sketch.excalidraw"]);
+}

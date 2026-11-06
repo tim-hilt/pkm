@@ -4,8 +4,11 @@
 //! A Drawing is its file name, `<name>.excalidraw`, on both sides. For each
 //! name the step compares the local file and the cloud blob with what this
 //! Device remembers of the last Sync (`SyncState`): the bytes then, and the
-//! blob's change marker then. A Drawing changed on both sides, or present on
-//! both without any history, is left as it is until that is decided.
+//! blob's change marker then.
+//!
+//! A Drawing present on both sides without any history is merged without a
+//! base if both are the same Drawing (`are_same_drawing`); otherwise both are
+//! kept and the local one is renamed to the next free name ("Sketch 2").
 //!
 //! A Drawing changed on both sides is merged (`merge_drawings`) and the result
 //! written to both. The same merge runs when only the cloud changed, since the
@@ -20,7 +23,7 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 
-use excalidraw_native_core::merge_drawings;
+use excalidraw_native_core::{are_same_drawing, merge_drawings};
 
 use crate::storage::{Storage, write_file_atomically};
 
@@ -201,7 +204,7 @@ impl Step<'_> {
             (Some(local), None, None) => self.upload(file, local),
             (None, Some(marker), None) => self.download(file, &marker, None),
             // Never Synced under this name, present on both sides.
-            (Some(_), Some(_), None) => Ok(()),
+            (Some(local), Some(marker), None) => self.first_meeting(file, &marker, local),
             (local, remote, Some(base)) => {
                 let local_changed = local.as_deref() != Some(&base.bytes[..]);
                 let remote_changed = remote.as_deref() != Some(&base.marker[..]);
@@ -267,6 +270,57 @@ impl Step<'_> {
         } else {
             self.upload(file, merged)
         }
+    }
+
+    /// A name both sides have, with no history between them. The same
+    /// Drawing is merged without a base; unrelated ones are both kept, the
+    /// local one under the next free name. A file that is no Drawing is
+    /// skipped.
+    fn first_meeting(&mut self, file: &str, marker: &str, local: Vec<u8>) -> io::Result<()> {
+        let Some(remote) = self.fetch(file)? else {
+            return Ok(()); // deleted since the listing
+        };
+        match are_same_drawing(&local, &remote) {
+            Err(_) => Ok(()),
+            Ok(true) => {
+                let merged = merge_drawings(None, &local, &remote).map_err(io::Error::other)?;
+                if merged != local && !self.replace_local(file, &merged, Some(&local))? {
+                    return Ok(());
+                }
+                if merged == remote {
+                    self.state.set(file, &remote, marker)
+                } else {
+                    self.upload(file, merged)
+                }
+            }
+            Ok(false) => {
+                let renamed = self.next_free_name(file)?;
+                if self.read_local(file)?.as_deref() != Some(&local[..]) {
+                    return Ok(()); // the app wrote it meanwhile
+                }
+                fs::rename(self.path(file), self.path(&renamed))?;
+                self.outcome.changed.push(name_of(&renamed));
+                // Writing the cloud's Drawing reports `file` itself.
+                self.write_local(file, &remote, marker, None)?;
+                self.upload(&renamed, local)
+            }
+        }
+    }
+
+    /// `file` with the lowest number from 2 up that no side uses: "Sketch 2".
+    fn next_free_name(&self, file: &str) -> io::Result<String> {
+        let stem = name_of(file);
+        let taken: BTreeSet<String> = self
+            .remote
+            .keys()
+            .cloned()
+            .chain(file_names(self.drawings)?)
+            .chain(self.state.files()?)
+            .collect();
+        Ok((2..)
+            .map(|n| format!("{stem} {n}{EXTENSION}"))
+            .find(|candidate| !taken.contains(candidate))
+            .expect("a free name"))
     }
 
     fn upload(&mut self, file: &str, bytes: Vec<u8>) -> io::Result<()> {

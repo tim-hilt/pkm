@@ -3,7 +3,7 @@
 //! `reconcileElements`, never recomputed with the merge's own rules.
 
 use excalidraw_native_core::json::{Value, parse};
-use excalidraw_native_core::merge_drawings;
+use excalidraw_native_core::{are_same_drawing, merge_drawings};
 
 fn element(id: &str, version: u32, nonce: u32, index: &str) -> String {
     format!(
@@ -268,4 +268,40 @@ fn bytes_that_are_no_drawing_are_refused() {
     assert!(merge_drawings(None, b"not json", &fine).is_err());
     assert!(merge_drawings(None, &fine, br##"{"type":"other"}"##).is_err());
     assert!(merge_drawings(None, &fine, br##"{"type":"excalidraw","elements":[{}]}"##).is_err());
+}
+
+// --- Sameness of same-named Drawings ----------------------------------------
+
+#[test]
+fn drawings_sharing_an_element_id_are_the_same() {
+    let a = elements_only(&[element("a", 1, 1, "a0"), element("b", 1, 1, "a1")]);
+    let b = elements_only(&[element("c", 1, 1, "a0"), element("b", 5, 2, "a1")]);
+    assert_eq!(are_same_drawing(&a, &b), Ok(true));
+}
+
+#[test]
+fn a_shared_id_counts_even_when_erased() {
+    let a = elements_only(&[element("a", 1, 1, "a0")]);
+    let b = elements_only(&[deleted("a", 2, "a0")]);
+    assert_eq!(are_same_drawing(&a, &b), Ok(true));
+}
+
+#[test]
+fn drawings_without_a_shared_id_are_unrelated() {
+    let a = elements_only(&[element("a", 1, 1, "a0")]);
+    let b = elements_only(&[element("b", 1, 1, "a0")]);
+    assert_eq!(are_same_drawing(&a, &b), Ok(false));
+}
+
+#[test]
+fn two_empty_drawings_are_the_same_but_an_empty_and_a_filled_one_are_not() {
+    let empty = elements_only(&[]);
+    let filled = elements_only(&[element("a", 1, 1, "a0")]);
+    assert_eq!(are_same_drawing(&empty, &empty), Ok(true));
+    assert_eq!(are_same_drawing(&empty, &filled), Ok(false));
+}
+
+#[test]
+fn sameness_of_a_non_drawing_is_an_error() {
+    assert!(are_same_drawing(b"nope", &elements_only(&[])).is_err());
 }
