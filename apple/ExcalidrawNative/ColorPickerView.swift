@@ -1,10 +1,9 @@
 import SwiftUI
 
 /// A colour row of the properties panel: the five top picks and, at the end,
-/// a button showing the current colour that opens the full picker below the
-/// row: Excalidraw's palette grid, the shades of the current colour and a hex
-/// code field. Everything is a tap target of the row's width, so the full
-/// palette is reachable with a finger.
+/// a button showing the current colour that opens the full picker
+/// (`FullColorPicker`) below the row. Everything is a tap target of the row's
+/// width, so the full palette is reachable with a finger.
 struct ColorPickerView: View {
     let kind: ColorPalette.Kind
     let topPicks: [String]
@@ -13,23 +12,25 @@ struct ColorPickerView: View {
     let onPick: (String) -> Void
     @Environment(\.colorScheme) private var colorScheme
     @State private var isOpen = false
-    @State private var hex = ""
-    @State private var hexIsInvalid = false
-    @FocusState private var hexIsFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 0) {
-                ForEach(topPicks, id: \.self) { swatch($0, size: 22) }
+                ForEach(topPicks, id: \.self) {
+                    SwatchButton(color: $0, size: 22, selected: selected, onPick: onPick)
+                }
                 Divider().frame(height: 22).padding(.horizontal, 4)
                 Button {
                     withAnimation(.snappy(duration: 0.2)) { isOpen.toggle() }
                 } label: {
-                    ColorSwatch(color: display(selected ?? "transparent"), size: 26)
-                        .overlay(Selection(size: 26).opacity(isOpen ? 1 : 0))
-                        .frame(width: 26, height: 26)
-                        .frame(minWidth: 30, minHeight: 36)
-                        .contentShape(Rectangle())
+                    ColorSwatch(
+                        color: ColorPalette.displayColor(selected ?? "transparent", dark: colorScheme == .dark),
+                        size: 26
+                    )
+                    .overlay(Selection(size: 26).opacity(isOpen ? 1 : 0))
+                    .frame(width: 26, height: 26)
+                    .frame(minWidth: 30, minHeight: 36)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .buttonPointer()
@@ -37,28 +38,44 @@ struct ColorPickerView: View {
                 .accessibilityValue(selected.map { Text(ColorPalette.name($0)) } ?? Text(""))
                 .accessibilityAddTraits(isOpen ? .isSelected : [])
             }
-            if isOpen { picker }
-        }
-        .onChange(of: selected, initial: true) { _, color in
-            guard !hexIsFocused else { return }
-            hex = Self.hexDigits(of: color)
-            hexIsInvalid = false
+            if isOpen {
+                FullColorPicker(kind: kind, selected: selected, onPick: onPick)
+                    .padding(10)
+                    .background(Chrome.pickerPanel, in: RoundedRectangle(cornerRadius: 8))
+            }
         }
     }
+}
 
-    private var picker: some View {
+/// The full colour picker, without the top-picks row: Excalidraw's palette
+/// grid, the shades of the current colour and a hex code field. It has no
+/// background or padding of its own; its container provides them.
+struct FullColorPicker: View {
+    let kind: ColorPalette.Kind
+    /// The colour of the Selection; `nil` if its Elements do not share one.
+    let selected: String?
+    let onPick: (String) -> Void
+    @State private var hex = ""
+    @State private var hexIsInvalid = false
+    @FocusState private var hexIsFocused: Bool
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             heading("Colors")
             let grid = ColorPalette.grid(for: kind)
             ForEach(0..<3, id: \.self) { row in
                 HStack(spacing: 0) {
-                    ForEach(grid[row * 5..<row * 5 + 5], id: \.self) { swatch($0, size: 26) }
+                    ForEach(grid[row * 5..<row * 5 + 5], id: \.self) {
+                        SwatchButton(color: $0, size: 26, selected: selected, onPick: onPick)
+                    }
                 }
             }
             heading("Shades")
             if let shades = ColorPalette.shades(of: selected) {
                 HStack(spacing: 0) {
-                    ForEach(shades, id: \.self) { swatch($0, size: 26) }
+                    ForEach(shades, id: \.self) {
+                        SwatchButton(color: $0, size: 26, selected: selected, onPick: onPick)
+                    }
                 }
             } else {
                 Text("No shades available for this color").font(.caption).foregroundStyle(.secondary)
@@ -66,8 +83,11 @@ struct ColorPickerView: View {
             heading("Hex code")
             hexField
         }
-        .padding(10)
-        .background(Chrome.pickerPanel, in: RoundedRectangle(cornerRadius: 8))
+        .onChange(of: selected, initial: true) { _, color in
+            guard !hexIsFocused else { return }
+            hex = Self.hexDigits(of: color)
+            hexIsInvalid = false
+        }
     }
 
     private var hexField: some View {
@@ -95,10 +115,6 @@ struct ColorPickerView: View {
         }
     }
 
-    private func display(_ color: String) -> String {
-        ColorPalette.displayColor(color, dark: colorScheme == .dark)
-    }
-
     private func commitHex() {
         if hex == Self.hexDigits(of: selected) {
             hexIsInvalid = false
@@ -114,13 +130,27 @@ struct ColorPickerView: View {
         Text(title).font(.caption).foregroundStyle(.secondary)
     }
 
-    /// A swatch in a cell that shares the row's width, so that it is a
-    /// touch target well beyond its drawn size.
-    private func swatch(_ color: String, size: CGFloat) -> some View {
+    /// The digits a hex field shows for `color`: none for transparent.
+    private static func hexDigits(of color: String?) -> String {
+        guard let color, color.hasPrefix("#") else { return "" }
+        return String(color.dropFirst())
+    }
+}
+
+/// A swatch in a cell that shares the row's width, so that it is a
+/// touch target well beyond its drawn size.
+private struct SwatchButton: View {
+    let color: String
+    let size: CGFloat
+    let selected: String?
+    let onPick: (String) -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
         Button {
             onPick(color)
         } label: {
-            ColorSwatch(color: display(color), size: size)
+            ColorSwatch(color: ColorPalette.displayColor(color, dark: colorScheme == .dark), size: size)
                 .overlay(Selection(size: size).opacity(color == selected ? 1 : 0))
                 .frame(width: size, height: size)
                 .frame(maxWidth: .infinity, minHeight: 36)
@@ -130,12 +160,6 @@ struct ColorPickerView: View {
         .buttonPointer()
         .accessibilityLabel(Text(ColorPalette.name(color)))
         .accessibilityAddTraits(color == selected ? .isSelected : [])
-    }
-
-    /// The digits a hex field shows for `color`: none for transparent.
-    private static func hexDigits(of color: String?) -> String {
-        guard let color, color.hasPrefix("#") else { return "" }
-        return String(color.dropFirst())
     }
 }
 

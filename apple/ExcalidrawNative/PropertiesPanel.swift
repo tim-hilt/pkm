@@ -16,137 +16,25 @@ struct PropertiesPanel: View {
     var width: CGFloat? = 195
     @State private var contentHeight: CGFloat = 0
 
-    static let strokeColors = ["#1e1e1e", "#e03131", "#2f9e44", "#1971c2", "#f08c00"]
-    static let backgroundColors = [
-        "transparent", "#ffc9c9", "#b2f2bb", "#a5d8ff", "#ffec99",
-    ]
+    static let strokeColors = StrokeGroup.topPicks
+    static let backgroundColors = BackgroundGroup.topPicks
 
     var body: some View {
         if let shown = controller.properties {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
-                    if shown.sections.strokeColor {
-                        section("Stroke") {
-                            ColorPickerView(
-                                kind: .stroke, topPicks: Self.strokeColors, selected: shown.strokeColor
-                            ) { controller.setProperty(.strokeColor($0)) }
-                        }
-                    }
-                    if shown.sections.backgroundColor {
-                        section("Background") {
-                            ColorPickerView(
-                                kind: .background, topPicks: Self.backgroundColors,
-                                selected: shown.backgroundColor
-                            ) { controller.setProperty(.backgroundColor($0)) }
-                        }
-                    }
-                    if shown.sections.fillStyle {
-                        section("Fill") {
-                            options(
-                                [
-                                    (.hachure, .drawing(PanelIcon.hachure), "Hachure"),
-                                    (.crossHatch, .drawing(PanelIcon.crossHatch), "Cross-hatch"),
-                                    (.solid, .drawing(PanelIcon.solidFill), "Solid"),
-                                ], selected: shown.fillStyle
-                            ) { .fillStyle($0) }
-                        }
-                    }
-                    if shown.sections.strokeWidth {
-                        section("Stroke width") {
-                            options(
-                                [
-                                    (.thin, .drawing(PanelIcon.width(1)), "Thin"),
-                                    (.medium, .drawing(PanelIcon.width(2.5)), "Bold"),
-                                    (.bold, .drawing(PanelIcon.width(4.5)), "Extra bold"),
-                                ], selected: shown.strokeWidth
-                            ) { .strokeWidth($0) }
-                        }
-                    }
-                    if shown.sections.strokeStyle {
-                        section("Stroke style") {
-                            options(
-                                [
-                                    (.solid, .drawing(PanelIcon.line(dash: [])), "Solid"),
-                                    (.dashed, .drawing(PanelIcon.line(dash: [4, 3])), "Dashed"),
-                                    (.dotted, .drawing(PanelIcon.line(dash: [0.1, 3], round: true)), "Dotted"),
-                                ], selected: shown.strokeStyle
-                            ) { .strokeStyle($0) }
-                        }
-                    }
-                    if shown.sections.sloppiness {
-                        section("Sloppiness") {
-                            options(
-                                [
-                                    (.architect, .drawing(PanelIcon.scribble(wobble: 0)), "Architect"),
-                                    (.artist, .drawing(PanelIcon.scribble(wobble: 1)), "Artist"),
-                                    (.cartoonist, .drawing(PanelIcon.scribble(wobble: 2)), "Cartoonist"),
-                                ], selected: shown.sloppiness
-                            ) { .sloppiness($0) }
-                        }
-                    }
-                    if shown.sections.edges {
-                        section("Edges") {
-                            options(
-                                [
-                                    (.sharp, .drawing(PanelIcon.corner(radius: 0)), "Sharp"),
-                                    (.round, .drawing(PanelIcon.corner(radius: 7)), "Round"),
-                                ], selected: shown.edges
-                            ) { .edges($0) }
-                        }
-                    }
-                    if shown.sections.text {
-                        section("Font size") {
-                            options(
-                                [
-                                    (.small, .text("S"), "Small"), (.medium, .text("M"), "Medium"),
-                                    (.large, .text("L"), "Large"), (.extraLarge, .text("XL"), "Extra large"),
-                                ], selected: shown.fontSize
-                            ) { .fontSize($0) }
-                        }
-                        section("Text align") {
-                            options(
-                                [
-                                    (.left, .symbol("text.alignleft"), "Left"),
-                                    (.center, .symbol("text.aligncenter"), "Center"),
-                                    (.right, .symbol("text.alignright"), "Right"),
-                                ], selected: shown.textAlign
-                            ) { .textAlign($0) }
-                        }
-                    }
-                    if shown.sections.opacity {
-                        section("Opacity") {
-                            Slider(
-                                value: Binding(
-                                    get: { shown.opacity ?? 100 },
-                                    set: { controller.setProperty(.opacity($0)) }),
-                                in: 0...100, step: 10
-                            )
-                            .accessibilityLabel(Text("Opacity"))
-                            HStack {
-                                Text("0")
-                                Spacer()
-                                Text("100")
-                            }
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .accessibilityHidden(true)
-                        }
-                    }
+                    if shown.sections.strokeColor { StrokeGroup(controller: controller, shown: shown) }
+                    if shown.sections.backgroundColor { BackgroundGroup(controller: controller, shown: shown) }
+                    if shown.sections.fillStyle { FillGroup(controller: controller, shown: shown) }
+                    if shown.sections.strokeWidth { StrokeWidthGroup(controller: controller, shown: shown) }
+                    if shown.sections.strokeStyle { StrokeStyleGroup(controller: controller, shown: shown) }
+                    if shown.sections.sloppiness { SloppinessGroup(controller: controller, shown: shown) }
+                    if shown.sections.edges { EdgesGroup(controller: controller, shown: shown) }
+                    if shown.sections.text { TextGroup(controller: controller, shown: shown) }
+                    if shown.sections.opacity { OpacityGroup(controller: controller, shown: shown) }
                     if controller.hasSelection {
-                        section("Layers") {
-                            buttons([
-                                (.symbol("arrow.down.to.line"), "Send to Back", { controller.moveInZOrder(.toBack) }),
-                                (.symbol("arrow.down"), "Send Backward", { controller.moveInZOrder(.backward) }),
-                                (.symbol("arrow.up"), "Bring Forward", { controller.moveInZOrder(.forward) }),
-                                (.symbol("arrow.up.to.line"), "Bring to Front", { controller.moveInZOrder(.toFront) }),
-                            ])
-                        }
-                        section("Actions") {
-                            buttons([
-                                (.symbol("plus.square.on.square"), "Duplicate", { controller.duplicate() }),
-                                (.symbol("trash"), "Delete", { controller.deleteSelection() }),
-                            ])
-                        }
+                        LayersGroup(controller: controller)
+                        ActionsGroup(controller: controller)
                     }
                 }
                 .padding(12)
@@ -160,43 +48,10 @@ struct PropertiesPanel: View {
             .shadow(color: .black.opacity(0.05), radius: 7, y: 7)
         }
     }
-
-    private func section<Content: View>(_ title: LocalizedStringResource, @ViewBuilder content: () -> Content)
-        -> some View
-    {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
-            content()
-        }
-    }
-
-    /// A row of icon buttons, one per option, the chosen one highlighted;
-    /// VoiceOver reads an option's name.
-    private func options<Value: Hashable>(
-        _ options: [(Value, PanelIcon, LocalizedStringResource)], selected: Value?,
-        property: @escaping (Value) -> Property
-    ) -> some View {
-        HStack(spacing: 8) {
-            ForEach(options, id: \.0) { value, icon, name in
-                IconButton(icon: icon, name: name, isSelected: selected == value) {
-                    controller.setProperty(property(value))
-                }
-            }
-        }
-    }
-
-    /// A row of icon buttons that act on the Selection.
-    private func buttons(_ buttons: [(PanelIcon, LocalizedStringResource, () -> Void)]) -> some View {
-        HStack(spacing: 8) {
-            ForEach(buttons.indices, id: \.self) { index in
-                IconButton(icon: buttons[index].0, name: buttons[index].1, isSelected: false, action: buttons[index].2)
-            }
-        }
-    }
 }
 
 /// One 32 pt icon button of the panel (hit area grown to Apple's 44 pt).
-private struct IconButton: View {
+struct IconButton: View {
     let icon: PanelIcon
     let name: LocalizedStringResource
     let isSelected: Bool
