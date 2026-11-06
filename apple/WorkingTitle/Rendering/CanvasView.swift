@@ -66,6 +66,7 @@ final class CanvasMetalView: MTKView {
         #if !os(macOS)
             isMultipleTouchEnabled = true
             enablePencilInput()
+            observeKeyboard()
         #endif
         enableImageInput()
     }
@@ -163,10 +164,48 @@ final class CanvasMetalView: MTKView {
     private func syncTextEditor() {
         if let shown = editor?.textEditor() {
             textOverlay.show(shown, in: self)
+            #if !os(macOS)
+                avoidKeyboard()
+            #endif
         } else {
             textOverlay.hide()
         }
     }
+
+    #if !os(macOS)
+        /// The on-screen keyboard's frame in screen coordinates; `nil` while
+        /// it is hidden. A hardware keyboard shows none (or only the small
+        /// shortcut bar, which the caret never needs to clear).
+        private var keyboardFrame: CGRect?
+
+        private func observeKeyboard() {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(keyboardWillChangeFrame(_:)),
+                name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
+        }
+
+        @objc private func keyboardWillChangeFrame(_ note: Notification) {
+            keyboardFrame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+            avoidKeyboard()
+        }
+
+        /// Pans the viewport, if need be, so that the caret's line is above
+        /// the keyboard. Does not pan back afterwards.
+        private func avoidKeyboard() {
+            guard let editor, let field = textOverlay.view, let window,
+                let end = field.selectedTextRange?.end
+            else { return }
+            let keyboard = keyboardFrame.map { window.screen.coordinateSpace.convert($0, to: self) }
+            let caret = field.convert(field.caretRect(for: end), to: self)
+            guard let panned = KeyboardAvoidance.viewport(keyboard: keyboard, caret: caret, current: editor.viewport())
+            else { return }
+            editor.setViewport(viewport: panned)
+            syncViewport()
+            syncOverlay()
+            if let moved = editor.textEditor() { textOverlay.show(moved, in: self) }
+            onEditorChange?()
+        }
+    #endif
 
     /// Hands the renderer the Scene's geometry again if the Scene changed.
     private func syncScene() {
