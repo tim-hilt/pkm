@@ -45,6 +45,8 @@ struct CloudBackingSection: View {
                 connected(to: connection)
             } else if provider == .iCloudDrive {
                 iCloudDriveForm
+            } else if provider == .googleDrive {
+                googleDriveForm
             } else {
                 webDAVForm
             }
@@ -108,6 +110,13 @@ struct CloudBackingSection: View {
             Button("Reconnect", action: pickFolder)
                 .disabled(isConnecting)
                 .accessibilityIdentifier("cloud-reconnect")
+        } else if cloud.status == .accessLost, connection.provider == .googleDrive {
+            if let error {
+                Text(error).foregroundStyle(.red).accessibilityIdentifier("cloud-error")
+            }
+            Button("Reconnect") { signIn(reconnecting: true) }
+                .disabled(isConnecting)
+                .accessibilityIdentifier("cloud-reconnect")
         } else if cloud.status == .accessLost {
             SecureField("Password", text: $password)
                 .accessibilityIdentifier("cloud-password")
@@ -155,6 +164,39 @@ struct CloudBackingSection: View {
         Button("Connect", action: pickFolder)
             .disabled(isConnecting)
             .accessibilityIdentifier("cloud-connect")
+    }
+
+    @ViewBuilder private var googleDriveForm: some View {
+        Text(
+            "You sign in on Google's page. Your Drawings are kept in the ExcalidrawNative folder of My Drive; the app sees only files it created."
+        )
+        .font(.footnote).foregroundStyle(.secondary)
+        if let error {
+            Text(error).foregroundStyle(.red).accessibilityIdentifier("cloud-error")
+        }
+        Button("Connect") { signIn(reconnecting: false) }
+            .disabled(isConnecting)
+            .accessibilityIdentifier("cloud-connect")
+    }
+
+    /// Signs in to Google Drive. Closing the sign-in page does nothing.
+    private func signIn(reconnecting: Bool) {
+        Task {
+            isConnecting = true
+            defer { isConnecting = false }
+            do {
+                if reconnecting {
+                    try await cloud.reconnectGoogleDrive()
+                } else {
+                    try await cloud.connectGoogleDrive()
+                }
+                error = nil
+            } catch let failure as ConnectError {
+                error = failure.message
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
     }
 
     /// Shows the folder picker, unless iCloud Drive is off.

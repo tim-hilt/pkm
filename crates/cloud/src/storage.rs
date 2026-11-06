@@ -39,6 +39,11 @@ pub enum ConnectError {
     ICloudDriveUnavailable,
     /// iCloud Drive: the folder granted is not iCloud Drive's root.
     WrongFolder,
+    /// OAuth: the user refused consent on the sign-in page.
+    AccessDenied,
+    /// OAuth: the sign-in did not go through: the redirect is not the answer
+    /// to this sign-in, or the provider refused the code.
+    SignInFailed,
 }
 
 /// The variant's name; clients word the message for the user.

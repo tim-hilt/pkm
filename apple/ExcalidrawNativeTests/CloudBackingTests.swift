@@ -14,9 +14,12 @@ import Testing
 
     private func model(
         checking check: @escaping @Sendable (String, String, String) throws -> Void = { _, _, _ in },
-        iCloudDriveOn: Bool = true
+        iCloudDriveOn: Bool = true,
+        signInPage: @escaping @MainActor (URL, String) async throws -> URL = { _, _ in throw CancellationError() }
     ) -> CloudBackingModel {
-        CloudBackingModel(credentials: credentials, checkWebDAV: check, isICloudDriveOn: { iCloudDriveOn })
+        CloudBackingModel(
+            credentials: credentials, checkWebDAV: check, isICloudDriveOn: { iCloudDriveOn },
+            showSignInPage: signInPage)
     }
 
     /// A folder standing in for iCloud Drive's root, removed by the caller.
@@ -87,13 +90,62 @@ import Testing
     @Test func everyFailureHasItsOwnMessage() {
         let messages = [
             ConnectError.WrongCredentials, .Unreachable, .NotHttps, .NotWebDav, .ICloudDriveUnavailable, .WrongFolder,
+            .AccessDenied, .SignInFailed,
         ].map(\.message)
 
-        #expect(Set(messages).count == 6)
+        #expect(Set(messages).count == 8)
+        #expect(ConnectError.AccessDenied.message == "Access denied")
     }
 
-    @Test func onlyWebDAVAndICloudDriveCanBeConnectedYet() {
-        #expect(CloudProvider.allCases.filter(\.isAvailable) == [.webDAV, .iCloudDrive])
+    @Test func onlyOneDriveCannotBeConnectedYet() {
+        #expect(CloudProvider.allCases.filter(\.isAvailable) == [.webDAV, .iCloudDrive, .googleDrive])
+    }
+
+    // MARK: Google Drive
+
+    @Test func closingTheSignInPageDoesNothing() async throws {
+        let cloud = model()
+
+        try await cloud.connectGoogleDrive()
+
+        #expect(cloud.connection == nil)
+        #expect(credentials.loadGoogle() == nil)
+    }
+
+    @Test func theGoogleAccountIsKeptInTheKeychainAndSurvivesARelaunch() {
+        let account = GoogleDriveAccount(refreshToken: "refresh-1", email: "tim@example.com")
+        #expect(credentials.saveGoogle(account))
+
+        let relaunched = model()
+
+        #expect(relaunched.connection == CloudConnection(provider: .googleDrive, detail: "tim@example.com"))
+        #expect(credentials.loadGoogle() == account)
+        #expect(CloudProvider.googleDrive.detailLabel == "Account")
+        credentials.forget()
+    }
+
+    @Test func aRotatedRefreshTokenReplacesTheOneInTheKeychain() {
+        credentials.saveGoogle(GoogleDriveAccount(refreshToken: "old", email: "tim@example.com"))
+
+        credentials.rotateGoogleToken(to: "new")
+
+        #expect(credentials.loadGoogle() == GoogleDriveAccount(refreshToken: "new", email: "tim@example.com"))
+        credentials.forget()
+    }
+
+    @Test func disconnectingGoogleDriveForgetsTheAccount() {
+        credentials.saveGoogle(GoogleDriveAccount(refreshToken: "refresh-1", email: "tim@example.com"))
+        let cloud = model()
+
+        cloud.disconnect()
+
+        #expect(cloud.connection == nil)
+        #expect(credentials.loadGoogle() == nil)
+        #expect(model().connection == nil)
+    }
+
+    @Test func aFullGoogleDriveIsNamedInTheStatusText() {
+        #expect(CloudProvider.googleDrive.name == "Google Drive")
     }
 
     // MARK: iCloud Drive
