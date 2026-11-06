@@ -11,6 +11,6 @@ mod sync_loop;
 pub mod webdav;
 
 pub use storage::{Blob, ConnectError, DirStorage, Storage};
-pub use sync::{StepOutcome, SyncState, sync_step};
-pub use sync_loop::{SyncLoop, Timing};
+pub use sync::{Progress, StepOutcome, SyncState, sync_step, sync_step_reporting};
+pub use sync_loop::{Observer, Status, SyncLoop, Timing};
 pub use webdav::WebDavStorage;

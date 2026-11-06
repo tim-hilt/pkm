@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import SwiftUI
 
 /// Where Drawings can be backed up. Only WebDAV can be Connected so far; the
@@ -71,16 +72,54 @@ struct CredentialsNotSaved: LocalizedError {
     var errorDescription: String? { "The password could not be saved to the Keychain" }
 }
 
-/// Hears from the core's Sync loop, on a thread of its own, which Drawings a
-/// Sync step wrote or deleted here, and hands that on to the main actor.
-private final class ChangeObserver: SyncObserver, @unchecked Sendable {
-    private let handler: @MainActor @Sendable ([String]) -> Void
+/// How many of the Drawings a Sync step transfers are done.
+struct SyncProgress: Equatable {
+    let done: Int
+    let total: Int
+}
 
-    init(_ handler: @escaping @MainActor @Sendable ([String]) -> Void) { self.handler = handler }
+/// Hears from the core's Sync loop, on a thread of its own, what it does, and
+/// hands that on to the main actor.
+private final class SyncEvents: SyncObserver, @unchecked Sendable {
+    private let onChanged: @MainActor @Sendable ([String]) -> Void
+    private let onProgress: @MainActor @Sendable (SyncProgress?) -> Void
+    private let onStatus: @MainActor @Sendable (SyncStatus) -> Void
+
+    init(
+        onChanged: @escaping @MainActor @Sendable ([String]) -> Void,
+        onProgress: @escaping @MainActor @Sendable (SyncProgress?) -> Void,
+        onStatus: @escaping @MainActor @Sendable (SyncStatus) -> Void
+    ) {
+        (self.onChanged, self.onProgress, self.onStatus) = (onChanged, onProgress, onStatus)
+    }
 
     func changed(names: [String]) {
-        Task { @MainActor [handler] in handler(names) }
+        Task { @MainActor [onChanged] in onChanged(names) }
     }
+
+    func progress(done: UInt32, total: UInt32) {
+        let progress = total == 0 ? nil : SyncProgress(done: Int(done), total: Int(total))
+        Task { @MainActor [onProgress] in onProgress(progress) }
+    }
+
+    func status(status: SyncStatus) {
+        Task { @MainActor [onStatus] in onStatus(status) }
+    }
+}
+
+/// Tells whether the Device has a connection.
+private final class NetworkMonitor: @unchecked Sendable {
+    private let monitor = NWPathMonitor()
+
+    init(_ handler: @escaping @MainActor @Sendable (Bool) -> Void) {
+        monitor.pathUpdateHandler = { path in
+            let online = path.status == .satisfied
+            Task { @MainActor in handler(online) }
+        }
+        monitor.start(queue: DispatchQueue(label: "cloud-backing.network"))
+    }
+
+    deinit { monitor.cancel() }
 }
 
 /// Cloud Backing: the Connection to the Cloud Provider this Device is Connected
@@ -90,6 +129,34 @@ private final class ChangeObserver: SyncObserver, @unchecked Sendable {
 final class CloudBackingModel {
     /// The Cloud Provider Connected to; nil while Cloud Backing is off.
     private(set) var connection: CloudConnection?
+
+    /// What Sync is doing; nil until the first step is through.
+    private(set) var status: SyncStatus?
+    /// Drawings done of all Drawings a running Sync step transfers.
+    private(set) var progress: SyncProgress?
+    /// When a Sync step last went through.
+    private(set) var lastSync: Date?
+    /// The Cloud Provider the user picked while Connected to another: asks
+    /// to confirm before `confirmSwitch` Disconnects.
+    private(set) var pendingSwitch: CloudProvider?
+
+    /// What Settings says of `status`.
+    var statusText: String {
+        switch status {
+        case nil: String(localized: "Not synced yet")
+        case .upToDate: String(localized: "Up to date")
+        case .syncing:
+            progress.map { String(localized: "Syncing \($0.done) of \($0.total) Drawings") }
+                ?? String(localized: "Syncing")
+        case .offline: String(localized: "Offline")
+        case .accessLost: String(localized: "Access lost")
+        case .full: String(localized: "\(connection?.provider.name ?? "") is full")
+        }
+    }
+
+    /// Whether Sync is blocked until the user acts, which the Gallery shows
+    /// with a warning icon: the cloud rejected the credentials or is full.
+    var hasProblem: Bool { status == .accessLost || status == .full }
 
     @ObservationIgnored private let credentials: CloudCredentials
     @ObservationIgnored private let checkWebDAV: @Sendable (String, String, String) throws -> Void
@@ -105,6 +172,8 @@ final class CloudBackingModel {
     /// The running Sync; nil while not Connected or not attached.
     @ObservationIgnored private var sync: CloudSync?
     @ObservationIgnored private var isInFront = true
+    @ObservationIgnored private var isOnline = true
+    @ObservationIgnored private var network: NetworkMonitor?
 
     /// Cloud Backing keeping its credentials in `credentials`. The Connection
     /// saved there is shown again without contacting the server, so launching
@@ -146,6 +215,7 @@ final class CloudBackingModel {
         drawings: URL, stateDirectory: URL, onChanged: @escaping @MainActor @Sendable ([String]) -> Void
     ) {
         target = SyncTarget(drawings: drawings, stateDirectory: stateDirectory, onChanged: onChanged)
+        network = NetworkMonitor { [weak self] online in self?.networkChanged(online: online) }
         restartSync()
     }
 
@@ -159,16 +229,63 @@ final class CloudBackingModel {
     /// A Drawing changed on this Device: Sync a few seconds from now.
     func drawingsChanged() { sync?.localChange() }
 
+    private func networkChanged(online: Bool) {
+        isOnline = online
+        sync?.setOnline(online: online)
+    }
+
+    /// Sync tells how it is doing: see `status`, `progress`, `lastSync`.
+    private func apply(status: SyncStatus) {
+        self.status = status
+        if status == .upToDate || status == .full { lastSync = Date() }
+    }
+
     private func restartSync() {
         sync = nil  // cancels the running step
+        (status, progress) = (nil, nil)
         guard let target, let account = credentials.load() else { return }
         sync = try? CloudSync.startWebdav(
             url: account.url, username: account.username, password: account.password,
             drawingsDirectory: target.drawings.path(percentEncoded: false),
             stateDirectory: target.stateDirectory.path(percentEncoded: false),
-            observer: ChangeObserver(target.onChanged))
+            observer: SyncEvents(
+                onChanged: target.onChanged,
+                onProgress: { [weak self] in self?.progress = $0 },
+                onStatus: { [weak self] in self?.apply(status: $0) }))
         if !isInFront { sync?.wentToBackground() }
+        if !isOnline { sync?.setOnline(online: false) }
     }
+
+    /// Reconnects after Sync lost access (the password changed): checks the
+    /// server with the new `password`, which throws a `ConnectError` if it is
+    /// still refused, and then lets Sync resume where it stopped.
+    func reconnect(password: String) async throws {
+        guard let account = credentials.load() else { return }
+        let check = checkWebDAV
+        try await Task.detached { try check(account.url, account.username, password) }.value
+        let renewed = WebDAVAccount(url: account.url, username: account.username, password: password)
+        guard credentials.save(renewed) else { throw CredentialsNotSaved() }
+        if let sync {
+            try? sync.reconnectWebdav(url: renewed.url, username: renewed.username, password: password)
+        }
+    }
+
+    /// The user picked `provider` while Connected to another: to be confirmed.
+    func requestSwitch(to provider: CloudProvider) {
+        guard let connection, connection.provider != provider else { return }
+        pendingSwitch = provider
+    }
+
+    /// The user confirmed: Disconnects the current Cloud Provider, so that
+    /// the picked one can be Connected. Returns it.
+    @discardableResult
+    func confirmSwitch() -> CloudProvider? {
+        guard let picked = pendingSwitch else { return nil }
+        disconnect()
+        return picked
+    }
+
+    func cancelSwitch() { pendingSwitch = nil }
 
     private func clearSyncState() {
         sync = nil
@@ -181,5 +298,6 @@ final class CloudBackingModel {
         clearSyncState()
         credentials.forget()
         connection = nil
+        (status, progress, lastSync, pendingSwitch) = (nil, nil, nil, nil)
     }
 }

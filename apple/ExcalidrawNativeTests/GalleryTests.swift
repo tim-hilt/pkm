@@ -33,6 +33,26 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: orphan.path))
     }
 
+    @Test func theGalleryTellsHowManyDrawingsAreSyncing() {
+        let gallery = Gallery(store: store)
+        #expect(gallery.syncText == nil)
+
+        gallery.syncProgress = SyncProgress(done: 3, total: 40)
+
+        #expect(gallery.syncText == "Syncing 3 of 40 Drawings")
+    }
+
+    @Test func theWarningShowsWhileAccessIsLostOrTheCloudIsFull() {
+        let gallery = Gallery(store: store)
+        var shown: [Bool] = []
+        for status: SyncStatus? in [nil, .upToDate, .syncing, .offline, .accessLost, .full] {
+            gallery.syncStatus = status
+            shown.append(gallery.showsSyncWarning)
+        }
+
+        #expect(shown == [false, false, false, false, true, true])
+    }
+
     @Test func creatingADrawingOpensAnEmptyOne() {
         let gallery = Gallery(store: store)
 

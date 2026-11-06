@@ -16,6 +16,8 @@ struct GalleryView: View {
     @State private var deleting: DrawingStore.Entry?
     #if os(iOS)
         @State private var isShowingSettings = Gallery.opensSettingsAtLaunch
+    #else
+        @Environment(\.openSettings) private var openSettings
     #endif
 
     private let columns = [GridItem(.adaptive(minimum: 160, maximum: 260), spacing: 16)]
@@ -61,6 +63,25 @@ struct GalleryView: View {
                             .accessibilityIdentifier("settings")
                     }
                 #endif
+                ToolbarItem(placement: .status) {
+                    if let text = gallery.syncText {
+                        Text(text).font(.footnote).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("sync-progress")
+                    }
+                }
+                ToolbarItem {
+                    if gallery.showsSyncWarning {
+                        Button("Cloud Backing needs attention", systemImage: "exclamationmark.triangle.fill") {
+                            #if os(iOS)
+                                isShowingSettings = true
+                            #else
+                                openSettings()
+                            #endif
+                        }
+                        .foregroundStyle(.orange)
+                        .accessibilityIdentifier("sync-warning")
+                    }
+                }
                 ToolbarItem {
                     Button("New Drawing", systemImage: "plus") { gallery.createDrawing() }
                         .accessibilityIdentifier("new-drawing")

@@ -108,6 +108,20 @@ pub struct StepOutcome {
     /// Drawings, unless it was cancelled, so changes still arrive while e.g.
     /// uploads fail. Cancelling is `io::ErrorKind::Interrupted`.
     pub error: Option<io::Error>,
+    /// The cloud rejected the credentials. The step stopped.
+    pub access_lost: bool,
+    /// An upload found the cloud full (or over its quota). Uploads stopped for
+    /// this step, downloads went on.
+    pub storage_full: bool,
+}
+
+/// How far a step is through the Drawings it transfers. Deletes and the
+/// exchange of state alone don't count: a step with nothing to transfer
+/// reports no progress at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Progress {
+    pub done: u32,
+    pub total: u32,
 }
 
 /// Runs one Sync step between `drawings` (the Device's Drawings folder) and
@@ -119,18 +133,33 @@ pub fn sync_step(
     storage: &dyn Storage,
     cancel: &AtomicBool,
 ) -> StepOutcome {
+    sync_step_reporting(drawings, state, storage, cancel, &|_| {})
+}
+
+/// `sync_step`, calling `progress` once the number of Drawings to transfer is
+/// known and after each one.
+pub fn sync_step_reporting(
+    drawings: &Path,
+    state: &SyncState,
+    storage: &dyn Storage,
+    cancel: &AtomicBool,
+    progress: &dyn Fn(Progress),
+) -> StepOutcome {
     let mut step = Step {
         drawings,
         state,
         storage,
         cancel,
+        progress,
+        done: 0,
+        total: 0,
         remote: HashMap::new(),
         uploaded: Vec::new(),
         outcome: StepOutcome::default(),
     };
     if let Err(error) = step.run() {
         let error = step.cancelled_or(error);
-        step.outcome.error.get_or_insert(error);
+        step.record(error);
     }
     step.outcome
 }
@@ -140,6 +169,10 @@ struct Step<'a> {
     state: &'a SyncState,
     storage: &'a dyn Storage,
     cancel: &'a AtomicBool,
+    progress: &'a dyn Fn(Progress),
+    /// Drawings to transfer in this step, and how many are done.
+    total: u32,
+    done: u32,
     /// File name → change marker of the Drawings in the cloud.
     remote: HashMap<String, String>,
     /// The Drawings put in the cloud, whose new markers are not known yet.
@@ -154,15 +187,58 @@ impl Step<'_> {
         files.extend(file_names(self.drawings)?);
         files.extend(self.state.files()?);
 
+        for file in &files {
+            self.check_cancelled()?;
+            let (local, remote, base) = self.facts(file)?;
+            if decide(local.as_deref(), remote.as_deref(), base.as_ref()).is_transfer() {
+                self.total += 1;
+            }
+        }
+        self.report();
+
         for file in files {
             self.check_cancelled()?;
             if let Err(error) = self.sync_drawing(&file) {
                 // Whatever the error, cancelling is why the transfer failed.
                 self.check_cancelled()?;
-                self.outcome.error.get_or_insert(error);
+                self.record(error);
+                if self.outcome.access_lost {
+                    return Ok(()); // every further call would be rejected too
+                }
             }
         }
         self.remember_uploads()
+    }
+
+    /// Notes what went wrong: lost access and a full cloud are problems of
+    /// their own, anything else is an error (offline, most likely).
+    fn record(&mut self, error: io::Error) {
+        match error.kind() {
+            io::ErrorKind::PermissionDenied => self.outcome.access_lost = true,
+            io::ErrorKind::StorageFull => self.outcome.storage_full = true,
+            _ => {
+                self.outcome.error.get_or_insert(error);
+            }
+        }
+    }
+
+    fn report(&self) {
+        if self.total > 0 {
+            (self.progress)(Progress {
+                done: self.done,
+                total: self.total,
+            });
+        }
+    }
+
+    /// The local file, the cloud blob's marker and the last-Synced state.
+    #[allow(clippy::type_complexity)]
+    fn facts(&self, file: &str) -> io::Result<(Option<Vec<u8>>, Option<String>, Option<Synced>)> {
+        Ok((
+            self.read_local(file)?,
+            self.remote.get(file).cloned(),
+            self.state.get(file)?,
+        ))
     }
 
     fn list_remote(&self) -> io::Result<HashMap<String, String>> {
@@ -192,41 +268,32 @@ impl Step<'_> {
         }
     }
 
-    /// The rules of the spec for one name, with L the local file, R the cloud
-    /// blob and B the last-Synced state.
+    /// The rules of the spec for one name (`decide`).
     fn sync_drawing(&mut self, file: &str) -> io::Result<()> {
-        let local = self.read_local(file)?;
-        let remote = self.remote.get(file).cloned();
-        let base = self.state.get(file)?;
-
-        match (local, remote, base) {
-            (None, None, _) => self.state.remove(file),
-            (Some(local), None, None) => self.upload(file, local),
-            (None, Some(marker), None) => self.download(file, &marker, None),
-            // Never Synced under this name, present on both sides.
-            (Some(local), Some(marker), None) => self.first_meeting(file, &marker, local),
-            (local, remote, Some(base)) => {
-                let local_changed = local.as_deref() != Some(&base.bytes[..]);
-                let remote_changed = remote.as_deref() != Some(&base.marker[..]);
-                match (local, remote) {
-                    (Some(local), Some(marker)) => match (local_changed, remote_changed) {
-                        (true, false) => self.upload(file, local),
-                        (_, true) => self.reconcile(file, &marker, local, &base, local_changed),
-                        (false, false) => Ok(()),
-                    },
-                    // Deleted here: reaches the cloud, unless it was edited there.
-                    (None, Some(marker)) if remote_changed => self.download(file, &marker, None),
-                    (None, Some(_)) => {
-                        self.storage.delete(file)?;
-                        self.state.remove(file)
-                    }
-                    // Deleted there: reaches here, unless it was edited here.
-                    (Some(local), None) if local_changed => self.upload(file, local),
-                    (Some(local), None) => self.delete_local(file, &local),
-                    (None, None) => Ok(()),
-                }
+        let (local, remote, base) = self.facts(file)?;
+        let action = decide(local.as_deref(), remote.as_deref(), base.as_ref());
+        let result = match (action, local, remote, base) {
+            (Action::Forget, ..) => self.state.remove(file),
+            (Action::Upload, Some(local), ..) => self.upload(file, local),
+            (Action::Download, _, Some(marker), _) => self.download(file, &marker, None),
+            (Action::FirstMeeting, Some(local), Some(marker), _) => {
+                self.first_meeting(file, &marker, local)
             }
+            (Action::Reconcile { local_changed }, Some(local), Some(marker), Some(base)) => {
+                self.reconcile(file, &marker, local, &base, local_changed)
+            }
+            (Action::DeleteRemote, ..) => {
+                self.storage.delete(file)?;
+                self.state.remove(file)
+            }
+            (Action::DeleteLocal, Some(local), ..) => self.delete_local(file, &local),
+            _ => Ok(()),
+        };
+        if action.is_transfer() {
+            self.done += 1;
+            self.report();
         }
+        result
     }
 
     fn path(&self, file: &str) -> PathBuf {
@@ -324,6 +391,10 @@ impl Step<'_> {
     }
 
     fn upload(&mut self, file: &str, bytes: Vec<u8>) -> io::Result<()> {
+        if self.outcome.storage_full {
+            // Another upload just found the cloud full: don't ask again.
+            return Err(io::Error::from(io::ErrorKind::StorageFull));
+        }
         let mut data = Cancellable {
             inner: &bytes[..],
             cancel: self.cancel,
@@ -411,6 +482,65 @@ impl Step<'_> {
             }
         }
         Ok(())
+    }
+}
+
+/// What a step does for one name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Action {
+    Idle,
+    /// Gone on both sides: forget it.
+    Forget,
+    Upload,
+    Download,
+    /// Present on both sides without history.
+    FirstMeeting,
+    /// The cloud changed (and maybe the local file too).
+    Reconcile {
+        local_changed: bool,
+    },
+    DeleteRemote,
+    DeleteLocal,
+}
+
+impl Action {
+    /// Whether it moves a Drawing's content, as opposed to deleting one or
+    /// only updating what is remembered.
+    fn is_transfer(self) -> bool {
+        matches!(
+            self,
+            Action::Upload | Action::Download | Action::FirstMeeting | Action::Reconcile { .. }
+        )
+    }
+}
+
+/// The rules of the spec for one name, with L the local file, R the cloud blob
+/// (its marker) and B the last-Synced state.
+fn decide(local: Option<&[u8]>, remote: Option<&str>, base: Option<&Synced>) -> Action {
+    match (local, remote, base) {
+        (None, None, _) => Action::Forget,
+        (Some(_), None, None) => Action::Upload,
+        (None, Some(_), None) => Action::Download,
+        // Never Synced under this name, present on both sides.
+        (Some(_), Some(_), None) => Action::FirstMeeting,
+        (local, remote, Some(base)) => {
+            let local_changed = local != Some(&base.bytes[..]);
+            let remote_changed = remote != Some(&base.marker[..]);
+            match (local, remote) {
+                (Some(_), Some(_)) => match (local_changed, remote_changed) {
+                    (true, false) => Action::Upload,
+                    (_, true) => Action::Reconcile { local_changed },
+                    (false, false) => Action::Idle,
+                },
+                // Deleted here: reaches the cloud, unless it was edited there.
+                (None, Some(_)) if remote_changed => Action::Download,
+                (None, Some(_)) => Action::DeleteRemote,
+                // Deleted there: reaches here, unless it was edited here.
+                (Some(_), None) if local_changed => Action::Upload,
+                (Some(_), None) => Action::DeleteLocal,
+                (None, None) => unreachable!("handled above"),
+            }
+        }
     }
 }
 

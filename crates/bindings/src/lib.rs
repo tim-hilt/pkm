@@ -4,7 +4,9 @@
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use excalidraw_native_cloud::{ConnectError, SyncLoop, SyncState, Timing, WebDavStorage};
+use excalidraw_native_cloud::{
+    ConnectError, Observer, Progress, Status, SyncLoop, SyncState, Timing, WebDavStorage,
+};
 use excalidraw_native_core::scene::{FillPattern, LineStyle};
 use excalidraw_native_core::{
     Command, ContextMenu, Cursor, Edges, ExportScope, FontSize, ImageFile, MagnifyEvent, Modifiers,
@@ -41,6 +43,53 @@ pub trait SyncObserver: Send + Sync {
     /// `.excalidraw`; a rename is the old name and the new one). Called on a
     /// thread of the Sync loop, not the main thread.
     fn changed(&self, names: Vec<String>);
+
+    /// Drawings are being transferred: `done` of `total`. `total` is 0 once
+    /// the step is over. Also on the Sync loop's thread.
+    fn progress(&self, done: u32, total: u32);
+
+    /// The status changed.
+    fn status(&self, status: SyncStatus);
+}
+
+/// What Cloud Backing is doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum SyncStatus {
+    UpToDate,
+    Syncing,
+    Offline,
+    /// The cloud rejected the credentials: Reconnect.
+    AccessLost,
+    /// The cloud is full: nothing is uploaded, downloads go on.
+    Full,
+}
+
+impl From<Status> for SyncStatus {
+    fn from(status: Status) -> Self {
+        match status {
+            Status::UpToDate => Self::UpToDate,
+            Status::Syncing => Self::Syncing,
+            Status::Offline => Self::Offline,
+            Status::AccessLost => Self::AccessLost,
+            Status::Full => Self::Full,
+        }
+    }
+}
+
+/// Hands what the loop does to the foreign observer.
+struct ForeignObserver(Arc<dyn SyncObserver>);
+
+impl Observer for ForeignObserver {
+    fn changed(&self, names: Vec<String>) {
+        self.0.changed(names);
+    }
+    fn progress(&self, progress: Option<Progress>) {
+        let (done, total) = progress.map_or((0, 0), |p| (p.done, p.total));
+        self.0.progress(done, total);
+    }
+    fn status(&self, status: Status) {
+        self.0.status(status.into());
+    }
 }
 
 /// Why Sync could not start.
@@ -90,7 +139,7 @@ impl CloudSync {
             state,
             Arc::new(storage),
             Timing::default(),
-            Arc::new(move |names| observer.changed(names)),
+            Arc::new(ForeignObserver(observer)),
         );
         Ok(Arc::new(Self { sync_loop }))
     }
@@ -109,6 +158,27 @@ impl CloudSync {
     /// change.
     pub fn local_change(&self) {
         self.sync_loop.local_change();
+    }
+
+    /// The Device lost its connection or has it back. Offline nothing runs;
+    /// back online Syncs at once.
+    pub fn set_online(&self, online: bool) {
+        self.sync_loop.set_online(online);
+    }
+
+    /// The user Reconnected with new credentials: Sync resumes where it
+    /// stopped. If the server rejects them too, the status is `AccessLost`
+    /// again.
+    pub fn reconnect_webdav(
+        &self,
+        url: String,
+        username: String,
+        password: String,
+    ) -> Result<(), SyncStartError> {
+        let storage = WebDavStorage::resume(&url, &username, &password)
+            .map_err(|_| SyncStartError::NotHttps)?;
+        self.sync_loop.reconnect(Arc::new(storage));
+        Ok(())
     }
 }
 

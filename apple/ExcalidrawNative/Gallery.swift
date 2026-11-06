@@ -15,6 +15,19 @@ final class Gallery {
     /// tell the user.
     private(set) var failure: String?
 
+    /// What Cloud Backing is doing, as it tells (`ContentView` passes it on).
+    var syncProgress: SyncProgress?
+    var syncStatus: SyncStatus?
+
+    /// "Syncing 3 of 40 Drawings" while Drawings transfer.
+    var syncText: String? {
+        syncProgress.map { String(localized: "Syncing \($0.done) of \($0.total) Drawings") }
+    }
+
+    /// Whether the Gallery shows its warning icon: Sync is blocked because
+    /// access was lost or the cloud is full.
+    var showsSyncWarning: Bool { syncStatus == .accessLost || syncStatus == .full }
+
     /// The pictures of the Drawings for their cards.
     @ObservationIgnored let thumbnails: Thumbnails
 
