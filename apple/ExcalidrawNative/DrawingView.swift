@@ -12,6 +12,13 @@ struct DrawingView: View {
     /// re-evaluated while navigating.
     @State private var geometry: Geometry
     @State private var controller = CanvasController()
+    /// Decides whether the toolbar is in the navigation bar (desktop) or at
+    /// the bottom (mobile); follows the Canvas container's size.
+    @State private var layout = DrawingLayout.desktop
+    #if !os(macOS)
+        @State private var lastChosen: [Int: Tool] = [:]
+        @State private var familyShown: Int?
+    #endif
     @Environment(\.scenePhase) private var scenePhase
 
     init(drawing: OpenDrawing, export: ExportedDrawing, onBack: @escaping () -> Void) {
@@ -23,19 +30,35 @@ struct DrawingView: View {
 
     var body: some View {
         // The system's navigation bar (the window's toolbar on a Mac) carries
-        // the Gallery button and, on iPhone and iPad, the main menu; on a Mac
-        // the menu's items are in the menu bar (`CanvasCommands`).
+        // the Gallery button, the desktop layout's toolbar and, on iPhone and
+        // iPad, the main menu; on a Mac the menu's items are in the menu bar
+        // (`CanvasCommands`). The Drawing's name is not shown.
         NavigationStack {
             canvas
-                .navigationTitle(drawing.name)
+                #if os(macOS)
+                    .navigationTitle(drawing.name)
+                    .toolbar(removing: .title)
+                    .hidesTitlebarSeparator()
+                #endif
                 .toolbar {
                     ToolbarItem(placement: .navigation) {
                         Button("Gallery", systemImage: "chevron.backward", action: onBack)
                             .accessibilityIdentifier("back-to-gallery")
                     }
+                    #if os(macOS)
+                        DesktopToolbar(controller: controller)
+                    #else
+                        if layout == .desktop {
+                            DesktopToolbar(controller: controller)
+                        } else {
+                            MobileToolbar(controller: controller, lastChosen: $lastChosen, familyShown: $familyShown)
+                        }
+                    #endif
                     #if !os(macOS)
                         ToolbarItem(placement: .primaryAction) {
-                            MainMenu(drawing: drawing, export: export, controller: controller)
+                            MainMenu(
+                                drawing: drawing, export: export, controller: controller,
+                                hasToolLock: layout == .mobile)
                         }
                     #endif
                 }
@@ -55,6 +78,11 @@ struct DrawingView: View {
         )
         .ignoresSafeArea()
         .focusedSceneValue(controller)
+        .onGeometryChange(for: DrawingLayout.self) {
+            DrawingLayout(containerSize: $0.size)
+        } action: {
+            layout = $0
+        }
         .overlay {
             GeometryReader { container in
                 chrome(in: container.size, bottomInset: container.safeAreaInsets.bottom)
@@ -92,15 +120,11 @@ struct DrawingView: View {
 
     private func desktopChrome(in size: CGSize, bottomInset: CGFloat) -> some View {
         ZStack {
-            ToolBar(controller: controller).fixedSize()
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-
             if showsProperties {
                 PropertiesPanel(
                     controller: controller,
                     maxHeight: DrawingLayout.propertiesMaxHeight(containerHeight: size.height)
                 )
-                .padding(.top, DrawingLayout.propertiesTop - DrawingLayout.margin)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
 
@@ -113,37 +137,21 @@ struct DrawingView: View {
         .padding(DrawingLayout.margin)
     }
 
-    /// excalidraw.com's phone layout (docs/layout-reference §4): everything
-    /// in the bottom bar within thumb reach; no zoom buttons (pinch),
-    /// properties in a sheet.
+    /// excalidraw.com's phone layout (docs/layout-reference §4): the toolbar
+    /// in the system's bottom bar within thumb reach (`MobileToolbar`); no
+    /// zoom buttons (pinch), properties in a sheet.
     private func mobileChrome(in size: CGSize) -> some View {
-        VStack(spacing: 4) {
-            MobileActionRow(controller: controller, showsProperties: showsProperties)
-            MobileToolBar(controller: controller)
-        }
-        .frame(width: DrawingLayout.bottomBarWidth(containerWidth: size.width))
-        .padding(.bottom, 10)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        MobileActionRow(controller: controller, showsProperties: showsProperties)
+            .frame(width: DrawingLayout.bottomBarWidth(containerWidth: size.width))
+            .padding(.bottom, 10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
     }
 
     /// The core decides when there is something to style.
     private var showsProperties: Bool { controller.properties != nil }
 }
 
-/// Excalidraw's island: white, radius 8, its soft shadow.
-private struct Island: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .background(.background, in: RoundedRectangle(cornerRadius: 8))
-            .shadow(color: .black.opacity(0.17), radius: 0.5)
-            .shadow(color: .black.opacity(0.08), radius: 1.5)
-            .shadow(color: .black.opacity(0.05), radius: 7, y: 7)
-    }
-}
-
 extension View {
-    fileprivate func island() -> some View { modifier(Island()) }
-
     /// Excalidraw's 36 pt control, its hit area grown to Apple's 44 pt.
     fileprivate func controlButton(width: CGFloat = 36, height: CGFloat = 36) -> some View {
         frame(width: width, height: height)
@@ -153,10 +161,6 @@ extension View {
 
 /// Excalidraw's grey control group fill, `#ececf4`.
 private let controlFill = Color(red: 0xEC / 255, green: 0xEC / 255, blue: 0xF4 / 255)
-/// Excalidraw's checked-tool fill `#e0dfff` and glyph `#030064`.
-private let checkedFill = Color(red: 0xE0 / 255, green: 0xDF / 255, blue: 1)
-private let checkedGlyph = Color(red: 3 / 255, green: 0, blue: 0x64 / 255)
-
 #if !os(macOS)
     /// Excalidraw's main menu in the navigation bar, as the system's own
     /// menu button: exports the Drawing. On a Mac its items are in the menu
@@ -165,10 +169,17 @@ private let checkedGlyph = Color(red: 3 / 255, green: 0, blue: 0x64 / 255)
         let drawing: OpenDrawing
         let export: ExportedDrawing
         let controller: CanvasController
+        /// Whether Tool lock is here, because the toolbar has no room for it.
+        let hasToolLock: Bool
         @AppStorage(ExportPreferences.backgroundKey) private var background = true
 
         var body: some View {
             Menu {
+                if hasToolLock {
+                    Toggle(
+                        "Keep tool selected", systemImage: controller.toolLock ? "lock" : "lock.open",
+                        isOn: Binding(get: { controller.toolLock }, set: { controller.setToolLock($0) }))
+                }
                 ShareLink(item: export, preview: SharePreview(drawing.name)) {
                     Label("Export", systemImage: "square.and.arrow.up")
                 }
@@ -209,14 +220,12 @@ private let checkedGlyph = Color(red: 3 / 255, green: 0, blue: 0x64 / 255)
     }
 #endif
 
-/// Excalidraw's toolbar island, in its order: Tool lock, then the Tools.
-struct ToolBar: View {
-    let controller: CanvasController
-
+/// The Tools in Excalidraw's order, with their names and glyphs.
+enum ToolBar {
     static func name(_ tool: Tool) -> LocalizedStringResource { tools.first { $0.0 == tool }!.1 }
     static func symbol(_ tool: Tool) -> String { tools.first { $0.0 == tool }!.2 }
 
-    private static let tools: [(Tool, LocalizedStringResource, String)] = [
+    fileprivate static let tools: [(Tool, LocalizedStringResource, String)] = [
         (.hand, "Hand", "hand.raised"),
         (.selection, "Selection", "cursorarrow"),
         (.rectangle, "Rectangle", "square"),
@@ -228,133 +237,97 @@ struct ToolBar: View {
         (.text, "Text", "textformat.alt"),
         (.eraser, "Eraser", "eraser"),
     ]
+}
 
-    var body: some View {
-        HStack(spacing: 4) {
-            toolButton(
-                "Keep tool selected", symbol: controller.toolLock ? "lock" : "lock.open",
-                checked: controller.toolLock
-            ) { controller.setToolLock(!controller.toolLock) }
-            divider
-            ForEach(Self.tools, id: \.0) { tool, name, symbol in
-                toolButton(name, symbol: symbol, checked: controller.tool == tool) {
-                    controller.setTool(tool)
-                }
+/// The desktop layout's toolbar, on the system toolbar's trailing side: Tool
+/// lock, then the Tools, as toggle buttons that show the armed one.
+private struct DesktopToolbar: ToolbarContent {
+    let controller: CanvasController
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Toggle(
+                "Keep tool selected", systemImage: controller.toolLock ? "lock" : "lock.open",
+                isOn: Binding(get: { controller.toolLock }, set: { controller.setToolLock($0) })
+            )
+            .toggleStyle(.button)
+            .labelStyle(.iconOnly)
+        }
+        ToolbarSpacer(.fixed, placement: .primaryAction)
+        ToolbarItemGroup(placement: .primaryAction) {
+            ForEach(ToolBar.tools, id: \.0) { tool, name, symbol in
+                Toggle(
+                    isOn: Binding(get: { controller.tool == tool }, set: { _ in controller.setTool(tool) })
+                ) { Label(String(localized: name), systemImage: symbol) }
+                .toggleStyle(.button)
+                .labelStyle(.iconOnly)
             }
         }
-        .padding(4)
-        .island()
-    }
-
-    private var divider: some View {
-        Rectangle().fill(Color(red: 0xF1 / 255, green: 0xF0 / 255, blue: 1))
-            .frame(width: 1, height: 24).padding(.horizontal, 4)
-    }
-
-    private func toolButton(
-        _ name: LocalizedStringResource, symbol: String, checked: Bool, action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.subheadline)
-                .foregroundStyle(checked ? checkedGlyph : .primary)
-                .controlButton()
-                .background(checked ? checkedFill : .clear, in: RoundedRectangle(cornerRadius: 8))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(Text(name))
-        .accessibilityAddTraits(checked ? .isSelected : [])
+        ToolbarSpacer(.fixed, placement: .primaryAction)
     }
 }
 
-/// The phone toolbar island (docs/layout-reference §4.2): one slot per Tool
-/// family, spread over the bar's width; tapping a family's armed Tool again
-/// offers the rest of the family. Tool lock, which has no slot on
-/// excalidraw.com's phone bar, is an icon button at the end. Pencil-only
-/// drawing sits in the main menu (iPad only, see `offersPencilOnlyDrawing`).
-private struct MobileToolBar: View {
-    let controller: CanvasController
-    /// Per slot, the Tool of its family last chosen, so the slot keeps showing it.
-    @State private var lastChosen: [Int: Tool] = [:]
-    @State private var familyShown: Int?
+/// The phone toolbar (docs/layout-reference §4.2), in the system's bottom
+/// bar: one slot per Tool family; tapping a family's armed Tool again offers
+/// the rest of the family. Tool lock, which has no slot on excalidraw.com's
+/// phone bar, is in the main menu with Pencil-only drawing (iPad only, see
+/// `offersPencilOnlyDrawing`), as the bar has no room for it.
+#if !os(macOS)
+    private struct MobileToolbar: ToolbarContent {
+        let controller: CanvasController
+        /// Per slot, the Tool of its family last chosen, so the slot keeps showing it.
+        @Binding var lastChosen: [Int: Tool]
+        @Binding var familyShown: Int?
 
-    var body: some View {
-        HStack(spacing: 4) {
-            ForEach(MobileToolSlot.all.indices, id: \.self) { index in
-                slot(index)
-                Spacer(minLength: 0)
-            }
-            lockButton
-        }
-        .padding(4)
-        .island()
-    }
-
-    private func slot(_ index: Int) -> some View {
-        let slot = MobileToolSlot.all[index]
-        let shown = slot.shownTool(current: controller.tool, last: lastChosen[index])
-        let armed = controller.tool == shown
-        return MobileToolButton(tool: shown, checked: armed) {
-            if armed && slot.tools.count > 1 {
-                familyShown = index
-            } else {
-                controller.setTool(shown)
+        var body: some ToolbarContent {
+            ToolbarItem(placement: .bottomBar) {
+                HStack(spacing: 0) { ForEach(MobileToolSlot.all.indices, id: \.self) { slot($0) } }
             }
         }
-        .popover(
-            isPresented: Binding(
-                get: { familyShown == index }, set: { if !$0 { familyShown = nil } })
-        ) {
-            HStack(spacing: 4) {
-                ForEach(slot.tools, id: \.self) { tool in
-                    MobileToolButton(tool: tool, checked: controller.tool == tool) {
-                        lastChosen[index] = tool
-                        controller.setTool(tool)
-                        familyShown = nil
+
+        private func slot(_ index: Int) -> some View {
+            let slot = MobileToolSlot.all[index]
+            let shown = slot.shownTool(current: controller.tool, last: lastChosen[index])
+            let armed = controller.tool == shown
+            return Toggle(
+                isOn: Binding(
+                    get: { armed },
+                    set: { _ in
+                        if armed && slot.tools.count > 1 {
+                            familyShown = index
+                        } else {
+                            controller.setTool(shown)
+                        }
+                    })
+            ) { Label(String(localized: ToolBar.name(shown)), systemImage: ToolBar.symbol(shown)) }
+            .toggleStyle(.button)
+            .labelStyle(.iconOnly)
+            .controlSize(.small)
+            .popover(
+                isPresented: Binding(
+                    get: { familyShown == index }, set: { if !$0 { familyShown = nil } })
+            ) {
+                HStack {
+                    ForEach(slot.tools, id: \.self) { tool in
+                        Toggle(
+                            isOn: Binding(
+                                get: { controller.tool == tool },
+                                set: { _ in
+                                    lastChosen[index] = tool
+                                    controller.setTool(tool)
+                                    familyShown = nil
+                                })
+                        ) { Label(String(localized: ToolBar.name(tool)), systemImage: ToolBar.symbol(tool)) }
+                        .toggleStyle(.button)
+                        .labelStyle(.iconOnly)
                     }
                 }
+                .padding(8)
+                .presentationCompactAdaptation(.popover)
             }
-            .padding(8)
-            .presentationCompactAdaptation(.popover)
         }
     }
-
-    private var lockButton: some View {
-        let on = controller.toolLock
-        return Button {
-            controller.setToolLock(!on)
-        } label: {
-            Image(systemName: on ? "lock" : "lock.open")
-                .font(.subheadline)
-                .foregroundStyle(on ? checkedGlyph : .primary)
-                .controlButton()
-                .background(on ? checkedFill : .clear, in: RoundedRectangle(cornerRadius: 4))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Keep tool selected")
-        .accessibilityAddTraits(on ? .isSelected : [])
-    }
-}
-
-/// A Tool's 36 pt button in the phone toolbar, radius-4 highlight when armed.
-private struct MobileToolButton: View {
-    let tool: Tool
-    let checked: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: ToolBar.symbol(tool))
-                .font(.subheadline)
-                .foregroundStyle(checked ? checkedGlyph : .primary)
-                .controlButton()
-                .background(checked ? checkedFill : .clear, in: RoundedRectangle(cornerRadius: 4))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(Text(ToolBar.name(tool)))
-        .accessibilityAddTraits(checked ? .isSelected : [])
-    }
-}
+#endif
 
 /// The phone action row over the toolbar (docs/layout-reference §4.3):
 /// properties on the left while a Tool or Selection has them, opening in a
