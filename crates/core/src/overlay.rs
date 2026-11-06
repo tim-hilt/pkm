@@ -7,11 +7,15 @@
 //! changes (see `Editor::overlay_revision`).
 
 use crate::edit_points::PointHandles;
+use std::collections::HashSet;
+
 use crate::frame::Frame;
-use crate::geometry::{FillRule, FillStyle, Geometry, PartWriter, StrokeStyle};
+use crate::geometry::{Dash, FillRule, FillStyle, Geometry, PartWriter, StrokeStyle};
+use crate::group;
 use crate::input::PointerKind;
 use crate::path::Point;
-use crate::scene::{Element, ElementType};
+use crate::scene::{ElementType, Scene};
+use crate::selection::Selection;
 use crate::transform_handles::{Grip, TransformBox};
 
 /// Excalidraw's selection colour (`--color-selection`), opaque.
@@ -22,11 +26,29 @@ const FRAME_PADDING: f64 = 4.0;
 /// The line width of a selection frame in view points.
 const FRAME_WIDTH: f64 = 1.0;
 
-/// The selection frame of every Element in `selected`, for a view at `zoom`:
-/// a rectangle around the Element, turned with it.
-pub(crate) fn selection<'a>(selected: impl Iterator<Item = Element<'a>>, zoom: f64) -> Geometry {
+/// Excalidraw's `groupSelectionColor` (black in the light theme).
+const GROUP_COLOR: u32 = 0x0000_00ff;
+/// The dash of a group frame in view points: `8` drawn, `4` skipped.
+const GROUP_DASH: (f64, f64) = (8.0, 4.0);
+
+/// The selection frames of a Selection, for a view at `zoom`: a rectangle
+/// around each selected Element, turned with it, except those that are
+/// selected as part of a group; and a dashed one around the common bounds
+/// of each selected group and of the group that was gone into (`editing`),
+/// as Excalidraw draws them (`renderInteractiveScene`).
+pub(crate) fn selection(
+    scene: &Scene,
+    selection: &Selection,
+    editing: Option<&str>,
+    zoom: f64,
+) -> Geometry {
+    let groups = group::selected_members(scene, selection, editing);
+    let in_group: HashSet<&str> = groups.iter().flatten().copied().collect();
     let mut geometry = Geometry::new();
-    for element in selected {
+    let singles = scene
+        .elements()
+        .filter(|e| !e.is_deleted() && selection.contains(e.id()) && !in_group.contains(e.id()));
+    for element in singles {
         let frame = Frame::drawn(&element);
         // Images are framed on their edges, everything else a little away.
         let padding = match element.kind() {
@@ -45,7 +67,34 @@ pub(crate) fn selection<'a>(selected: impl Iterator<Item = Element<'a>>, zoom: f
             corners,
         );
     }
+    let entered = editing.map(|group| group::members(scene, group));
+    let selected = groups.iter().map(|ids| {
+        scene
+            .elements()
+            .filter(|e| ids.contains(&e.id()))
+            .collect::<Vec<_>>()
+    });
+    for members in selected.chain(entered) {
+        if let Some(bounds) = members.iter().map(Frame::shown).reduce(Frame::union) {
+            group_frame(&mut geometry, &bounds, zoom);
+        }
+    }
     geometry
+}
+
+/// A dashed frame around `bounds`, not turned.
+fn group_frame(geometry: &mut Geometry, bounds: &Frame, zoom: f64) {
+    let style = StrokeStyle {
+        color: GROUP_COLOR,
+        width: (FRAME_WIDTH / zoom) as f32,
+        opacity: 1.0,
+        dash: Some(Dash {
+            on: (GROUP_DASH.0 / zoom) as f32,
+            off: (GROUP_DASH.1 / zoom) as f32,
+        }),
+    };
+    let corners = corners(bounds, FRAME_PADDING / zoom, 0.0);
+    trace(&mut geometry.stroke(NO_ELEMENT, 0, style), corners);
 }
 
 /// Excalidraw's handle colour: white squares with the selection colour

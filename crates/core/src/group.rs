@@ -100,6 +100,28 @@ fn selected<'a>(scene: &'a Scene, selection: &Selection, editing: Option<&str>) 
         .collect()
 }
 
+/// The Elements of each selected group, group by group (see [`selected`]).
+pub(crate) fn selected_members<'a>(
+    scene: &'a Scene,
+    selection: &Selection,
+    editing: Option<&str>,
+) -> Vec<Vec<&'a str>> {
+    let ids: HashSet<&str> = selection.ids().iter().map(String::as_str).collect();
+    groups_of(scene, &ids, editing)
+        .into_iter()
+        .map(|(_, members)| members)
+        .filter(|members| members.iter().all(|id| ids.contains(id)))
+        .collect()
+}
+
+/// The Elements that are in `group` and not deleted.
+pub(crate) fn members<'a>(scene: &'a Scene, group: &str) -> Vec<Element<'a>> {
+    scene
+        .elements()
+        .filter(|e| !e.is_deleted() && e.is_in_group(group))
+        .collect()
+}
+
 /// The group that a double-tap on the Element `hit` goes into: the selected
 /// group it is in, if any.
 pub(crate) fn entered(

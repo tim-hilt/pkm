@@ -740,7 +740,8 @@ impl Editor {
     }
 
     /// What clients draw over the Scene: a frame around each selected
-    /// Element, the transform handles of the Selection (or, while one is
+    /// Element (a dashed one around each selected group and the group that
+    /// was gone into instead), the transform handles of the Selection (or, while one is
     /// being dragged, the box-select rectangle instead; or, for a line or
     /// arrow that is alone in the Selection, handles on its points), and a
     /// highlight around the shape an end of an arrow that is being put
@@ -751,8 +752,12 @@ impl Editor {
     /// from the Elements as they are because of the zoom it was made for.
     pub fn overlay(&self) -> Geometry {
         let zoom = self.navigation.viewport().zoom();
-        let selected = self.shown().filter(|e| self.selection.contains(e.id()));
-        let mut geometry = overlay::selection(selected, zoom);
+        let mut geometry = overlay::selection(
+            &self.scene,
+            &self.selection,
+            self.editing_group.as_deref(),
+            zoom,
+        );
         if let Some(boxing) = &self.box_selecting {
             overlay::box_select(&mut geometry, &boxing.bounds(), zoom);
         } else if let Some(transform_box) = TransformBox::of(&self.scene, &self.selection) {

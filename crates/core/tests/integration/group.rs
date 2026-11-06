@@ -8,7 +8,7 @@
 //! expected fractional indices are worked out with its `fractional-indexing`.
 
 use workingtitle_core::json::Value;
-use workingtitle_core::{Editor, ZOrder};
+use workingtitle_core::{Editor, PartKind, ZOrder};
 
 use crate::common;
 use common::{editor_with, replay, saved_elements, tap};
@@ -589,4 +589,100 @@ fn a_box_called_off_by_another_finger_keeps_the_group_that_was_gone_into() {
     assert_eq!(selected(&editor), ["a"]);
     select(&mut editor, "b", 15.0);
     assert_eq!(selected(&editor), ["b"]);
+}
+
+// --- Group frames on the overlay -----------------------------------------------
+
+/// The overlay's parts that belong to an Element's frame (solid) and to a
+/// group's (dashed), as the chains of corners they trace. Handles have no
+/// Element and are left out.
+type Corners = Vec<(f32, f32)>;
+
+fn frames(editor: &Editor) -> (Vec<Corners>, Vec<Corners>) {
+    let overlay = editor.overlay();
+    let (mut solid, mut dashed) = (Vec::new(), Vec::new());
+    for part in overlay.parts() {
+        if part.kind != PartKind::Stroke as u32 {
+            continue;
+        }
+        let corners: Vec<_> = common::ops(&overlay, part)
+            .iter()
+            .map(|(_, c)| (c[0], c[1]))
+            .collect();
+        if part.dash_on > 0.0 {
+            // Excalidraw's `groupSelectionColor` (black), 8 on and 4 off, one wide.
+            assert_eq!(part.color, 0x0000_00ff);
+            assert_eq!((part.dash_on, part.dash_off, part.width), (8.0, 4.0, 1.0));
+            dashed.push(corners);
+        } else if part.element != u32::MAX {
+            solid.push(corners);
+        }
+    }
+    (solid, dashed)
+}
+
+/// The box a frame traces, as `(min, max)`.
+fn bounds_of(corners: &[(f32, f32)]) -> ((f32, f32), (f32, f32)) {
+    let xs = corners.iter().map(|c| c.0);
+    let ys = corners.iter().map(|c| c.1);
+    (
+        (
+            xs.clone().fold(f32::MAX, f32::min),
+            ys.clone().fold(f32::MAX, f32::min),
+        ),
+        (xs.fold(f32::MIN, f32::max), ys.fold(f32::MIN, f32::max)),
+    )
+}
+
+#[test]
+fn a_selected_group_gets_one_dashed_frame_around_all_its_elements() {
+    let mut editor = four(["\"g\"", "\"g\"", "", ""]);
+    select(&mut editor, "a", 0.0);
+
+    let (solid, dashed) = frames(&editor);
+
+    // Padded by 4 on every side; the elements have no frames of their own.
+    assert!(solid.is_empty());
+    assert_eq!(dashed.len(), 1);
+    assert_eq!(bounds_of(&dashed[0]), ((-4.0, -4.0), (144.0, 24.0)));
+}
+
+#[test]
+fn nested_groups_are_framed_as_the_outermost_one_that_is_selected() {
+    let mut editor = four(["\"i\",\"o\"", "\"i\",\"o\"", "\"o\"", ""]);
+    select(&mut editor, "a", 0.0);
+
+    let (solid, dashed) = frames(&editor);
+
+    assert!(solid.is_empty());
+    assert_eq!(dashed.len(), 1);
+    assert_eq!(bounds_of(&dashed[0]), ((-4.0, -4.0), (244.0, 24.0)));
+}
+
+#[test]
+fn the_group_that_was_gone_into_keeps_its_frame_around_the_selected_element() {
+    let mut editor = four(["\"g\"", "\"g\"", "", ""]);
+    select(&mut editor, "a", 0.0);
+    double_tap(&mut editor, "b", 5.0);
+
+    let (solid, dashed) = frames(&editor);
+
+    assert_eq!(selected(&editor), ["b"]);
+    assert_eq!(dashed.len(), 1);
+    assert_eq!(bounds_of(&dashed[0]), ((-4.0, -4.0), (144.0, 24.0)));
+    assert_eq!(solid.len(), 1);
+    assert_eq!(bounds_of(&solid[0]), ((96.0, -4.0), (144.0, 24.0)));
+}
+
+#[test]
+fn a_group_and_a_single_element_selected_together_are_framed_each_its_own_way() {
+    let mut editor = four(["\"g\"", "\"g\"", "", ""]);
+    select_all_of(&mut editor, &["a", "c"]);
+
+    let (solid, dashed) = frames(&editor);
+
+    assert_eq!(dashed.len(), 1);
+    assert_eq!(bounds_of(&dashed[0]), ((-4.0, -4.0), (144.0, 24.0)));
+    assert_eq!(solid.len(), 1);
+    assert_eq!(bounds_of(&solid[0]), ((196.0, -4.0), (244.0, 24.0)));
 }
