@@ -72,9 +72,9 @@ _Avoid_: Text editor (that is the core's description of the view), textarea, inp
 The text bound to a rectangle, diamond or ellipse (its container), as Excalidraw's bound text: made and edited in the Text view by a double-tap on the shape (or Enter on a selected shape on Mac), wrapped to the width the shape leaves it, centred in it, growing the shape when it does not fit, and moving, resizing, turning and erasing with it. Saved as a text Element with `containerId`, listed in the shape's `boundElements`.
 _Avoid_: Caption, bound text (Excalidraw's name for it)
 
-**Action Bar**:
-The small floating bar shown next to a non-empty Selection offering actions such as duplicate, delete, z-order and group; replaces a context menu.
-_Avoid_: Context menu, popup
+**Context menu**:
+The system's own menu opened by a long-press with a finger (or a secondary click) with the selection Tool, never by itself: on an Element (selecting it first, unless it is already selected) it offers cut, copy, paste, duplicate, group, ungroup, arrange (z-order) and delete; on empty Canvas, paste and select all, and the Selection stays. Paste puts the Elements where it was opened. Offered on iPhone and iPad; the Mac has the Edit and Arrange menus. Replaced the Action Bar.
+_Avoid_: Action Bar (the removed floating bar), popover, popup, long-press menu
 
 **Properties panel**:
 The panel that sets stroke colour, background colour, fill style, stroke width, stroke style, sloppiness, edges and opacity (and, for text, font size and text alignment) on the Selection, and, with an empty Selection, as the style of the next Element. It shows the Selection's current values, or none chosen where they are mixed.
