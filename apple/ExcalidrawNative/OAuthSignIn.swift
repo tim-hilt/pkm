@@ -17,6 +17,13 @@ enum GoogleOAuth {
     #endif
 }
 
+/// The Microsoft OAuth client of this build: the app registration
+/// "ExcalidrawNative" in Azure, for personal Microsoft accounts. Its redirect
+/// scheme is the core's.
+enum OneDriveOAuth {
+    static let clientID = "REPLACE-WITH-AZURE-APPLICATION-ID"
+}
+
 /// Shows a sign-in page in the system's web authentication session and hands
 /// back the redirect it ends with. Throws `CancellationError` when the user
 /// closes the page.

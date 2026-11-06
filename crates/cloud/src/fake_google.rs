@@ -3,17 +3,14 @@
 //! and can be made to revoke access, rotate refresh tokens or run out of space.
 
 use std::collections::HashMap;
-use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
-use std::thread;
 
 use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
 use excalidraw_native_core::json::{self, Value};
 
+use crate::fake_http::{Answer, FakeServer, Request, parse_query};
 use crate::gdrive::Hosts;
-use crate::percent::{decode, encode};
+use crate::percent::encode;
 use crate::sha256::sha256;
 
 pub(crate) const CLIENT_ID: &str = "123-abc.apps.googleusercontent.com";
@@ -54,23 +51,12 @@ impl State {
 }
 
 pub(crate) struct FakeGoogle {
-    addr: SocketAddr,
+    server: FakeServer,
     state: Arc<Mutex<State>>,
-    stop: Arc<AtomicBool>,
 }
-
-struct Request {
-    method: String,
-    path: String,
-    query: HashMap<String, String>,
-    headers: HashMap<String, String>,
-    body: Vec<u8>,
-}
-
-struct Answer(u16, Vec<u8>);
 
 fn json_answer(status: u16, body: &str) -> Answer {
-    Answer(status, body.as_bytes().to_vec())
+    Answer::json(status, body)
 }
 
 fn quote(text: &str) -> String {
@@ -79,26 +65,15 @@ fn quote(text: &str) -> String {
 
 impl FakeGoogle {
     pub fn start() -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
         let state = Arc::new(Mutex::new(State::default()));
-        let stop = Arc::new(AtomicBool::new(false));
-        let (shared, stopping) = (Arc::clone(&state), Arc::clone(&stop));
-        thread::spawn(move || {
-            for stream in listener.incoming() {
-                if stopping.load(Relaxed) {
-                    return;
-                }
-                let Ok(stream) = stream else { continue };
-                let shared = Arc::clone(&shared);
-                thread::spawn(move || serve(stream, &shared));
-            }
-        });
-        Self { addr, state, stop }
+        let shared = Arc::clone(&state);
+        let server =
+            FakeServer::start(move |request, _| answer(request, &mut shared.lock().unwrap()));
+        Self { server, state }
     }
 
     pub fn hosts(&self) -> Hosts {
-        let base = format!("http://{}", self.addr);
+        let base = format!("http://{}", self.server.addr);
         Hosts::for_test(&base)
     }
 
@@ -179,108 +154,6 @@ impl FakeGoogle {
             version: 1,
         });
     }
-}
-
-impl Drop for FakeGoogle {
-    fn drop(&mut self) {
-        self.stop.store(true, Relaxed);
-        let _ = TcpStream::connect(self.addr);
-    }
-}
-
-fn parse_query(query: &str) -> HashMap<String, String> {
-    query
-        .split('&')
-        .filter_map(|pair| pair.split_once('='))
-        .map(|(k, v)| (decode(k), decode(&v.replace('+', " "))))
-        .collect()
-}
-
-fn serve(mut stream: TcpStream, state: &Mutex<State>) {
-    let Some(request) = read_request(&mut stream) else {
-        return;
-    };
-    let Answer(status, body) = answer(&request, &mut state.lock().unwrap());
-    let head = format!(
-        "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
-    );
-    let _ = stream.write_all(head.as_bytes());
-    let _ = stream.write_all(&body);
-}
-
-fn read_more(stream: &mut TcpStream, into: &mut Vec<u8>) -> Option<()> {
-    let mut chunk = [0u8; 4096];
-    let n = stream.read(&mut chunk).ok()?;
-    into.extend_from_slice(&chunk[..n]);
-    (n > 0).then_some(())
-}
-
-fn read_request(stream: &mut TcpStream) -> Option<Request> {
-    let mut buffer = Vec::new();
-    let mut chunk = [0u8; 4096];
-    let head_end = loop {
-        if let Some(i) = buffer.windows(4).position(|w| w == b"\r\n\r\n") {
-            break i;
-        }
-        let n = stream.read(&mut chunk).ok()?;
-        if n == 0 {
-            return None;
-        }
-        buffer.extend_from_slice(&chunk[..n]);
-    };
-    let head = String::from_utf8_lossy(&buffer[..head_end]).into_owned();
-    let mut lines = head.lines();
-    let mut first = lines.next()?.split(' ');
-    let (method, target) = (first.next()?.to_owned(), first.next()?);
-    let headers: HashMap<String, String> = lines
-        .filter_map(|l| l.split_once(':'))
-        .map(|(k, v)| (k.to_ascii_lowercase(), v.trim().to_owned()))
-        .collect();
-    let mut rest = buffer[head_end + 4..].to_vec();
-    let body = if headers
-        .get("transfer-encoding")
-        .is_some_and(|v| v == "chunked")
-    {
-        // Chunks: a hex size line, the data, CRLF; a size of 0 ends it.
-        let mut body = Vec::new();
-        loop {
-            let line_end = loop {
-                if let Some(i) = rest.windows(2).position(|w| w == b"\r\n") {
-                    break i;
-                }
-                read_more(stream, &mut rest)?;
-            };
-            let size =
-                usize::from_str_radix(std::str::from_utf8(&rest[..line_end]).ok()?.trim(), 16)
-                    .ok()?;
-            while rest.len() < line_end + 2 + size + 2 {
-                read_more(stream, &mut rest)?;
-            }
-            body.extend_from_slice(&rest[line_end + 2..line_end + 2 + size]);
-            rest.drain(..line_end + 2 + size + 2);
-            if size == 0 {
-                break body;
-            }
-        }
-    } else {
-        let length: usize = headers
-            .get("content-length")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0);
-        while rest.len() < length {
-            read_more(stream, &mut rest)?;
-        }
-        rest
-    };
-    let (path, query) = target.split_once('?').unwrap_or((target, ""));
-    Some(Request {
-        method,
-        path: path.to_owned(),
-        query: parse_query(query),
-        headers,
-        body,
-    })
 }
 
 fn answer(request: &Request, fake: &mut State) -> Answer {
@@ -482,7 +355,7 @@ fn drive(request: &Request, fake: &mut State) -> Answer {
                 return not_found();
             };
             match method {
-                "GET" => Answer(200, fake.files[i].data.clone()),
+                "GET" => Answer::data(200, fake.files[i].data.clone()),
                 "PATCH" => {
                     if fake.full {
                         return quota_exceeded();
@@ -494,7 +367,7 @@ fn drive(request: &Request, fake: &mut State) -> Answer {
                 }
                 "DELETE" => {
                     fake.files.remove(i);
-                    Answer(204, Vec::new())
+                    Answer::data(204, Vec::new())
                 }
                 _ => json_answer(405, "{}"),
             }

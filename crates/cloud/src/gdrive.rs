@@ -11,8 +11,8 @@ use std::io::{self, Read};
 use std::sync::{Arc, Mutex};
 
 use excalidraw_native_core::json::{self, Object, Value};
-use ureq::http::{Request, Response};
-use ureq::{Agent, Body, SendBody};
+use ureq::Body;
+use ureq::http::Response;
 
 use crate::http::api_agent;
 use crate::oauth::{OAuthConfig, OnRotate, Session, SignIn as OAuthSignIn};
@@ -127,7 +127,7 @@ impl SignIn {
         let session = self
             .inner
             .finish(agent.clone(), redirect, Arc::new(|_| {}))?;
-        let storage = GoogleDriveStorage::from_session(agent, self.hosts, session);
+        let storage = GoogleDriveStorage::from_session(self.hosts, session);
         storage.folder_id().map_err(|e| match e.kind() {
             io::ErrorKind::PermissionDenied => ConnectError::AccessDenied,
             _ => ConnectError::Unreachable,
@@ -143,7 +143,6 @@ impl SignIn {
 /// `My Drive/ExcalidrawNative`. Tokens revoked are `PermissionDenied`, a full
 /// Drive is `StorageFull`, anything else that fails is another kind.
 pub struct GoogleDriveStorage {
-    agent: Agent,
     session: Session,
     hosts: Hosts,
     /// The ID of the `ExcalidrawNative` folder, once known.
@@ -187,12 +186,11 @@ impl GoogleDriveStorage {
             refresh_token.to_owned(),
             on_rotate,
         );
-        Self::from_session(agent, hosts, session)
+        Self::from_session(hosts, session)
     }
 
-    fn from_session(agent: Agent, hosts: Hosts, session: Session) -> Self {
+    fn from_session(hosts: Hosts, session: Session) -> Self {
         Self {
-            agent,
             session,
             hosts,
             folder: Mutex::new(None),
@@ -200,9 +198,8 @@ impl GoogleDriveStorage {
     }
 
     /// Sends a request. Any answer is returned, whatever its status, except
-    /// for refused access (401 twice, or 403 with a reason that is not about
-    /// this request) and a full Drive. An access token Google refuses is
-    /// fetched anew once.
+    /// for refused access (see `Session::send`, or 403 with a reason that is
+    /// not about this request) and a full Drive.
     fn send(
         &self,
         method: &str,
@@ -210,38 +207,19 @@ impl GoogleDriveStorage {
         content_type: Option<&str>,
         body: &[u8],
     ) -> io::Result<Response<Body>> {
-        for attempt in 0..2 {
-            let mut request = Request::builder().method(method).uri(url).header(
-                "Authorization",
-                format!("Bearer {}", self.session.access_token()?),
-            );
-            if let Some(content_type) = content_type {
-                request = request.header("Content-Type", content_type);
-            }
-            let mut reader = body;
-            let request = request
-                .body(SendBody::from_reader(&mut reader))
-                .map_err(io::Error::other)?;
-            let mut response = self.agent.run(request).map_err(ureq::Error::into_io)?;
-            match response.status().as_u16() {
-                401 if attempt == 0 => self.session.expire(),
-                401 => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::PermissionDenied,
-                        "401 Unauthorized",
-                    ));
-                }
-                403 => {
-                    let text = response
-                        .body_mut()
-                        .read_to_string()
-                        .map_err(ureq::Error::into_io)?;
-                    return Err(forbidden(&text));
-                }
-                _ => return Ok(response),
-            }
+        let headers: Vec<_> = content_type
+            .map(|t| ("Content-Type", t))
+            .into_iter()
+            .collect();
+        let mut response = self.session.send(method, url, &headers, body)?;
+        if response.status().as_u16() == 403 {
+            let text = response
+                .body_mut()
+                .read_to_string()
+                .map_err(ureq::Error::into_io)?;
+            return Err(forbidden(&text));
         }
-        unreachable!("the second 401 returns")
+        Ok(response)
     }
 
     /// The JSON answer to a request, which must succeed.

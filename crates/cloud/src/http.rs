@@ -19,6 +19,10 @@ pub(crate) fn api_agent(https_only: bool) -> ureq::Agent {
     let config = ureq::Agent::config_builder()
         .https_only(https_only)
         .http_status_as_error(false)
+        // A redirect is an answer too: Graph's download URLs are authorized
+        // already and refuse the token that was sent to the API.
+        .max_redirects(0)
+        .max_redirects_will_error(false)
         .tls_config(tls_config())
         .timeout_connect(Some(std::time::Duration::from_secs(10)))
         .timeout_recv_response(Some(std::time::Duration::from_secs(30)))

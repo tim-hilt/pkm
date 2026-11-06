@@ -5,8 +5,8 @@ use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use excalidraw_native_cloud::{
-    ConnectError, DirStorage, GoogleDriveStorage, Observer, Progress, Status, SyncLoop, SyncState,
-    Timing, WebDavStorage,
+    ConnectError, DirStorage, GoogleDriveStorage, Observer, OneDriveStorage, Progress, Status,
+    SyncLoop, SyncState, Timing, WebDavStorage,
 };
 use excalidraw_native_core::scene::{FillPattern, LineStyle};
 use excalidraw_native_core::{
@@ -30,6 +30,7 @@ pub enum ConnectError {
     WrongFolder,
     AccessDenied,
     SignInFailed,
+    UnsupportedAccount,
 }
 
 /// Connects to the WebDAV server at `url` as `username` with `password`, which
@@ -113,6 +114,68 @@ impl GoogleDriveSignIn {
     }
 }
 
+/// A OneDrive sign-in under way. The client shows `url` in the system's
+/// web authentication session, listening for `callback_scheme`, and hands the
+/// redirect it ends with to `finish`. If the user cancels the page, drop this
+/// and do nothing else.
+#[derive(uniffi::Object)]
+pub struct OneDriveSignIn {
+    sign_in: Mutex<Option<excalidraw_native_cloud::onedrive::SignIn>>,
+    url: String,
+    callback_scheme: String,
+}
+
+/// The account signed in to.
+#[derive(Debug, uniffi::Record)]
+pub struct OneDriveAccount {
+    /// To keep in the keychain; Sync resumes from it.
+    pub refresh_token: String,
+    /// For the user to see.
+    pub email: String,
+}
+
+#[uniffi::export]
+impl OneDriveSignIn {
+    /// Starts signing in with the app's Microsoft OAuth client `client_id`.
+    #[uniffi::constructor]
+    pub fn start(client_id: String) -> Result<Arc<Self>, ConnectError> {
+        let sign_in = excalidraw_native_cloud::onedrive::SignIn::start(&client_id)?;
+        Ok(Arc::new(Self {
+            url: sign_in.url().to_owned(),
+            callback_scheme: sign_in.callback_scheme(),
+            sign_in: Mutex::new(Some(sign_in)),
+        }))
+    }
+
+    /// The sign-in page.
+    pub fn url(&self) -> String {
+        self.url.clone()
+    }
+
+    /// The URL scheme the page redirects to.
+    pub fn callback_scheme(&self) -> String {
+        self.callback_scheme.clone()
+    }
+
+    /// Finishes with the `redirect` URL the page ended at: creates
+    /// `Apps/ExcalidrawNative`. Refused consent is
+    /// `AccessDenied`, a work or school account `UnsupportedAccount`. Blocks while it talks to Microsoft, so call it off the
+    /// main thread. Keeps nothing: the client keeps the refresh token.
+    pub fn finish(&self, redirect: String) -> Result<OneDriveAccount, ConnectError> {
+        let sign_in = self
+            .sign_in
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+            .ok_or(ConnectError::SignInFailed)?;
+        let account = sign_in.finish(&redirect)?;
+        Ok(OneDriveAccount {
+            refresh_token: account.refresh_token,
+            email: account.email,
+        })
+    }
+}
+
 /// Hears of a refresh token that replaced the one Sync was started with.
 #[uniffi::export(with_foreign)]
 pub trait TokenObserver: Send + Sync {
@@ -127,6 +190,18 @@ fn google_drive_storage(
     tokens: Arc<dyn TokenObserver>,
 ) -> Arc<GoogleDriveStorage> {
     Arc::new(GoogleDriveStorage::resume(
+        client_id,
+        refresh_token,
+        move |token| tokens.refresh_token_rotated(token.to_owned()),
+    ))
+}
+
+fn one_drive_storage(
+    client_id: &str,
+    refresh_token: &str,
+    tokens: Arc<dyn TokenObserver>,
+) -> Arc<OneDriveStorage> {
+    Arc::new(OneDriveStorage::resume(
         client_id,
         refresh_token,
         move |token| tokens.refresh_token_rotated(token.to_owned()),
@@ -312,6 +387,31 @@ impl CloudSync {
         Ok(Arc::new(Self { sync_loop }))
     }
 
+    /// Starts Syncing like `start_webdav`, with `Apps/ExcalidrawNative` of the
+    /// OneDrive account that `OneDriveSignIn::finish` returned the
+    /// `refresh_token` of.
+    #[uniffi::constructor]
+    pub fn start_one_drive(
+        client_id: String,
+        refresh_token: String,
+        tokens: Arc<dyn TokenObserver>,
+        drawings_directory: String,
+        state_directory: String,
+        observer: Arc<dyn SyncObserver>,
+    ) -> Result<Arc<Self>, SyncStartError> {
+        let storage = one_drive_storage(&client_id, &refresh_token, tokens);
+        let state =
+            SyncState::open(state_directory).map_err(|_| SyncStartError::StateUnavailable)?;
+        let sync_loop = SyncLoop::start(
+            drawings_directory.into(),
+            state,
+            storage,
+            Timing::default(),
+            Arc::new(ForeignObserver(observer)),
+        );
+        Ok(Arc::new(Self { sync_loop }))
+    }
+
     /// The app came to the front: Sync at once.
     pub fn came_to_front(&self) {
         self.sync_loop.came_to_front();
@@ -337,6 +437,17 @@ impl CloudSync {
     /// The user Reconnected with new credentials: Sync resumes where it
     /// stopped. If the server rejects them too, the status is `AccessLost`
     /// again.
+    pub fn reconnect_one_drive(
+        &self,
+        client_id: String,
+        refresh_token: String,
+        tokens: Arc<dyn TokenObserver>,
+    ) {
+        let storage = one_drive_storage(&client_id, &refresh_token, tokens);
+        self.sync_loop.reconnect(storage);
+    }
+
+    /// Like `reconnect_one_drive`, for Google Drive.
     pub fn reconnect_google_drive(
         &self,
         client_id: String,
@@ -347,7 +458,7 @@ impl CloudSync {
         self.sync_loop.reconnect(storage);
     }
 
-    /// Like `reconnect_google_drive`, for WebDAV.
+    /// Like `reconnect_one_drive`, for WebDAV.
     pub fn reconnect_webdav(
         &self,
         url: String,

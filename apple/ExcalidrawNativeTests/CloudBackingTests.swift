@@ -90,15 +90,11 @@ import Testing
     @Test func everyFailureHasItsOwnMessage() {
         let messages = [
             ConnectError.WrongCredentials, .Unreachable, .NotHttps, .NotWebDav, .ICloudDriveUnavailable, .WrongFolder,
-            .AccessDenied, .SignInFailed,
+            .AccessDenied, .SignInFailed, .UnsupportedAccount,
         ].map(\.message)
 
-        #expect(Set(messages).count == 8)
+        #expect(Set(messages).count == 9)
         #expect(ConnectError.AccessDenied.message == "Access denied")
-    }
-
-    @Test func onlyOneDriveCannotBeConnectedYet() {
-        #expect(CloudProvider.allCases.filter(\.isAvailable) == [.webDAV, .iCloudDrive, .googleDrive])
     }
 
     // MARK: Google Drive
@@ -146,6 +142,57 @@ import Testing
 
     @Test func aFullGoogleDriveIsNamedInTheStatusText() {
         #expect(CloudProvider.googleDrive.name == "Google Drive")
+    }
+
+    // MARK: OneDrive
+
+    @Test func closingMicrosoftsSignInPageDoesNothing() async throws {
+        let cloud = model()
+
+        try await cloud.connectOneDrive()
+
+        #expect(cloud.connection == nil)
+        #expect(credentials.loadOneDrive() == nil)
+    }
+
+    @Test func theOneDriveAccountIsKeptInTheKeychainAndSurvivesARelaunch() {
+        let account = OneDriveAccount(refreshToken: "refresh-1", email: "tim@example.com")
+        #expect(credentials.saveOneDrive(account))
+
+        let relaunched = model()
+
+        #expect(relaunched.connection == CloudConnection(provider: .oneDrive, detail: "tim@example.com"))
+        #expect(credentials.loadOneDrive() == account)
+        #expect(credentials.loadGoogle() == nil)
+        credentials.forget()
+    }
+
+    @Test func aRotatedOneDriveTokenReplacesTheOneInTheKeychain() {
+        credentials.saveOneDrive(OneDriveAccount(refreshToken: "old", email: "tim@example.com"))
+
+        credentials.rotateOneDriveToken(to: "new")
+
+        #expect(credentials.loadOneDrive() == OneDriveAccount(refreshToken: "new", email: "tim@example.com"))
+        credentials.forget()
+    }
+
+    @Test func disconnectingOneDriveForgetsTheAccount() {
+        credentials.saveOneDrive(OneDriveAccount(refreshToken: "refresh-1", email: "tim@example.com"))
+        let cloud = model()
+
+        cloud.disconnect()
+
+        #expect(cloud.connection == nil)
+        #expect(credentials.loadOneDrive() == nil)
+        #expect(model().connection == nil)
+    }
+
+    @Test func workAndSchoolAccountsAreRefusedWithNotSupported() {
+        #expect(ConnectError.UnsupportedAccount.message.contains("not supported"))
+    }
+
+    @Test func aFullOneDriveIsNamedInTheStatusText() {
+        #expect(CloudProvider.oneDrive.name == "OneDrive")
     }
 
     // MARK: iCloud Drive

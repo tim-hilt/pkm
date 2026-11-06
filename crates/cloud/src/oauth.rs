@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 
 use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
 use excalidraw_native_core::json;
-use ureq::Agent;
+use ureq::http::{Request, Response};
+use ureq::{Agent, Body, SendBody};
 
 use crate::percent::{decode, encode};
 use crate::sha256::sha256;
@@ -279,6 +280,68 @@ impl Session {
     /// is fetched anew.
     pub fn expire(&self) {
         self.tokens.lock().unwrap().access = None;
+    }
+
+    /// Sends a request with an access token. Any answer is returned, whatever
+    /// its status, except a 401: the token is fetched anew and the request
+    /// sent once more, and a second 401 is `PermissionDenied`.
+    pub fn send(
+        &self,
+        method: &str,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: &[u8],
+    ) -> io::Result<Response<Body>> {
+        for attempt in 0..2 {
+            let token = self.access_token()?;
+            let response = self.send_with(Some(&token), method, url, headers, body)?;
+            match response.status().as_u16() {
+                401 if attempt == 0 => self.expire(),
+                401 => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "401 Unauthorized",
+                    ));
+                }
+                _ => return Ok(response),
+            }
+        }
+        unreachable!("the second 401 returns")
+    }
+
+    /// Sends a request without an access token, for a URL the provider handed
+    /// out that is authorized already (an upload session, a download) and
+    /// refuses a token on top.
+    pub fn send_to_handed_out_url(
+        &self,
+        method: &str,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: &[u8],
+    ) -> io::Result<Response<Body>> {
+        self.send_with(None, method, url, headers, body)
+    }
+
+    fn send_with(
+        &self,
+        token: Option<&str>,
+        method: &str,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: &[u8],
+    ) -> io::Result<Response<Body>> {
+        let mut request = Request::builder().method(method).uri(url);
+        if let Some(token) = token {
+            request = request.header("Authorization", format!("Bearer {token}"));
+        }
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        let mut reader = body;
+        let request = request
+            .body(SendBody::from_reader(&mut reader))
+            .map_err(io::Error::other)?;
+        self.agent.run(request).map_err(ureq::Error::into_io)
     }
 }
 

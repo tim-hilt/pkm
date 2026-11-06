@@ -11,8 +11,8 @@ struct WebDAVAccount: Equatable, Sendable {
 /// Where the credentials of the Connected Cloud Provider are kept on this
 /// Device: URL and username in `defaults`, the password in the Keychain under
 /// `service`; for iCloud Drive the bookmark of the grant in `defaults`; for
-/// Google Drive the account's email in `defaults` and its refresh token in the
-/// Keychain. Never synced. Losing any part means not Connected.
+/// Google Drive and OneDrive the account's email in `defaults` and its refresh
+/// token in the Keychain. Never synced. Losing any part means not Connected.
 // `UserDefaults` and the Keychain are safe to use from any thread.
 struct CloudCredentials: @unchecked Sendable {
     let defaults: UserDefaults
@@ -21,9 +21,16 @@ struct CloudCredentials: @unchecked Sendable {
     private static let urlKey = "cloud.webdav.url"
     private static let usernameKey = "cloud.webdav.username"
     private static let bookmarkKey = "cloud.icloud.bookmark"
-    private static let googleEmailKey = "cloud.google.email"
     private static let passwordName = "WebDAV password"
-    private static let googleTokenName = "Google Drive refresh token"
+
+    /// Where the account of a Cloud Provider that signs in with OAuth is kept.
+    private struct OAuthSlot {
+        let emailKey: String
+        let tokenName: String
+        static let google = OAuthSlot(emailKey: "cloud.google.email", tokenName: "Google Drive refresh token")
+        static let oneDrive = OAuthSlot(emailKey: "cloud.onedrive.email", tokenName: "OneDrive refresh token")
+        static let all = [google, oneDrive]
+    }
 
     /// What `save` kept; nil if there is none or a part is missing.
     func load() -> WebDAVAccount? {
@@ -40,28 +47,51 @@ struct CloudCredentials: @unchecked Sendable {
 
     /// The Google account `saveGoogle` kept; nil if there is none or a part is missing.
     func loadGoogle() -> GoogleDriveAccount? {
-        guard let email = defaults.string(forKey: Self.googleEmailKey),
-            let token = secret(Self.googleTokenName)
-        else { return nil }
-        return GoogleDriveAccount(refreshToken: token, email: email)
+        loadOAuth(.google).map { GoogleDriveAccount(refreshToken: $0.token, email: $0.email) }
     }
 
     /// Replaces what was saved with the Google account. False if the Keychain
     /// refused the token; then nothing is saved.
     @discardableResult
     func saveGoogle(_ account: GoogleDriveAccount) -> Bool {
-        forget()
-        guard store(account.refreshToken, as: Self.googleTokenName) else { return false }
-        defaults.set(account.email, forKey: Self.googleEmailKey)
-        return true
+        saveOAuth(.google, token: account.refreshToken, email: account.email)
     }
 
     /// Keeps `token`, which replaced the account's refresh token. Called on
     /// the Sync loop's thread.
-    func rotateGoogleToken(to token: String) {
-        guard defaults.string(forKey: Self.googleEmailKey) != nil else { return }
-        SecItemDelete(query(Self.googleTokenName) as CFDictionary)
-        _ = store(token, as: Self.googleTokenName)
+    func rotateGoogleToken(to token: String) { rotateOAuth(.google, to: token) }
+
+    /// The OneDrive account `saveOneDrive` kept; nil if there is none or a part is missing.
+    func loadOneDrive() -> OneDriveAccount? {
+        loadOAuth(.oneDrive).map { OneDriveAccount(refreshToken: $0.token, email: $0.email) }
+    }
+
+    /// Like `saveGoogle`, for OneDrive.
+    @discardableResult
+    func saveOneDrive(_ account: OneDriveAccount) -> Bool {
+        saveOAuth(.oneDrive, token: account.refreshToken, email: account.email)
+    }
+
+    /// Like `rotateGoogleToken`, for OneDrive.
+    func rotateOneDriveToken(to token: String) { rotateOAuth(.oneDrive, to: token) }
+
+    private func loadOAuth(_ slot: OAuthSlot) -> (token: String, email: String)? {
+        guard let email = defaults.string(forKey: slot.emailKey), let token = secret(slot.tokenName)
+        else { return nil }
+        return (token, email)
+    }
+
+    private func saveOAuth(_ slot: OAuthSlot, token: String, email: String) -> Bool {
+        forget()
+        guard store(token, as: slot.tokenName) else { return false }
+        defaults.set(email, forKey: slot.emailKey)
+        return true
+    }
+
+    private func rotateOAuth(_ slot: OAuthSlot, to token: String) {
+        guard defaults.string(forKey: slot.emailKey) != nil else { return }
+        SecItemDelete(query(slot.tokenName) as CFDictionary)
+        _ = store(token, as: slot.tokenName)
     }
 
     /// Replaces what was saved with the iCloud Drive grant `bookmark`.
@@ -86,9 +116,11 @@ struct CloudCredentials: @unchecked Sendable {
         defaults.removeObject(forKey: Self.urlKey)
         defaults.removeObject(forKey: Self.usernameKey)
         defaults.removeObject(forKey: Self.bookmarkKey)
-        defaults.removeObject(forKey: Self.googleEmailKey)
         SecItemDelete(query(Self.passwordName) as CFDictionary)
-        SecItemDelete(query(Self.googleTokenName) as CFDictionary)
+        for slot in OAuthSlot.all {
+            defaults.removeObject(forKey: slot.emailKey)
+            SecItemDelete(query(slot.tokenName) as CFDictionary)
+        }
     }
 
     private func store(_ secret: String, as name: String) -> Bool {

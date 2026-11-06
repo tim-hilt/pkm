@@ -37,7 +37,6 @@ struct CloudBackingSection: View {
                         provider.icon
                     }
                     .tag(provider)
-                    .disabled(!provider.isAvailable)
                 }
             }
             .accessibilityIdentifier("cloud-provider")
@@ -47,6 +46,8 @@ struct CloudBackingSection: View {
                 iCloudDriveForm
             } else if provider == .googleDrive {
                 googleDriveForm
+            } else if provider == .oneDrive {
+                oneDriveForm
             } else {
                 webDAVForm
             }
@@ -110,11 +111,11 @@ struct CloudBackingSection: View {
             Button("Reconnect", action: pickFolder)
                 .disabled(isConnecting)
                 .accessibilityIdentifier("cloud-reconnect")
-        } else if cloud.status == .accessLost, connection.provider == .googleDrive {
+        } else if cloud.status == .accessLost, connection.provider == .googleDrive || connection.provider == .oneDrive {
             if let error {
                 Text(error).foregroundStyle(.red).accessibilityIdentifier("cloud-error")
             }
-            Button("Reconnect") { signIn(reconnecting: true) }
+            Button("Reconnect") { signIn(to: connection.provider, reconnecting: true) }
                 .disabled(isConnecting)
                 .accessibilityIdentifier("cloud-reconnect")
         } else if cloud.status == .accessLost {
@@ -174,21 +175,35 @@ struct CloudBackingSection: View {
         if let error {
             Text(error).foregroundStyle(.red).accessibilityIdentifier("cloud-error")
         }
-        Button("Connect") { signIn(reconnecting: false) }
+        Button("Connect") { signIn(to: .googleDrive, reconnecting: false) }
             .disabled(isConnecting)
             .accessibilityIdentifier("cloud-connect")
     }
 
-    /// Signs in to Google Drive. Closing the sign-in page does nothing.
-    private func signIn(reconnecting: Bool) {
+    @ViewBuilder private var oneDriveForm: some View {
+        Text(
+            "You sign in on Microsoft's page. Your Drawings are kept in Apps/ExcalidrawNative of your OneDrive; the app sees nothing else. Personal Microsoft accounts only."
+        )
+        .font(.footnote).foregroundStyle(.secondary)
+        if let error {
+            Text(error).foregroundStyle(.red).accessibilityIdentifier("cloud-error")
+        }
+        Button("Connect") { signIn(to: .oneDrive, reconnecting: false) }
+            .disabled(isConnecting)
+            .accessibilityIdentifier("cloud-connect")
+    }
+
+    /// Signs in to Google Drive or OneDrive. Closing the sign-in page does nothing.
+    private func signIn(to provider: CloudProvider, reconnecting: Bool) {
         Task {
             isConnecting = true
             defer { isConnecting = false }
             do {
-                if reconnecting {
-                    try await cloud.reconnectGoogleDrive()
-                } else {
-                    try await cloud.connectGoogleDrive()
+                switch (provider, reconnecting) {
+                case (.oneDrive, true): try await cloud.reconnectOneDrive()
+                case (.oneDrive, false): try await cloud.connectOneDrive()
+                case (_, true): try await cloud.reconnectGoogleDrive()
+                case (_, false): try await cloud.connectGoogleDrive()
                 }
                 error = nil
             } catch let failure as ConnectError {

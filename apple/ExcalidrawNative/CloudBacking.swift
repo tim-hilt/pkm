@@ -2,8 +2,7 @@ import Foundation
 import Network
 import SwiftUI
 
-/// Where Drawings can be backed up. WebDAV, iCloud Drive and Google Drive can
-/// be Connected so far; the picker shows OneDrive, disabled.
+/// Where Drawings can be backed up; the picker shows all of them.
 enum CloudProvider: CaseIterable, Hashable {
     case webDAV
     case iCloudDrive
@@ -18,9 +17,6 @@ enum CloudProvider: CaseIterable, Hashable {
         case .oneDrive: "OneDrive"
         }
     }
-
-    /// Whether the app can Connect it yet.
-    var isAvailable: Bool { self != .oneDrive }
 
     /// What Settings calls the detail of a Connection to it.
     var detailLabel: String {
@@ -66,6 +62,7 @@ extension ConnectError {
         case .ICloudDriveUnavailable: "Turn on iCloud Drive in Settings"
         case .WrongFolder:
             "Pick iCloud Drive itself, not a folder in it, so your Drawings end up in iCloud Drive/ExcalidrawNative"
+        case .UnsupportedAccount: "Work and school accounts are not supported. Use a personal Microsoft account."
         case .AccessDenied: "Access denied"
         case .SignInFailed: "Sign-in failed. Try again."
         }
@@ -79,9 +76,17 @@ struct CredentialsNotSaved: LocalizedError {
 
 /// Hears from the core's Sync loop of a refresh token to keep in the Keychain.
 private final class RotatedTokens: TokenObserver {
-    private let credentials: CloudCredentials
-    init(_ credentials: CloudCredentials) { self.credentials = credentials }
-    func refreshTokenRotated(token: String) { credentials.rotateGoogleToken(to: token) }
+    private let keep: @Sendable (String) -> Void
+    init(_ keep: @escaping @Sendable (String) -> Void) { self.keep = keep }
+    func refreshTokenRotated(token: String) { keep(token) }
+
+    static func google(_ credentials: CloudCredentials) -> RotatedTokens {
+        RotatedTokens { credentials.rotateGoogleToken(to: $0) }
+    }
+
+    static func oneDrive(_ credentials: CloudCredentials) -> RotatedTokens {
+        RotatedTokens { credentials.rotateOneDriveToken(to: $0) }
+    }
 }
 
 /// How many of the Drawings a Sync step transfers are done.
@@ -195,7 +200,7 @@ final class CloudBackingModel {
     /// saved there is shown again without contacting the server, so launching
     /// offline works. `checkWebDAV` is the core's Connect and `isICloudDriveOn`
     /// tells whether the user is signed in to iCloud Drive; `showSignInPage`
-    /// shows Google's sign-in page and returns the redirect; tests replace them.
+    /// shows a provider's sign-in page and returns the redirect; tests replace them.
     init(
         credentials: CloudCredentials = .app,
         checkWebDAV: @escaping @Sendable (String, String, String) throws -> Void = {
@@ -212,6 +217,8 @@ final class CloudBackingModel {
         self.showSignInPage = showSignInPage
         if let google = credentials.loadGoogle() {
             connection = CloudConnection(provider: .googleDrive, detail: google.email)
+        } else if let oneDrive = credentials.loadOneDrive() {
+            connection = CloudConnection(provider: .oneDrive, detail: oneDrive.email)
         } else if let account = credentials.load() {
             connection = CloudConnection(provider: .webDAV, detail: account.url)
         } else if credentials.loadBookmark() != nil {
@@ -246,18 +253,33 @@ final class CloudBackingModel {
         restartSync()
     }
 
-    /// Shows Google's sign-in page and signs in. Nil if the user closed the
-    /// page, which is nothing to report. Throws a `ConnectError` otherwise
-    /// (`AccessDenied` if consent was refused).
-    private func signInToGoogle() async throws -> GoogleDriveAccount? {
-        let signIn = try GoogleDriveSignIn.start(clientId: GoogleOAuth.clientID)
-        guard let page = URL(string: signIn.url()) else { throw ConnectError.SignInFailed }
-        let redirect: URL
+    /// Shows the sign-in page at `url` and returns the redirect it ends with.
+    /// Nil if the user closed the page, which is nothing to report.
+    private func redirect(fromSignInPage url: String, callbackScheme: String) async throws -> URL? {
+        guard let page = URL(string: url) else { throw ConnectError.SignInFailed }
         do {
-            redirect = try await showSignInPage(page, signIn.callbackScheme())
+            return try await showSignInPage(page, callbackScheme)
         } catch is CancellationError {
             return nil
         }
+    }
+
+    /// Signs in on Google's page. Nil if the user closed it. Throws a
+    /// `ConnectError` otherwise (`AccessDenied` if consent was refused).
+    private func signInToGoogle() async throws -> GoogleDriveAccount? {
+        let signIn = try GoogleDriveSignIn.start(clientId: GoogleOAuth.clientID)
+        guard let redirect = try await redirect(fromSignInPage: signIn.url(), callbackScheme: signIn.callbackScheme())
+        else { return nil }
+        return try await Task.detached { try signIn.finish(redirect: redirect.absoluteString) }.value
+    }
+
+    /// Signs in on Microsoft's page. Nil if the user closed it. Throws a
+    /// `ConnectError` otherwise (`AccessDenied` if consent was refused,
+    /// `UnsupportedAccount` for a work or school account).
+    private func signInToOneDrive() async throws -> OneDriveAccount? {
+        let signIn = try OneDriveSignIn.start(clientId: OneDriveOAuth.clientID)
+        guard let redirect = try await redirect(fromSignInPage: signIn.url(), callbackScheme: signIn.callbackScheme())
+        else { return nil }
         return try await Task.detached { try signIn.finish(redirect: redirect.absoluteString) }.value
     }
 
@@ -285,7 +307,34 @@ final class CloudBackingModel {
         connection = CloudConnection(provider: .googleDrive, detail: account.email)
         sync?.reconnectGoogleDrive(
             clientId: GoogleOAuth.clientID, refreshToken: account.refreshToken,
-            tokens: RotatedTokens(credentials))
+            tokens: RotatedTokens.google(credentials))
+    }
+
+    /// Connects OneDrive: the user signs in on Microsoft's page, and Drawings
+    /// go to `Apps/ExcalidrawNative`. Does nothing if the user closes the
+    /// page; throws a `ConnectError` if it fails, and then nothing is kept.
+    /// Keeps the refresh token in the Keychain until `disconnect`.
+    func connectOneDrive() async throws {
+        guard let account = try await signInToOneDrive() else { return }
+        // What was Synced with another account or Cloud Provider says nothing about this one.
+        if let old = connection, old.provider != .oneDrive || old.detail != account.email {
+            clearSyncState()
+        }
+        guard credentials.saveOneDrive(account) else { throw CredentialsNotSaved() }
+        connection = CloudConnection(provider: .oneDrive, detail: account.email)
+        restartSync()
+    }
+
+    /// Signs in again after Sync lost access (revoked on Microsoft's side),
+    /// and lets Sync resume where it stopped. Does nothing if the user closes
+    /// the page.
+    func reconnectOneDrive() async throws {
+        guard let account = try await signInToOneDrive() else { return }
+        guard credentials.saveOneDrive(account) else { throw CredentialsNotSaved() }
+        connection = CloudConnection(provider: .oneDrive, detail: account.email)
+        sync?.reconnectOneDrive(
+            clientId: OneDriveOAuth.clientID, refreshToken: account.refreshToken,
+            tokens: RotatedTokens.oneDrive(credentials))
     }
 
     /// Connects to the WebDAV server at `url`: checks it and creates the
@@ -350,6 +399,8 @@ final class CloudBackingModel {
         guard let target else { return }
         if let google = credentials.loadGoogle() {
             sync = startGoogleDriveSync(account: google, target: target)
+        } else if let oneDrive = credentials.loadOneDrive() {
+            sync = startOneDriveSync(account: oneDrive, target: target)
         } else if let bookmark = credentials.loadBookmark() {
             sync = startICloudDriveSync(bookmark: bookmark, target: target)
         } else if let account = credentials.load() {
@@ -388,7 +439,16 @@ final class CloudBackingModel {
     private func startGoogleDriveSync(account: GoogleDriveAccount, target: SyncTarget) -> CloudSync? {
         try? CloudSync.startGoogleDrive(
             clientId: GoogleOAuth.clientID, refreshToken: account.refreshToken,
-            tokens: RotatedTokens(credentials),
+            tokens: RotatedTokens.google(credentials),
+            drawingsDirectory: target.drawings.path(percentEncoded: false),
+            stateDirectory: target.stateDirectory.path(percentEncoded: false),
+            observer: observer(for: target))
+    }
+
+    private func startOneDriveSync(account: OneDriveAccount, target: SyncTarget) -> CloudSync? {
+        try? CloudSync.startOneDrive(
+            clientId: OneDriveOAuth.clientID, refreshToken: account.refreshToken,
+            tokens: RotatedTokens.oneDrive(credentials),
             drawingsDirectory: target.drawings.path(percentEncoded: false),
             stateDirectory: target.stateDirectory.path(percentEncoded: false),
             observer: observer(for: target))

@@ -44,6 +44,8 @@ pub enum ConnectError {
     /// OAuth: the sign-in did not go through: the redirect is not the answer
     /// to this sign-in, or the provider refused the code.
     SignInFailed,
+    /// OneDrive: a work or school account, which is not supported.
+    UnsupportedAccount,
 }
 
 /// The variant's name; clients word the message for the user.
