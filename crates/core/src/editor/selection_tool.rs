@@ -161,7 +161,8 @@ impl Editor {
             .elements()
             .rev()
             .filter(hit_test::is_selectable)
-            .filter(|e| text::takes_label(e.kind()))
+            // An arrow has no inside to tap.
+            .filter(|e| text::takes_label(e.kind()) && e.kind() != ElementType::Arrow)
             .find(|e| Frame::of(e).contains_turned(at, e.angle(), 0.0))
             .map(|e| e.id().to_owned())
     }

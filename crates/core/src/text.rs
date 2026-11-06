@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use crate::color::parse_color;
 use crate::geometry::{Geometry, TextAlign, TextStyle};
 use crate::json::Value;
+use crate::linear;
 use crate::scene::{Element, ElementType, Scene, VerticalAlign};
 use crate::wrap;
 
@@ -25,6 +26,10 @@ pub trait TextMeasurer: Send + Sync {
 
 /// Padding between a container and the text bound to it.
 const BOUND_TEXT_PADDING: f64 = 5.0;
+/// How much of an arrow's width the lines of its label may take.
+const ARROW_LABEL_WIDTH_FRACTION: f64 = 0.7;
+/// The least an arrow's label may be wide, in font sizes.
+const ARROW_LABEL_MIN_WIDTH_IN_FONT_SIZES: f64 = 11.0;
 
 /// The Elements a text can be bound to, found by `id` the first time one is
 /// asked for: most Scenes have no labels.
@@ -60,12 +65,12 @@ impl<'a> Containers<'a> {
     }
 }
 
-/// Whether a shape of `kind` can have a text created in it by the user.
-/// (Arrows hold text too, but only as files have it.)
+/// Whether an Element of `kind` can have a text created in it by the user:
+/// shapes and arrows, but not lines (`isTextBindableContainer`).
 pub(crate) fn takes_label(kind: ElementType) -> bool {
     matches!(
         kind,
-        ElementType::Rectangle | ElementType::Diamond | ElementType::Ellipse
+        ElementType::Rectangle | ElementType::Diamond | ElementType::Ellipse | ElementType::Arrow
     )
 }
 
@@ -104,8 +109,8 @@ struct Block {
 /// With a `measurer`, a label wraps to its container and sits in it as
 /// Excalidraw would lay it out now (`redrawTextBoundingBox`), and so does a
 /// text of fixed width; without, and for text that is as wide as it is long,
-/// the lines are the ones saved in the file. The text of an arrow's label is
-/// where the file has it.
+/// the lines are the ones saved in the file. The label of an arrow sits at
+/// the middle of its path (`getBoundTextElementPosition`).
 pub(crate) fn draw(
     element: &Element,
     containers: &Containers,
@@ -174,7 +179,7 @@ fn layout(
     container: Option<&Element>,
     measurer: Option<&dyn TextMeasurer>,
 ) -> Block {
-    let saved = Block {
+    let mut saved = Block {
         lines: normalized(element.text())
             .split('\n')
             .map(str::to_owned)
@@ -185,6 +190,15 @@ fn layout(
         height: element.height(),
         angle: element.angle(),
     };
+    // The file's position of an arrow's label is not what is drawn: the
+    // arrow may have moved or bent since.
+    if let Some(arrow) = container
+        .as_ref()
+        .filter(|c| c.kind() == ElementType::Arrow)
+    {
+        (saved.x, saved.y) = arrow_label_origin(arrow, (saved.width, saved.height));
+        saved.angle = 0.0;
+    }
     let Some(measurer) = measurer else {
         return saved;
     };
@@ -200,19 +214,18 @@ fn layout(
     };
 
     match container {
-        Some(container) if container.kind() == ElementType::Arrow => saved,
         Some(container) => {
-            let lines = wrapped(bound_max_width(container));
+            let lines = wrapped(bound_max_width(container, element));
             let width = wrap::widest(&lines, font_size, measurer);
             let height = lines.len() as f64 * line_height;
-            let (x, y) = bound_position(element, container, (width, height));
+            let (x, y) = label_origin(element, container, (width, height));
             Block {
                 lines,
                 x,
                 y,
                 width,
                 height,
-                angle: container.angle(),
+                angle: label_angle(container),
             }
         }
         None if !element.auto_resize() => {
@@ -227,10 +240,48 @@ fn layout(
     }
 }
 
-/// How wide the lines of a label may be (`getBoundTextMaxWidth`): the width
-/// of the rectangle that fits in the container, less padding.
-fn bound_max_width(container: &Element) -> f64 {
-    label_max_width(container.kind(), container.width())
+/// How wide the lines of the `label` of `container` may be
+/// (`getBoundTextMaxWidth`): for a shape the width of the rectangle that fits
+/// in it, less padding; for an arrow a fraction of its width, but at least
+/// as wide as a few characters of the label.
+pub(crate) fn bound_max_width(container: &Element, label: &Element) -> f64 {
+    match container.kind() {
+        ElementType::Arrow => arrow_label_width(container.width(), label.font_size()),
+        kind => label_max_width(kind, container.width()),
+    }
+}
+
+/// How wide the lines of the label of an arrow `width` wide set at
+/// `font_size` may be.
+pub(crate) fn arrow_label_width(width: f64, font_size: f64) -> f64 {
+    (ARROW_LABEL_WIDTH_FRACTION * width).max(font_size * ARROW_LABEL_MIN_WIDTH_IN_FONT_SIZES)
+}
+
+/// Where the top left of a label of `size` goes in `container`: at the
+/// middle of an arrow's path, else in the padded rectangle of a shape.
+fn label_origin(label: &Element, container: &Element, size: (f64, f64)) -> (f64, f64) {
+    if container.kind() == ElementType::Arrow {
+        arrow_label_origin(container, size)
+    } else {
+        bound_position(label, container, size)
+    }
+}
+
+/// Where the top left of a label of `(width, height)` goes on `arrow`: the
+/// label is centred on the middle of the path.
+fn arrow_label_origin(arrow: &Element, (width, height): (f64, f64)) -> (f64, f64) {
+    let (x, y) = linear::label_anchor(arrow);
+    (x - width / 2.0, y - height / 2.0)
+}
+
+/// How far the label of `container` is turned: with a shape, but never with a
+/// line or arrow.
+pub(crate) fn label_angle(container: &Element) -> f64 {
+    if container.kind().is_linear() {
+        0.0
+    } else {
+        container.angle()
+    }
 }
 
 /// How wide the lines of a label may be in a container of `kind` and `width`.
@@ -274,7 +325,10 @@ fn bound_position(text: &Element, container: &Element, (width, height): (f64, f6
         }
         _ => {}
     }
-    let (max_width, max_height) = (bound_max_width(container), bound_max_height(container));
+    let (max_width, max_height) = (
+        label_max_width(container.kind(), container.width()),
+        bound_max_height(container),
+    );
 
     let y = top
         + match text.vertical_align() {
@@ -361,14 +415,13 @@ pub(crate) fn members_of(element: &Element, fit: Typed) -> Option<Vec<(&'static 
 /// The members the text `element` has to save to fit its font size and
 /// alignment again, if it has to save any (Excalidraw's
 /// `redrawTextBoundingBox`): a label sits in its `container` again, any other
-/// text is laid out as typed. The text of an arrow is where the file has it.
+/// text is laid out as typed.
 pub(crate) fn refit(
     element: &Element,
     container: Option<&Element>,
     measurer: &dyn TextMeasurer,
 ) -> Option<Vec<(&'static str, Value)>> {
     let fit = match container {
-        Some(container) if container.kind() == ElementType::Arrow => return None,
         Some(container) => {
             let fit = fit_label(element, container, Some(measurer));
             Typed {
@@ -466,12 +519,12 @@ pub(crate) fn fit_label(
 ) -> LabelFit {
     let (text, width, height) = match measurer {
         Some(measurer) => {
-            let lines = set_in_lines(label, bound_max_width(container), measurer);
+            let lines = set_in_lines(label, bound_max_width(container, label), measurer);
             (Some(lines.text), lines.width, lines.height)
         }
         None => (None, label.width(), label.height()),
     };
-    let (x, y) = bound_position(label, container, (width, height));
+    let (x, y) = label_origin(label, container, (width, height));
     LabelFit {
         text,
         x,
@@ -505,7 +558,8 @@ pub(crate) fn container_size_for(
     measurer: &dyn TextMeasurer,
 ) -> (f64, f64) {
     let kind = container.kind();
-    let lines = set_in_lines(label, bound_max_width(container), measurer);
+    let max_width = bound_max_width(container, label);
+    let lines = set_in_lines(label, max_width, measurer);
     let (mut width, mut height) = (container.width(), container.height());
     let max_height = bound_max_height(container);
     if lines.height > max_height {
@@ -513,7 +567,7 @@ pub(crate) fn container_size_for(
     } else if height > original_height && lines.height < max_height {
         height = container_dimension(kind, lines.height).max(original_height);
     }
-    if lines.width > bound_max_width(container) {
+    if lines.width > max_width {
         width = container_dimension(kind, lines.width);
     }
     (width, height)

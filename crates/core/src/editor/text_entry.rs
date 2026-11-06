@@ -5,8 +5,8 @@ impl Editor {
     /// where it is, what it says and how it looks (see
     /// [`crate::text_editing`]). A tap with the text Tool opens it at the tap
     /// (or on the text that is there), and so does a double-tap (a
-    /// double-click) on a text; a double-tap on a rectangle, diamond or
-    /// ellipse opens it on the label of the shape, as does
+    /// double-click) on a text; a double-tap on a rectangle, diamond,
+    /// ellipse or arrow opens it on the label of the shape, as does
     /// [`Editor::edit_selected_text`]. It closes when the text is committed
     /// or cancelled, or by a tap elsewhere, which commits. The position is in view
     /// coordinates: clients read it with the viewport after every input and
@@ -159,7 +159,7 @@ impl Editor {
 
     /// The command to edit the text of the Selection (Enter on a Mac): the
     /// text of a selected text, or the label of a selected rectangle,
-    /// diamond or ellipse, which is made if it has none. Does nothing for any
+    /// diamond, ellipse or arrow, which is made if it has none. Does nothing for any
     /// other Selection, and while a text is edited.
     pub fn edit_selected_text(&mut self) {
         if self.text.is_some() || self.is_gesturing() {
@@ -229,11 +229,15 @@ impl Editor {
         };
         let on_label = text::label_of(&self.scene, &id)
             .is_some_and(|l| Frame::of(&l).contains_turned(at, l.angle(), 0.0));
-        let frame = Frame::of(&shape);
-        let middle = (
-            (frame.min.0 + frame.max.0) / 2.0,
-            (frame.min.1 + frame.max.1) / 2.0,
-        );
+        let middle = if shape.kind() == ElementType::Arrow {
+            crate::linear::label_anchor(&shape)
+        } else {
+            let frame = Frame::of(&shape);
+            (
+                (frame.min.0 + frame.max.0) / 2.0,
+                (frame.min.1 + frame.max.1) / 2.0,
+            )
+        };
         let snap = TEXT_TO_CENTER_SNAP_THRESHOLD / viewport.zoom();
         let near_middle = (at.0 - middle.0).hypot(at.1 - middle.1) <= snap;
         let unlabelled = !shape.has_bound_text();

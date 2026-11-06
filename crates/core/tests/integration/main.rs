@@ -9,6 +9,7 @@ mod common;
 
 mod action_bar;
 mod arrow_binding;
+mod arrow_labels;
 mod benchmarks;
 mod bound_text;
 mod box_select;

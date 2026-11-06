@@ -124,6 +124,70 @@ pub(crate) fn exact_curve(element: &Element) -> Option<Vec<Op>> {
     Some(Sketcher::new(element.seed(), EXACT).curve(&points).outline)
 }
 
+/// Where the label of the line or arrow `element` is centred, in the Scene
+/// (`getBoundTextElementCenter`): on the middle point of a path of an odd
+/// number of points, else halfway along the middle segment, which is a curve
+/// for a rounded Element and straight otherwise. Turned with the Element.
+pub(crate) fn label_anchor(element: &Element) -> Point {
+    let points = element.points();
+    let n = points.len();
+    let local = if n % 2 == 1 {
+        points[n / 2]
+    } else {
+        let (from, to) = (points[n / 2 - 1], points[n / 2]);
+        match exact_curve(element)
+            .as_deref()
+            .and_then(|ops| ops.get(n / 2))
+        {
+            Some(&Op::Cubic(c1, c2, end)) => halfway_along_cubic(from, c1, c2, end),
+            _ => ((from.0 + to.0) / 2.0, (from.1 + to.1) / 2.0),
+        }
+    };
+    let at = (element.x() + local.0, element.y() + local.1);
+    let angle = element.angle();
+    if angle == 0.0 {
+        return at;
+    }
+    let pivot = match drawn_bounds(element) {
+        Some(((x0, y0), (x1, y1))) => ((x0 + x1) / 2.0, (y0 + y1) / 2.0),
+        None => (
+            element.x() + element.width() / 2.0,
+            element.y() + element.height() / 2.0,
+        ),
+    };
+    let (sin, cos) = angle.sin_cos();
+    let (dx, dy) = (at.0 - pivot.0, at.1 - pivot.1);
+    (pivot.0 + dx * cos - dy * sin, pivot.1 + dx * sin + dy * cos)
+}
+
+/// The point halfway along the length of the cubic from `p0` to `p3`.
+fn halfway_along_cubic(p0: Point, p1: Point, p2: Point, p3: Point) -> Point {
+    const STEPS: usize = 256;
+    let at = |t: f64| {
+        let u = 1.0 - t;
+        let (a, b, c, d) = (u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
+        (
+            a * p0.0 + b * p1.0 + c * p2.0 + d * p3.0,
+            a * p0.1 + b * p1.1 + c * p2.1 + d * p3.1,
+        )
+    };
+    let samples: Vec<Point> = (0..=STEPS).map(|i| at(i as f64 / STEPS as f64)).collect();
+    let lengths: Vec<f64> = samples
+        .windows(2)
+        .map(|w| (w[1].0 - w[0].0).hypot(w[1].1 - w[0].1))
+        .collect();
+    let mut remaining = lengths.iter().sum::<f64>() / 2.0;
+    for (i, length) in lengths.iter().enumerate() {
+        if remaining <= *length && *length > 0.0 {
+            let f = remaining / length;
+            let (a, b) = (samples[i], samples[i + 1]);
+            return (a.0 + (b.0 - a.0) * f, a.1 + (b.1 - a.1) * f);
+        }
+        remaining -= length;
+    }
+    samples[STEPS]
+}
+
 /// The corners (top left, bottom right) in the Scene of the box Excalidraw
 /// takes for the line or arrow: around its sketched stroke, jitter included,
 /// but not the arrowheads. `None` if the stroke has no curves.

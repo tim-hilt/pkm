@@ -12,7 +12,9 @@
 //! container): it is created and edited with the shape, wraps to the width
 //! the shape leaves it, is centred in it and lists in the shape's
 //! `boundElements`. The shape grows with the text, as on excalidraw.com, and
-//! the arrows bound to it follow.
+//! the arrows bound to it follow. An arrow takes a label too, at the middle
+//! of its path; that wraps to a fraction of the arrow's width and does not
+//! make the arrow grow.
 
 use crate::binding::Attachments;
 use crate::color::parse_color;
@@ -20,10 +22,11 @@ use crate::draw_shape::new_element;
 use crate::geometry::TextAlign;
 use crate::history::Step;
 use crate::json::{Object, Value};
+use crate::linear;
 use crate::path::Point;
 use crate::properties::{self, Property, align_name};
 use crate::random::Entropy;
-use crate::scene::{Element, Scene};
+use crate::scene::{Element, ElementType, Scene};
 use crate::style::Style;
 use crate::text::{self, TextMeasurer};
 use crate::viewport::Viewport;
@@ -136,7 +139,10 @@ impl TextEditing {
         measurer: &dyn TextMeasurer,
     ) -> Option<Self> {
         let container = scene.element_by_id(container_id)?;
-        let (origin, angle) = ((container.x(), container.y()), container.angle());
+        let (origin, angle) = (
+            (container.x(), container.y()),
+            text::label_angle(&container),
+        );
         let groups = container
             .member("groupIds")
             .cloned()
@@ -285,15 +291,27 @@ impl TextEditing {
         let Some(container) = self.container.as_ref() else {
             return;
         };
-        let size = {
+        // An arrow does not grow with its label.
+        let size = if scene
+            .element(container.handle)
+            .is_some_and(|c| c.kind() == ElementType::Arrow)
+        {
+            None
+        } else {
             let (Some(label), Some(shape)) =
                 (scene.element(self.handle), scene.element(container.handle))
             else {
                 return;
             };
-            text::container_size_for(&label, &shape, container.original_height, measurer)
+            Some(text::container_size_for(
+                &label,
+                &shape,
+                container.original_height,
+                measurer,
+            ))
         };
-        if let Some(shape) = scene.element(container.handle)
+        if let Some(size) = size
+            && let Some(shape) = scene.element(container.handle)
             && (shape.width(), shape.height()) != size
         {
             let members = [
@@ -493,21 +511,28 @@ fn list_label(
 /// The box a text view of the label `label` of `container` fills, as `(x, y,
 /// width, height)` in the Scene: as wide as lines may be in the container and
 /// as high as the text, with the lines aligned in it as the label is. The
-/// label sits in it by its alignment, so its middle is off the box's by
-/// whatever the lines leave over, along the (turned) top of the container.
+/// label of a shape sits in it by its alignment, so its middle is off the
+/// box's by whatever the lines leave over, along the (turned) top of the
+/// container; that of an arrow is centred on the box.
 fn label_box(label: &Element, container: &Element) -> (f64, f64, f64, f64) {
-    let width = text::label_max_width(container.kind(), container.width());
+    let width = text::bound_max_width(container, label);
     let height = label.height();
     let off = match label.text_align() {
+        _ if container.kind() == ElementType::Arrow => 0.0,
         TextAlign::Left => (width - label.width()) / 2.0,
         TextAlign::Center => 0.0,
         TextAlign::Right => (label.width() - width) / 2.0,
     };
-    let (sin, cos) = container.angle().sin_cos();
-    let middle = (
-        label.x() + label.width() / 2.0 + off * cos,
-        label.y() + label.height() / 2.0 + off * sin,
-    );
+    let (sin, cos) = text::label_angle(container).sin_cos();
+    // What a file saves of an arrow's label may be where the arrow was.
+    let middle = if container.kind() == ElementType::Arrow {
+        linear::label_anchor(container)
+    } else {
+        (
+            label.x() + label.width() / 2.0 + off * cos,
+            label.y() + label.height() / 2.0 + off * sin,
+        )
+    };
     (
         middle.0 - width / 2.0,
         middle.1 - height / 2.0,
