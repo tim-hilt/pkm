@@ -196,6 +196,16 @@ private struct MainMenu: View {
                 share("Export Selection as PNG", scope: .selection)
                     .disabled(!controller.hasSelection)
             }
+            #if !os(macOS)
+                if offersPencilOnlyDrawing {
+                    Section("Settings") {
+                        Toggle(
+                            isOn: Binding(
+                                get: { controller.pencilOnlyDrawing }, set: { controller.setPencilOnlyDrawing($0) })
+                        ) { Label("Pencil-only drawing", systemImage: "applepencil") }
+                    }
+                }
+            #endif
         } label: {
             Label("Menu", systemImage: "line.3.horizontal")
         }
@@ -255,14 +265,6 @@ struct ToolBar: View {
                     controller.setTool(tool)
                 }
             }
-            #if !os(macOS)
-                if offersPencilOnlyDrawing {
-                    divider
-                    toolButton(
-                        "Pencil-only drawing", symbol: "applepencil", checked: controller.pencilOnlyDrawing
-                    ) { controller.setPencilOnlyDrawing(!controller.pencilOnlyDrawing) }
-                }
-            #endif
         }
         .padding(4)
         .island()
@@ -291,9 +293,9 @@ struct ToolBar: View {
 
 /// The phone toolbar island (docs/layout-reference §4.2): one slot per Tool
 /// family, spread over the bar's width; tapping a family's armed Tool again
-/// offers the rest of the family. Tool lock and Pencil-only drawing, which
-/// have no slot on excalidraw.com's phone bar, sit in the ⋮ menu (Pencil-only
-/// drawing only on an iPad, see `offersPencilOnlyDrawing`).
+/// offers the rest of the family. Tool lock, which has no slot on
+/// excalidraw.com's phone bar, is an icon button at the end. Pencil-only
+/// drawing sits in the main menu (iPad only, see `offersPencilOnlyDrawing`).
 private struct MobileToolBar: View {
     let controller: CanvasController
     /// Per slot, the Tool of its family last chosen, so the slot keeps showing it.
@@ -306,7 +308,7 @@ private struct MobileToolBar: View {
                 slot(index)
                 Spacer(minLength: 0)
             }
-            moreMenu
+            lockButton
         }
         .padding(4)
         .island()
@@ -341,26 +343,20 @@ private struct MobileToolBar: View {
         }
     }
 
-    private var moreMenu: some View {
-        Menu {
-            Toggle(
-                "Keep tool selected",
-                isOn: Binding(
-                    get: { controller.toolLock }, set: { controller.setToolLock($0) }))
-            #if !os(macOS)
-                if offersPencilOnlyDrawing {
-                    Toggle(
-                        "Pencil-only drawing",
-                        isOn: Binding(
-                            get: { controller.pencilOnlyDrawing }, set: { controller.setPencilOnlyDrawing($0) }))
-                }
-            #endif
+    private var lockButton: some View {
+        let on = controller.toolLock
+        return Button {
+            controller.setToolLock(!on)
         } label: {
-            Image(systemName: "ellipsis").rotationEffect(.degrees(90)).controlButton()
+            Image(systemName: on ? "lock" : "lock.open")
+                .font(.subheadline)
+                .foregroundStyle(on ? checkedGlyph : .primary)
+                .controlButton()
+                .background(on ? checkedFill : .clear, in: RoundedRectangle(cornerRadius: 4))
         }
-        .menuIndicator(.hidden)
         .buttonStyle(.plain)
-        .accessibilityLabel("More tools")
+        .accessibilityLabel("Keep tool selected")
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 }
 
