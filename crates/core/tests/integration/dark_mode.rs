@@ -325,3 +325,23 @@ fn the_erase_preview_shows_faded_elements_in_their_dark_colours() {
         assert!([0xff83_83ff, 0x5a2c_2cff].contains(&part.color));
     }
 }
+
+/// The launch screen's colour set (`LaunchBackground`) is white in light mode
+/// and the dark Canvas colour, the transform of `#ffffff`, in dark mode.
+#[test]
+fn launch_screen_background_follows_the_appearance() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../apple/ExcalidrawNative/Resources/Assets.xcassets/LaunchBackground.colorset/Contents.json"
+    );
+    let file = std::fs::read_to_string(path).expect("colour set exists");
+    // Components of each variant, in file order: light first, then dark.
+    let (light, dark) = file.split_once("\"appearances\"").expect("dark variant");
+    let hex = |part: &str| {
+        let channels: Vec<&str> = part.split("\"0x").skip(1).map(|c| &c[..2]).collect();
+        assert_eq!(channels.len(), 3);
+        format!("#{}", channels.concat().to_lowercase())
+    };
+    assert_eq!(hex(light), "#ffffff");
+    assert_eq!(hex(dark), dark_mode_color("#ffffff"));
+}
