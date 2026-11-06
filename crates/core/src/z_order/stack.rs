@@ -206,17 +206,17 @@ impl<'a> Stack<'a> {
             self.editing_group
                 .is_some_and(|g| layer.groups.iter().any(|id| id == g))
         };
-        // The first and last place the move may reach: those of the group
-        // gone into, or else of the frame, or else of the whole stack.
-        let (lowest, highest) = if self.editing_group.is_some() {
-            (
-                places().position(in_editing_group),
-                places().rposition(in_editing_group),
-            )
-        } else if frame.is_some() {
+        // The first and last place the move may reach: those of the frame,
+        // or else of the group gone into, or else of the whole stack.
+        let (lowest, highest) = if frame.is_some() {
             (
                 places().position(is_of_frame),
                 places().rposition(is_of_frame),
+            )
+        } else if self.editing_group.is_some() {
+            (
+                places().position(in_editing_group),
+                places().rposition(in_editing_group),
             )
         } else {
             (Some(0), self.order.len().checked_sub(1))
@@ -281,10 +281,16 @@ impl<'a> Stack<'a> {
         direction: Direction,
         containing_frame: Option<&str>,
     ) -> Option<usize> {
+        // Inside the group gone into, the closest member of it, whatever
+        // lies in between (as Excalidraw does, for legacy reasons).
         let counts = |place: usize| {
             let layer = self.layer_in(order, place);
             !layer.deleted
-                && containing_frame.is_none_or(|frame| layer.frame.as_deref() == Some(frame))
+                && match (containing_frame, self.editing_group) {
+                    (Some(frame), _) => layer.frame.as_deref() == Some(frame),
+                    (None, Some(editing)) => layer.groups.iter().any(|g| g == editing),
+                    (None, None) => true,
+                }
         };
         let candidate = match direction {
             Direction::Back => {

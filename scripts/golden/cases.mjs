@@ -324,6 +324,22 @@ function texts(upstream) {
   add("label-grows", `${LOREM}. ${LOREM}`, { container: ["rectangle", { height: 40 }] });
   add("label-big-font", "Big label", { container: ["ellipse", {}], fontSize: 28 });
   add("label-multiline", "one\ntwo\nthree", { container: ["diamond", { width: 200, height: 140 }] });
+
+  // Arrow labels: centred on the middle of the path, wrapped to 0.7 of the
+  // arrow's width (at least 11 font sizes), never growing the arrow.
+  const arrow = (points, extra = {}) => {
+    const [width, height] = extent(points);
+    return ["arrow", { points, width, height, ...extra }];
+  };
+  add("label-arrow-straight", "Arrow label", { container: arrow([[0, 0], [200, 60]]) });
+  add("label-arrow-wraps", LOREM, { container: arrow([[0, 0], [240, 0]]) });
+  add("label-arrow-short", "Short arrow, long label", { container: arrow([[0, 0], [60, 40]]) });
+  add("label-arrow-odd", "Middle point", { container: arrow([[0, 0], [100, 80], [200, 0]]) });
+  add("label-arrow-even", "Middle segment", { container: arrow([[0, 0], [60, 80], [140, 80], [200, 0]]) });
+  add("label-arrow-curved", "Curved", {
+    container: arrow([[0, 0], [60, 80], [140, 80], [200, 0]], { roundness: { type: 2 } }),
+  });
+  add("label-arrow-big-font", "Big", { container: arrow([[0, 0], [200, 0]]), fontSize: 36 });
   return elements;
 }
 

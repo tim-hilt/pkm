@@ -26,19 +26,15 @@ impl Editor {
         let finger = self.pencil_only.restricts(event.kind);
         let tool = if finger { Tool::Selection } else { self.tool };
         let tapping = matches!(tool, Tool::Selection | Tool::Text);
-        // A pan of space or a mouse button took the pointer: what it
-        // interrupted is gone, but the pan is no tap, not even a right-click,
-        // and leaves the taps before it as they were.
-        if tapping && !self.navigation.is_pinching() && self.navigation.is_pan_overriding_tool() {
-            self.taps.abandon_press();
-            self.drop_move();
-            self.drop_transform();
-            self.drop_point_drag();
-            self.drop_box_select();
-            return;
-        }
-        if !tapping || self.navigation.is_pinching() {
-            self.taps.cancel();
+        if !tapping || self.navigation.suspends_tool() {
+            // A pan of space or a mouse button took the pointer: what it
+            // interrupted is gone, but the pan is no tap, not even a
+            // right-click, and leaves the taps before it as they were.
+            if tapping && !self.navigation.is_pinching() {
+                self.taps.abandon_press();
+            } else {
+                self.taps.cancel();
+            }
             self.drop_move();
             self.drop_transform();
             self.drop_point_drag();

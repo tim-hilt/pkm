@@ -9,12 +9,14 @@ enum KeyboardAvoidance {
     static let margin: CGFloat = 16
 
     /// The viewport that lifts `caret` clear of `keyboard`, or `nil` if it
-    /// already is, or if no keyboard covers the Canvas (a hardware keyboard).
-    /// Both rects are in the Canvas's coordinates; only panning, never zooming.
+    /// already is, or if no keyboard covers the caret (a hardware keyboard, or
+    /// a floating one beside or above it). Both rects are in the Canvas's
+    /// coordinates; only panning, never zooming.
     static func viewport(keyboard: CGRect?, caret: CGRect, current: ViewportState) -> ViewportState? {
-        guard let keyboard, !keyboard.isNull, !keyboard.isEmpty, current.zoom > 0 else { return nil }
-        let lift = caret.maxY + margin - keyboard.minY
-        guard lift > 0 else { return nil }
+        guard let keyboard, current.zoom > 0 else { return nil }
+        let line = CGRect(x: caret.minX, y: caret.minY, width: max(caret.width, 1), height: caret.height + margin)
+        guard line.intersects(keyboard) else { return nil }
+        let lift = line.maxY - keyboard.minY
         var panned = current
         panned.originY += Double(lift) / current.zoom
         return panned

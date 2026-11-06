@@ -2,7 +2,9 @@
 //! shapes (`bound_text.rs`). The only test double is a `TextMeasurer` with
 //! fixed character widths (half the font size).
 //!
-//! Expected values are worked out by hand from Excalidraw's rules
+//! Positions and wrapping are checked against labels that Excalidraw itself
+//! laid out (`text.excalidraw`, made by the golden fixture generator); the
+//! other expected values are worked out by hand from Excalidraw's rules
 //! (`getBoundTextMaxWidth`, `LinearElementEditor.getBoundTextElementCenter`):
 //! at font size 20 a character is 10 wide and a line 25 high; the lines of an
 //! arrow's label are at most 0.7 of its width wide, but no less than 11 font
@@ -71,6 +73,48 @@ fn number(element: &Value, key: &str) -> f64 {
 /// The middle of the box of the open editor.
 fn middle(shown: &TextEditor) -> (f64, f64) {
     (shown.x + shown.width / 2.0, shown.y + shown.height / 2.0)
+}
+
+// --- As Excalidraw lays them out ----------------------------------------------------
+
+#[test]
+fn arrow_labels_are_wrapped_and_placed_as_excalidraw_does() {
+    // The labels of `text.excalidraw` where Excalidraw put them: the same
+    // texts, unbound, at the position and with the lines the file saves.
+    let fixture = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/golden/text.excalidraw"),
+    )
+    .unwrap();
+    let unbound = fixture.replace(
+        r#""containerId": "label-arrow-"#,
+        r#""containerId": null, "was": "label-arrow-"#,
+    );
+    assert_ne!(unbound, fixture);
+    let load = |json: &str| {
+        let mut editor = Editor::new();
+        editor.load(json.as_bytes()).unwrap();
+        editor.set_text_measurer(Arc::new(FixedWidth));
+        editor.geometry()
+    };
+    let (labelled, expected) = (load(&fixture), load(&unbound));
+    let lines = |geometry: &workingtitle_core::Geometry| -> Vec<(String, f32, f32)> {
+        geometry
+            .text_lines()
+            .iter()
+            .map(|l| (geometry.line_text(l).to_owned(), l.x, l.y))
+            .collect()
+    };
+    let (actual, expected) = (lines(&labelled), lines(&expected));
+
+    assert_eq!(actual.len(), expected.len());
+    for (a, e) in actual.iter().zip(&expected) {
+        assert_eq!(a.0, e.0);
+        assert!(
+            (a.1 - e.1).abs() < 1e-3 && (a.2 - e.2).abs() < 1e-3,
+            "{a:?} != {e:?}"
+        );
+    }
 }
 
 // --- Opening ----------------------------------------------------------------------

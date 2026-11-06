@@ -8,6 +8,7 @@
 //! the Elements of the Selection that have the property, and the panel shows
 //! the value those share.
 
+use crate::color::parse_color;
 use crate::draw_shape::{ADAPTIVE_RADIUS, PROPORTIONAL_RADIUS};
 use crate::geometry::TextAlign;
 use crate::json::{Object, Value};
@@ -108,13 +109,10 @@ impl Sections {
     }
 }
 
-/// Whether a CSS colour draws nothing: `transparent` or a hex colour with
-/// zero alpha.
+/// Whether a CSS colour draws nothing (Excalidraw's `isTransparent`: its
+/// alpha is zero).
 fn is_transparent(color: &str) -> bool {
-    color == "transparent"
-        || color.strip_prefix('#').is_some_and(|hex| {
-            matches!(hex.len(), 4 | 8) && hex.ends_with(&"0".repeat(hex.len() / 4))
-        })
+    parse_color(color) & 0xff == 0
 }
 
 impl Property {

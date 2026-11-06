@@ -93,7 +93,8 @@ export async function loadUpstream(checkoutDir) {
         upstream.newTextElement({ ...opts, text: wrapped, originalText: text, ...extra });
 
       if (container) {
-        const maxWidth = upstream.getBoundTextMaxWidth(container, null);
+        // An arrow's label wraps to a width that depends on its font size.
+        const maxWidth = upstream.getBoundTextMaxWidth(container, { fontSize });
         let label = make(upstream.wrapText(text, font, maxWidth), {
           containerId: container.id,
           verticalAlign: opts.verticalAlign ?? "middle",
@@ -102,7 +103,8 @@ export async function loadUpstream(checkoutDir) {
           y: 0,
         });
         const grown = { ...container, boundElements: [{ type: "text", id: label.id }] };
-        if (label.height > upstream.getBoundTextMaxHeight(container, label)) {
+        // An arrow does not grow with its label.
+        if (container.type !== "arrow" && label.height > upstream.getBoundTextMaxHeight(container, label)) {
           grown.height = upstream.computeContainerDimensionForBoundText(label.height, container.type);
         }
         label = { ...label, angle: grown.angle, ...upstream.computeBoundTextPosition(grown, label, new Map()) };

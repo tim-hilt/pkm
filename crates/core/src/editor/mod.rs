@@ -389,6 +389,7 @@ impl Editor {
         if self.selection.clear() {
             self.overlay_revision += 1;
         }
+        self.sync_points();
         self.editing_group = None;
     }
 
@@ -475,7 +476,11 @@ impl Editor {
             .pointer(event, self.tool == Tool::Hand || finger);
         self.navigated();
         if !finger {
-            if event.phase == PointerPhase::Down && self.tool != Tool::Selection {
+            // A press that pans (space, a mouse button) selects nothing.
+            if event.phase == PointerPhase::Down
+                && self.tool != Tool::Selection
+                && !self.navigation.suspends_tool()
+            {
                 self.clear_selection();
             }
             self.draw_shape(event);

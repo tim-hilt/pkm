@@ -21,28 +21,11 @@ final class Thumbnails {
     /// The Drawings (as name and date, like the keys of `memory`) found to be no
     /// valid Drawing; they are not read again until they change.
     private var unreadable: Set<String> = []
-    /// Draws a scene; the default is made when first needed and stays nil
-    /// without a GPU. Tests put a failing one in its place.
-    private var draw: (ThumbnailScene) -> RenderedImage?
-    private let retryDelay: Duration
-    /// How often a draw that fails (GPU busy, no memory for a texture) is tried.
-    nonisolated static let drawAttempts = 3
+    /// Made when first needed; stays nil without a GPU.
+    private var renderer: ThumbnailRenderer?
 
-    init(
-        store: DrawingStore, retryDelay: Duration = .milliseconds(100),
-        draw: ((ThumbnailScene) -> RenderedImage?)? = nil
-    ) {
+    init(store: DrawingStore) {
         self.store = store
-        self.retryDelay = retryDelay
-        if let draw {
-            self.draw = draw
-        } else {
-            var renderer: ThumbnailRenderer?
-            self.draw = { scene in
-                if renderer == nil { renderer = ThumbnailRenderer() }
-                return renderer?.render(scene)
-            }
-        }
         memory.totalCostLimit = 48 << 20
     }
 
@@ -66,7 +49,7 @@ final class Thumbnails {
     }
 
     /// Thumbnails drawn so far (not counting those from caches).
-    private(set) var rendered = 0
+    var rendered: Int { renderer?.rendered ?? 0 }
 
     /// The thumbnail of the Drawing as listed in `entry`. Cheap when called again.
     func thumbnail(for entry: DrawingStore.Entry) async -> Thumbnail {
@@ -93,15 +76,9 @@ final class Thumbnails {
     }
 
     private func render(_ scene: ThumbnailScene, for entry: DrawingStore.Entry) async -> CGImage? {
-        var drawn: RenderedImage?
-        for attempt in 1...Self.drawAttempts {
-            guard !Task.isCancelled else { return nil }
-            drawn = draw(scene)
-            if drawn != nil || attempt == Self.drawAttempts { break }
-            try? await Task.sleep(for: retryDelay)
-        }
-        guard let rendered = drawn else { return nil }
-        self.rendered += 1
+        guard !Task.isCancelled else { return nil }
+        if renderer == nil { renderer = ThumbnailRenderer() }
+        guard let rendered = renderer?.render(scene) else { return nil }
         await Self.cache(rendered, for: entry, in: store)
         return rendered.cgImage()
     }

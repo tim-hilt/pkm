@@ -69,9 +69,8 @@ pub(crate) fn selection(
     }
     let entered = editing.map(|group| group::members(scene, group));
     let selected = groups.iter().map(|ids| {
-        scene
-            .elements()
-            .filter(|e| ids.contains(&e.id()))
+        ids.iter()
+            .filter_map(|id| scene.element_by_id(id))
             .collect::<Vec<_>>()
     });
     for members in selected.chain(entered) {

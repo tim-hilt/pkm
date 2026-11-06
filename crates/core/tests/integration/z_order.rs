@@ -575,3 +575,25 @@ fn inside_a_group_undo_restores_the_order_and_the_indices() {
     assert_eq!(ids(&editor), before_ids);
     assert_eq!(indices(&editor), before_indices);
 }
+
+#[test]
+fn inside_a_group_one_place_passes_the_next_member_whatever_lies_between() {
+    // `x` is no member of `g` but lies between two of them (Excalidraw
+    // moves to the closest member regardless, `getTargetIndex`).
+    let mut editor = editor_with(&[
+        &rect("o", 0.0, Some("a0"), ""),
+        &rect("a", 100.0, Some("a1"), r#","groupIds":["g"]"#),
+        &rect("x", 200.0, Some("a2"), ""),
+        &rect("c", 300.0, Some("a3"), r#","groupIds":["g"]"#),
+        &rect("z", 400.0, Some("a4"), ""),
+    ]);
+    select(&mut editor, 300.0, 0.0);
+    tap(&mut editor, "finger", centre(300.0), 5.0);
+    tap(&mut editor, "finger", centre(300.0), 5.2);
+    select(&mut editor, 100.0, 10.0);
+
+    editor.move_in_z_order(ZOrder::Forward);
+
+    assert_eq!(ids(&editor), ["o", "x", "c", "a", "z"]);
+    assert_indices_ascend(&editor);
+}

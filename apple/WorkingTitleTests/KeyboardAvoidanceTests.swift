@@ -45,4 +45,13 @@ import Testing
         #expect(KeyboardAvoidance.viewport(keyboard: nil, caret: caret(bottom: 800), current: viewport) == nil)
         #expect(KeyboardAvoidance.viewport(keyboard: .null, caret: caret(bottom: 800), current: viewport) == nil)
     }
+
+    @Test func aFloatingKeyboardBesideOrAboveTheCaretDoesNotPan() {
+        let floating = CGRect(x: 200, y: 300, width: 180, height: 120)
+        // Beside it.
+        #expect(KeyboardAvoidance.viewport(keyboard: floating, caret: caret(bottom: 400), current: viewport) == nil)
+        // Below it: lifting would move the caret under it.
+        let below = CGRect(x: 250, y: 600, width: 2, height: 20)
+        #expect(KeyboardAvoidance.viewport(keyboard: floating, caret: below, current: viewport) == nil)
+    }
 }
