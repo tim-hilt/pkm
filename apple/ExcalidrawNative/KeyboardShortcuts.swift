@@ -51,12 +51,24 @@ struct CanvasCommands: Commands {
     @FocusedValue(CanvasController.self) private var controller
     #if os(macOS)
         @FocusedValue(\.drawingExporter) private var exporter
+        @FocusedValue(\.backToGallery) private var backToGallery
         @AppStorage(ExportPreferences.backgroundKey) private var exportBackground = true
     #endif
 
     var body: some Commands {
         // A Mac has no main menu button on the Canvas: its items are here.
         #if os(macOS)
+            // The Canvas has no Gallery button on a Mac: ⌘W, which would
+            // close the app's only window, leaves the Drawing instead.
+            CommandGroup(replacing: .saveItem) {
+                if let backToGallery {
+                    Button("Back to Gallery", action: backToGallery)
+                        .keyboardShortcut("w")
+                } else {
+                    Button("Close") { NSApp.keyWindow?.performClose(nil) }
+                        .keyboardShortcut("w")
+                }
+            }
             CommandGroup(replacing: .importExport) {
                 Button("Export…") { exporter?.exportDrawing() }
                     .disabled(exporter == nil)
@@ -137,3 +149,10 @@ struct CanvasCommands: Commands {
         }
     }
 }
+
+#if os(macOS)
+    extension FocusedValues {
+        /// Leaves the Drawing in front for the Gallery (File > Back to Gallery).
+        @Entry var backToGallery: (() -> Void)?
+    }
+#endif

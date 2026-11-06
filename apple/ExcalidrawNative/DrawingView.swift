@@ -22,29 +22,36 @@ struct DrawingView: View {
     }
 
     var body: some View {
-        // The system's navigation bar (the window's toolbar on a Mac) carries
-        // the Gallery button and, on iPhone and iPad, the main menu; on a Mac
-        // the menu's items are in the menu bar (`CanvasCommands`).
+        // On iPhone and iPad the system's navigation bar carries the Gallery
+        // button and the main menu. A Mac's window keeps only its traffic
+        // lights: going back and the menu's items are in the menu bar
+        // (`CanvasCommands`). The bar shows no title: the Canvas gets the
+        // screen to itself.
         NavigationStack {
             canvas
-                .navigationTitle(drawing.name)
-                .toolbar {
-                    ToolbarItem(placement: .navigation) {
-                        Button("Gallery", systemImage: "chevron.backward", action: onBack)
+                #if !os(macOS)
+                    .toolbar {
+                        ToolbarItem(placement: .navigation) {
+                            Button("Gallery", systemImage: "chevron.backward", action: onBack)
                             .accessibilityIdentifier("back-to-gallery")
-                    }
-                    #if !os(macOS)
+                        }
                         ToolbarItem(placement: .primaryAction) {
                             MainMenu(drawing: drawing, export: export, controller: controller)
                         }
-                    #endif
-                }
-                #if !os(macOS)
+                    }
+                #endif
+                #if os(macOS)
+                    // Neither the window's title nor the faint separator
+                    // under its title bar: the Canvas runs up to the top edge.
+                    .toolbar(removing: .title)
+                    .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+                #else
                     .navigationBarTitleDisplayMode(.inline)
                 #endif
         }
         #if os(macOS)
             .focusedSceneValue(\.drawingExporter, DrawingExporter(drawing: drawing, export: export))
+            .focusedSceneValue(\.backToGallery, onBack)
         #endif
     }
 
