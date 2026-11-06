@@ -46,14 +46,42 @@
 
         /// What a press of `kind` at `point` (in the Canvas's coordinates)
         /// opens: the core selects what is pressed and says which menu it is;
-        /// `nil` if it is none, or one that is not shown yet.
+        /// `nil` if it is none. The point is remembered for a Paste from the
+        /// menu, which the system hands over without one.
         func contextMenuForPress(at point: CGPoint, kind: PointerKind) -> UIMenu? {
             var result: ContextMenu?
             perform { result = $0.longPress(x: point.x, y: point.y, kind: kind) }
             switch result {
-            case .element(let canGroup, let canUngroup): return elementMenu(canGroup: canGroup, canUngroup: canUngroup)
-            case .canvas, nil: return nil
+            case .element(let canGroup, let canUngroup):
+                contextMenuPoint = point
+                return elementMenu(canGroup: canGroup, canUngroup: canUngroup)
+            case .canvas:
+                contextMenuPoint = point
+                return canvasMenu()
+            case nil: return nil
             }
+        }
+
+        /// The system's own Paste item: it reads the pasteboard without the
+        /// "Allow Paste" prompt a custom item would trigger. It lands in
+        /// `paste(itemProviders:)`, at the remembered press point.
+        private func pasteItem() -> UICommand {
+            UICommand(
+                title: String(localized: "Paste"), image: UIImage(systemName: "doc.on.clipboard"),
+                action: #selector(UIResponder.paste(_:)))
+        }
+
+        /// The menu of empty Canvas: Paste and Select All. The Selection is
+        /// left as it was.
+        func canvasMenu() -> UIMenu {
+            UIMenu(children: [
+                pasteItem(),
+                UIAction(
+                    title: String(localized: "Select All"), image: UIImage(systemName: "checkmark.circle.badge.plus")
+                ) {
+                    [weak self] _ in self?.perform { $0.perform(command: .selectAll) }
+                },
+            ])
         }
 
         /// The menu of the Selection: Excalidraw's entries and order. Group and
@@ -93,6 +121,7 @@
             return UIMenu(children: [
                 item("Cut", "scissors") { $0.cut(nil) },
                 item("Copy", "doc.on.doc") { $0.copy(nil) },
+                pasteItem(),
                 item("Duplicate", "plus.square.on.square") { $0.perform { $0.duplicate() } },
                 item("Group", "rectangle.3.group", disabled: !canGroup) { $0.perform { $0.group() } },
                 item("Ungroup", "rectangle.3.offgrid", disabled: !canUngroup) { $0.perform { $0.ungroup() } },
@@ -109,6 +138,13 @@
         ) -> UIMenu? {
             defer { pendingContextMenu = nil }
             return pendingContextMenu
+        }
+
+        func editMenuInteraction(
+            _ interaction: UIEditMenuInteraction, didEndFor configuration: UIEditMenuConfiguration
+        ) {
+            // After the chosen item has run: a Paste reads the point first.
+            DispatchQueue.main.async { [weak self] in self?.contextMenuPoint = nil }
         }
     }
 #endif

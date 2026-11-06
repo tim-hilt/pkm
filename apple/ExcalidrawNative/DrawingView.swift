@@ -110,11 +110,6 @@ struct DrawingView: View {
                 HistoryControls(controller: controller)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-
-            #if !os(macOS)
-                PasteImageControl(controller: controller)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-            #endif
         }
         .padding(DrawingLayout.margin)
     }
@@ -364,8 +359,8 @@ private struct MobileToolButton: View {
 
 /// The phone action row over the toolbar (docs/layout-reference §4.3):
 /// properties on the left while a Tool or Selection has them, opening in a
-/// sheet (the spec's native adaptation of excalidraw.com's popovers); paste
-/// and undo/redo on the right.
+/// sheet (the spec's native adaptation of excalidraw.com's popovers); undo/redo
+/// on the right.
 private struct MobileActionRow: View {
     let controller: CanvasController
     let showsProperties: Bool
@@ -380,9 +375,6 @@ private struct MobileActionRow: View {
                     .accessibilityIdentifier("properties-sheet")
             }
             Spacer(minLength: 0)
-            #if !os(macOS)
-                PasteImageControl(controller: controller)
-            #endif
             Button("Undo", systemImage: "arrow.uturn.backward") { controller.undo() }
                 .controlButton(width: 32, height: 32)
                 .disabled(!controller.canUndo)
@@ -457,49 +449,3 @@ extension View {
             .background(controlFill, in: RoundedRectangle(cornerRadius: 8))
     }
 }
-
-#if !os(macOS)
-    /// The system's paste button: the one way to paste an image or Elements on an iPhone,
-    /// which has no keyboard shortcut or menu to do it. Pasting through it
-    /// needs no permission prompt.
-    private struct PasteImageControl: UIViewRepresentable {
-        let controller: CanvasController
-
-        /// What the button pastes into. The Canvas is not there when the button
-        /// is made, so this hands the paste on to it when it happens.
-        @MainActor final class Target: UIResponder {
-            let controller: CanvasController
-
-            init(_ controller: CanvasController) {
-                self.controller = controller
-                super.init()
-                pasteConfiguration = UIPasteConfiguration(acceptableTypeIdentifiers: CanvasMetalView.pasteTypes)
-            }
-
-            override func paste(itemProviders: [NSItemProvider]) {
-                controller.canvas?.paste(itemProviders: itemProviders)
-            }
-        }
-
-        func makeCoordinator() -> Target { Target(controller) }
-
-        func makeUIView(context: Context) -> UIPasteControl {
-            let configuration = UIPasteControl.Configuration()
-            configuration.displayMode = .iconOnly
-            configuration.baseBackgroundColor = .secondarySystemBackground
-            configuration.baseForegroundColor = .label
-            configuration.cornerStyle = .capsule
-            let control = UIPasteControl(configuration: configuration)
-            control.target = context.coordinator
-            return control
-        }
-
-        func updateUIView(_ control: UIPasteControl, context: Context) {}
-
-        /// Its own size: left to fill the space it is offered, it covers the
-        /// whole Canvas and takes every tap.
-        func sizeThatFits(_ proposal: ProposedViewSize, uiView: UIPasteControl, context: Context) -> CGSize? {
-            uiView.intrinsicContentSize
-        }
-    }
-#endif

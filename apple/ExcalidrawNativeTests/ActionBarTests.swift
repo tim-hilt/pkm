@@ -166,11 +166,5 @@ import Testing
         // Nothing came of it: the Selection and the bar are as they were.
         #expect(setup.editor.selection() == ["box"])
         #expect(setup.controller.actionBar != nil)
-        // The Canvas has no menu of its own to open.
-        #if os(macOS)
-            #expect(setup.canvas.menu == nil)
-        #else
-            #expect(!setup.canvas.interactions.contains { $0 is UIContextMenuInteraction })
-        #endif
     }
 }

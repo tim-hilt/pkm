@@ -49,7 +49,7 @@ import Testing
         @Test func theElementMenuHasTheEntriesInOrderWithArrangeAsASubmenu() throws {
             let menu = try makeSetup().canvas.elementMenu(canGroup: false, canUngroup: false)
 
-            #expect(titles(menu) == ["Cut", "Copy", "Duplicate", "Group", "Ungroup", "Arrange", "Delete"])
+            #expect(titles(menu) == ["Cut", "Copy", "Paste", "Duplicate", "Group", "Ungroup", "Arrange", "Delete"])
             let arrange = try #require(menu.children.first { $0.title == "Arrange" } as? UIMenu)
             #expect(titles(arrange) == ["Bring to Front", "Bring Forward", "Send Backward", "Send to Back"])
             #expect(try action("Delete", in: menu).attributes.contains(.destructive))
@@ -85,12 +85,50 @@ import Testing
             #expect(try action("Ungroup", in: menu).attributes.contains(.disabled))
         }
 
-        @Test func nothingOpensOnEmptyCanvasOrForThePencil() throws {
+        @Test func theCanvasMenuHasPasteAndSelectAll() throws {
+            let menu = try makeSetup().canvas.canvasMenu()
+
+            #expect(titles(menu) == ["Paste", "Select All"])
+        }
+
+        @Test func pressingEmptyCanvasGivesTheCanvasMenuAndKeepsTheSelection() throws {
+            let setup = try makeSetup()
+            _ = try #require(press(setup, at: CGPoint(x: 150, y: 125)))
+
+            let menu = try #require(press(setup, at: CGPoint(x: 600, y: 500)))
+
+            #expect(titles(menu) == ["Paste", "Select All"])
+            #expect(setup.editor.selection() == ["a"])
+            try action("Select All", in: menu).performWithSender(nil, target: nil)
+            #expect(Set(setup.editor.selection()) == ["a", "b"])
+        }
+
+        @Test func nothingOpensForThePencil() throws {
             let setup = try makeSetup()
 
-            #expect(press(setup, at: CGPoint(x: 600, y: 500)) == nil)
             #expect(press(setup, at: CGPoint(x: 150, y: 125), kind: .pencil) == nil)
+            #expect(press(setup, at: CGPoint(x: 600, y: 500), kind: .pencil) == nil)
             #expect(setup.editor.selection().isEmpty)
+        }
+
+        // MARK: Paste
+
+        @Test func pasteFromTheMenuLandsAroundThePressPoint() async throws {
+            let setup = try makeSetup()
+            setup.editor.perform(command: .selectAll)
+            setup.canvas.copy(nil)
+            let text = try #require(UIPasteboard.general.string)
+            setup.editor.perform(command: .selectAll)
+            setup.canvas.perform { $0.deleteSelection() }
+            #expect(setup.editor.elementCount() == 0)
+
+            _ = try #require(press(setup, at: CGPoint(x: 600, y: 500)))
+            setup.canvas.paste(itemProviders: [NSItemProvider(object: text as NSString)])
+
+            #expect(await eventually { setup.editor.elementCount() == 2 })
+            // The two rectangles span 300 wide, centred on the press point.
+            let saved = String(decoding: setup.editor.save(), as: UTF8.self)
+            #expect(saved.contains(#""x": 450"#) || saved.contains(#""x": 450."#))
         }
 
         // MARK: What the entries do

@@ -85,15 +85,16 @@ extension CanvasMetalView {
             }
         }
 
-        /// The Elements among the pasted `providers`, if any.
-        func pasteElements(from providers: [NSItemProvider]) async -> Bool {
+        /// The Elements among the pasted `providers`, if any, around `point`
+        /// as for `pasteClipboardText`.
+        func pasteElements(from providers: [NSItemProvider], at point: CGPoint? = nil) async -> Bool {
             for provider in providers where provider.canLoadObject(ofClass: NSString.self) {
                 let text = await withCheckedContinuation { continuation in
                     _ = provider.loadObject(ofClass: NSString.self) { text, _ in
                         continuation.resume(returning: text as? String)
                     }
                 }
-                if let text, pasteClipboardText(text) { return true }
+                if let text, pasteClipboardText(text, at: point) { return true }
             }
             return false
         }

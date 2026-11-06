@@ -95,11 +95,13 @@ extension CanvasMetalView {
 
         override var canBecomeFirstResponder: Bool { true }
 
-        /// A paste: ⌘V with a keyboard, or a paste button (`UIPasteControl`).
+        /// A paste: ⌘V with a keyboard, or the Paste item of the Context menu,
+        /// which puts it around where the menu was opened.
         override func paste(itemProviders: [NSItemProvider]) {
+            let point = contextMenuPoint
             Task {
-                if await pasteElements(from: itemProviders) { return }
-                await insertImages(from: await Self.imageData(of: itemProviders))
+                if await pasteElements(from: itemProviders, at: point) { return }
+                await insertImages(from: await Self.imageData(of: itemProviders), at: point)
             }
         }
 

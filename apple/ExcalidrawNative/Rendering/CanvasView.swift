@@ -51,6 +51,9 @@ final class CanvasMetalView: MTKView {
         /// about to show.
         var editMenuInteraction: UIEditMenuInteraction?
         var pendingContextMenu: UIMenu?
+        /// Where the open menu was pressed, in the Canvas's coordinates, for a
+        /// Paste from it.
+        var contextMenuPoint: CGPoint?
     #endif
 
     init() {
