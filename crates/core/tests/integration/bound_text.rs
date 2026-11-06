@@ -961,3 +961,116 @@ fn editing_lays_a_label_out_as_excalidraw_did_in_its_own_fixture() {
         );
     }
 }
+
+// --- The text Tool on shapes ---------------------------------------------------------
+
+fn text_tap(editor: &mut Editor, at: (f64, f64)) {
+    editor.set_tool(Tool::Text);
+    tap(editor, "finger", at, 50.0);
+}
+
+fn live_texts(editor: &Editor) -> usize {
+    saved_elements(editor)
+        .iter()
+        .filter(|e| e.get("type").and_then(Value::as_str) == Some("text"))
+        .filter(|e| e.get("isDeleted").and_then(Value::as_bool) != Some(true))
+        .count()
+}
+
+#[test]
+fn a_text_tool_tap_near_the_middle_of_a_shape_makes_its_label() {
+    for kind in ["rectangle", "diamond", "ellipse"] {
+        let mut editor = scene_of(kind);
+        text_tap(&mut editor, (MIDDLE.0 + 20.0, MIDDLE.1 - 20.0));
+        let shown = open(&editor);
+        assert!(shown.fixed_width, "{kind}");
+        assert_eq!(shown.align, TextAlign::Center, "{kind}");
+        editor.set_editing_text("Hi");
+        editor.commit_text();
+        assert_eq!(string(&label(&editor), "containerId"), "s", "{kind}");
+    }
+}
+
+#[test]
+fn a_text_tool_tap_on_a_label_edits_it() {
+    let mut editor = labelled("rectangle", 200.0, "Hi");
+    text_tap(&mut editor, MIDDLE);
+    assert_eq!(open(&editor).text, "Hi");
+    editor.set_editing_text("Hello");
+    editor.commit_text();
+    assert_eq!(live_texts(&editor), 1);
+    assert_eq!(string(&label(&editor), "text"), "Hello");
+}
+
+#[test]
+fn a_text_tool_tap_in_a_shape_but_away_from_the_middle_makes_a_free_text() {
+    let mut editor = scene_of("rectangle");
+    text_tap(&mut editor, (110.0, 110.0));
+    assert!(!open(&editor).fixed_width);
+    editor.set_editing_text("Free");
+    editor.commit_text();
+    assert!(
+        label(&editor)
+            .get("containerId")
+            .is_none_or(|v| v.as_str().is_none())
+    );
+}
+
+#[test]
+fn a_text_tool_tap_on_a_labelled_shape_away_from_its_label_makes_a_free_text() {
+    let mut editor = labelled("rectangle", 200.0, "Hi");
+    text_tap(&mut editor, (110.0, 110.0));
+    assert_eq!(open(&editor).text, "");
+    assert!(!open(&editor).fixed_width);
+}
+
+#[test]
+fn a_text_tool_tap_on_empty_canvas_makes_a_free_text() {
+    let mut editor = scene_of("rectangle");
+    text_tap(&mut editor, (600.0, 600.0));
+    assert!(!open(&editor).fixed_width);
+}
+
+#[test]
+fn the_middle_snap_is_30_view_points_whatever_the_zoom() {
+    // Whether a text-Tool tap `dx` view points right of the middle, zoomed
+    // in, makes a label.
+    let makes_label = |dx: f64| {
+        let mut editor = scene_of("rectangle");
+        for _ in 0..10 {
+            editor.zoom_in();
+        }
+        let view = editor.viewport();
+        let (ox, oy) = view.origin();
+        let middle = ((MIDDLE.0 - ox) * view.zoom(), (MIDDLE.1 - oy) * view.zoom());
+        text_tap(&mut editor, (middle.0 + dx, middle.1));
+        open(&editor).fixed_width
+    };
+    assert!(makes_label(25.0));
+    assert!(!makes_label(35.0));
+}
+
+#[test]
+fn text_tool_labels_undo_cancel_and_vanish_when_empty_as_double_tap_ones_do() {
+    // Undo.
+    let mut editor = scene_of("rectangle");
+    text_tap(&mut editor, MIDDLE);
+    editor.set_editing_text("Hi");
+    editor.commit_text();
+    editor.undo();
+    assert_eq!(live_texts(&editor), 0);
+
+    // Cancel.
+    let mut editor = scene_of("rectangle");
+    text_tap(&mut editor, MIDDLE);
+    editor.set_editing_text("Hi");
+    editor.cancel_text();
+    assert_eq!(live_texts(&editor), 0);
+
+    // Emptying a label deletes it.
+    let mut editor = labelled("rectangle", 200.0, "Hi");
+    text_tap(&mut editor, MIDDLE);
+    editor.set_editing_text("  ");
+    editor.commit_text();
+    assert_eq!(live_texts(&editor), 0);
+}

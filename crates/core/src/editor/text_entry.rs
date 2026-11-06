@@ -185,7 +185,7 @@ impl Editor {
     }
 
     /// Follows the pointer for a tap that opens the text view (with the text
-    /// Tool, on a text if there is one at the tap) or, if it is open, closes
+    /// Tool; see [`Editor::text_target`]) or, if it is open, closes
     /// it, keeping the text.
     pub(super) fn follow_text_tap(&mut self, event: PointerEvent) {
         let Some(Recognized::Tap(tap)) = self.taps.track(event) else {
@@ -195,10 +195,64 @@ impl Editor {
             self.commit_text();
             return;
         }
-        let at = self.navigation.viewport().scene_at(tap.x, tap.y);
-        let existing = self
-            .hit(tap.x, tap.y, tap.kind)
-            .filter(|id| self.is_free_text(id));
-        self.begin_text(existing, at);
+        match self.text_target(tap.x, tap.y, tap.kind) {
+            TextTarget::Free(existing, at) => self.begin_text(existing, at),
+            TextTarget::Label(container) => self.begin_label(&container),
+        }
+    }
+
+    fn holds_label(&self, id: &str) -> bool {
+        self.scene
+            .element_by_id(id)
+            .is_some_and(|e| text::takes_label(e.kind()))
+    }
+
+    /// What a text-Tool tap at the view point `(x, y)` edits or makes (as
+    /// Excalidraw's `getTargetAt`): a free text or the label that is there,
+    /// else the label of a shape tapped near its middle, else a new free text.
+    fn text_target(&self, x: f64, y: f64, kind: PointerKind) -> TextTarget {
+        let viewport = self.navigation.viewport();
+        let at = viewport.scene_at(x, y);
+        let hit = self.hit(x, y, kind);
+        if let Some(id) = hit.as_ref().filter(|id| self.is_free_text(id)) {
+            return TextTarget::Free(Some(id.clone()), at);
+        }
+        // A hollow shape is not hit inside, but still holds a label.
+        let Some(id) = hit
+            .filter(|id| self.holds_label(id))
+            .or_else(|| self.label_container_at(at))
+        else {
+            return TextTarget::Free(None, at);
+        };
+        let Some(shape) = self.scene.element_by_id(&id) else {
+            return TextTarget::Free(None, at);
+        };
+        let on_label = text::label_of(&self.scene, &id)
+            .is_some_and(|l| Frame::of(&l).contains_turned(at, l.angle(), 0.0));
+        let frame = Frame::of(&shape);
+        let middle = (
+            (frame.min.0 + frame.max.0) / 2.0,
+            (frame.min.1 + frame.max.1) / 2.0,
+        );
+        let snap = TEXT_TO_CENTER_SNAP_THRESHOLD / viewport.zoom();
+        let near_middle = (at.0 - middle.0).hypot(at.1 - middle.1) <= snap;
+        let unlabelled = !shape.has_bound_text();
+        if on_label || (unlabelled && near_middle) {
+            TextTarget::Label(id)
+        } else {
+            TextTarget::Free(None, at)
+        }
     }
 }
+
+/// What a text-Tool tap edits or makes.
+enum TextTarget {
+    /// A free text: the one that is there, or a new one at the Scene point.
+    Free(Option<String>, Point),
+    /// The label of the shape with this id, made if it has none.
+    Label(String),
+}
+
+/// How near the middle of a shape, in view points, a text-Tool tap makes
+/// its label (Excalidraw's `TEXT_TO_CENTER_SNAP_THRESHOLD`).
+const TEXT_TO_CENTER_SNAP_THRESHOLD: f64 = 30.0;
