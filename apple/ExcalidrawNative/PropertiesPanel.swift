@@ -155,7 +155,7 @@ struct PropertiesPanel: View {
             .scrollBounceBehavior(.basedOnSize)
             .frame(width: width, height: min(contentHeight, maxHeight))
             .frame(maxWidth: width == nil ? .infinity : nil)
-            .background(.background, in: RoundedRectangle(cornerRadius: 8))
+            .background(Chrome.island, in: RoundedRectangle(cornerRadius: 8))
             .shadow(color: .black.opacity(0.17), radius: 0.5)
             .shadow(color: .black.opacity(0.05), radius: 7, y: 7)
         }
@@ -207,7 +207,7 @@ private struct IconButton: View {
             icon.view
                 .frame(width: 32, height: 32)
                 .background(
-                    isSelected ? Color.indigo.opacity(0.18) : Color.primary.opacity(0.05),
+                    isSelected ? Chrome.optionSelected : Color.primary.opacity(0.05),
                     in: RoundedRectangle(cornerRadius: 8)
                 )
                 .contentShape(Rectangle().inset(by: -6))

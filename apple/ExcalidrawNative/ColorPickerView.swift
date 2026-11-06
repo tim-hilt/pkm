@@ -66,7 +66,7 @@ struct ColorPickerView: View {
             hexField
         }
         .padding(10)
-        .background(Color(white: 0.97), in: RoundedRectangle(cornerRadius: 8))
+        .background(Chrome.pickerPanel, in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var hexField: some View {
@@ -86,8 +86,8 @@ struct ColorPickerView: View {
             }
             .padding(.horizontal, 8)
             .frame(minHeight: 36)
-            .background(.white, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(white: 0.92), lineWidth: 1))
+            .background(Chrome.inputFill, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Chrome.inputBorder, lineWidth: 1))
             if hexIsInvalid {
                 Text("Not a valid color").font(.caption).foregroundStyle(.red)
             }
@@ -166,7 +166,7 @@ private struct Checkerboard: View {
     var body: some View {
         Canvas { context, size in
             let cell = size.width / 3
-            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.white))
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Chrome.checkerboard))
             for row in 0..<3 {
                 for column in 0..<3 where (row + column) % 2 == 0 {
                     context.fill(

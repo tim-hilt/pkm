@@ -141,7 +141,7 @@ struct DrawingView: View {
 private struct Island: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .background(.background, in: RoundedRectangle(cornerRadius: 8))
+            .background(Chrome.island, in: RoundedRectangle(cornerRadius: 8))
             .shadow(color: .black.opacity(0.17), radius: 0.5)
             .shadow(color: .black.opacity(0.08), radius: 1.5)
             .shadow(color: .black.opacity(0.05), radius: 7, y: 7)
@@ -157,12 +157,6 @@ extension View {
             .contentShape(Rectangle().inset(by: -(44 - min(width, height)) / 2))
     }
 }
-
-/// Excalidraw's grey control group fill, `#ececf4`.
-private let controlFill = Color(red: 0xEC / 255, green: 0xEC / 255, blue: 0xF4 / 255)
-/// Excalidraw's checked-tool fill `#e0dfff` and glyph `#030064`.
-private let checkedFill = Color(red: 0xE0 / 255, green: 0xDF / 255, blue: 1)
-private let checkedGlyph = Color(red: 3 / 255, green: 0, blue: 0x64 / 255)
 
 #if !os(macOS)
     /// Excalidraw's main menu in the navigation bar, as the system's own
@@ -254,7 +248,7 @@ struct ToolBar: View {
     }
 
     private var divider: some View {
-        Rectangle().fill(Color(red: 0xF1 / 255, green: 0xF0 / 255, blue: 1))
+        Rectangle().fill(Chrome.divider)
             .frame(width: 1, height: 24).padding(.horizontal, 4)
     }
 
@@ -264,9 +258,9 @@ struct ToolBar: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.subheadline)
-                .foregroundStyle(checked ? checkedGlyph : .primary)
+                .foregroundStyle(checked ? Chrome.checkedGlyph : .primary)
                 .controlButton()
-                .background(checked ? checkedFill : .clear, in: RoundedRectangle(cornerRadius: 8))
+                .background(checked ? Chrome.checkedFill : .clear, in: RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
         .buttonPointer()
@@ -334,9 +328,9 @@ private struct MobileToolBar: View {
         } label: {
             Image(systemName: on ? "lock" : "lock.open")
                 .font(.subheadline)
-                .foregroundStyle(on ? checkedGlyph : .primary)
+                .foregroundStyle(on ? Chrome.checkedGlyph : .primary)
                 .controlButton()
-                .background(on ? checkedFill : .clear, in: RoundedRectangle(cornerRadius: 4))
+                .background(on ? Chrome.checkedFill : .clear, in: RoundedRectangle(cornerRadius: 4))
         }
         .buttonStyle(.plain)
         .buttonPointer()
@@ -355,9 +349,9 @@ private struct MobileToolButton: View {
         Button(action: action) {
             Image(systemName: ToolBar.symbol(tool))
                 .font(.subheadline)
-                .foregroundStyle(checked ? checkedGlyph : .primary)
+                .foregroundStyle(checked ? Chrome.checkedGlyph : .primary)
                 .controlButton()
-                .background(checked ? checkedFill : .clear, in: RoundedRectangle(cornerRadius: 4))
+                .background(checked ? Chrome.checkedFill : .clear, in: RoundedRectangle(cornerRadius: 4))
         }
         .buttonStyle(.plain)
         .buttonPointer()
@@ -381,7 +375,7 @@ private struct MobileActionRow: View {
                 Button("Properties", systemImage: "slider.horizontal.3") { sheetShown = true }
                     .controlButton(width: 32, height: 32)
                     .buttonPointer()
-                    .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                    .background(Chrome.island, in: RoundedRectangle(cornerRadius: 8))
                     .accessibilityIdentifier("properties-sheet")
             }
             Spacer(minLength: 0)
@@ -431,6 +425,6 @@ extension View {
         labelStyle(.iconOnly)
             .buttonStyle(.borderless)
             .tint(.primary)
-            .background(controlFill, in: RoundedRectangle(cornerRadius: 8))
+            .background(Chrome.controlFill, in: RoundedRectangle(cornerRadius: 8))
     }
 }
