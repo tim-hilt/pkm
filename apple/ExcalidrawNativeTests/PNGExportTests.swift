@@ -73,6 +73,18 @@ import Testing
         #expect(PNGExport.render(try twoRectangles(), scope: .selection, background: true) == nil, "nothing selected")
     }
 
+    @Test func anExportMadeInDarkModeMatchesTheLightExport() throws {
+        let editor = try twoRectangles()
+        let light = try #require(PNGExport.render(editor, scope: .scene, background: true))
+
+        editor.setDarkMode(on: true)
+        let dark = try #require(PNGExport.render(editor, scope: .scene, background: true))
+
+        #expect(dark.width == light.width && dark.height == light.height)
+        #expect(dark.bgra == light.bgra)
+        #expect(dark.pixel(2, 2) == (255, 255, 255), "paper stays white")
+    }
+
     @Test func theExportIsAPNG() throws {
         let data = try #require(PNGExport.pngData(try twoRectangles(), scope: .scene, background: false))
 

@@ -414,6 +414,16 @@ impl Geometry {
         }
     }
 
+    /// Replaces the colour of every part and line of text by `f` of it.
+    pub(crate) fn map_colors(&mut self, f: impl Fn(u32) -> u32) {
+        for part in &mut self.parts {
+            part.color = f(part.color);
+        }
+        for line in &mut self.text_lines {
+            line.color = f(line.color);
+        }
+    }
+
     /// Appends everything in `other` as it is, with its ops, text and file
     /// ids moved to the end of these buffers and its text lines and images
     /// moved behind the parts already here.

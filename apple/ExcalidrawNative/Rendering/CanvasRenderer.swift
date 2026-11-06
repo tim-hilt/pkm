@@ -82,9 +82,14 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
     /// Frames rendered so far. Stays constant while nothing changes, which is
     /// how "no continuous render loop" is verified.
     private(set) var framesRendered = 0
-    /// Whether frames start as white paper; transparent otherwise, for
-    /// exporting images without background.
+    /// Whether frames start as paper; transparent otherwise, for exporting
+    /// images without background.
     var drawsPaper = true
+    /// The colour of the paper as `0xRRGGBBAA`: the Canvas colour the core
+    /// reports (`Editor.canvasColor`); white by default.
+    var paperColor: UInt32 = 0xffff_ffff {
+        didSet { if paperColor != oldValue { onNeedsDisplay?() } }
+    }
 
     private let queue: any MTLCommandQueue
     private let pipeline: any MTLRenderPipelineState
@@ -338,6 +343,12 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         onNeedsDisplay?()
     }
 
+    /// `rgba` (`0xRRGGBBAA`) as the colour to clear to.
+    private static func clearColor(_ rgba: UInt32) -> MTLClearColor {
+        let channel = { (shift: UInt32) in Double((rgba >> shift) & 0xff) / 255 }
+        return MTLClearColor(red: channel(24), green: channel(16), blue: channel(8), alpha: channel(0))
+    }
+
     /// Renders one frame into `target` (a single-sampled 2D texture in
     /// `pixelFormat` with `.renderTarget` usage, such as a drawable's) and
     /// presents `drawable` if given. The target is cleared to the Canvas
@@ -359,7 +370,7 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         pass.colorAttachments[0].loadAction = .clear
         pass.colorAttachments[0].storeAction = .multisampleResolve
         pass.colorAttachments[0].clearColor =
-            drawsPaper ? MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1) : MTLClearColor()
+            drawsPaper ? Self.clearColor(paperColor) : MTLClearColor()
         pass.stencilAttachment.texture = stencil
         pass.stencilAttachment.loadAction = .clear
         pass.stencilAttachment.clearStencil = 0

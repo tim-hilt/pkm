@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::binding::{self, Attachments, End};
 use crate::box_select::BoxSelect;
 use crate::clipboard;
+use crate::color::{dark_mode, parse_color};
 use crate::context_menu::ContextMenu;
 use crate::delete;
 use crate::draw_freedraw::StrokeDrawing;
@@ -100,6 +101,8 @@ pub struct Editor {
     generation: u64,
     /// What [`Editor::geometry`] generated for shapes, see `GeometryCache`.
     geometry_cache: RefCell<GeometryCache>,
+    /// Colours are shown dark, see [`Editor::set_dark_mode`].
+    dark_mode: bool,
     /// Changes whenever anything shown on the Canvas does, see
     /// [`Editor::revision`].
     revision: u64,
@@ -189,6 +192,7 @@ impl Editor {
             scene: Scene::empty(),
             generation: next_generation(),
             geometry_cache: RefCell::default(),
+            dark_mode: false,
             revision: 0,
             navigation: Navigation::default(),
             tool: Tool::default(),
@@ -298,7 +302,9 @@ impl Editor {
     pub fn geometry(&self) -> Geometry {
         // The text view shows the text that is being edited.
         let editing = self.text.as_ref().map(TextEditing::handle);
-        let geometry = self.geometry_of(self.generation, |e| editing != Some(e.handle()));
+        let geometry = self.geometry_of(self.generation, self.dark_mode, |e| {
+            editing != Some(e.handle())
+        });
         self.prune_geometry_cache();
         geometry
     }

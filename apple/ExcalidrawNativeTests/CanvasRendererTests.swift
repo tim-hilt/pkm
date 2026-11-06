@@ -28,6 +28,22 @@ import Testing
         #expect(frame.red(20, 20) == 255, "outside")
     }
 
+    @Test func theFrameIsClearedToTheCanvasColourTheCoreReports() throws {
+        let editor = Editor()
+        try editor.load(
+            bytes: Data(
+                ##"{"type":"excalidraw","version":2,"elements":[],"appState":{"viewBackgroundColor":"#ffc9c9"}}"##.utf8)
+        )
+        editor.setDarkMode(on: true)
+        let renderer = try OffscreenRender.makeRenderer()
+        renderer.setGeometry(editor.geometry())
+        renderer.paperColor = editor.canvasColor()
+
+        let frame = OffscreenRender.draw(with: renderer)
+
+        #expect(frame.pixel(10, 10) == (0x5a, 0x2c, 0x2c), "#ffc9c9 as excalidraw.com's dark theme shows it")
+    }
+
     @Test func edgesAreAntiAliased() throws {
         // The top edge spans y = 99...101. Shifting the view by half a unit makes it
         // span 98.5...100.5, so pixel row 98 is half covered: neither paper nor ink.

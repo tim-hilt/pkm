@@ -253,6 +253,13 @@ pub struct Shortcut {
     pub command: Command,
 }
 
+/// How Excalidraw shows a CSS colour in its dark theme, for swatches; see
+/// [`excalidraw_native_core::dark_mode_color`].
+#[uniffi::export]
+pub fn dark_mode_color(css: String) -> String {
+    excalidraw_native_core::dark_mode_color(&css)
+}
+
 /// Every keyboard shortcut; see [`excalidraw_native_core::shortcuts`].
 #[uniffi::export]
 pub fn shortcuts() -> Vec<Shortcut> {
@@ -472,6 +479,24 @@ impl Editor {
     /// Whether the Tool lock is on: the Tool stays after drawing a shape.
     pub fn tool_lock(&self) -> bool {
         self.editor().tool_lock()
+    }
+
+    /// Shows colours dark (the system appearance); see
+    /// [`excalidraw_native_core::Editor::set_dark_mode`]. It does not change
+    /// `revision`: redraw after calling it.
+    pub fn set_dark_mode(&self, on: bool) {
+        self.editor().set_dark_mode(on);
+    }
+
+    /// Whether colours are shown dark.
+    pub fn dark_mode(&self) -> bool {
+        self.editor().dark_mode()
+    }
+
+    /// The colour of the Canvas as `0xRRGGBBAA`, as displayed; see
+    /// [`excalidraw_native_core::Editor::canvas_color`].
+    pub fn canvas_color(&self) -> u32 {
+        self.editor().canvas_color()
     }
 
     /// Turns the Tool lock on or off; turning it off returns to selection.

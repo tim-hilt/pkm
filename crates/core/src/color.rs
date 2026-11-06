@@ -254,6 +254,55 @@ fn pack(rgb: Rgb, alpha: f64) -> u32 {
     r << 24 | g << 16 | b << 8 | byte(alpha * 255.0)
 }
 
+/// How Excalidraw shows `rgba` in its dark theme (`applyDarkModeFilter`, the
+/// CSS filter `invert(93%) hue-rotate(180deg)`, each channel rounded after
+/// the invert and again after the rotation). Alpha is kept.
+pub(crate) fn dark_mode(rgba: u32) -> u32 {
+    const INVERT: f64 = 0.93;
+    let [r, g, b] = [rgba >> 24, rgba >> 16, rgba >> 8].map(|c| {
+        let c = f64::from(c & 0xff);
+        ((c * (1.0 - INVERT) + (255.0 - c) * INVERT).clamp(0.0, 255.0) + 0.5).floor() / 255.0
+    });
+    // 180 degrees; `sin` is not exactly 0, as in Excalidraw.
+    let (sin, cos) = std::f64::consts::PI.sin_cos();
+    let rotate = |m: [f64; 3]| {
+        let v = r * m[0] + g * m[1] + b * m[2];
+        (v.clamp(0.0, 1.0) * 255.0 + 0.5).floor() as u32
+    };
+    let (r, g, b) = (
+        rotate([
+            0.213 + cos * 0.787 - sin * 0.213,
+            0.715 - cos * 0.715 - sin * 0.715,
+            0.072 - cos * 0.072 + sin * 0.928,
+        ]),
+        rotate([
+            0.213 - cos * 0.213 + sin * 0.143,
+            0.715 + cos * 0.285 + sin * 0.14,
+            0.072 - cos * 0.072 - sin * 0.283,
+        ]),
+        rotate([
+            0.213 - cos * 0.213 - sin * 0.787,
+            0.715 - cos * 0.715 + sin * 0.715,
+            0.072 + cos * 0.928 + sin * 0.072,
+        ]),
+    );
+    r << 24 | g << 16 | b << 8 | rgba & 0xff
+}
+
+/// [`dark_mode`] for a CSS colour, written as Excalidraw writes it:
+/// `#rrggbb`, with `aa` appended if the colour is not opaque. `transparent`
+/// stays `transparent`.
+pub fn dark_mode_color(css: &str) -> String {
+    if css.trim().eq_ignore_ascii_case("transparent") {
+        return "transparent".to_owned();
+    }
+    let dark = dark_mode(parse_color(css));
+    match dark & 0xff {
+        0xff => format!("#{:06x}", dark >> 8),
+        alpha => format!("#{:06x}{alpha:02x}", dark >> 8),
+    }
+}
+
 /// The CSS colour names tinycolor knows, sorted, as `0xRRGGBB`.
 const NAMES: &[(&str, u32)] = &[
     ("aliceblue", 0xf0f8ff),

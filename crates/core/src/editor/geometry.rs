@@ -27,6 +27,8 @@ fn generated_by(
 ///   is the version it is drawn with, which also changes with its container.
 /// * `background`: the colour of the Canvas, which fills outline arrowheads;
 ///   a change empties the cache.
+/// * `dark`: whether colours are the dark display colours; a change empties
+///   the cache.
 /// * `measurer`: what texts are laid out with; setting one empties the cache.
 ///
 /// The eraser fade is not in the key: entries are cached unfaded and the fade
@@ -38,6 +40,7 @@ fn generated_by(
 pub(super) struct GeometryCache {
     generation: u64,
     background: String,
+    dark: bool,
     /// By handle: the version, what was generated and the `epoch` of the last
     /// assembly that used it.
     elements: HashMap<u32, Entry>,
@@ -56,12 +59,14 @@ struct Entry {
 }
 
 impl GeometryCache {
-    /// Empties the cache unless it is for `generation` and `background`.
-    fn begin(&mut self, generation: u64, background: &str) {
-        if self.generation != generation || self.background != background {
+    /// Empties the cache unless it is for `generation`, `background` and
+    /// `dark`.
+    fn begin(&mut self, generation: u64, background: &str, dark: bool) {
+        if self.generation != generation || self.background != background || self.dark != dark {
             self.elements.clear();
             self.generation = generation;
             self.background = background.to_owned();
+            self.dark = dark;
         }
         self.epoch += 1;
     }
@@ -113,6 +118,37 @@ impl GeometryCache {
 }
 
 impl Editor {
+    /// Shows colours as Excalidraw's dark theme does (ADR-0010) in
+    /// [`Editor::geometry`] and [`Editor::canvas_color`]; off by default.
+    /// Clients set it from the system appearance. It changes only what is
+    /// shown: the Scene, [`Editor::revision`], the Selection, the history,
+    /// [`Editor::properties`] and [`Editor::export`] stay as they are, so
+    /// clients redraw after changing it. The geometry is regenerated once, and
+    /// has another [`Geometry::generation`].
+    pub fn set_dark_mode(&mut self, on: bool) {
+        if self.dark_mode != on {
+            self.dark_mode = on;
+            // What clients cached per Element has the old colours.
+            self.generation = next_generation();
+        }
+    }
+
+    /// Whether colours are shown dark, see [`Editor::set_dark_mode`].
+    pub fn dark_mode(&self) -> bool {
+        self.dark_mode
+    }
+
+    /// The colour of the Canvas as `0xRRGGBBAA`: `viewBackgroundColor`, as
+    /// displayed (so transformed in dark mode). Clients clear their frame to it.
+    pub fn canvas_color(&self) -> u32 {
+        let background = parse_color(self.scene.view_background_color());
+        if self.dark_mode {
+            dark_mode(background)
+        } else {
+            background
+        }
+    }
+
     /// What a PNG export of `scope` shows: its geometry and the Scene
     /// rectangle to rasterise, which is the Elements' bounds plus
     /// Excalidraw's export padding. A text being edited is in it as typed
@@ -124,7 +160,7 @@ impl Editor {
         };
         let bounds = bounds_of(self.shown().filter(|e| included(e)))?;
         Some(Export {
-            geometry: self.geometry_of(next_generation(), included),
+            geometry: self.geometry_of(next_generation(), false, included),
             x: bounds.min_x - EXPORT_PADDING,
             y: bounds.min_y - EXPORT_PADDING,
             width: bounds.max_x - bounds.min_x + 2.0 * EXPORT_PADDING,
@@ -136,14 +172,23 @@ impl Editor {
     pub(super) fn geometry_of(
         &self,
         generation: u64,
+        dark: bool,
         include: impl Fn(&Element) -> bool,
     ) -> Geometry {
         let background = self.scene.view_background_color();
         let mut cache = self.geometry_cache.borrow_mut();
-        cache.begin(self.generation, background);
+        cache.begin(self.generation, background, dark);
         let mut geometry = Geometry::with_capacity(generation, cache.sizes);
         let containers = Containers::new(&self.scene);
         let measurer = self.measurer.as_ref().map(|m| &*m.0);
+        // Elements are drawn in their own colours (outline arrowheads in the
+        // Canvas colour as written) and transformed as a whole, once.
+        let shown = |mut drawn: Geometry| {
+            if dark {
+                drawn.map_colors(dark_mode);
+            }
+            drawn
+        };
         for element in self.shown().filter(|e| include(e)) {
             let mark = geometry.mark();
             let handle = element.handle();
@@ -154,7 +199,7 @@ impl Editor {
                     cache.get(handle, version, |_| {
                         let mut drawn = Geometry::new();
                         text::draw(&element, &containers, measurer, &mut drawn);
-                        drawn
+                        shown(drawn)
                     })
                 }
                 ElementType::Image => cache.get(handle, element.version(), |_| {
@@ -165,7 +210,7 @@ impl Editor {
                 _ => cache.get(handle, element.version(), |background| {
                     let mut drawn = Geometry::new();
                     shape::draw(&element, background, &mut drawn);
-                    drawn
+                    shown(drawn)
                 }),
             };
             geometry.extend(drawn);

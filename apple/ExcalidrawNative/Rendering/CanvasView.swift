@@ -23,6 +23,7 @@ final class CanvasMetalView: MTKView {
     var editor: Editor? {
         didSet {
             renderer?.files = editor
+            applyAppearance()
             shownRevision = editor?.revision()
             shownOverlayRevision = nil
             reportViewSize()
@@ -30,6 +31,24 @@ final class CanvasMetalView: MTKView {
             syncOverlay()
             syncTextEditor()
         }
+    }
+
+    /// Whether the system appearance is dark. The Canvas shows the Scene in
+    /// Excalidraw's dark colours then (ADR-0010); changing it keeps the
+    /// Selection, the Text view and the undo history.
+    var isDark = false {
+        didSet { if isDark != oldValue { applyAppearance() } }
+    }
+
+    /// Tells the editor the appearance and shows what it reports for it: the
+    /// geometry again (other colours) and the Canvas colour. Does nothing
+    /// that the editor does not already show.
+    private func applyAppearance() {
+        guard let editor else { return }
+        let changed = editor.darkMode() != isDark
+        editor.setDarkMode(on: isDark)
+        renderer?.paperColor = editor.canvasColor()
+        if changed { renderer?.setGeometry(editor.geometry()) }
     }
 
     /// Called after input or a command reached the editor, for chrome that
@@ -276,6 +295,7 @@ final class CanvasMetalView: MTKView {
         guard let editor, editor.revision() != shownRevision else { return }
         shownRevision = editor.revision()
         renderer?.setGeometry(editor.geometry())
+        renderer?.paperColor = editor.canvasColor()
         onSceneChange?()
     }
 
@@ -554,13 +574,13 @@ struct CanvasView {
     /// Called when the Scene changed.
     var onSceneChange: (() -> Void)?
 
-    @MainActor private func makeCanvas() -> CanvasMetalView {
+    @MainActor private func makeCanvas(isDark: Bool) -> CanvasMetalView {
         let canvas = CanvasMetalView()
-        update(canvas)
+        update(canvas, isDark: isDark)
         return canvas
     }
 
-    @MainActor private func update(_ canvas: CanvasMetalView) {
+    @MainActor private func update(_ canvas: CanvasMetalView, isDark: Bool) {
         // SwiftUI updates this view for reasons that have nothing to do with
         // the Scene (a chrome state change); the Canvas must not be reset to
         // the geometry of the hand-over then.
@@ -568,6 +588,7 @@ struct CanvasView {
             canvas.renderer?.setGeometry(geometry)
             canvas.editor = editor
         }
+        canvas.isDark = isDark
         canvas.onSceneChange = onSceneChange
         controller.canvas = canvas
     }
@@ -575,13 +596,21 @@ struct CanvasView {
 
 #if os(macOS)
     extension CanvasView: NSViewRepresentable {
-        func makeNSView(context: Context) -> CanvasMetalView { makeCanvas() }
-        func updateNSView(_ canvas: CanvasMetalView, context: Context) { update(canvas) }
+        func makeNSView(context: Context) -> CanvasMetalView {
+            makeCanvas(isDark: context.environment.colorScheme == .dark)
+        }
+        func updateNSView(_ canvas: CanvasMetalView, context: Context) {
+            update(canvas, isDark: context.environment.colorScheme == .dark)
+        }
     }
 #else
     extension CanvasView: UIViewRepresentable {
-        func makeUIView(context: Context) -> CanvasMetalView { makeCanvas() }
-        func updateUIView(_ canvas: CanvasMetalView, context: Context) { update(canvas) }
+        func makeUIView(context: Context) -> CanvasMetalView {
+            makeCanvas(isDark: context.environment.colorScheme == .dark)
+        }
+        func updateUIView(_ canvas: CanvasMetalView, context: Context) {
+            update(canvas, isDark: context.environment.colorScheme == .dark)
+        }
     }
 #endif
 
