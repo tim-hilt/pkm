@@ -271,6 +271,7 @@ name = "excalidraw-native-cloud"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "excalidraw-native-core",
  "libc",
  "quick-xml",
  "ureq",

@@ -8,6 +8,8 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+# The merge of concurrent changes.
+excalidraw-native-core = { path = "../core" }
 # Basic auth.
 base64 = "0.22"
 # The PROPFIND answers of a WebDAV server.

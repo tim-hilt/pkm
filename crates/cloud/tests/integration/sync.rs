@@ -8,6 +8,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
 
 use excalidraw_native_cloud::{Blob, DirStorage, Storage, SyncState, sync_step};
+use excalidraw_native_core::json;
 
 struct Scratch(PathBuf);
 
@@ -337,7 +338,7 @@ fn only_changed_drawings_are_transferred() {
 }
 
 #[test]
-fn a_drawing_changed_on_both_sides_is_left_as_it_is_on_both() {
+fn a_drawing_that_cant_be_parsed_is_skipped_and_left_as_it_is_on_both_sides() {
     let cloud = Cloud::new();
     let (phone, tablet) = (Device::new(), Device::new());
     phone.write("Sketch.excalidraw", b"one");
@@ -349,6 +350,271 @@ fn a_drawing_changed_on_both_sides_is_left_as_it_is_on_both() {
     assert!(phone.sync(&cloud).is_empty());
     assert_eq!(phone.read("Sketch.excalidraw").unwrap(), b"phone");
     assert_eq!(cloud.read("Sketch.excalidraw").unwrap(), b"cloud!");
+
+    // Also when only the one side is no Drawing.
+    let (phone, tablet) = (Device::new(), Device::new());
+    phone.write("Fine.excalidraw", &drawing(&[element("a", 1, "a0", 0)]));
+    phone.sync(&cloud);
+    tablet.sync(&cloud);
+    phone.write("Fine.excalidraw", &drawing(&[element("a", 2, "a0", 5)]));
+    cloud.write("Fine.excalidraw", b"{broken");
+    let before = phone.read("Fine.excalidraw").unwrap();
+    assert!(phone.sync(&cloud).is_empty());
+    assert_eq!(phone.read("Fine.excalidraw").unwrap(), before);
+    assert_eq!(cloud.read("Fine.excalidraw").unwrap(), b"{broken");
+    // The cloud is fine, the local file is broken.
+    cloud.write("Fine.excalidraw", &before);
+    tablet.write("Fine.excalidraw", b"{broken");
+    tablet.sync(&cloud);
+    assert_eq!(tablet.read("Fine.excalidraw").unwrap(), b"{broken");
+    assert_eq!(cloud.read("Fine.excalidraw").unwrap(), before);
+}
+
+// --- Concurrent changes -----------------------------------------------------
+
+fn element(id: &str, version: u32, index: &str, x: u32) -> String {
+    format!(
+        r#"{{"id":"{id}","type":"rectangle","version":{version},"versionNonce":7,"index":"{index}","isDeleted":false,"x":{x}}}"#
+    )
+}
+
+fn erased(id: &str, version: u32, index: &str) -> String {
+    element(id, version, index, 0).replace("false", "true")
+}
+
+fn drawing(elements: &[String]) -> Vec<u8> {
+    with(elements, "{}", "{}")
+}
+
+fn with(elements: &[String], app_state: &str, files: &str) -> Vec<u8> {
+    format!(
+        r#"{{"type":"excalidraw","version":2,"elements":[{}],"appState":{app_state},"files":{files}}}"#,
+        elements.join(",")
+    )
+    .into_bytes()
+}
+
+/// `(id, version, isDeleted)` of the Elements of a Drawing's bytes, in order.
+fn elements_of(bytes: &[u8]) -> Vec<(String, u64, bool)> {
+    let value = json::parse(std::str::from_utf8(bytes).unwrap()).unwrap();
+    value
+        .get("elements")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| {
+            (
+                e.get("id").unwrap().as_str().unwrap().to_owned(),
+                e.get("version").unwrap().as_f64().unwrap() as u64,
+                e.get("isDeleted").unwrap().as_bool().unwrap(),
+            )
+        })
+        .collect()
+}
+
+fn e(id: &str, version: u64, deleted: bool) -> (String, u64, bool) {
+    (id.into(), version, deleted)
+}
+
+/// Two Devices that Synced one Drawing of Elements `a` and `b`, then went apart.
+fn two_devices_apart() -> (Cloud, Device, Device) {
+    let cloud = Cloud::new();
+    let (phone, tablet) = (Device::new(), Device::new());
+    phone.write(
+        "Sketch.excalidraw",
+        &drawing(&[element("a", 1, "a0", 0), element("b", 1, "a1", 0)]),
+    );
+    phone.sync(&cloud);
+    tablet.sync(&cloud);
+    (cloud, phone, tablet)
+}
+
+#[test]
+fn changes_made_on_two_devices_are_merged_on_every_device() {
+    let (cloud, phone, tablet) = two_devices_apart();
+    phone.write(
+        "Sketch.excalidraw",
+        &drawing(&[element("a", 2, "a0", 10), element("b", 1, "a1", 0)]),
+    );
+    tablet.write(
+        "Sketch.excalidraw",
+        &drawing(&[element("a", 1, "a0", 0), element("b", 3, "a1", 30)]),
+    );
+
+    phone.sync(&cloud); // reaches the cloud first
+    assert!(tablet.sync(&cloud).contains(&"Sketch".to_owned())); // merges, uploads
+    assert_eq!(phone.sync(&cloud), ["Sketch"]);
+
+    let merged = [e("a", 2, false), e("b", 3, false)];
+    assert_eq!(
+        elements_of(&phone.read("Sketch.excalidraw").unwrap()),
+        merged
+    );
+    assert_eq!(
+        elements_of(&tablet.read("Sketch.excalidraw").unwrap()),
+        merged
+    );
+    assert_eq!(
+        elements_of(&cloud.read("Sketch.excalidraw").unwrap()),
+        merged
+    );
+    assert_eq!(
+        phone.read("Sketch.excalidraw"),
+        cloud.read("Sketch.excalidraw")
+    );
+    assert_eq!(
+        tablet.read("Sketch.excalidraw"),
+        cloud.read("Sketch.excalidraw")
+    );
+}
+
+#[test]
+fn the_merge_is_the_last_synced_state() {
+    let (cloud, phone, tablet) = two_devices_apart();
+    phone.write("Sketch.excalidraw", &drawing(&[element("a", 2, "a0", 10)]));
+    tablet.write("Sketch.excalidraw", &drawing(&[element("b", 2, "a1", 20)]));
+    phone.sync(&cloud);
+    tablet.sync(&cloud);
+    phone.sync(&cloud);
+    cloud.take_calls();
+
+    assert!(tablet.sync(&cloud).is_empty());
+    assert!(phone.sync(&cloud).is_empty());
+    let calls = cloud.take_calls();
+    assert!(
+        calls.gets.is_empty() && calls.puts.is_empty(),
+        "idle after merge"
+    );
+}
+
+#[test]
+fn an_erase_on_one_side_and_edits_on_the_other_both_survive() {
+    let (cloud, phone, tablet) = two_devices_apart();
+    phone.write(
+        "Sketch.excalidraw",
+        &drawing(&[erased("a", 2, "a0"), element("b", 1, "a1", 0)]),
+    );
+    tablet.write(
+        "Sketch.excalidraw",
+        &drawing(&[element("a", 1, "a0", 0), element("b", 2, "a1", 5)]),
+    );
+    phone.sync(&cloud);
+    tablet.sync(&cloud);
+    phone.sync(&cloud);
+
+    let merged = [e("a", 2, true), e("b", 2, false)];
+    assert_eq!(
+        elements_of(&phone.read("Sketch.excalidraw").unwrap()),
+        merged
+    );
+    assert_eq!(
+        elements_of(&tablet.read("Sketch.excalidraw").unwrap()),
+        merged
+    );
+}
+
+#[test]
+fn images_added_on_two_devices_are_both_kept() {
+    let (cloud, phone, tablet) = two_devices_apart();
+    phone.write(
+        "Sketch.excalidraw",
+        &with(&[element("a", 1, "a0", 0)], "{}", r#"{"f1":{"id":"f1"}}"#),
+    );
+    tablet.write(
+        "Sketch.excalidraw",
+        &with(&[element("a", 1, "a0", 0)], "{}", r#"{"f2":{"id":"f2"}}"#),
+    );
+    phone.sync(&cloud);
+    tablet.sync(&cloud);
+    phone.sync(&cloud);
+
+    for bytes in [
+        phone.read("Sketch.excalidraw").unwrap(),
+        cloud.read("Sketch.excalidraw").unwrap(),
+    ] {
+        let value = json::parse(std::str::from_utf8(&bytes).unwrap()).unwrap();
+        assert_eq!(value.get("files").unwrap().as_object().unwrap().len(), 2);
+    }
+}
+
+#[test]
+fn app_state_that_another_tool_stored_survives_a_device_that_never_touched_it() {
+    let (cloud, phone, tablet) = two_devices_apart();
+    // excalidraw.com sets the background; the phone only edits an Element.
+    cloud.write(
+        "Sketch.excalidraw",
+        &with(
+            &[element("a", 1, "a0", 0), element("b", 1, "a1", 0)],
+            r##"{"viewBackgroundColor":"#000000"}"##,
+            "{}",
+        ),
+    );
+    phone.write(
+        "Sketch.excalidraw",
+        &drawing(&[element("a", 2, "a0", 9), element("b", 1, "a1", 0)]),
+    );
+    phone.sync(&cloud);
+    tablet.sync(&cloud);
+
+    for bytes in [
+        phone.read("Sketch.excalidraw").unwrap(),
+        tablet.read("Sketch.excalidraw").unwrap(),
+    ] {
+        let value = json::parse(std::str::from_utf8(&bytes).unwrap()).unwrap();
+        let state = value.get("appState").unwrap();
+        assert_eq!(
+            state.get("viewBackgroundColor").unwrap().as_str(),
+            Some("#000000")
+        );
+        assert_eq!(elements_of(&bytes)[0], e("a", 2, false));
+    }
+}
+
+#[test]
+fn an_upload_that_another_device_overwrote_is_written_again_and_all_devices_converge() {
+    let (cloud, phone, tablet) = two_devices_apart();
+    // Both go to upload at the same time; the tablet's write lands last.
+    phone.write(
+        "Sketch.excalidraw",
+        &drawing(&[element("a", 2, "a0", 10), element("b", 1, "a1", 0)]),
+    );
+    phone.sync(&cloud);
+    cloud.write(
+        "Sketch.excalidraw",
+        &drawing(&[element("a", 1, "a0", 0), element("b", 2, "a1", 20)]),
+    );
+
+    phone.sync(&cloud); // sees the overwrite, writes its newer Element again
+    tablet.sync(&cloud);
+    phone.sync(&cloud);
+
+    let merged = [e("a", 2, false), e("b", 2, false)];
+    assert_eq!(
+        elements_of(&cloud.read("Sketch.excalidraw").unwrap()),
+        merged
+    );
+    assert_eq!(
+        elements_of(&phone.read("Sketch.excalidraw").unwrap()),
+        merged
+    );
+    assert_eq!(
+        elements_of(&tablet.read("Sketch.excalidraw").unwrap()),
+        merged
+    );
+    assert_eq!(
+        phone.read("Sketch.excalidraw"),
+        tablet.read("Sketch.excalidraw")
+    );
+}
+
+#[test]
+fn a_one_sided_change_stays_byte_for_byte_as_the_other_tool_wrote_it() {
+    let (cloud, phone, _) = two_devices_apart();
+    let theirs = br#"{ "type": "excalidraw", "elements": [ {"id":"a","version":5,"versionNonce":1,"index":"a0","isDeleted":false},{"id":"b","type":"rectangle","version":1,"versionNonce":7,"index":"a1","isDeleted":false,"x":0} ], "appState": {"z":1,"a":2}, "files": {} }"#;
+    cloud.write("Sketch.excalidraw", theirs);
+    phone.sync(&cloud);
+    assert_eq!(phone.read("Sketch.excalidraw").unwrap(), theirs);
 }
 
 #[test]

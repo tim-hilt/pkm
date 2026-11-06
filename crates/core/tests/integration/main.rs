@@ -35,6 +35,7 @@ mod insert_images;
 mod json;
 mod keyboard_shortcuts;
 mod lines_and_arrows;
+mod merge;
 mod mouse_pan;
 mod move_selection;
 mod multi_touch;

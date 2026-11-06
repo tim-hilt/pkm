@@ -34,6 +34,7 @@ mod insert_image;
 pub mod json;
 mod laser;
 mod linear;
+mod merge;
 mod move_selection;
 mod navigation;
 mod outline;
@@ -72,6 +73,7 @@ pub use input::{
     MagnifyEvent, Modifiers, PointerButton, PointerEvent, PointerKind, PointerPhase, ScrollEvent,
 };
 pub use insert_image::ImageFile;
+pub use merge::{MergeError, merge_drawings};
 pub use pencil_double_tap::PencilDoubleTap;
 pub use properties::{Properties, Property, Sections};
 pub use scene::LoadError;

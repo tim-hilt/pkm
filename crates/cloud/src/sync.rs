@@ -5,13 +5,22 @@
 //! name the step compares the local file and the cloud blob with what this
 //! Device remembers of the last Sync (`SyncState`): the bytes then, and the
 //! blob's change marker then. A Drawing changed on both sides, or present on
-//! both without any history, is left as it is until the merge exists.
+//! both without any history, is left as it is until that is decided.
+//!
+//! A Drawing changed on both sides is merged (`merge_drawings`) and the result
+//! written to both. The same merge runs when only the cloud changed, since the
+//! change may be another Device's upload overwriting ours without having seen
+//! it (there is no conditional write): what the cloud then lacks is uploaded
+//! again. A Drawing that can't be parsed is skipped, and left as it is on both
+//! sides.
 
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+
+use excalidraw_native_core::merge_drawings;
 
 use crate::storage::{Storage, write_file_atomically};
 
@@ -199,8 +208,8 @@ impl Step<'_> {
                 match (local, remote) {
                     (Some(local), Some(marker)) => match (local_changed, remote_changed) {
                         (true, false) => self.upload(file, local),
-                        (false, true) => self.download(file, &marker, Some(&local)),
-                        _ => Ok(()), // unchanged, or changed on both sides
+                        (_, true) => self.reconcile(file, &marker, local, &base, local_changed),
+                        (false, false) => Ok(()),
                     },
                     // Deleted here: reaches the cloud, unless it was edited there.
                     (None, Some(marker)) if remote_changed => self.download(file, &marker, None),
@@ -230,6 +239,36 @@ impl Step<'_> {
         }
     }
 
+    /// The cloud's Drawing changed since the last Sync: merges it with the
+    /// local one. What the merge gives goes to the side that lacks it.
+    fn reconcile(
+        &mut self,
+        file: &str,
+        marker: &str,
+        local: Vec<u8>,
+        base: &Synced,
+        local_changed: bool,
+    ) -> io::Result<()> {
+        let Some(remote) = self.fetch(file)? else {
+            return Ok(()); // deleted since the listing
+        };
+        let merged = match merge_drawings(Some(&base.bytes), &local, &remote) {
+            Ok(merged) => merged,
+            // Not a Drawing on one side: skipped when both changed, else the
+            // cloud's file is copied as it is.
+            Err(_) if local_changed => return Ok(()),
+            Err(_) => return self.write_local(file, &remote, marker, Some(&local)),
+        };
+        if merged != local && !self.replace_local(file, &merged, Some(&local))? {
+            return Ok(());
+        }
+        if merged == remote {
+            self.state.set(file, &remote, marker)
+        } else {
+            self.upload(file, merged)
+        }
+    }
+
     fn upload(&mut self, file: &str, bytes: Vec<u8>) -> io::Result<()> {
         let mut data = Cancellable {
             inner: &bytes[..],
@@ -244,8 +283,16 @@ impl Step<'_> {
     /// local file as it was read; if the app wrote it since, it is left for
     /// the next step.
     fn download(&mut self, file: &str, marker: &str, expected: Option<&[u8]>) -> io::Result<()> {
-        let Some(data) = self.storage.get(file)? else {
+        let Some(bytes) = self.fetch(file)? else {
             return Ok(()); // deleted since the listing
+        };
+        self.write_local(file, &bytes, marker, expected)
+    }
+
+    /// The cloud's Drawing, if it is still there.
+    fn fetch(&self, file: &str) -> io::Result<Option<Vec<u8>>> {
+        let Some(data) = self.storage.get(file)? else {
+            return Ok(None);
         };
         let mut bytes = Vec::new();
         Cancellable {
@@ -253,13 +300,38 @@ impl Step<'_> {
             cancel: self.cancel,
         }
         .read_to_end(&mut bytes)?;
-        if self.read_local(file)?.as_deref() != expected {
-            return Ok(());
+        Ok(Some(bytes))
+    }
+
+    /// Writes `bytes`, the cloud's Drawing with `marker`, here and remembers it.
+    fn write_local(
+        &mut self,
+        file: &str,
+        bytes: &[u8],
+        marker: &str,
+        expected: Option<&[u8]>,
+    ) -> io::Result<()> {
+        if self.replace_local(file, bytes, expected)? {
+            self.state.set(file, bytes, marker)?;
         }
-        write_file_atomically(&self.path(file), &bytes)?;
-        self.state.set(file, &bytes, marker)?;
-        self.outcome.changed.push(name_of(file));
         Ok(())
+    }
+
+    /// Writes `bytes` here, unless the local file is not `expected` any more
+    /// (the app wrote it meanwhile; it is left for the next step). Whether it
+    /// was written.
+    fn replace_local(
+        &mut self,
+        file: &str,
+        bytes: &[u8],
+        expected: Option<&[u8]>,
+    ) -> io::Result<bool> {
+        if self.read_local(file)?.as_deref() != expected {
+            return Ok(false);
+        }
+        write_file_atomically(&self.path(file), bytes)?;
+        self.outcome.changed.push(name_of(file));
+        Ok(true)
     }
 
     fn delete_local(&mut self, file: &str, expected: &[u8]) -> io::Result<()> {
