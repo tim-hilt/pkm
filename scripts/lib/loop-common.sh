@@ -38,10 +38,12 @@ log_section() {
 }
 
 # --- Status line ---------------------------------------------------------------
-# One status at a time: status_set shows it with a spinner and an elapsed timer (on a
-# terminal), status_stop replaces it with a final line and sets status_elapsed.
+# One status at a time: status_set shows it with a spinner and a timer (on a terminal),
+# status_stop replaces it with a final line and sets status_elapsed. The timer counts up
+# from the start unless a deadline is given, then it counts down to it.
 
 status_message=""
+status_deadline=""
 spinner_pid=""
 
 format_elapsed() {
@@ -49,8 +51,35 @@ format_elapsed() {
   if ((minutes > 0)); then echo "${minutes}m ${seconds}s"; else echo "${seconds}s"; fi
 }
 
+# Formats the seconds left until a deadline as "1h 9m left", "9m 5s left" or "5s left".
+format_remaining() {
+  local seconds=$1 hours minutes
+  ((seconds > 0)) || seconds=0
+  hours=$((seconds / 3600)) minutes=$((seconds % 3600 / 60))
+  if ((hours > 0)); then
+    echo "${hours}h ${minutes}m left"
+  elif ((minutes > 0)); then
+    echo "${minutes}m $((seconds % 60))s left"
+  else
+    echo "${seconds}s left"
+  fi
+}
+
+# The spinner's timer: time left until status_deadline, else time since status_start.
+status_timer() {
+  if [[ -n $status_deadline ]]; then
+    format_remaining $((status_deadline - $(date +%s)))
+  else
+    format_elapsed $(($(date +%s) - status_start))
+  fi
+}
+
+# Usage: status_set <message> [deadline-epoch]
+# Shows <message> behind a spinner, counting down to <deadline-epoch> when it is given
+# and counting elapsed time otherwise.
 status_set() {
   status_message=$1
+  status_deadline=${2:-}
   status_start=$(date +%s)
   [[ -t 1 ]] || return 0
   (
@@ -58,7 +87,7 @@ status_set() {
     frame=0
     while :; do
       printf '\r\033[K%s %s (%s)' "${frames[frame++ % 10]}" "$status_message" \
-        "$(format_elapsed $(($(date +%s) - status_start)))"
+        "$(status_timer)"
       sleep 0.1
     done
   ) &
@@ -129,11 +158,11 @@ await_quota() {
   fi
 
   log_section "Claude 5-hour window exhausted; waiting until $until" "$usage"
-  status_set "Claude 5-hour window exhausted; waiting until $until"
   # At least a minute, so a resets_at in the past is not probed in a hot loop. Short
   # sleeps against the wall clock, since `sleep` stalls while the laptop is suspended.
   local wake=$((reset + 90)) floor=$(($(date +%s) + 60))
   ((wake > floor)) || wake=$floor
+  status_set "Claude 5-hour window exhausted; waiting until $until" "$wake"
   while (($(date +%s) < wake)); do sleep 60; done
   status_stop
 }
