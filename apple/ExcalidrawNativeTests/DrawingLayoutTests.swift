@@ -31,6 +31,21 @@ import Testing
         #expect(DrawingLayout.propertiesMaxHeight(containerHeight: 832) == 666)
         #expect(DrawingLayout.propertiesMaxHeight(containerHeight: 100) == 0)
     }
+
+    /// The desktop toolbar's measured width is about 456 pt.
+    @Test(arguments: [
+        (1470.0, 16.0),  // MacBook Air window
+        (1366.0, 16.0),  // iPad full screen
+        (1024.0, 76.0),  // 1024 pt Mac window
+        (678.0, 76.0),  // iPad Split View half
+    ])
+    func thePropertiesPanelSharesTheToolbarsTopWhenItFits(width: CGFloat, top: CGFloat) {
+        #expect(DrawingLayout.propertiesTop(containerWidth: width, toolbarWidth: 456) == top)
+    }
+
+    @Test func thePanelsRoomGrowsWithItsHeightAboveTheDefaultTop() {
+        #expect(DrawingLayout.propertiesMaxHeight(containerHeight: 832, top: 16) == 726)
+    }
 }
 
 /// excalidraw.com's phone chrome (docs/layout-reference §4): a bottom bar

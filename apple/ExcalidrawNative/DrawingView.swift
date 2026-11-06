@@ -8,6 +8,8 @@ struct DrawingView: View {
     let export: ExportedDrawing
     let onBack: () -> Void
     @State private var controller = CanvasController()
+    /// Measured so the desktop panel can tell whether it fits beside the toolbar.
+    @State private var toolbarWidth: CGFloat = 0
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -89,14 +91,16 @@ struct DrawingView: View {
     private func desktopChrome(in size: CGSize, bottomInset: CGFloat) -> some View {
         ZStack {
             ToolBar(controller: controller).fixedSize()
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { toolbarWidth = $0 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
             if showsProperties {
+                let top = DrawingLayout.propertiesTop(containerWidth: size.width, toolbarWidth: toolbarWidth)
                 PropertiesPanel(
                     controller: controller,
-                    maxHeight: DrawingLayout.propertiesMaxHeight(containerHeight: size.height)
+                    maxHeight: DrawingLayout.propertiesMaxHeight(containerHeight: size.height, top: top)
                 )
-                .padding(.top, DrawingLayout.propertiesTop - DrawingLayout.margin)
+                .padding(.top, top - DrawingLayout.margin)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
 

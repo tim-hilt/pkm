@@ -19,10 +19,23 @@ enum DrawingLayout: Equatable {
     static let margin: CGFloat = 16
     /// Top of the desktop properties panel, below the toolbar.
     static let propertiesTop: CGFloat = 76
+    /// The desktop properties panel's width.
+    static let propertiesWidth: CGFloat = 195
+    /// Clear room kept between the panel and a toolbar that shares its top.
+    static let propertiesGap: CGFloat = 80
+    /// Top of the desktop properties panel: level with the toolbar when the
+    /// centred toolbar leaves the panel (and a gap) clear on the left,
+    /// otherwise below the toolbar.
+    static func propertiesTop(containerWidth: CGFloat, toolbarWidth: CGFloat) -> CGFloat {
+        let toolbarLeft = (containerWidth - toolbarWidth) / 2
+        let fits = toolbarLeft >= margin + propertiesWidth + propertiesGap
+        return fits ? margin : propertiesTop
+    }
     /// Excalidraw's `containerHeight − 166`: the desktop properties panel
     /// scrolls beyond this, clear of the zoom controls.
-    static func propertiesMaxHeight(containerHeight: CGFloat) -> CGFloat {
-        max(0, containerHeight - 166)
+    /// The panel's room shrinks by however much higher than `propertiesTop` it sits.
+    static func propertiesMaxHeight(containerHeight: CGFloat, top: CGFloat = propertiesTop) -> CGFloat {
+        max(0, containerHeight - 166 + (propertiesTop - top))
     }
 }
 
