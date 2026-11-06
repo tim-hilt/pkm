@@ -419,6 +419,39 @@
         }
       }
     },
+    "Export…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export…"
+          }
+        }
+      }
+    },
+    "Export Scene as PNG…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export Scene as PNG…"
+          }
+        }
+      }
+    },
+    "Export Selection as PNG…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export Selection as PNG…"
+          }
+        }
+      }
+    },
     "Export PNG": {
       "extractionState": "manual",
       "localizations": {

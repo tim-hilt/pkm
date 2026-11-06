@@ -39,4 +39,14 @@ import XCTest
 
         XCTAssertTrue(app.buttons["back-to-gallery"].waitForExistence(timeout: 10))
     }
+
+    /// The Gallery and menu buttons are the system's navigation bar buttons.
+    func testTheCanvasHasNativeBackAndMenuButtonsInTheNavigationBar() {
+        app.buttons["new-drawing"].tap()
+
+        let bar = app.navigationBars.firstMatch
+        XCTAssertTrue(bar.buttons["back-to-gallery"].waitForExistence(timeout: 10), "back is in the bar")
+        XCTAssertTrue(bar.buttons["main-menu"].exists, "the menu is in the bar")
+        XCTAssertLessThan(bar.buttons["back-to-gallery"].frame.midX, bar.buttons["main-menu"].frame.midX)
+    }
 }

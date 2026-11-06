@@ -49,8 +49,30 @@ struct MenuShortcut {
 /// The Canvas's Commands in the app's menus, for the Drawing in front.
 struct CanvasCommands: Commands {
     @FocusedValue(CanvasController.self) private var controller
+    #if os(macOS)
+        @FocusedValue(\.drawingExporter) private var exporter
+        @AppStorage(ExportPreferences.backgroundKey) private var exportBackground = true
+    #endif
 
     var body: some Commands {
+        // A Mac has no main menu button on the Canvas: its items are here.
+        #if os(macOS)
+            CommandGroup(replacing: .importExport) {
+                Button("Export…") { exporter?.exportDrawing() }
+                    .disabled(exporter == nil)
+                Menu("Export PNG") {
+                    Toggle("Background", isOn: $exportBackground)
+                    Button("Export Scene as PNG…") {
+                        exporter?.exportPNG(scope: .scene, background: exportBackground)
+                    }
+                    Button("Export Selection as PNG…") {
+                        exporter?.exportPNG(scope: .selection, background: exportBackground)
+                    }
+                    .disabled(controller?.hasSelection != true)
+                }
+                .disabled(exporter == nil)
+            }
+        #endif
         CommandGroup(replacing: .undoRedo) {
             items(for: [.undo, .redo])
         }

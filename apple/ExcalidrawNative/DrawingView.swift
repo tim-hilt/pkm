@@ -22,6 +22,33 @@ struct DrawingView: View {
     }
 
     var body: some View {
+        // The system's navigation bar (the window's toolbar on a Mac) carries
+        // the Gallery button and, on iPhone and iPad, the main menu; on a Mac
+        // the menu's items are in the menu bar (`CanvasCommands`).
+        NavigationStack {
+            canvas
+                .navigationTitle(drawing.name)
+                .toolbar {
+                    ToolbarItem(placement: .navigation) {
+                        Button("Gallery", systemImage: "chevron.backward", action: onBack)
+                            .accessibilityIdentifier("back-to-gallery")
+                    }
+                    #if !os(macOS)
+                        ToolbarItem(placement: .primaryAction) {
+                            MainMenu(drawing: drawing, export: export, controller: controller)
+                        }
+                    #endif
+                }
+                #if !os(macOS)
+                    .navigationBarTitleDisplayMode(.inline)
+                #endif
+        }
+        #if os(macOS)
+            .focusedSceneValue(\.drawingExporter, DrawingExporter(drawing: drawing, export: export))
+        #endif
+    }
+
+    private var canvas: some View {
         CanvasView(
             editor: drawing.editor, geometry: geometry, controller: controller,
             onSceneChange: { drawing.editorDidChange() }
@@ -66,21 +93,8 @@ struct DrawingView: View {
 
     private func desktopChrome(in size: CGSize) -> some View {
         ZStack {
-            HStack(alignment: .top, spacing: 0) {
-                HStack(spacing: 8) {
-                    BackControl(action: onBack)
-                    MainMenu(drawing: drawing, export: export, controller: controller)
-                }
-                Spacer(minLength: 8)
-                ToolBar(controller: controller).fixedSize()
-                Spacer(minLength: 8)
-                // As wide as the controls on the left while there is room, so
-                // that the toolbar is centred; it gives way first, so that in a
-                // narrow window (iPad Split View) the toolbar moves right
-                // instead of covering them, as on excalidraw.com.
-                Color.clear.frame(maxWidth: 36 + 8 + 36, maxHeight: 0)
-            }
-            .frame(maxHeight: .infinity, alignment: .top)
+            ToolBar(controller: controller).fixedSize()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
             if showsProperties {
                 PropertiesPanel(
@@ -105,26 +119,17 @@ struct DrawingView: View {
         .padding(DrawingLayout.margin)
     }
 
-    /// excalidraw.com's phone layout (docs/layout-reference §4): menu top
-    /// left, everything else in the bottom bar within thumb reach; no zoom
-    /// buttons (pinch), properties in a sheet.
+    /// excalidraw.com's phone layout (docs/layout-reference §4): everything
+    /// in the bottom bar within thumb reach; no zoom buttons (pinch),
+    /// properties in a sheet.
     private func mobileChrome(in size: CGSize) -> some View {
-        ZStack {
-            HStack(spacing: 8) {
-                BackControl(action: onBack, size: 32)
-                MainMenu(drawing: drawing, export: export, controller: controller, size: 32)
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
-            VStack(spacing: 4) {
-                MobileActionRow(controller: controller, showsProperties: showsProperties)
-                MobileToolBar(controller: controller)
-            }
-            .frame(width: DrawingLayout.bottomBarWidth(containerWidth: size.width))
-            .padding(.bottom, 10)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        VStack(spacing: 4) {
+            MobileActionRow(controller: controller, showsProperties: showsProperties)
+            MobileToolBar(controller: controller)
         }
+        .frame(width: DrawingLayout.bottomBarWidth(containerWidth: size.width))
+        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
     }
 
     /// The core decides when there is something to style.
@@ -158,45 +163,28 @@ private let controlFill = Color(red: 0xEC / 255, green: 0xEC / 255, blue: 0xF4 /
 private let checkedFill = Color(red: 0xE0 / 255, green: 0xDF / 255, blue: 1)
 private let checkedGlyph = Color(red: 3 / 255, green: 0, blue: 0x64 / 255)
 
-/// Back to the Gallery, in the corner Excalidraw keeps for its main menu.
-private struct BackControl: View {
-    let action: () -> Void
-    /// 36 pt on desktop, 32 pt on phones.
-    var size: CGFloat = 36
+#if !os(macOS)
+    /// Excalidraw's main menu in the navigation bar, as the system's own
+    /// menu button: exports the Drawing. On a Mac its items are in the menu
+    /// bar instead (`CanvasCommands`).
+    private struct MainMenu: View {
+        let drawing: OpenDrawing
+        let export: ExportedDrawing
+        let controller: CanvasController
+        @AppStorage(ExportPreferences.backgroundKey) private var background = true
 
-    var body: some View {
-        Button("Gallery", systemImage: "chevron.backward", action: action)
-            .labelStyle(.iconOnly)
-            .buttonStyle(.borderless)
-            .tint(.primary)
-            .controlButton(width: size, height: size)
-            .background(controlFill, in: RoundedRectangle(cornerRadius: 8))
-            .accessibilityIdentifier("back-to-gallery")
-    }
-}
-
-/// Excalidraw's main menu (hamburger): exports the Drawing.
-private struct MainMenu: View {
-    let drawing: OpenDrawing
-    let export: ExportedDrawing
-    let controller: CanvasController
-    /// 36 pt on desktop, 32 pt on phones.
-    var size: CGFloat = 36
-    @State private var background = true
-
-    var body: some View {
-        Menu {
-            ShareLink(item: export, preview: SharePreview(drawing.name)) {
-                Label("Export", systemImage: "square.and.arrow.up")
-            }
-            .accessibilityIdentifier("export-drawing")
-            Section("Export PNG") {
-                Toggle("Background", isOn: $background)
-                share("Export Scene as PNG", scope: .scene)
-                share("Export Selection as PNG", scope: .selection)
-                    .disabled(!controller.hasSelection)
-            }
-            #if !os(macOS)
+        var body: some View {
+            Menu {
+                ShareLink(item: export, preview: SharePreview(drawing.name)) {
+                    Label("Export", systemImage: "square.and.arrow.up")
+                }
+                .accessibilityIdentifier("export-drawing")
+                Section("Export PNG") {
+                    Toggle("Background", isOn: $background)
+                    share("Export Scene as PNG", scope: .scene)
+                    share("Export Selection as PNG", scope: .selection)
+                        .disabled(!controller.hasSelection)
+                }
                 if offersPencilOnlyDrawing {
                     Section("Settings") {
                         Toggle(
@@ -205,24 +193,18 @@ private struct MainMenu: View {
                         ) { Label("Pencil-only drawing", systemImage: "applepencil") }
                     }
                 }
-            #endif
-        } label: {
-            Label("Menu", systemImage: "line.3.horizontal")
+            } label: {
+                Label("Menu", systemImage: "ellipsis")
+            }
+            .accessibilityIdentifier("main-menu")
         }
-        .labelStyle(.iconOnly)
-        .menuIndicator(.hidden)
-        .buttonStyle(.borderless)
-        .tint(.primary)
-        .controlButton(width: size, height: size)
-        .background(controlFill, in: RoundedRectangle(cornerRadius: 8))
-        .accessibilityIdentifier("main-menu")
-    }
 
-    private func share(_ title: LocalizedStringKey, scope: ExportScope) -> some View {
-        let png = ExportedPNG(name: drawing.name, editor: drawing.editor, scope: scope, background: background)
-        return ShareLink(item: png, preview: SharePreview(drawing.name)) { Label(title, systemImage: "photo") }
+        private func share(_ title: LocalizedStringKey, scope: ExportScope) -> some View {
+            let png = ExportedPNG(name: drawing.name, editor: drawing.editor, scope: scope, background: background)
+            return ShareLink(item: png, preview: SharePreview(drawing.name)) { Label(title, systemImage: "photo") }
+        }
     }
-}
+#endif
 
 #if !os(macOS)
     /// Whether the chrome offers the Pencil-only drawing setting: on an iPad
