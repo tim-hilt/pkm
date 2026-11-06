@@ -160,14 +160,16 @@ extension View {
         var body: some View {
             Menu {
                 ShareLink(item: export, preview: SharePreview(drawing.name)) {
-                    Label("Export", systemImage: "square.and.arrow.up")
+                    Label("Share", systemImage: "square.and.arrow.up")
                 }
                 .accessibilityIdentifier("export-drawing")
-                Section("Export PNG") {
+                Menu {
                     Toggle("Background", isOn: $background)
                     share("Export Scene as PNG", scope: .scene)
                     share("Export Selection as PNG", scope: .selection)
                         .disabled(!controller.hasSelection)
+                } label: {
+                    Label("Export PNG", systemImage: "photo")
                 }
                 if offersPencilOnlyDrawing {
                     Section("Settings") {
