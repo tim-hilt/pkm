@@ -21,7 +21,11 @@ fi
 git config core.hooksPath .githooks
 
 mkdir -p logs
-log_file="logs/$(basename "$(cd "$directory" && pwd)").loop.log"
+project=$(basename "$(cd "$directory" && pwd)")
+log_file="logs/$project.loop.log"
+state_file="${log_file%.log}.state"
+review_session=$(session_name review "$project")
+load_interrupted_session
 
 shopt -s nullglob dotglob
 tasks=()
@@ -51,10 +55,12 @@ pending_blockers() {
 # Implements $1 with an agent, then gates on the Apple tests.
 implement() {
   local task_file=$1
+  quota_await_headroom
   status_set "Implementing $task_file"
 
   run_pi anthropic claude-sonnet-5-5 medium \
-    "/skill:tdd implement the task described in @$task_file. This is a headless run: the seams named in the task and its spec are the confirmed seams. Apply software-design best practices during the implementation. Tick off all completed bullet points in $task_file and set its Status line to in-review when you're finished; edit it in place, since .scratch/ is untracked. Commit the implementation using the commit-message 'Implement $task_file'."
+    "/skill:tdd implement the task described in @$task_file. This is a headless run: the seams named in the task and its spec are the confirmed seams. Apply software-design best practices during the implementation. Tick off all completed bullet points in $task_file and set its Status line to in-review when you're finished; edit it in place, since .scratch/ is untracked. Commit the implementation using the commit-message 'Implement $task_file'." \
+    "$(session_name loop "$project" "$(basename "$task_file" .md)")"
 
   status_stop
   log_section "$task_file implemented in $status_elapsed" "$pi_output"
@@ -101,17 +107,24 @@ if [[ -n $still_blocked ]]; then
   printf 'Still blocked, not implemented:\n%s' "$still_blocked" >&2
 fi
 
-if ((implemented == 0)); then
+if ((implemented == 0)) && [[ $resume_session != "$review_session" ]]; then
   echo "No ready-for-agent tasks found."
   exit 0
 fi
 
 spec_file="$directory/spec.md"
 
+quota_await_headroom
 status_set "Reviewing $spec_file"
 
 run_pi anthropic claude-opus-5-5 high \
-  "/skill:software-design the last commits implemented the tickets in @$tasks_dir. Please review these commits according to @$spec_file. Also consider @$log_file to understand how we got to the current state. Pay special attention to correctness and simplicity. Fix found issues right away. If an issue is fully implemented, then please set its Status line to 'done'. Commit your changes using the commit-message 'Reviewed $spec_file'."
+  "/skill:software-design the last commits implemented the tickets in @$tasks_dir. Please review these commits according to @$spec_file. Also consider @$log_file to understand how we got to the current state. Pay special attention to correctness and simplicity. Fix found issues right away. If an issue is fully implemented, then please set its Status line to 'done'. Commit your changes using the commit-message 'Reviewed $spec_file'." \
+  "$review_session"
 
 status_stop
 log_section "$spec_file reviewed in $status_elapsed" "$pi_output"
+
+if [[ -n $resume_session ]]; then
+  printf 'Interrupted session %s was not resumed; its task is no longer ready-for-agent. Open it with: pi --session-id %s\n' \
+    "$resume_session" "$resume_session" >&2
+fi
