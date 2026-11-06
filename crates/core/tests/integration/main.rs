@@ -14,6 +14,7 @@ mod bound_text;
 mod box_select;
 mod clipboard;
 mod context_menu;
+mod cursor;
 mod draw_freedraw;
 mod draw_lines;
 mod draw_shapes;

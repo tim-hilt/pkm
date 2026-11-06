@@ -198,6 +198,17 @@ impl Navigation {
         self.is_pinching() || self.is_pan_overriding_tool()
     }
 
+    /// Whether a pointer is dragging the Canvas: a right-button press that
+    /// has not travelled [`SECONDARY_SLOP`] yet does not count.
+    pub fn is_dragging(&self) -> bool {
+        self.drag.is_some_and(|d| !d.pending)
+    }
+
+    /// Whether the pan key (space) is held.
+    pub fn pan_key(&self) -> bool {
+        self.pan_key
+    }
+
     /// The client reports the pan key (space) down or up. It only matters
     /// for drags that begin while it is held.
     pub fn set_pan_key(&mut self, held: bool) {

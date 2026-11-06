@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use excalidraw_native_core::scene::{FillPattern, LineStyle};
 use excalidraw_native_core::{
-    Command, ContextMenu, Edges, ExportScope, FontSize, ImageFile, MagnifyEvent, Modifiers,
+    Command, ContextMenu, Cursor, Edges, ExportScope, FontSize, ImageFile, MagnifyEvent, Modifiers,
     PencilDoubleTap, PointerButton, PointerEvent, PointerKind, PointerPhase, Properties, Property,
     ScrollEvent, Sections, Shortcut, Sloppiness, StrokeWidth, TextAlign, TextEditor, Tool, ZOrder,
 };
@@ -126,6 +126,22 @@ pub enum Tool {
     Freedraw,
     Eraser,
     Text,
+}
+
+#[uniffi::remote(Enum)]
+pub enum Cursor {
+    Arrow,
+    Crosshair,
+    Text,
+    Move,
+    Grab,
+    Grabbing,
+    Pointer,
+    Eraser,
+    ResizeNorthSouth,
+    ResizeEastWest,
+    ResizeNorthWestSouthEast,
+    ResizeNorthEastSouthWest,
 }
 
 #[uniffi::remote(Enum)]
@@ -671,6 +687,12 @@ impl Editor {
     /// means nothing.
     pub fn long_press(&self, x: f64, y: f64, kind: PointerKind) -> Option<ContextMenu> {
         self.editor().long_press(x, y, kind)
+    }
+
+    /// The mouse cursor at the view point `(x, y)`; see
+    /// [`excalidraw_native_core::Editor::cursor`].
+    pub fn cursor(&self, x: f64, y: f64) -> Cursor {
+        self.editor().cursor(x, y)
     }
 
     /// The space bar went down (`true`) or up; see

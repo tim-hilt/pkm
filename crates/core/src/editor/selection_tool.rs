@@ -507,7 +507,7 @@ impl Editor {
         if self.point_dragging.is_some() {
             return;
         }
-        if self.in_selection_box(transform_box, origin) {
+        if self.in_selection_box(transform_box, origin.x, origin.y) {
             return self.begin_move(None, origin, event);
         }
         match self.hit(origin.x, origin.y, origin.kind) {
@@ -516,7 +516,7 @@ impl Editor {
         }
     }
 
-    /// Whether a press at `origin` is in the box around a Selection of
+    /// Whether a press at the view point `(x, y)` is in the box around a Selection of
     /// several Elements, where a drag moves them all, whatever is under it
     /// (Excalidraw's `isHittingCommonBoundingBoxOfSelectedElements`). A
     /// single Element's box is part of hitting it, see
@@ -524,14 +524,15 @@ impl Editor {
     pub(super) fn in_selection_box(
         &self,
         transform_box: Option<TransformBox>,
-        origin: Origin,
+        x: f64,
+        y: f64,
     ) -> bool {
         if self.selection.ids().len() < 2 {
             return false;
         }
         let viewport = self.navigation.viewport();
         transform_box.is_some_and(|transform_box| {
-            transform_box.encloses(viewport.scene_at(origin.x, origin.y), viewport.zoom())
+            transform_box.encloses(viewport.scene_at(x, y), viewport.zoom())
         })
     }
 

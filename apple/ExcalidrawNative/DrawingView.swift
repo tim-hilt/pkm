@@ -269,6 +269,7 @@ struct ToolBar: View {
                 .background(checked ? checkedFill : .clear, in: RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
+        .buttonPointer()
         .accessibilityLabel(Text(name))
         .accessibilityAddTraits(checked ? .isSelected : [])
     }
@@ -338,6 +339,7 @@ private struct MobileToolBar: View {
                 .background(on ? checkedFill : .clear, in: RoundedRectangle(cornerRadius: 4))
         }
         .buttonStyle(.plain)
+        .buttonPointer()
         .accessibilityLabel("Keep tool selected")
         .accessibilityAddTraits(on ? .isSelected : [])
     }
@@ -358,6 +360,7 @@ private struct MobileToolButton: View {
                 .background(checked ? checkedFill : .clear, in: RoundedRectangle(cornerRadius: 4))
         }
         .buttonStyle(.plain)
+        .buttonPointer()
         .accessibilityLabel(Text(ToolBar.name(tool)))
         .accessibilityAddTraits(checked ? .isSelected : [])
     }
@@ -377,6 +380,7 @@ private struct MobileActionRow: View {
             if showsProperties {
                 Button("Properties", systemImage: "slider.horizontal.3") { sheetShown = true }
                     .controlButton(width: 32, height: 32)
+                    .buttonPointer()
                     .background(.background, in: RoundedRectangle(cornerRadius: 8))
                     .accessibilityIdentifier("properties-sheet")
             }
@@ -405,16 +409,17 @@ private struct ZoomControls: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            Button("Zoom out", systemImage: "minus") { controller.zoomOut() }.controlButton()
+            Button("Zoom out", systemImage: "minus") { controller.zoomOut() }.controlButton().buttonPointer()
             Button {
                 controller.resetZoom()
             } label: {
                 Text(verbatim: "\(controller.zoomPercent)%").font(.subheadline).monospacedDigit()
             }
             .controlButton(width: 60)
+            .buttonPointer()
             .accessibilityLabel(Text("Reset zoom"))
             .accessibilityValue(Text(verbatim: "\(controller.zoomPercent)%"))
-            Button("Zoom in", systemImage: "plus") { controller.zoomIn() }.controlButton()
+            Button("Zoom in", systemImage: "plus") { controller.zoomIn() }.controlButton().buttonPointer()
         }
         .controlGroup()
     }

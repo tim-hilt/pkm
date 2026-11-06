@@ -273,6 +273,16 @@ impl TransformGesture {
         self.pointer
     }
 
+    /// The handle the pointer holds.
+    pub fn handle(&self) -> Handle {
+        self.handle
+    }
+
+    /// How the box was turned when the gesture began.
+    pub fn angle(&self) -> f64 {
+        self.transform_box.angle()
+    }
+
     /// Ends the transform where it is; the step is what undoes it.
     pub fn finish(self) -> Step {
         self.step

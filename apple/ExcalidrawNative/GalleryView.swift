@@ -28,6 +28,7 @@ struct GalleryView: View {
                             Card(drawing: drawing, thumbnails: gallery.thumbnails)
                         }
                         .buttonStyle(.plain)
+                        .buttonPointer()
                         .accessibilityIdentifier("drawing-\(drawing.name)")
                         // VoiceOver reaches the menu's actions from the card itself.
                         .accessibilityActions { actions(for: drawing) }

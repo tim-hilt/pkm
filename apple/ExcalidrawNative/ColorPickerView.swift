@@ -31,6 +31,7 @@ struct ColorPickerView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .buttonPointer()
                 .accessibilityLabel(Text("More colours"))
                 .accessibilityValue(selected.map { Text(ColorPalette.name($0)) } ?? Text(""))
                 .accessibilityAddTraits(isOpen ? .isSelected : [])
@@ -121,6 +122,7 @@ struct ColorPickerView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .buttonPointer()
         .accessibilityLabel(Text(ColorPalette.name(color)))
         .accessibilityAddTraits(color == selected ? .isSelected : [])
     }

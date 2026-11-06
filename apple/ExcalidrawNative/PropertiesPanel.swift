@@ -213,6 +213,7 @@ private struct IconButton: View {
                 .contentShape(Rectangle().inset(by: -6))
         }
         .buttonStyle(.plain)
+        .buttonPointer()
         .accessibilityLabel(Text(name))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }

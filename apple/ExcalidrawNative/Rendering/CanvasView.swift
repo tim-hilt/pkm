@@ -56,6 +56,8 @@ final class CanvasMetalView: MTKView {
         var contextMenuPoint: CGPoint?
         /// Takes the system's undo gestures to the core's history.
         private lazy var historyManager = CanvasUndoManager { [weak self] in self }
+        /// Gives the pointer of a trackpad or mouse the core's cursor.
+        private var pointerInteraction: UIPointerInteraction?
     #endif
 
     init() {
@@ -80,6 +82,7 @@ final class CanvasMetalView: MTKView {
             enablePencilInput()
             enableContextMenu()
             observeKeyboard()
+            enablePointer()
         #endif
         enableImageInput()
     }
@@ -199,7 +202,25 @@ final class CanvasMetalView: MTKView {
         syncViewport()
         syncOverlay()
         syncTextEditor()
+        syncCursor()
         onEditorChange?()
+    }
+
+    /// Shows the core's cursor for where the mouse is: what it does may have
+    /// changed with any input or command (a Tool, the space bar, a drag).
+    private func syncCursor() {
+        #if os(macOS)
+            guard let editor, let window, let contentView = window.contentView else { return }
+            let inWindow = window.mouseLocationOutsideOfEventStream
+            // Over the chrome or the text view, those show their own cursors;
+            // a drag that began on the Canvas keeps its cursor everywhere.
+            let hit = contentView.hitTest(contentView.superview?.convert(inWindow, from: nil) ?? inWindow)
+            guard hit === self || isMouseDragging else { return }
+            let at = convert(inWindow, from: nil)
+            editor.cursor(x: at.x, y: at.y).nsCursor.set()
+        #else
+            pointerInteraction?.invalidate()
+        #endif
     }
 
     /// Shows the text view where the core says, or takes it away if no text
@@ -295,6 +316,26 @@ final class CanvasMetalView: MTKView {
 
         override var acceptsFirstResponder: Bool { true }
 
+        // MARK: Cursor
+
+        /// Whether a mouse button is down on the Canvas: its drag keeps the
+        /// cursor, even over the chrome.
+        private var isMouseDragging = false
+
+        /// Mouse moves only, no cursor updates: the Canvas lies under the
+        /// whole window, and its cursor-update area would take the updates
+        /// the chrome's buttons show their pointing hand with.
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if trackingAreas.isEmpty {
+                addTrackingArea(
+                    NSTrackingArea(
+                        rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self))
+            }
+        }
+
+        override func mouseMoved(with event: NSEvent) { syncCursor() }
+
         /// A lost key-up must not leave panning stuck.
         override func resignFirstResponder() -> Bool {
             setPanKey(false)
@@ -375,6 +416,7 @@ final class CanvasMetalView: MTKView {
 
         private func sendMouse(_ phase: PointerPhase, _ event: NSEvent) {
             let position = viewPoint(of: event)
+            isMouseDragging = phase == .down || phase == .move
             send(
                 PointerEvent(
                     id: 0, phase: phase, x: position.x, y: position.y, kind: .mouse,
@@ -382,6 +424,12 @@ final class CanvasMetalView: MTKView {
                     modifiers: Modifiers(event.modifierFlags)))
         }
     #else
+        private func enablePointer() {
+            let interaction = UIPointerInteraction(delegate: self)
+            addInteraction(interaction)
+            pointerInteraction = interaction
+        }
+
         /// Keys the menus do not list (see `pressKey`).
         override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
             var unhandled = Set<UIPress>()
@@ -473,6 +521,27 @@ final class CanvasMetalView: MTKView {
         #endif
     }
 }
+
+#if !os(macOS)
+    extension CanvasMetalView: UIPointerInteractionDelegate {
+        /// A region of a single point around the pointer, so that the system
+        /// asks again as soon as it moves, with the core's cursor there.
+        func pointerInteraction(
+            _ interaction: UIPointerInteraction, regionFor request: UIPointerRegionRequest,
+            defaultRegion: UIPointerRegion
+        ) -> UIPointerRegion? {
+            let at = request.location
+            let cursor = editor?.cursor(x: at.x, y: at.y) ?? .arrow
+            return UIPointerRegion(rect: CGRect(x: at.x - 0.5, y: at.y - 0.5, width: 1, height: 1), identifier: cursor)
+        }
+
+        func pointerInteraction(_ interaction: UIPointerInteraction, styleFor region: UIPointerRegion)
+            -> UIPointerStyle?
+        {
+            (region.identifier as? Cursor)?.pointerStyle
+        }
+    }
+#endif
 
 /// SwiftUI host for `CanvasMetalView`: the thin platform layer, identical on
 /// iOS and macOS except for the representable protocol it adopts.

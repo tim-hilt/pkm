@@ -45,6 +45,7 @@ use crate::z_order::{self, ZOrder};
 use crate::{image, shape};
 
 mod commands;
+mod cursor;
 mod drawing_tools;
 mod geometry;
 use geometry::{GeometryCache, bounds_of};
