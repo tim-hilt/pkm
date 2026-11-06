@@ -552,11 +552,12 @@ fn erasing_an_arrow_takes_it_out_of_the_boundelements_of_its_shape() {
 // --- Selection, other Tools and gestures ------------------------------------------------
 
 #[test]
-fn an_erased_element_leaves_the_selection_and_undo_selects_it_again() {
+fn choosing_the_eraser_clears_the_selection_and_undo_of_an_erase_keeps_it_empty() {
     let mut editor = editor_with(&[HOLLOW, FILLED]);
     common::tap(&mut editor, "mouse", (100.0, 125.0), 0.0);
     assert_eq!(editor.selection(), ["hollow"]);
     editor.set_tool(Tool::Eraser);
+    assert!(editor.selection().is_empty());
 
     replay(
         &mut editor,
@@ -567,7 +568,7 @@ fn an_erased_element_leaves_the_selection_and_undo_selects_it_again() {
     assert!(editor.selection().is_empty());
 
     editor.undo();
-    assert_eq!(editor.selection(), ["hollow"]);
+    assert!(editor.selection().is_empty());
 }
 
 #[test]

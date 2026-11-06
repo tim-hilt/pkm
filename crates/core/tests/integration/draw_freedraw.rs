@@ -344,7 +344,7 @@ fn the_tool_stays_with_the_tool_lock_off_and_on() {
 }
 
 #[test]
-fn a_stroke_leaves_the_selection_alone() {
+fn a_stroke_clears_the_selection() {
     let mut editor = Editor::new();
     editor.set_tool(Tool::Rectangle);
     send(&mut editor, (0, Mouse), Down, (0.0, 0.0), 0.5);
@@ -353,13 +353,12 @@ fn a_stroke_leaves_the_selection_alone() {
     send(&mut editor, (0, Mouse), Down, (50.0, 0.0), 0.5);
     send(&mut editor, (0, Mouse), Up, (50.0, 0.0), 0.5);
     editor.select_all();
-    let selected = editor.selection().to_vec();
-    assert_eq!(selected.len(), 1);
+    assert_eq!(editor.selection().len(), 1);
 
     editor.set_tool(Tool::Freedraw);
     flat_stroke(&mut editor, (0, Mouse), &[(100.0, 100.0), (120.0, 130.0)]);
 
-    assert_eq!(editor.selection(), selected);
+    assert!(editor.selection().is_empty());
 }
 
 #[test]

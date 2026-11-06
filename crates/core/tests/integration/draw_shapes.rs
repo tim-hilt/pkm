@@ -682,39 +682,40 @@ fn the_drawn_shape_becomes_the_selection_so_it_can_be_adjusted_right_away() {
 }
 
 #[test]
-fn drawing_replaces_the_selection() {
+fn drawing_selects_the_drawn_shape_alone() {
     let mut editor = editor_with(Tool::Rectangle);
     drag(&mut editor, (0.0, 0.0), (50.0, 50.0));
     let first = ids(&editor)[0].clone();
     assert_eq!(editor.selection(), std::slice::from_ref(&first));
 
     editor.set_tool(Tool::Ellipse);
+    assert!(editor.selection().is_empty());
     drag(&mut editor, (100.0, 0.0), (150.0, 50.0));
 
     let second = ids(&editor)[1].clone();
     assert_eq!(editor.selection(), [second]);
-    // Undoing the shape brings back what was selected before it.
+    // Choosing the Tool cleared the Selection, so undoing the shape goes
+    // back to an empty one.
     editor.undo();
-    assert_eq!(editor.selection(), [first]);
+    assert!(editor.selection().is_empty());
 }
 
 #[test]
-fn a_tap_or_a_cancelled_drawing_leaves_the_selection_alone() {
+fn a_tap_or_a_cancelled_drawing_selects_nothing() {
     let mut editor = editor_with(Tool::Rectangle);
     drag(&mut editor, (0.0, 0.0), (50.0, 50.0));
-    let first = ids(&editor);
     editor.set_tool(Tool::Rectangle);
 
     let mouse = (0, Mouse);
     let none = Modifiers::default();
     send(&mut editor, mouse, Down, (100.0, 0.0), none);
     send(&mut editor, mouse, Up, (100.0, 0.0), none);
-    assert_eq!(editor.selection(), first);
+    assert!(editor.selection().is_empty());
 
     send(&mut editor, mouse, Down, (100.0, 0.0), none);
     send(&mut editor, mouse, Move, (150.0, 50.0), none);
     send(&mut editor, mouse, Cancel, (150.0, 50.0), none);
-    assert_eq!(editor.selection(), first);
+    assert!(editor.selection().is_empty());
 }
 
 #[test]

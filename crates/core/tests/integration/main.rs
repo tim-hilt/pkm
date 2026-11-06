@@ -44,6 +44,7 @@ mod properties;
 mod resize_rotate;
 mod scene;
 mod select;
+mod selection_on_tool_change;
 mod stable_handles;
 mod text;
 mod text_editing;

@@ -316,7 +316,7 @@ fn a_pinch_in_the_middle_of_a_hand_drag_keeps_the_tool() {
     );
 
     assert_eq!(editor.tool(), Tool::Hand);
-    assert_eq!(editor.selection(), ["a"]);
+    assert!(editor.selection().is_empty());
 }
 
 #[test]
@@ -336,7 +336,7 @@ fn a_pinch_keeps_a_locked_shape_tool() {
 
     assert_eq!(editor.tool(), Tool::Ellipse);
     assert!(editor.tool_lock());
-    assert_eq!(editor.selection(), ["a"]);
+    assert!(editor.selection().is_empty());
 }
 
 #[test]

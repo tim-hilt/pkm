@@ -271,7 +271,7 @@ fn escape_with_nothing_being_placed_changes_nothing() {
 
     assert_eq!(editor.save(), before);
     assert_eq!(editor.tool(), Tool::Rectangle);
-    assert_eq!(editor.selection().len(), 1);
+    assert!(editor.selection().is_empty());
 }
 
 #[test]

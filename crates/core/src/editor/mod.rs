@@ -360,6 +360,8 @@ impl Editor {
     /// Makes `tool` the active Tool; whatever the previous one was doing
     /// with a pointer still down stops, and a shape it was drawing is gone. A
     /// line or arrow that is waiting for its next point is finished as it is.
+    /// Any Tool but selection also clears the Selection and leaves the group
+    /// that was gone into, and so does a pointer going down with one.
     pub fn set_tool(&mut self, tool: Tool) {
         if tool != self.tool {
             self.commit_text();
@@ -373,8 +375,21 @@ impl Editor {
             self.drop_point_drag();
             self.drop_box_select();
             self.assign_tool(tool);
+            if tool != Tool::Selection {
+                self.clear_selection();
+            }
             self.sync_highlight();
         }
+    }
+
+    /// Empties the Selection and leaves the group that was gone into, as
+    /// excalidraw.com does when a drawing Tool is chosen or used. It is no
+    /// undo step: a step begun afterwards records the empty Selection.
+    fn clear_selection(&mut self) {
+        if self.selection.clear() {
+            self.overlay_revision += 1;
+        }
+        self.editing_group = None;
     }
 
     /// Makes `tool` the active Tool, remembering the one it replaces.
@@ -460,6 +475,9 @@ impl Editor {
             .pointer(event, self.tool == Tool::Hand || finger);
         self.navigated();
         if !finger {
+            if event.phase == PointerPhase::Down && self.tool != Tool::Selection {
+                self.clear_selection();
+            }
             self.draw_shape(event);
             self.draw_linear(event);
             self.draw_stroke(event);

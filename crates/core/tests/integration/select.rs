@@ -274,11 +274,10 @@ fn a_press_on_an_element_selects_it_however_long_it_lasts() {
 #[test]
 fn only_the_selection_tool_selects() {
     for tool in [Tool::Hand, Tool::Rectangle] {
+        // Choosing the Tool already cleared the Selection.
         let mut editor = editor_with_selection();
         editor.set_tool(tool);
-
-        tap(&mut editor, "mouse", (500.0, 500.0), 1.0);
-        assert_eq!(editor.selection(), ["a"], "{tool:?} clears nothing");
+        assert!(editor.selection().is_empty(), "{tool:?} clears it");
 
         let mut editor = editor_with(&[&rectangle("a", true)]);
         editor.set_tool(tool);
@@ -296,7 +295,9 @@ fn a_tool_change_during_a_press_makes_it_no_tap() {
     editor.set_tool(Tool::Selection);
     replay(&mut editor, "1.1 up 1 finger 500 500");
 
-    assert_eq!(editor.selection(), ["a"]);
+    // The tap on empty Canvas would have cleared it; the Tool change did,
+    // and the lift selected nothing.
+    assert!(editor.selection().is_empty());
 }
 
 #[test]

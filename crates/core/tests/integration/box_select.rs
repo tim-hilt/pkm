@@ -299,7 +299,9 @@ fn a_tool_change_ends_the_box() {
     );
     editor.set_tool(Tool::Hand);
 
-    assert_eq!(editor.selection(), ["a"]);
+    // Choosing the hand Tool cleared the Selection, and the box selected
+    // nothing.
+    assert!(editor.selection().is_empty());
 }
 
 #[test]
