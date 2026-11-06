@@ -58,21 +58,3 @@
         }
     }
 #endif
-
-#if os(macOS)
-    extension View {
-        /// Hides the faint line the Mac window draws under its toolbar, so the
-        /// Canvas runs seamlessly up to the window's top edge.
-        func hidesTitlebarSeparator() -> some View {
-            background(TitlebarSeparatorHider())
-        }
-    }
-
-    private struct TitlebarSeparatorHider: NSViewRepresentable {
-        func makeNSView(context: Context) -> NSView { NSView() }
-
-        func updateNSView(_ view: NSView, context: Context) {
-            DispatchQueue.main.async { view.window?.titlebarSeparatorStyle = .none }
-        }
-    }
-#endif
