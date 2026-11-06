@@ -3,7 +3,6 @@ use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::action_bar::ActionBar;
 use crate::binding::{self, Attachments, End};
 use crate::box_select::BoxSelect;
 use crate::clipboard;
@@ -723,24 +722,6 @@ impl Editor {
     /// The ids of the selected Elements, in the order they were selected.
     pub fn selection(&self) -> &[String] {
         self.selection.ids()
-    }
-
-    /// Where the Action Bar is shown, or `None` if it is not: it is shown
-    /// next to a non-empty Selection, except while a pointer is dragging it,
-    /// or drawing, or box-selecting. The anchor is in view coordinates, so it
-    /// follows the Selection through panning and zooming: clients read it
-    /// with the viewport after every input and command. See
-    /// [`crate::action_bar`].
-    pub fn action_bar(&self) -> Option<ActionBar> {
-        if self.is_gesturing() {
-            return None;
-        }
-        ActionBar::of(
-            &self.scene,
-            &self.selection,
-            self.editing_group.as_deref(),
-            self.navigation.viewport(),
-        )
     }
 
     /// What clients draw over the Scene: a frame around each selected

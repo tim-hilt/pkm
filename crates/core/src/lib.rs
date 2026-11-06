@@ -2,7 +2,6 @@
 //!
 //! Clients drive everything through [`Editor`].
 
-mod action_bar;
 mod arrowhead;
 mod base64;
 mod binding;
@@ -60,7 +59,6 @@ mod viewport;
 mod wrap;
 mod z_order;
 
-pub use action_bar::ActionBar;
 pub use context_menu::ContextMenu;
 pub use editor::{Editor, Export, ExportScope};
 pub use geometry::{

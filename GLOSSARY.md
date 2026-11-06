@@ -73,7 +73,7 @@ The text bound to a rectangle, diamond or ellipse (its container), as Excalidraw
 _Avoid_: Caption, bound text (Excalidraw's name for it)
 
 **Context menu**:
-The system's own menu opened by a long-press with a finger (or a secondary click) with the selection Tool, never by itself: on an Element (selecting it first, unless it is already selected) it offers cut, copy, paste, duplicate, group, ungroup, arrange (z-order) and delete; on empty Canvas, paste and select all, and the Selection stays. Paste puts the Elements where it was opened. Offered on iPhone and iPad; the Mac has the Edit and Arrange menus. Replaced the Action Bar.
+The system's own menu opened by a long-press with a finger (or a secondary click) with the selection Tool, never by itself: on an Element (selecting it first, unless it is already selected) it offers cut, copy, paste, duplicate, group, ungroup, arrange (z-order) and delete; on empty Canvas, paste and select all, and the Selection stays. Paste puts the Elements where it was opened. Offered on iPhone and iPad; the Mac has the Edit and Arrange menus.
 _Avoid_: Action Bar (the removed floating bar), popover, popup, long-press menu
 
 **Properties panel**:

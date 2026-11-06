@@ -1,5 +1,6 @@
 //! Grouping and ungrouping (ADR-0006), tested at the Editor seam: taps and
-//! commands in, the Selection, the Action Bar and the saved Drawing out.
+//! commands in, the Selection, the long-press's group and ungroup flags and
+//! the saved Drawing out.
 //!
 //! Expected values follow Excalidraw's `actionGroup` and `groups.ts`: an
 //! Element lists its groups innermost first, a tap selects the outermost
@@ -8,7 +9,7 @@
 //! expected fractional indices are worked out with its `fractional-indexing`.
 
 use excalidraw_native_core::json::Value;
-use excalidraw_native_core::{Editor, PartKind, ZOrder};
+use excalidraw_native_core::{ContextMenu, Editor, PartKind, PointerKind, ZOrder};
 
 use crate::common;
 use common::{editor_with, replay, saved_elements, tap};
@@ -50,6 +51,29 @@ fn four(groups: [&str; 4]) -> Editor {
 
 fn select(editor: &mut Editor, id: &str, t: f64) {
     tap(editor, "mouse", centre(id), t);
+}
+
+/// The long-press's answer for `id`, which must be selected: whether grouping
+/// and ungrouping the Selection would do anything.
+fn group_flags(editor: &mut Editor, id: &str) -> (bool, bool) {
+    let (x, y) = centre(id);
+    match editor.long_press(x, y, PointerKind::Finger) {
+        Some(ContextMenu::Element {
+            can_group,
+            can_ungroup,
+        }) => (can_group, can_ungroup),
+        Some(ContextMenu::Canvas) | None => {
+            panic!("a long-press on an Element offers the Element menu")
+        }
+    }
+}
+
+fn can_group(editor: &mut Editor, id: &str) -> bool {
+    group_flags(editor, id).0
+}
+
+fn can_ungroup(editor: &mut Editor, id: &str) -> bool {
+    group_flags(editor, id).1
 }
 
 fn select_with_shift(editor: &mut Editor, id: &str, t: f64) {
@@ -256,7 +280,7 @@ fn a_group_of_deleted_elements_and_one_other_is_no_group() {
     select(&mut editor, "a", 0.0);
 
     assert_eq!(selected(&editor), ["a"]);
-    assert!(!editor.action_bar().unwrap().can_ungroup);
+    assert!(!can_ungroup(&mut editor, "a"));
 }
 
 #[test]
@@ -322,14 +346,14 @@ fn select_all_selects_every_element_of_every_group() {
 fn ungrouping_dissolves_the_selected_group_and_keeps_the_elements_selected() {
     let mut editor = four(["\"g\"", "\"g\"", "", ""]);
     select(&mut editor, "a", 0.0);
-    assert!(editor.action_bar().unwrap().can_ungroup);
+    assert!(can_ungroup(&mut editor, "a"));
 
     editor.ungroup();
 
     assert!(groups_of(&editor, "a").is_empty());
     assert!(groups_of(&editor, "b").is_empty());
     assert_eq!(selected(&editor), ["a", "b"]);
-    assert!(!editor.action_bar().unwrap().can_ungroup);
+    assert!(!can_ungroup(&mut editor, "a"));
     // Tapping selects what is tapped alone from here on.
     select(&mut editor, "a", 1.0);
     assert_eq!(selected(&editor), ["a"]);
@@ -441,7 +465,7 @@ fn a_double_tap_goes_into_the_group_and_selects_the_element_alone() {
     select(&mut editor, "a", 10.0);
     assert_eq!(selected(&editor), ["a"]);
     // Neither is a group, so there is nothing to ungroup.
-    assert!(!editor.action_bar().unwrap().can_ungroup);
+    assert!(!can_ungroup(&mut editor, "a"));
     select_with_shift(&mut editor, "b", 11.0);
     assert_eq!(selected(&editor), ["a", "b"]);
 }
@@ -513,7 +537,7 @@ fn a_double_tap_goes_into_a_nested_group_one_level_at_a_time() {
     assert_eq!(selected(&editor), ["c"]);
     select(&mut editor, "b", 11.0);
     assert_eq!(selected(&editor), ["a", "b"]);
-    assert!(editor.action_bar().unwrap().can_ungroup);
+    assert!(can_ungroup(&mut editor, "a"));
 
     // Into `inner`: now the Elements are on their own.
     double_tap(&mut editor, "b", 15.0);
@@ -529,7 +553,7 @@ fn grouping_inside_a_group_makes_the_new_group_part_of_it() {
     double_tap(&mut editor, "a", 5.0);
     select_with_shift(&mut editor, "b", 10.0);
     assert_eq!(selected(&editor), ["a", "b"]);
-    assert!(editor.action_bar().unwrap().can_group);
+    assert!(can_group(&mut editor, "a"));
 
     editor.group();
 

@@ -6,10 +6,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use excalidraw_native_core::scene::{FillPattern, LineStyle};
 use excalidraw_native_core::{
-    ActionBar, Command, ContextMenu, Edges, ExportScope, FontSize, ImageFile, MagnifyEvent,
-    Modifiers, PencilDoubleTap, PointerButton, PointerEvent, PointerKind, PointerPhase, Properties,
-    Property, ScrollEvent, Sections, Shortcut, Sloppiness, StrokeWidth, TextAlign, TextEditor,
-    Tool, ZOrder,
+    Command, ContextMenu, Edges, ExportScope, FontSize, ImageFile, MagnifyEvent, Modifiers,
+    PencilDoubleTap, PointerButton, PointerEvent, PointerKind, PointerPhase, Properties, Property,
+    ScrollEvent, Sections, Shortcut, Sloppiness, StrokeWidth, TextAlign, TextEditor, Tool, ZOrder,
 };
 
 uniffi::setup_scaffolding!("ExcalidrawNativeCore");
@@ -292,16 +291,6 @@ pub struct TextEditor {
     pub fixed_width: bool,
 }
 
-/// Where the Action Bar is shown, in view coordinates; see
-/// [`excalidraw_native_core::ActionBar`].
-#[uniffi::remote(Record)]
-pub struct ActionBar {
-    pub x: f64,
-    pub y: f64,
-    pub can_group: bool,
-    pub can_ungroup: bool,
-}
-
 /// Which menu a long-press opens; see [`excalidraw_native_core::ContextMenu`].
 #[uniffi::remote(Enum)]
 pub enum ContextMenu {
@@ -572,13 +561,6 @@ impl Editor {
     /// [`excalidraw_native_core::Editor::cancel_text`].
     pub fn cancel_text(&self) {
         self.editor().cancel_text();
-    }
-
-    /// Where the Action Bar is shown, `None` if it is hidden; see
-    /// [`excalidraw_native_core::Editor::action_bar`]. Read it with the viewport
-    /// after forwarding input or a command.
-    pub fn action_bar(&self) -> Option<ActionBar> {
-        self.editor().action_bar()
     }
 
     /// Duplicates the Selection and selects the copies; see
@@ -1113,7 +1095,7 @@ mod tests {
     }
 
     #[test]
-    fn the_action_bar_commands_work_through_the_bindings() {
+    fn the_selection_commands_work_through_the_bindings() {
         let editor = Editor::new();
         editor
             .load(
@@ -1123,7 +1105,6 @@ mod tests {
                     .to_vec(),
             )
             .unwrap();
-        assert!(editor.action_bar().is_none());
         let mouse = |phase| PointerEvent {
             id: 0,
             phase,
@@ -1137,9 +1118,7 @@ mod tests {
         };
         editor.pointer(mouse(PointerPhase::Down));
         editor.pointer(mouse(PointerPhase::Up));
-        // Below the middle of the box 10..40 by 20..60.
-        let bar = editor.action_bar().unwrap();
-        assert_eq!((bar.x, bar.y), (25.0, 92.0));
+        assert_eq!(editor.selection(), ["a"]);
 
         editor.duplicate();
         assert_eq!(editor.element_count(), 2);
@@ -1147,7 +1126,7 @@ mod tests {
         assert!(editor.can_undo());
         editor.delete_selection();
         assert_eq!(editor.element_count(), 1);
-        assert!(editor.action_bar().is_none());
+        assert!(editor.selection().is_empty());
     }
 
     #[test]
@@ -1208,16 +1187,31 @@ mod tests {
             editor.pointer(mouse(PointerPhase::Down, x, shift));
             editor.pointer(mouse(PointerPhase::Up, x, shift));
         }
-        let bar = editor.action_bar().unwrap();
-        assert!(bar.can_group && !bar.can_ungroup);
+        assert_eq!(
+            editor.long_press(15.0, 20.0, PointerKind::Mouse),
+            Some(ContextMenu::Element {
+                can_group: true,
+                can_ungroup: false
+            })
+        );
 
         editor.group();
-        let bar = editor.action_bar().unwrap();
-        assert!(!bar.can_group && bar.can_ungroup);
+        assert_eq!(
+            editor.long_press(15.0, 20.0, PointerKind::Mouse),
+            Some(ContextMenu::Element {
+                can_group: false,
+                can_ungroup: true
+            })
+        );
 
         editor.ungroup();
-        let bar = editor.action_bar().unwrap();
-        assert!(!bar.can_ungroup);
+        assert_eq!(
+            editor.long_press(15.0, 20.0, PointerKind::Mouse),
+            Some(ContextMenu::Element {
+                can_group: true,
+                can_ungroup: false
+            })
+        );
     }
 
     #[test]

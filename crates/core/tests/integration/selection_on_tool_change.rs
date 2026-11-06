@@ -3,7 +3,7 @@
 //! excalidraw.com's `App.setActiveTool` and `clearSelectionIfNotUsingSelection`.
 //! Tested at the Editor seam with recorded sequences.
 
-use excalidraw_native_core::{Command, Editor, PencilDoubleTap, Tool};
+use excalidraw_native_core::{Command, Editor, PencilDoubleTap, PointerKind, Tool};
 
 use crate::common;
 use common::{editor_with, replay, tap};
@@ -49,7 +49,11 @@ fn choosing_a_drawing_tool_clears_the_selection() {
         editor.set_tool(tool);
 
         assert!(editor.selection().is_empty(), "{tool:?}");
-        assert!(editor.action_bar().is_none(), "{tool:?}");
+        // A long-press with a drawing Tool offers no Context menu.
+        assert!(
+            editor.long_press(20.0, 10.0, PointerKind::Mouse).is_none(),
+            "{tool:?}"
+        );
         assert!(editor.overlay_revision() > revision, "{tool:?}");
     }
 }

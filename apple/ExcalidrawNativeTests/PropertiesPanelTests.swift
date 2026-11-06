@@ -102,7 +102,7 @@ import Testing
             _ = setup.controller.canUndo
             _ = setup.controller.canRedo
             _ = setup.controller.properties
-            _ = setup.controller.viewSize
+            _ = setup.controller.hasSelection
         } onChange: {
             invalidated.isSet = true
         }

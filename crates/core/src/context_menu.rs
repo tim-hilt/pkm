@@ -2,8 +2,8 @@
 //!
 //! Clients detect the hold (a finger kept down inside a small slop, or a
 //! secondary click) and show the system's menu; the core decides which menu
-//! it is and what the press selects, so that every platform agrees. It
-//! replaces the Action Bar's group and ungroup flags.
+//! it is and what the press selects, so that every platform agrees. Its
+//! Element menu carries whether group and ungroup would do anything.
 
 /// The menu a long-press asks the client to show.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

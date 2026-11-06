@@ -1,6 +1,6 @@
 # excalidraw.com layout reference
 
-Measurements of excalidraw.com's UI at the three target display sizes. The UI tickets ([45 desktop layout](../../.scratch/v1/issues/45-desktop-layout.md), [46 mobile layout](../../.scratch/v1/issues/46-mobile-layout.md), [27 properties panel](../../.scratch/v1/issues/27-properties-panel.md), [09 zoom controls](../../.scratch/v1/issues/09-hand-tool-and-zoom-controls.md), [28 Action Bar](../../.scratch/v1/issues/28-action-bar-duplicate-delete.md)) reproduce these layouts; ticket 50 reviews visual parity against them.
+Measurements of excalidraw.com's UI at the three target display sizes. The UI tickets ([45 desktop layout](../../.scratch/v1/issues/45-desktop-layout.md), [46 mobile layout](../../.scratch/v1/issues/46-mobile-layout.md), [27 properties panel](../../.scratch/v1/issues/27-properties-panel.md), [09 zoom controls](../../.scratch/v1/issues/09-hand-tool-and-zoom-controls.md), [28 Context menu](../../.scratch/v1/issues/28-action-bar-duplicate-delete.md)) reproduce these layouts; ticket 50 reviews visual parity against them.
 
 All lengths are CSS px, which map 1:1 to SwiftUI points. Coordinates are `x,y` of the top-left corner inside the editor container (= the window/viewport; excalidraw.com has no outer chrome). Colours are light theme unless stated.
 
@@ -115,7 +115,7 @@ Island at `16,76`, 195 wide, padding 12, vertical gap 8 between fieldsets.
 | Multiple Elements | common fieldsets above · Layers · **Align** (8 buttons, 2 rows) · Actions (+ Group / Ungroup) |
 | Hand, Eraser, Selection with empty Selection | **no panel** |
 
-  _Fill_ appears only when the background is not transparent. _Actions_ appears only when a Selection exists (not for an armed Tool). Layers/Align/Actions are what ticket 28–30's Action Bar takes over.
+  _Fill_ appears only when the background is not transparent. _Actions_ appears only when a Selection exists (not for an armed Tool). Layers/Align/Actions are what ticket 28–30's Context menu takes over.
 - Stroke/Background defaults and "last used" behaviour: new Elements take the last chosen values (story 56).
 
 ### 2.5 Property controls and their option sets
@@ -295,7 +295,7 @@ Seen on excalidraw.com and intentionally **not** reproduced (spec "Out of scope"
 - **AI / generate**: Text to diagram, Wireframe to code, Mermaid to Excalidraw, Draw to shape.
 - **Tools not in v1**: Sticky note, Frame tool, Web Embed, Laser pointer, Bucket fill, Lasso selection, Link action, crop.
 - **Welcome screen** and its hand-drawn arrows/hints (the Gallery replaces it), command palette, "Find on canvas", Stats panel, Help dialog contents, reset-the-canvas, theme/language menu entries (system-provided), eyedropper, tool-lock hint tooltips, zen/view mode, grid/snapping toggles.
-- **Context menu** (long-press / right-click): replaced by the Action Bar (glossary); its Layers/Actions content is available in §2.4/§4.3 as reference for the Action Bar's options.
+- **Context menu** (long-press / right-click): a long-press with a finger opens the system's own Context menu (glossary); its Layers/Actions content is available in §2.4/§4.3 as reference for the menu's options. A right-click context menu on the Mac is out of scope.
 - **excalidraw.com quirk**: at 678×1024 the top-right cluster (Share + Library) overflows the container (`ipad-splitview-678x1024-*.png`); not to be copied.
 
 ## 8. Quick reference — numbers a UI ticket needs

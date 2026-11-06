@@ -6,7 +6,9 @@
 use crate::common;
 
 use common::editor_with;
-use excalidraw_native_core::{Command, Editor, Modifiers, Tool, ZOrder, shortcuts};
+use excalidraw_native_core::{
+    Command, ContextMenu, Editor, Modifiers, PointerKind, Tool, ZOrder, shortcuts,
+};
 
 const NONE: Modifiers = Modifiers {
     shift: false,
@@ -135,14 +137,23 @@ fn cmd_a_selects_all_and_cmd_d_duplicates() {
     assert_eq!(editor.element_count(), 4);
 }
 
+/// The long-press's answer for the Selection: whether ungrouping would do
+/// anything. Rectangle `a` is 0..10 by 0..10.
+fn can_ungroup(editor: &mut Editor) -> bool {
+    match editor.long_press(5.0, 5.0, PointerKind::Finger) {
+        Some(ContextMenu::Element { can_ungroup, .. }) => can_ungroup,
+        Some(ContextMenu::Canvas) | None => panic!("a long-press on a selected Element"),
+    }
+}
+
 #[test]
 fn cmd_g_groups_and_cmd_shift_g_ungroups() {
     let mut editor = editor_with(&[&rect("a", 0.0), &rect("b", 20.0)]);
     press(&mut editor, "a", CMD);
     press(&mut editor, "g", CMD);
-    assert!(editor.action_bar().unwrap().can_ungroup);
+    assert!(can_ungroup(&mut editor));
     press(&mut editor, "g", CMD_SHIFT);
-    assert!(!editor.action_bar().unwrap().can_ungroup);
+    assert!(!can_ungroup(&mut editor));
 }
 
 #[test]

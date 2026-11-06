@@ -63,7 +63,7 @@ fn client_refresh(editor: &Editor, overlay_revision: &mut u64) {
         editor.tool_lock(),
         editor.pencil_only_drawing(),
     );
-    let _ = (editor.can_undo(), editor.can_redo(), editor.action_bar());
+    let _ = (editor.can_undo(), editor.can_redo());
     if editor.shows_properties() {
         editor.properties();
     }

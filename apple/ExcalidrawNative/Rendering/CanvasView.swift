@@ -516,15 +516,9 @@ final class CanvasController {
     /// of the next Element if nothing is selected. `nil` while the panel is
     /// hidden (`Editor.showsProperties`) and until there is an editor.
     private(set) var properties: Properties?
-    /// Where the Action Bar is shown, in the Canvas's coordinates, or `nil` if
-    /// it is hidden; the core decides, and the position follows the Selection
-    /// through panning and zooming.
-    private(set) var actionBar: ActionBar?
-    /// Whether something is selected (and no pointer is drawing or moving):
-    /// exactly when the core shows the Action Bar.
-    var hasSelection: Bool { actionBar != nil }
-    /// The size of the Canvas, which keeps the Action Bar inside it.
-    private(set) var viewSize = CGSize.zero
+    /// Whether something is selected: it enables the Edit and Export Selection
+    /// items exactly then.
+    private(set) var hasSelection = false
     /// The zoom in whole percent, as the reset zoom button shows it. Whole
     /// percent, so that a pinch updates the chrome only when the number does.
     private(set) var zoomPercent = 100
@@ -543,8 +537,7 @@ final class CanvasController {
         canUndo = editor.canUndo()
         canRedo = editor.canRedo()
         properties = editor.showsProperties() ? editor.properties() : nil
-        actionBar = editor.actionBar()
-        viewSize = canvas?.bounds.size ?? .zero
+        hasSelection = !editor.selection().isEmpty
         zoomPercent = Int((editor.viewport().zoom * 100).rounded())
     }
 

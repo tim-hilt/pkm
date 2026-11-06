@@ -191,7 +191,7 @@ impl Editor {
     /// as Excalidraw does: see [`crate::group`]. Tapping any of them then
     /// selects them all. One undo step. Does nothing unless two or more
     /// Elements are selected and not all of them in a group already (see
-    /// [`ActionBar::can_group`]), or while a pointer is drawing or moving.
+    /// the long-press's `can_group`), or while a pointer is drawing or moving.
     pub fn group(&mut self) {
         self.finish_placing();
         if self.is_gesturing() {
@@ -215,7 +215,7 @@ impl Editor {
     /// Dissolves the groups that are selected (the `ungroup` command): the
     /// Elements stay selected, now without them. Groups inside and outside
     /// those stay. One undo step. Does nothing unless a group is selected
-    /// (see [`ActionBar::can_ungroup`]), or while a pointer is drawing or
+    /// (see the long-press's `can_ungroup`), or while a pointer is drawing or
     /// moving.
     pub fn ungroup(&mut self) {
         self.finish_placing();

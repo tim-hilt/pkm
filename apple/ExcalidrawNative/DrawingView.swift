@@ -54,7 +54,6 @@ struct DrawingView: View {
             onSceneChange: { drawing.editorDidChange() }
         )
         .ignoresSafeArea()
-        .overlay { ActionBarView(controller: controller).dynamicTypeSize(...Self.largestChromeType) }
         .focusedSceneValue(controller)
         .overlay {
             GeometryReader { container in
