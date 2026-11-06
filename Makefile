@@ -111,7 +111,7 @@ visual-parity-app: apple-project
 # share of one input event in the 5,000-Element one.
 # See docs/performance-benchmarks.md for the full procedure.
 bench:
-	cargo test --release --locked -q -p workingtitle-core --test integration -- --ignored --nocapture benchmarks::
+	cargo test --release --locked -q -p workingtitle-core --test integration -- --ignored --nocapture --test-threads=1 benchmarks::
 
 clean:
 	rm -rf apple/WorkingTitle.xcodeproj apple/build apple/Generated target

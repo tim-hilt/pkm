@@ -49,10 +49,9 @@ after.
 | Open 1,000 Elements < 200 ms | 4.4 ms (core: load + geometry, best of 10) | met (core); end-to-end on device not yet measured |
 | Download < 10 MB | 1.2 MB `.ipa` (3.8 MB uncompressed `.app`), iOS Release | met |
 | < 150 MB memory at 5,000 Elements | 35 MB peak RSS (core only, both Scenes loaded with geometry); 110 MB footprint of the Mac app with `scene-5000` open | met (core, Mac); app on device not yet measured |
-| 120 fps pan/zoom/draw at 5,000 Elements | core's share of an input event: pinch step 2.2 ms, box-select step 4.4 ms (`make bench`); dragging or drawing still regenerates all geometry (8.8 ms, issue 56) and a select-all move takes ~40 ms per step (issue 63) | pending device run; known misses filed |
+| 120 fps pan/zoom/draw at 5,000 Elements | core's share of an input event: pinch step 2.2 ms, box-select step 4.4 ms (`make bench`); `geometry()` after a one-Element change 0.9 ms mean, 1.4 ms slowest (was 8.8 ms before the per-Element cache, issue 56) and a select-all move takes ~40 ms per step (issue 63) | pending device run; known misses filed |
 | No work while idle | 0.0 % CPU, 0 idle wake-ups (Mac, `scene-5000` open) | met |
 
-The known misses of the frame budget are filed as issues 56 (geometry
-regenerated for every Element on each change) and 63 (gestures on a large
+The known miss of the frame budget is filed as issue 63 (gestures on a large
 Selection). File a ticket under `.scratch/` for any other target a later run
 misses.

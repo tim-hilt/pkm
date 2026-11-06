@@ -21,6 +21,7 @@ mod eraser;
 mod fills;
 mod freedraw;
 mod geometry;
+mod geometry_cache;
 mod golden;
 mod group;
 mod hand_drawn_shapes;

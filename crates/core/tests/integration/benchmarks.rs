@@ -157,3 +157,37 @@ fn input_events_in_5000_elements_take_under_a_frame() {
     assert!(pinch < frame, "pinch step took {pinch:?}");
     assert!(box_select < frame, "box-select step took {box_select:?}");
 }
+
+/// `Editor::geometry()` after a one-Element change in `scene-5000`: what a
+/// client asks for after every pointer move while dragging (issue 56).
+#[test]
+#[ignore = "measurement; run in release, see docs/performance-benchmarks.md"]
+fn geometry_after_a_one_element_change_in_5000_elements_takes_well_under_a_frame() {
+    use PointerKind::Mouse;
+    use PointerPhase::{Down, Move, Up};
+    let mut editor = open(&benchmark_scene(5000));
+    editor.set_view_size(1024.0, 1366.0);
+    editor.zoom_to_fit();
+    editor.pointer(pointer(1, Down, (500.0, 600.0), Mouse, 0.0));
+    editor.pointer(pointer(1, Up, (500.0, 600.0), Mouse, 0.05));
+    editor.pointer(pointer(1, Down, (500.0, 600.0), Mouse, 1.0));
+
+    let steps = 100;
+    let mut slowest = Duration::ZERO;
+    let mut total = Duration::ZERO;
+    for step in 0..steps {
+        let t = 1.0 + step as f64 / 120.0;
+        editor.pointer(pointer(1, Move, (500.0 + step as f64, 600.0), Mouse, t));
+        let start = Instant::now();
+        let geometry = editor.geometry();
+        let took = start.elapsed();
+        assert!(!geometry.parts().is_empty());
+        slowest = slowest.max(took);
+        total += took;
+    }
+    println!(
+        "geometry() after a drag step, scene-5000 (mean {:?}, slowest of {steps}): {slowest:?}",
+        total / steps
+    );
+    assert!(slowest < Duration::from_millis(4), "took {slowest:?}");
+}

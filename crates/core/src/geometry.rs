@@ -305,6 +305,18 @@ pub(crate) struct Mark {
     images: usize,
 }
 
+/// How much a [`Geometry`] holds, to size the next one alike.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Sizes {
+    parts: usize,
+    verbs: usize,
+    coords: usize,
+    text_lines: usize,
+    text: usize,
+    images: usize,
+    file_ids: usize,
+}
+
 /// Paths, text and images to draw, in z-order (later ones are drawn over earlier ones).
 #[derive(Debug, Default)]
 pub struct Geometry {
@@ -329,6 +341,34 @@ impl Geometry {
         Self {
             generation,
             ..Self::default()
+        }
+    }
+
+    /// Empty geometry like [`Geometry::with_generation`] with room for what
+    /// `sizes` say, so that assembling it does not grow its buffers over and
+    /// over.
+    pub(crate) fn with_capacity(generation: u64, sizes: Sizes) -> Self {
+        Self {
+            generation,
+            parts: Vec::with_capacity(sizes.parts),
+            verbs: Vec::with_capacity(sizes.verbs),
+            coords: Vec::with_capacity(sizes.coords),
+            text_lines: Vec::with_capacity(sizes.text_lines),
+            text: String::with_capacity(sizes.text),
+            images: Vec::with_capacity(sizes.images),
+            file_ids: String::with_capacity(sizes.file_ids),
+        }
+    }
+
+    pub(crate) fn sizes(&self) -> Sizes {
+        Sizes {
+            parts: self.parts.len(),
+            verbs: self.verbs.len(),
+            coords: self.coords.len(),
+            text_lines: self.text_lines.len(),
+            text: self.text.len(),
+            images: self.images.len(),
+            file_ids: self.file_ids.len(),
         }
     }
 
@@ -372,6 +412,48 @@ impl Geometry {
             image.opacity *= factor;
             image.version = faded(image.version);
         }
+    }
+
+    /// Appends everything in `other` as it is, with its ops, text and file
+    /// ids moved to the end of these buffers and its text lines and images
+    /// moved behind the parts already here.
+    pub(crate) fn extend(&mut self, other: &Geometry) {
+        let (verbs, coords) = (index(self.verbs.len()), index(self.coords.len()));
+        let (parts, text, file_ids) = (
+            index(self.parts.len()),
+            index(self.text.len()),
+            index(self.file_ids.len()),
+        );
+        self.parts.extend(other.parts.iter().map(|part| Part {
+            verb_start: part.verb_start + verbs,
+            coord_start: part.coord_start + coords,
+            ..*part
+        }));
+        self.verbs.extend_from_slice(&other.verbs);
+        self.coords.extend_from_slice(&other.coords);
+        self.text_lines
+            .extend(other.text_lines.iter().map(|line| TextLine {
+                part_index: line.part_index + parts,
+                text_start: line.text_start + text,
+                ..*line
+            }));
+        self.text.push_str(&other.text);
+        self.images.extend(other.images.iter().map(|image| Image {
+            part_index: image.part_index + parts,
+            file_id_start: image.file_id_start + file_ids,
+            ..*image
+        }));
+        self.file_ids.push_str(&other.file_ids);
+    }
+
+    pub(crate) fn shrink_to_fit(&mut self) {
+        self.parts.shrink_to_fit();
+        self.verbs.shrink_to_fit();
+        self.coords.shrink_to_fit();
+        self.text_lines.shrink_to_fit();
+        self.text.shrink_to_fit();
+        self.images.shrink_to_fit();
+        self.file_ids.shrink_to_fit();
     }
 
     /// Appends an empty stroked part for `element` at `version` and returns

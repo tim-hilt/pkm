@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -46,7 +47,7 @@ use crate::{image, shape};
 mod commands;
 mod drawing_tools;
 mod geometry;
-use geometry::bounds_of;
+use geometry::{GeometryCache, bounds_of};
 mod selection_tool;
 mod text_entry;
 
@@ -96,6 +97,8 @@ pub struct Editor {
     /// reassigned, see
     /// [`Geometry::generation`].
     generation: u64,
+    /// What [`Editor::geometry`] generated for shapes, see `GeometryCache`.
+    geometry_cache: RefCell<GeometryCache>,
     /// Changes whenever anything shown on the Canvas does, see
     /// [`Editor::revision`].
     revision: u64,
@@ -184,6 +187,7 @@ impl Editor {
         Self {
             scene: Scene::empty(),
             generation: next_generation(),
+            geometry_cache: RefCell::default(),
             revision: 0,
             navigation: Navigation::default(),
             tool: Tool::default(),
@@ -255,6 +259,7 @@ impl Editor {
     pub fn set_text_measurer(&mut self, measurer: Arc<dyn TextMeasurer>) {
         self.measurer = Some(Measurer(measurer));
         // What was drawn for texts may differ now.
+        self.geometry_cache.get_mut().clear();
         self.changed();
     }
 
@@ -292,7 +297,9 @@ impl Editor {
     pub fn geometry(&self) -> Geometry {
         // The text view shows the text that is being edited.
         let editing = self.text.as_ref().map(TextEditing::handle);
-        self.geometry_of(self.generation, |e| editing != Some(e.handle()))
+        let geometry = self.geometry_of(self.generation, |e| editing != Some(e.handle()));
+        self.prune_geometry_cache();
+        geometry
     }
 
     /// Which part of the Scene the Canvas shows. Clients read it after

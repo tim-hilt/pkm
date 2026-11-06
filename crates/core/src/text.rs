@@ -129,13 +129,7 @@ pub(crate) fn draw(
         font_size: font_size as f32,
         align,
     };
-    // Lines change with the container as well as with their own Element.
-    let version = container.map_or(element.version(), |c| {
-        element
-            .version()
-            .wrapping_mul(0x9E37_79B1)
-            .wrapping_add(c.version())
-    });
+    let version = version(element, container.as_ref());
 
     let anchor_x = block.x
         + match align {
@@ -163,6 +157,16 @@ pub(crate) fn draw(
             block.angle as f32,
         );
     }
+}
+
+/// The version `text` is drawn with: lines change with the container as well
+/// as with their own Element.
+pub(crate) fn version(text: &Element, container: Option<&Element>) -> u32 {
+    container.map_or(text.version(), |c| {
+        text.version()
+            .wrapping_mul(0x9E37_79B1)
+            .wrapping_add(c.version())
+    })
 }
 
 fn layout(
