@@ -19,14 +19,15 @@ struct ColorPickerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 0) {
-                ForEach(topPicks, id: \.self) { swatch($0, size: 26) }
+                ForEach(topPicks, id: \.self) { swatch($0, size: 22) }
+                Divider().frame(height: 22).padding(.horizontal, 4)
                 Button {
                     withAnimation(.snappy(duration: 0.2)) { isOpen.toggle() }
                 } label: {
-                    ColorSwatch(color: selected ?? "transparent", shape: RoundedRectangle(cornerRadius: 6))
-                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.accentColor, lineWidth: isOpen ? 3 : 0))
+                    ColorSwatch(color: selected ?? "transparent", size: 26)
+                        .overlay(Selection(size: 26).opacity(isOpen ? 1 : 0))
                         .frame(width: 26, height: 26)
-                        .frame(maxWidth: .infinity, minHeight: 36)
+                        .frame(minWidth: 30, minHeight: 36)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -49,13 +50,13 @@ struct ColorPickerView: View {
             let grid = ColorPalette.grid(for: kind)
             ForEach(0..<3, id: \.self) { row in
                 HStack(spacing: 0) {
-                    ForEach(grid[row * 5..<row * 5 + 5], id: \.self) { swatch($0, size: 30) }
+                    ForEach(grid[row * 5..<row * 5 + 5], id: \.self) { swatch($0, size: 26) }
                 }
             }
             heading("Shades")
             if let shades = ColorPalette.shades(of: selected) {
                 HStack(spacing: 0) {
-                    ForEach(shades, id: \.self) { swatch($0, size: 30) }
+                    ForEach(shades, id: \.self) { swatch($0, size: 26) }
                 }
             } else {
                 Text("No shades available for this color").font(.caption).foregroundStyle(.secondary)
@@ -63,6 +64,8 @@ struct ColorPickerView: View {
             heading("Hex code")
             hexField
         }
+        .padding(10)
+        .background(Color(white: 0.97), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var hexField: some View {
@@ -82,7 +85,8 @@ struct ColorPickerView: View {
             }
             .padding(.horizontal, 8)
             .frame(minHeight: 36)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+            .background(.white, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(white: 0.92), lineWidth: 1))
             if hexIsInvalid {
                 Text("Not a valid color").font(.caption).foregroundStyle(.red)
             }
@@ -110,8 +114,8 @@ struct ColorPickerView: View {
         Button {
             onPick(color)
         } label: {
-            ColorSwatch(color: color, shape: Circle())
-                .overlay(Circle().stroke(Color.accentColor, lineWidth: 3).opacity(color == selected ? 1 : 0))
+            ColorSwatch(color: color, size: size)
+                .overlay(Selection(size: size).opacity(color == selected ? 1 : 0))
                 .frame(width: size, height: size)
                 .frame(maxWidth: .infinity, minHeight: 36)
                 .contentShape(Rectangle())
@@ -128,18 +132,31 @@ struct ColorPickerView: View {
     }
 }
 
-/// A colour filled into `shape`, ringed so that white shows; transparent
-/// is a checkerboard, as in Excalidraw.
-private struct ColorSwatch<S: InsettableShape>: View {
+/// A colour filled into a rounded square of `size`, with a hairline ring so
+/// that white shows; transparent is a checkerboard, as in Excalidraw.
+private struct ColorSwatch: View {
     let color: String
-    let shape: S
+    let size: CGFloat
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: size * 0.2)
         shape.fill(Color(hex: color))
             .background {
                 if Color.isTransparent(color) { Checkerboard().clipShape(shape) }
             }
-            .overlay(shape.strokeBorder(.secondary.opacity(0.6), lineWidth: 1))
+            .overlay(shape.strokeBorder(Color.black.opacity(0.1), lineWidth: 1))
+    }
+}
+
+/// The ring around the chosen swatch, drawn just outside it; the gaps
+/// between swatches are wider than it.
+private struct Selection: View {
+    let size: CGFloat
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: size * 0.2 + 2)
+            .strokeBorder(Color.accentColor, lineWidth: 2)
+            .padding(-2)
     }
 }
 
