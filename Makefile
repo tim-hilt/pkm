@@ -32,7 +32,7 @@ build: apple-project
 # Builds an unsigned ExcalidrawNative.ipa for sideloading on an iPhone or iPad
 # (TARGETED_DEVICE_FAMILY is 1,2). SideStore, AltStore and similar tools
 # re-sign it on the device, so no provisioning profile is embedded.
-IPA_PRODUCT := apple/build/Build/Products/Release-iphoneos/ExcalidrawNative.app
+IPA_PRODUCT := 'apple/build/Build/Products/Release-iphoneos/Excalidraw Native.app'
 ipa: apple-project
 	$(XCODEBUILD) build -configuration Release -destination 'generic/platform=iOS' \
 		-derivedDataPath build CODE_SIGNING_ALLOWED=NO
@@ -89,7 +89,7 @@ sim:
 run: apple-project sim
 	$(XCODEBUILD) build -destination 'platform=iOS Simulator,name=$(SIM)' -derivedDataPath build
 	xcrun simctl boot '$(SIM)' 2>/dev/null || true
-	xcrun simctl install '$(SIM)' apple/build/Build/Products/Debug-iphonesimulator/ExcalidrawNative.app
+	xcrun simctl install '$(SIM)' 'apple/build/Build/Products/Debug-iphonesimulator/Excalidraw Native.app'
 	xcrun simctl launch --terminate-running-process '$(SIM)' com.timhilt.excalidrawnative
 
 # Regenerates the committed golden fixtures from the pinned Excalidraw checkout

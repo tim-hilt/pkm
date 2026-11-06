@@ -76,6 +76,10 @@ _Avoid_: Caption, bound text (Excalidraw's name for it)
 The system's own menu opened by a long-press with a finger (or a secondary click) with the selection Tool, never by itself: on an Element (selecting it first, unless it is already selected) it offers cut, copy, paste, duplicate, group, ungroup, arrange (z-order) and delete; on empty Canvas, paste and select all, and the Selection stays. Paste puts the Elements where it was opened. VoiceOver and Switch Control reach the Element menu's actions as custom actions on the Canvas while there is a Selection. Offered on iPhone and iPad; the Mac has the Edit and Arrange menus.
 _Avoid_: Action Bar (the removed floating bar), popover, popup, long-press menu
 
+**Dark mode**:
+The dark look of the app's screens (Canvas, chrome and Gallery), following the system's appearance; the Canvas shows each colour as excalidraw.com's dark theme does. It only changes what is shown: never the Drawing, never an export.
+_Avoid_: Theme, dark theme, night mode
+
 **Properties panel**:
 The panel that sets stroke colour, background colour, fill style, stroke width, stroke style, sloppiness, edges and opacity (and, for text, font size and text alignment) on the Selection, and, with an empty Selection, as the style of the next Element. It shows the Selection's current values, or none chosen where they are mixed.
 _Avoid_: Inspector, style bar, sidebar

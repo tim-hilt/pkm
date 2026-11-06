@@ -11,6 +11,7 @@ target="${1:?usage: $0 <device-name|mac>}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 build="$root/apple/build"
 app=ExcalidrawNative
+product="Excalidraw Native.app"
 
 bundle_id="${BUNDLE_ID:-com.timhilt.excalidrawnative}"
 # Apple registers an App ID on the first device build under a new bundle ID and
@@ -29,9 +30,9 @@ if [[ "$target" == mac ]]; then
   xcodebuild build -quiet -project $app.xcodeproj -scheme $app -configuration "$config" \
     -destination 'platform=macOS' -derivedDataPath "$build" -allowProvisioningUpdates \
     PRODUCT_BUNDLE_IDENTIFIER="$bundle_id"
-  rm -rf /Applications/$app.app
-  cp -R "$build/Build/Products/$config/$app.app" /Applications/
-  open /Applications/$app.app
+  rm -rf /Applications/$app.app "/Applications/$product"
+  cp -R "$build/Build/Products/$config/$product" /Applications/
+  open "/Applications/$product"
 else
   candidates=("$bundle_id")
   # Respect an explicit BUNDLE_ID: only fall back when nothing was chosen.
@@ -60,6 +61,6 @@ else
     || echo "note: installing as $installed_id; this app's Drawings stay in that ID's container" >&2
 
   xcrun devicectl device install app --device "$target" \
-    "$build/Build/Products/$config-iphoneos/$app.app"
+    "$build/Build/Products/$config-iphoneos/$product"
   xcrun devicectl device process launch --device "$target" "$installed_id"
 fi

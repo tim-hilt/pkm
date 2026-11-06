@@ -40,6 +40,10 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.timhilt.excalidrawnative
+        # The bundle, executable and macOS menu bar show this name; the Swift
+        # module keeps its space-free one.
+        PRODUCT_NAME: Excalidraw Native
+        PRODUCT_MODULE_NAME: ExcalidrawNative
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: $(inherited)
         MARKETING_VERSION: "0.1.0"
@@ -108,7 +112,7 @@ targets:
         DEVELOPMENT_TEAM: $(inherited)
         "CODE_SIGN_IDENTITY[sdk=macosx*]": "-"
         # macOS app bundles keep the executable under Contents/MacOS.
-        "TEST_HOST[sdk=macosx*]": "$(BUILT_PRODUCTS_DIR)/ExcalidrawNative.app/Contents/MacOS/ExcalidrawNative"
+        "TEST_HOST[sdk=macosx*]": "$(BUILT_PRODUCTS_DIR)/Excalidraw Native.app/Contents/MacOS/Excalidraw Native"
         "BUNDLE_LOADER[sdk=macosx*]": "$(TEST_HOST)"
 schemes:
   ExcalidrawNativeUITests:
