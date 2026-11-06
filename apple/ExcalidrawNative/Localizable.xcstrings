@@ -12,6 +12,17 @@
         }
       }
     },
+    "Actions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Actions"
+          }
+        }
+      }
+    },
     "Actions for %@": {
       "extractionState": "manual",
       "localizations": {
@@ -712,6 +723,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Large"
+          }
+        }
+      }
+    },
+    "Layers": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Layers"
           }
         }
       }
