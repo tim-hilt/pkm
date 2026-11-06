@@ -37,12 +37,14 @@ pub enum ZOrder {
 }
 
 /// Moves the Elements of `selection` (and the labels of its containers) in
-/// z-order as part of `step`. Returns whether anything moved.
+/// z-order as part of `step`, within `editing_group` if one was gone into.
+/// Returns whether anything moved.
 pub(crate) fn move_selection(
     scene: &mut Scene,
     entropy: &mut Entropy,
     step: &mut Step,
     selection: &Selection,
+    editing_group: Option<&str>,
     how: ZOrder,
 ) -> bool {
     let layers: Vec<Layer> = scene.raw_elements().map(layer_of).collect();
@@ -57,7 +59,7 @@ pub(crate) fn move_selection(
                         .is_some_and(|c| selection.contains(c)))
         })
         .collect();
-    let mut stack = Stack::new(&layers);
+    let mut stack = Stack::new(&layers, editing_group);
     match how {
         ZOrder::Forward => stack.shift_by_one(Direction::Front, &wanted),
         ZOrder::Backward => stack.shift_by_one(Direction::Back, &wanted),

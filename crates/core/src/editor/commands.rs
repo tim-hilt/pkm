@@ -177,6 +177,7 @@ impl Editor {
             &mut self.entropy,
             &mut step,
             &self.selection,
+            self.editing_group.as_deref(),
             how,
         ) {
             return;

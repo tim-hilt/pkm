@@ -2,10 +2,9 @@
 //! commit, on a stack of [`Layer`]s instead of Elements, so that it can be
 //! read next to the original.
 //!
-//! Not ported: the `editingGroupId` branches, which move an Element among
-//! the Elements of the group that was gone into (see [`crate::group`]); here
-//! an Element moves with its whole outermost group whatever was gone into.
-//! Nor is selecting a frame, which would take its children along, because
+//! With a group gone into (`editingGroupId`, see [`crate::group`]) an Element
+//! moves among the Elements of that group only, and its inner groups are
+//! the units passed. Not ported is selecting a frame, which would take its children along, because
 //! the core has no such thing.
 
 use std::collections::{HashMap, HashSet};
@@ -39,6 +38,8 @@ pub(super) enum Direction {
 /// The Elements in z-order, bottom first, which is the order of the file.
 pub(super) struct Stack<'a> {
     layers: &'a [Layer],
+    /// The group that was gone into, if any.
+    editing_group: Option<&'a str>,
     by_id: HashMap<&'a str, usize>,
     /// The layers (as positions in `layers`) in their current order.
     order: Vec<usize>,
@@ -55,10 +56,11 @@ pub(super) struct Outcome {
 }
 
 impl<'a> Stack<'a> {
-    /// The stack of `layers`, bottom first.
-    pub fn new(layers: &'a [Layer]) -> Self {
+    /// The stack of `layers`, bottom first, with `editing_group` gone into.
+    pub fn new(layers: &'a [Layer], editing_group: Option<&'a str>) -> Self {
         Self {
             layers,
+            editing_group,
             by_id: layers
                 .iter()
                 .enumerate()
@@ -200,17 +202,28 @@ impl<'a> Stack<'a> {
             frame.is_some_and(|f| layer.frame.as_deref() == Some(f) || layer.id == f)
         };
         let places = || self.order.iter().map(|&l| &self.layers[l]);
+        let in_editing_group = |layer: &Layer| {
+            self.editing_group
+                .is_some_and(|g| layer.groups.iter().any(|id| id == g))
+        };
+        // The first and last place the move may reach: those of the group
+        // gone into, or else of the frame, or else of the whole stack.
+        let (lowest, highest) = if self.editing_group.is_some() {
+            (
+                places().position(in_editing_group),
+                places().rposition(in_editing_group),
+            )
+        } else if frame.is_some() {
+            (
+                places().position(is_of_frame),
+                places().rposition(is_of_frame),
+            )
+        } else {
+            (Some(0), self.order.len().checked_sub(1))
+        };
         let (leading, trailing) = match direction {
-            Direction::Back => (
-                frame.map_or(Some(0), |_| places().position(is_of_frame)),
-                Some(last),
-            ),
-            Direction::Front => (
-                Some(first),
-                frame.map_or(self.order.len().checked_sub(1), |_| {
-                    places().rposition(is_of_frame)
-                }),
-            ),
+            Direction::Back => (lowest, Some(last)),
+            Direction::Front => (Some(first), highest),
         };
         // A frame without a first layer begins at the bottom.
         let (Some(leading), Some(trailing)) = (leading, trailing) else {
@@ -281,6 +294,18 @@ impl<'a> Stack<'a> {
             Direction::Front => (boundary + 1..order.len()).find(|&place| counts(place))?,
         };
         let next = self.layer_in(order, candidate);
+        if let Some(editing) = self.editing_group {
+            let source = self.layer_in(order, boundary);
+            if source.groups == next.groups {
+                return self
+                    .place_with_label(order, candidate, direction)
+                    .or(Some(candidate));
+            }
+            if !next.groups.iter().any(|g| g == editing) {
+                // Never out of the group gone into.
+                return None;
+            }
+        }
         let places_where = |test: &dyn Fn(&Layer) -> bool| -> Vec<usize> {
             (0..order.len())
                 .filter(|&place| test(self.layer_in(order, place)))
@@ -298,12 +323,25 @@ impl<'a> Stack<'a> {
                 l.frame.as_deref() == Some(frame) || l.id == frame
             }));
         }
-        let Some(group) = next.groups.last() else {
-            return self
-                .place_with_label(order, candidate, direction)
-                .or(Some(candidate));
+        // A group is passed as a whole: the outermost one, or inside the
+        // group gone into, the one just below it.
+        let group = match self.editing_group {
+            Some(editing) => next
+                .groups
+                .iter()
+                .position(|g| g == editing)
+                .and_then(|at| at.checked_sub(1))
+                .map(|below| &next.groups[below]),
+            None => next.groups.last(),
         };
-        // A group is passed as a whole, the outermost one.
+        let Some(group) = group else {
+            return if next.groups.is_empty() {
+                self.place_with_label(order, candidate, direction)
+                    .or(Some(candidate))
+            } else {
+                Some(candidate)
+            };
+        };
         edge(places_where(&|l| l.groups.contains(group))).or(Some(candidate))
     }
 

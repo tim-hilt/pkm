@@ -491,3 +491,87 @@ fn the_geometry_generation_and_handles_stay_when_elements_change_places() {
     assert_eq!(drawn[..drawn.len() - 1], drawn_before[1..]);
     assert_eq!(drawn[drawn.len() - 1], drawn_before[0]);
 }
+
+// --- With a group gone into (Excalidraw's `editingGroupId`) ---------------------
+
+/// `o`, then `a`, `b`, `c` (the group `g`, with `a` and `b` also in the
+/// inner group `i` if `inner`), then `z`; `g` gone into, `pick` selected.
+fn inside_group(inner: bool, pick: f64) -> Editor {
+    let ab = if inner {
+        r#","groupIds":["i","g"]"#
+    } else {
+        r#","groupIds":["g"]"#
+    };
+    let mut editor = editor_with(&[
+        &rect("o", 0.0, Some("a0"), ""),
+        &rect("a", 100.0, Some("a1"), ab),
+        &rect("b", 200.0, Some("a2"), ab),
+        &rect("c", 300.0, Some("a3"), r#","groupIds":["g"]"#),
+        &rect("z", 400.0, Some("a4"), ""),
+    ]);
+    select(&mut editor, 300.0, 0.0);
+    tap(&mut editor, "finger", centre(300.0), 5.0);
+    tap(&mut editor, "finger", centre(300.0), 5.2);
+    select(&mut editor, pick, 10.0);
+    editor
+}
+
+#[test]
+fn inside_a_group_send_to_back_stays_in_the_group() {
+    let mut editor = inside_group(false, 300.0);
+    editor.move_in_z_order(ZOrder::ToBack);
+    assert_eq!(ids(&editor), ["o", "c", "a", "b", "z"]);
+    assert_indices_ascend(&editor);
+}
+
+#[test]
+fn inside_a_group_bring_to_front_stays_in_the_group() {
+    let mut editor = inside_group(false, 100.0);
+    editor.move_in_z_order(ZOrder::ToFront);
+    assert_eq!(ids(&editor), ["o", "b", "c", "a", "z"]);
+    assert_indices_ascend(&editor);
+}
+
+#[test]
+fn inside_a_group_one_place_passes_the_next_member_only() {
+    let mut editor = inside_group(false, 100.0);
+    editor.move_in_z_order(ZOrder::Forward);
+    assert_eq!(ids(&editor), ["o", "b", "a", "c", "z"]);
+    editor.move_in_z_order(ZOrder::Backward);
+    assert_eq!(ids(&editor), ["o", "a", "b", "c", "z"]);
+    assert_indices_ascend(&editor);
+}
+
+#[test]
+fn inside_a_group_a_member_does_not_leave_it() {
+    let mut editor = inside_group(false, 100.0);
+    editor.move_in_z_order(ZOrder::Backward);
+    assert_eq!(ids(&editor), ["o", "a", "b", "c", "z"]);
+    let mut editor = inside_group(false, 300.0);
+    editor.move_in_z_order(ZOrder::Forward);
+    assert_eq!(ids(&editor), ["o", "a", "b", "c", "z"]);
+}
+
+#[test]
+fn inside_a_group_an_inner_group_moves_as_a_whole() {
+    let mut editor = inside_group(true, 100.0);
+    editor.move_in_z_order(ZOrder::Forward);
+    assert_eq!(ids(&editor), ["o", "c", "a", "b", "z"]);
+    assert_indices_ascend(&editor);
+
+    // And is passed as a whole.
+    let mut editor = inside_group(true, 300.0);
+    editor.move_in_z_order(ZOrder::Backward);
+    assert_eq!(ids(&editor), ["o", "c", "a", "b", "z"]);
+    assert_indices_ascend(&editor);
+}
+
+#[test]
+fn inside_a_group_undo_restores_the_order_and_the_indices() {
+    let mut editor = inside_group(false, 300.0);
+    let (before_ids, before_indices) = (ids(&editor), indices(&editor));
+    editor.move_in_z_order(ZOrder::ToBack);
+    editor.undo();
+    assert_eq!(ids(&editor), before_ids);
+    assert_eq!(indices(&editor), before_indices);
+}
