@@ -27,7 +27,7 @@ import Testing
 
     private func mouse(_ phase: PointerPhase, _ x: Double, _ y: Double) -> PointerEvent {
         PointerEvent(
-            id: 0, phase: phase, x: x, y: y, kind: .mouse, pressure: 0.5, timestamp: 0,
+            id: 0, phase: phase, x: x, y: y, kind: .mouse, button: .primary, pressure: 0.5, timestamp: 0,
             modifiers: Modifiers(shift: false, ctrl: false, alt: false, meta: false))
     }
 
@@ -268,7 +268,7 @@ import Testing
         for (phase, x) in [(PointerPhase.down, 10.0), (.move, 90), (.up, 90)] {
             drawing.editor.pointer(
                 event: PointerEvent(
-                    id: 0, phase: phase, x: x, y: x, kind: .mouse, pressure: 0.5, timestamp: 0,
+                    id: 0, phase: phase, x: x, y: x, kind: .mouse, button: .primary, pressure: 0.5, timestamp: 0,
                     modifiers: Modifiers(shift: false, ctrl: false, alt: false, meta: false)))
         }
         drawing.editorDidChange()
@@ -326,7 +326,7 @@ import Testing
         for (phase, x) in [(PointerPhase.down, 10.0), (.move, 90), (.up, 90)] {
             canvas.send(
                 PointerEvent(
-                    id: 0, phase: phase, x: x, y: x, kind: .mouse, pressure: 0.5, timestamp: 0,
+                    id: 0, phase: phase, x: x, y: x, kind: .mouse, button: .primary, pressure: 0.5, timestamp: 0,
                     modifiers: Modifiers(shift: false, ctrl: false, alt: false, meta: false)))
         }
         #expect(changes > 0)

@@ -771,6 +771,14 @@ impl Editor {
         }
     }
 
+    /// The client reports the space bar down (`true`) or up. A drag that
+    /// begins while it is held pans whatever the Tool and pointer, see
+    /// [`crate::navigation`]. Clients reset it when the window or app loses
+    /// focus, and do not send it while the text view has focus.
+    pub fn set_pan_key(&mut self, held: bool) {
+        self.navigation.set_pan_key(held);
+    }
+
     /// A scroll wheel or trackpad scroll (Mac): pans, or zooms with ctrl/cmd.
     pub fn scroll(&mut self, event: ScrollEvent) {
         self.navigation.scroll(event);

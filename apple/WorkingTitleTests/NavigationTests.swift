@@ -18,7 +18,7 @@ import Testing
 
     private func finger(_ id: UInt64, _ phase: PointerPhase, _ x: Double, _ y: Double) -> PointerEvent {
         PointerEvent(
-            id: id, phase: phase, x: x, y: y, kind: .finger, pressure: 0.5, timestamp: 0,
+            id: id, phase: phase, x: x, y: y, kind: .finger, button: .primary, pressure: 0.5, timestamp: 0,
             modifiers: Modifiers(
                 shift: false, ctrl: false, alt: false, meta: false))
     }

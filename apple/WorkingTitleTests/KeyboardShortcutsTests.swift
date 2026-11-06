@@ -61,7 +61,7 @@ import Testing
         for phase in [PointerPhase.down, .up] {
             canvas.send(
                 PointerEvent(
-                    id: 1, phase: phase, x: 300, y: 200, kind: .finger, pressure: 0.5, timestamp: 1,
+                    id: 1, phase: phase, x: 300, y: 200, kind: .finger, button: .primary, pressure: 0.5, timestamp: 1,
                     modifiers: Self.none))
         }
         #expect(canvas.textOverlay.view != nil)

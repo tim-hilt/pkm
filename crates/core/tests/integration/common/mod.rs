@@ -9,8 +9,8 @@ use std::path::PathBuf;
 
 use workingtitle_core::json::{Object, Value, parse};
 use workingtitle_core::{
-    Editor, Geometry, Modifiers, Part, PartKind, PointerEvent, PointerKind, PointerPhase,
-    TextMeasurer, Verb,
+    Editor, Geometry, Modifiers, Part, PartKind, PointerButton, PointerEvent, PointerKind,
+    PointerPhase, TextMeasurer, Verb,
 };
 
 /// The only `TextMeasurer` of the tests (spec, Testing Decisions): every
@@ -37,16 +37,25 @@ pub fn editor_with_fixture(name: &str) -> Editor {
 // --- Recorded pointer input ---------------------------------------------------
 
 /// Feeds a recorded pointer sequence to the editor. An event may end with
-/// `shift` and/or `alt` for the keys held while it happened.
+/// `shift` and/or `alt` for the keys held while it happened, and with
+/// `right` or `middle` for the mouse button (the primary one otherwise). The
+/// lines `space down` and `space up` report the space bar.
 pub fn replay(editor: &mut Editor, recording: &str) {
     for line in recording.lines().filter(|l| !l.trim().is_empty()) {
         let f: Vec<&str> = line.split_whitespace().collect();
+        if let ["space", state] = f[..] {
+            editor.set_pan_key(state == "down");
+            continue;
+        }
         let [time, phase, id, kind, x, y, rest @ ..] = &f[..] else {
             panic!("bad recorded event: {line}")
         };
         let mut modifiers = Modifiers::default();
+        let mut button = PointerButton::Primary;
         for flag in rest {
             match *flag {
+                "right" => button = PointerButton::Secondary,
+                "middle" => button = PointerButton::Middle,
                 "shift" => modifiers.shift = true,
                 "alt" => modifiers.alt = true,
                 _ => panic!("unknown modifier in: {line}"),
@@ -69,6 +78,7 @@ pub fn replay(editor: &mut Editor, recording: &str) {
                 "mouse" => PointerKind::Mouse,
                 _ => panic!("unknown kind in: {line}"),
             },
+            button,
             pressure: 0.5,
             timestamp: time.parse().unwrap(),
             modifiers,

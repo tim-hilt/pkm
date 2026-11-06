@@ -65,7 +65,9 @@ pub use geometry::{
     Dash, FillRule, FillStyle, Geometry, Image, ImageStatus, Part, PartKind, PartWriter,
     StrokeStyle, TextAlign, TextLine, TextStyle, Verb,
 };
-pub use input::{MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase, ScrollEvent};
+pub use input::{
+    MagnifyEvent, Modifiers, PointerButton, PointerEvent, PointerKind, PointerPhase, ScrollEvent,
+};
 pub use insert_image::ImageFile;
 pub use pencil_double_tap::PencilDoubleTap;
 pub use properties::{Properties, Property};

@@ -111,6 +111,12 @@ impl TapRecognizer {
         self.last = None;
     }
 
+    /// Forgets the press in progress only: a tap that is waiting for its
+    /// double stays. For a press that was taken over by a pan.
+    pub fn abandon_press(&mut self) {
+        self.press = None;
+    }
+
     /// Follows `event`. Returns what the pointer just turned out to be
     /// doing, if anything.
     pub fn track(&mut self, event: PointerEvent) -> Option<Recognized> {

@@ -61,7 +61,7 @@ import Testing
         for (phase, time) in [(PointerPhase.down, 0.0), (.up, 0.05)] {
             editor.pointer(
                 event: PointerEvent(
-                    id: 0, phase: phase, x: 300, y: 125, kind: .mouse, pressure: 0.5, timestamp: time,
+                    id: 0, phase: phase, x: 300, y: 125, kind: .mouse, button: .primary, pressure: 0.5, timestamp: time,
                     modifiers: modifiers))
         }
         #expect(editor.selection() == ["b"])

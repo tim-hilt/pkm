@@ -33,6 +33,7 @@ mod json;
 mod keyboard_shortcuts;
 mod legacy_properties;
 mod lines_and_arrows;
+mod mouse_pan;
 mod move_selection;
 mod multi_touch;
 mod navigation;

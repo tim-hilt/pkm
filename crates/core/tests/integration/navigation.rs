@@ -42,6 +42,7 @@ fn replay(editor: &mut Editor, recording: &str) {
                 "mouse" => PointerKind::Mouse,
                 _ => panic!("unknown kind in: {line}"),
             },
+            button: workingtitle_core::PointerButton::Primary,
             pressure: 0.5,
             timestamp: n as f64 * 0.01,
             modifiers: Modifiers::default(),

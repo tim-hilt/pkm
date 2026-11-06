@@ -32,6 +32,7 @@ fn send(
         x,
         y,
         kind,
+        button: workingtitle_core::PointerButton::Primary,
         pressure,
         timestamp: 0.0,
         modifiers: Modifiers::default(),

@@ -25,7 +25,7 @@ import Testing
 
     private func mouse(_ phase: PointerPhase, _ x: Double, _ y: Double) -> PointerEvent {
         PointerEvent(
-            id: 0, phase: phase, x: x, y: y, kind: .mouse, pressure: 0.5, timestamp: 0,
+            id: 0, phase: phase, x: x, y: y, kind: .mouse, button: .primary, pressure: 0.5, timestamp: 0,
             modifiers: Modifiers(shift: false, ctrl: false, alt: false, meta: false))
     }
 

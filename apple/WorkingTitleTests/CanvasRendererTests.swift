@@ -172,7 +172,8 @@ import Testing
         for (phase, dx, time) in [(PointerPhase.down, 0.0, 0.0), (.move, 40, 0.05), (.up, 40, 0.1)] {
             editor.pointer(
                 event: PointerEvent(
-                    id: 0, phase: phase, x: x + dx, y: 40 + dx, kind: .mouse, pressure: 0.5, timestamp: time,
+                    id: 0, phase: phase, x: x + dx, y: 40 + dx, kind: .mouse, button: .primary, pressure: 0.5,
+                    timestamp: time,
                     modifiers: modifiers))
         }
     }

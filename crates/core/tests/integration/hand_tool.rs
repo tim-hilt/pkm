@@ -16,6 +16,7 @@ fn send(editor: &mut Editor, id: u64, kind: PointerKind, phase: PointerPhase, x:
         x,
         y,
         kind,
+        button: workingtitle_core::PointerButton::Primary,
         pressure: 0.5,
         timestamp: 0.0,
         modifiers: Modifiers::default(),

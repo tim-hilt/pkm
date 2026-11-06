@@ -26,7 +26,7 @@ import Testing
 
     private func pencil(_ phase: PointerPhase, _ x: Double, _ y: Double, pressure: Float) -> PointerEvent {
         PointerEvent(
-            id: 1, phase: phase, x: x, y: y, kind: .pencil, pressure: pressure, timestamp: 0,
+            id: 1, phase: phase, x: x, y: y, kind: .pencil, button: .primary, pressure: pressure, timestamp: 0,
             modifiers: Modifiers(shift: false, ctrl: false, alt: false, meta: false))
     }
 

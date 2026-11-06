@@ -95,6 +95,14 @@ final class CanvasMetalView: MTKView {
         return true
     }
 
+    /// Reports the space bar to the core, which pans with it held. Space goes
+    /// to the text view while one is open, so it is never reported then; a
+    /// release is always reported, so that no key-up can be lost.
+    private func setPanKey(_ held: Bool) {
+        guard !held || textOverlay.view == nil else { return }
+        perform { $0.setPanKey(held: held) }
+    }
+
     /// Edit > Select All (⌘A) while the Canvas has the keyboard.
     override func selectAll(_ sender: Any?) { perform { $0.perform(command: .selectAll) } }
 
@@ -205,11 +213,25 @@ final class CanvasMetalView: MTKView {
 
         override var acceptsFirstResponder: Bool { true }
 
+        /// A lost key-up must not leave panning stuck.
+        override func resignFirstResponder() -> Bool {
+            setPanKey(false)
+            return super.resignFirstResponder()
+        }
+
         /// Keys the menus do not list (see `pressKey`): Escape finishes a
         /// line being placed; Enter does too, and otherwise edits the text
         /// of the Selection, as on excalidraw.com. The core decides.
         override func keyDown(with event: NSEvent) {
+            if event.keyCode == Self.spaceKey, textOverlay.view == nil {
+                setPanKey(true)
+                return
+            }
             if !pressKey(Self.keyName(of: event), Modifiers(event.modifierFlags)) { super.keyDown(with: event) }
+        }
+
+        override func keyUp(with event: NSEvent) {
+            if event.keyCode == Self.spaceKey { setPanKey(false) } else { super.keyUp(with: event) }
         }
 
         /// The key as `Shortcut.key` names it: the character it types without
@@ -225,6 +247,7 @@ final class CanvasMetalView: MTKView {
             }
         }
 
+        private static let spaceKey: UInt16 = 49
         private static let backspaceKey: UInt16 = 51
         private static let forwardDeleteKey: UInt16 = 117
 
@@ -242,10 +265,30 @@ final class CanvasMetalView: MTKView {
         override func mouseDragged(with event: NSEvent) { sendMouse(.move, event) }
         override func mouseUp(with event: NSEvent) { sendMouse(.up, event) }
 
+        // The right button and the wheel button pan; the core tells a
+        // right-click from a pan.
+        override func rightMouseDown(with event: NSEvent) { mouseDown(with: event) }
+        override func rightMouseDragged(with event: NSEvent) { mouseDragged(with: event) }
+        override func rightMouseUp(with event: NSEvent) { mouseUp(with: event) }
+        override func otherMouseDown(with event: NSEvent) { mouseDown(with: event) }
+        override func otherMouseDragged(with event: NSEvent) { mouseDragged(with: event) }
+        override func otherMouseUp(with event: NSEvent) { mouseUp(with: event) }
+
         private static let pointsPerWheelLine: CGFloat = 10
 
         private func viewPoint(of event: NSEvent) -> CGPoint {
             convert(event.locationInWindow, from: nil)
+        }
+
+        /// The button of a mouse event; buttons beyond the wheel button are
+        /// the primary one's.
+        private func button(of event: NSEvent) -> PointerButton {
+            switch event.type {
+            case .rightMouseDown, .rightMouseDragged, .rightMouseUp: .secondary
+            case .otherMouseDown, .otherMouseDragged, .otherMouseUp:
+                event.buttonNumber == 2 ? .middle : .primary
+            default: .primary
+            }
         }
 
         private func sendMouse(_ phase: PointerPhase, _ event: NSEvent) {
@@ -253,7 +296,8 @@ final class CanvasMetalView: MTKView {
             send(
                 PointerEvent(
                     id: 0, phase: phase, x: position.x, y: position.y, kind: .mouse,
-                    pressure: 0.5, timestamp: event.timestamp, modifiers: Modifiers(event.modifierFlags)))
+                    button: button(of: event), pressure: 0.5, timestamp: event.timestamp,
+                    modifiers: Modifiers(event.modifierFlags)))
         }
     #else
         /// Keys the menus do not list (see `pressKey`).
@@ -262,6 +306,10 @@ final class CanvasMetalView: MTKView {
             for press in presses {
                 guard let key = press.key else {
                     unhandled.insert(press)
+                    continue
+                }
+                if key.keyCode == .keyboardSpacebar, textOverlay.view == nil {
+                    setPanKey(true)
                     continue
                 }
                 let name =
@@ -275,6 +323,27 @@ final class CanvasMetalView: MTKView {
                 if !pressKey(name, Modifiers(key.modifierFlags)) { unhandled.insert(press) }
             }
             if !unhandled.isEmpty { super.pressesBegan(unhandled, with: event) }
+        }
+
+        override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+            releaseSpace(presses, with: event) { super.pressesEnded($0, with: event) }
+        }
+
+        override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+            releaseSpace(presses, with: event) { super.pressesCancelled($0, with: event) }
+        }
+
+        /// Reports the release of space; the other presses go on to `rest`.
+        private func releaseSpace(_ presses: Set<UIPress>, with event: UIPressesEvent?, rest: (Set<UIPress>) -> Void) {
+            let others = presses.filter { $0.key?.keyCode != .keyboardSpacebar }
+            if others.count != presses.count { setPanKey(false) }
+            if !others.isEmpty { rest(others) }
+        }
+
+        /// A lost key-up must not leave panning stuck.
+        override func resignFirstResponder() -> Bool {
+            setPanKey(false)
+            return super.resignFirstResponder()
         }
 
         override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) { send(touches, .down, event) }
@@ -301,6 +370,8 @@ final class CanvasMetalView: MTKView {
                         event: PointerEvent(
                             id: id, phase: phase, x: position.x, y: position.y,
                             kind: PointerKind(sample.type),
+                            button: sample.type == .indirectPointer && event?.buttonMask.contains(.secondary) == true
+                                ? .secondary : .primary,
                             pressure: sample.maximumPossibleForce > 0
                                 ? Float(sample.force / sample.maximumPossibleForce) : 0.5,
                             timestamp: sample.timestamp, modifiers: modifiers))

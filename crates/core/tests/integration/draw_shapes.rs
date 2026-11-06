@@ -28,6 +28,7 @@ fn send(
         x,
         y,
         kind,
+        button: workingtitle_core::PointerButton::Primary,
         pressure: 0.5,
         timestamp: 0.0,
         modifiers,

@@ -9,10 +9,18 @@
 //!   Canvas. A second finger turns it into the two-finger gesture above.
 //!   Without the hand Tool, Pencil and mouse never navigate. Fingers drag the
 //!   Canvas like the hand Tool does in Pencil-only drawing.
+//! * Mac mouse: with the space bar held, or with the wheel button, or with the
+//!   right button once it has travelled more than [`SECONDARY_SLOP`] points,
+//!   a drag pans whatever the Tool, and takes the pointer from it. Scrolling
+//!   while the wheel button pans zooms. A right button released before that
+//!   was a right-click, which does nothing. Fingers, Pencil and mouse alike
+//!   pan with space.
 //! * Zoom commands (in, out, reset, fit) act on the view as a whole, so they
 //!   need to know its size.
 
-use crate::input::{MagnifyEvent, PointerEvent, PointerKind, PointerPhase, ScrollEvent};
+use crate::input::{
+    MagnifyEvent, PointerButton, PointerEvent, PointerKind, PointerPhase, ScrollEvent,
+};
 use crate::viewport::Viewport;
 
 /// One zoom step of Excalidraw (`ZOOM_STEP`); a wheel tick moves the zoom by
@@ -20,6 +28,9 @@ use crate::viewport::Viewport;
 const MAX_WHEEL_ZOOM_STEP: f64 = 0.1;
 /// The zoom change of one zoom in / zoom out command (`ZOOM_STEP`).
 const ZOOM_STEP: f64 = 0.1;
+/// How far (view points) the right button must travel to pan rather than
+/// click (Excalidraw's `AppPan`).
+const SECONDARY_SLOP: f64 = 5.0;
 /// Wheel deltas of this size and larger zoom at full amplification.
 const FULL_WHEEL_DELTA: f64 = 20.0;
 
@@ -31,8 +42,10 @@ pub(crate) struct Navigation {
     fingers: Vec<Finger>,
     /// Set while the first two of `fingers` are navigating.
     pinch: Option<Pinch>,
-    /// Set while the hand Tool is dragging the Canvas.
+    /// Set while a pointer is dragging the Canvas.
     drag: Option<Drag>,
+    /// Whether the pan key (space) is held.
+    pan_key: bool,
     /// Width and height of the Canvas in view points; zero until a client
     /// reports it.
     view_size: (f64, f64),
@@ -47,12 +60,27 @@ pub(crate) struct Bounds {
     pub max_y: f64,
 }
 
-/// A hand Tool drag: the pointer driving it and where it was last seen.
+/// What started a drag of the Canvas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DragSource {
+    /// The hand Tool, or a finger in Pencil-only drawing.
+    Hand,
+    /// The pan key was held.
+    PanKey,
+    Wheel,
+    Secondary,
+}
+
+/// A drag of the Canvas: the pointer driving it and where it was last seen.
 #[derive(Debug, Clone, Copy)]
 struct Drag {
     id: u64,
     x: f64,
     y: f64,
+    source: DragSource,
+    /// A secondary-button press that has not travelled [`SECONDARY_SLOP`]
+    /// yet, and may still be a click. `x` and `y` are where it began.
+    pending: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -147,6 +175,24 @@ impl Navigation {
         self.pinch.is_some()
     }
 
+    /// Whether a drag of space, the wheel button or the right button is in
+    /// progress: it pans whatever the Tool, which then gets no input.
+    pub fn is_pan_overriding_tool(&self) -> bool {
+        self.drag.is_some_and(|d| d.source != DragSource::Hand)
+    }
+
+    /// Whether the Tool's gestures are suspended: pinching or overridden
+    /// panning.
+    pub fn suspends_tool(&self) -> bool {
+        self.is_pinching() || self.is_pan_overriding_tool()
+    }
+
+    /// The client reports the pan key (space) down or up. It only matters
+    /// for drags that begin while it is held.
+    pub fn set_pan_key(&mut self, held: bool) {
+        self.pan_key = held;
+    }
+
     /// Ends a hand Tool drag, e.g. because another Tool was chosen.
     pub fn cancel_drag(&mut self) {
         self.drag = None;
@@ -157,17 +203,26 @@ impl Navigation {
             PointerPhase::Down => {
                 let others = self.fingers.iter().filter(|f| f.id != event.id).count();
                 // Only a pointer that is alone on the Canvas can start a drag.
-                if hand_tool && self.drag.is_none() && self.pinch.is_none() && others == 0 {
-                    self.drag = Some(Drag {
+                if self.drag.is_none() && self.pinch.is_none() && others == 0 {
+                    self.drag = self.drag_source(event, hand_tool).map(|source| Drag {
                         id: event.id,
                         x: event.x,
                         y: event.y,
+                        source,
+                        pending: source == DragSource::Secondary,
                     });
                 }
             }
             PointerPhase::Move => {
                 if let Some(drag) = self.drag.as_mut().filter(|d| d.id == event.id) {
-                    self.viewport.scroll_by(drag.x - event.x, drag.y - event.y);
+                    if drag.pending {
+                        if (event.x - drag.x).hypot(event.y - drag.y) <= SECONDARY_SLOP {
+                            return;
+                        }
+                        drag.pending = false;
+                    } else {
+                        self.viewport.scroll_by(drag.x - event.x, drag.y - event.y);
+                    }
                     drag.x = event.x;
                     drag.y = event.y;
                 }
@@ -177,6 +232,17 @@ impl Navigation {
                     self.drag = None;
                 }
             }
+        }
+    }
+
+    /// What makes `event`, a press, drag the Canvas, if anything. Decided at
+    /// the press: the pan key or the Tool changing later does not matter.
+    fn drag_source(&self, event: PointerEvent, hand_tool: bool) -> Option<DragSource> {
+        match event.button {
+            PointerButton::Middle => Some(DragSource::Wheel),
+            PointerButton::Secondary => Some(DragSource::Secondary),
+            PointerButton::Primary if self.pan_key => Some(DragSource::PanKey),
+            PointerButton::Primary => hand_tool.then_some(DragSource::Hand),
         }
     }
 
@@ -211,6 +277,13 @@ impl Navigation {
     pub fn scroll(&mut self, event: ScrollEvent) {
         let zoom_modifier = event.modifiers.ctrl || event.modifiers.meta;
         let (dx, dy) = (event.dx, event.dy);
+        // Scrolling with the wheel button held zooms, whatever the modifiers.
+        if self.drag.is_some_and(|d| d.source == DragSource::Wheel) {
+            if dy != 0.0 {
+                self.zoom_by_wheel(event.x, event.y, dy);
+            }
+            return;
+        }
         if event.modifiers.shift {
             // Shift pans horizontally, ctrl/cmd+shift vertically. Macs turn
             // shift+wheel into a horizontal delta, so either axis counts.

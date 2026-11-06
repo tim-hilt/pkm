@@ -5,7 +5,7 @@ impl Editor {
     pub(super) fn draw_shape(&mut self, event: PointerEvent) {
         // Two fingers navigate; they never draw, and a drawing one of them
         // began turns into the gesture.
-        if self.navigation.is_pinching() {
+        if self.navigation.suspends_tool() {
             self.drop_shape();
             return;
         }
@@ -70,7 +70,7 @@ impl Editor {
         // Two fingers navigate: they place no points, and a line that one of
         // them began is gone. A line that is waiting for its next point
         // waits on.
-        if self.navigation.is_pinching() {
+        if self.navigation.suspends_tool() {
             if let Some(linear) = self.linear.as_mut() {
                 let update = linear.interrupt(&mut self.scene, &mut self.entropy);
                 self.linear_updated(update);
@@ -163,7 +163,7 @@ impl Editor {
         // Two fingers navigate, and end the stroke being drawn, whichever
         // pointer draws it (also the Pencil): a short one is dropped as the
         // mark of a finger landing, a longer one is kept as drawn.
-        if self.navigation.is_pinching() {
+        if self.navigation.suspends_tool() {
             if let Some(stroke) = self.stroke.take() {
                 if stroke.is_spike() {
                     stroke.cancel(&mut self.scene);
@@ -215,7 +215,7 @@ impl Editor {
     pub(super) fn erase(&mut self, event: PointerEvent) {
         // Two fingers navigate, and an erase one of them began is called off:
         // nothing is deleted by a finger that was only landing.
-        if self.navigation.is_pinching() {
+        if self.navigation.suspends_tool() {
             self.drop_erase();
             return;
         }

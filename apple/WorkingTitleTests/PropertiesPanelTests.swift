@@ -36,7 +36,7 @@ import Testing
         for phase in [PointerPhase.down, .up] {
             setup.canvas.send(
                 PointerEvent(
-                    id: 0, phase: phase, x: 100, y: 125, kind: .mouse, pressure: 0.5, timestamp: 0,
+                    id: 0, phase: phase, x: 100, y: 125, kind: .mouse, button: .primary, pressure: 0.5, timestamp: 0,
                     modifiers: Modifiers(shift: false, ctrl: false, alt: false, meta: false)))
         }
     }

@@ -51,7 +51,7 @@ import Testing
         for (phase, x) in [(PointerPhase.down, 10.0), (.move, 90), (.up, 90)] {
             drawing.editor.pointer(
                 event: PointerEvent(
-                    id: 0, phase: phase, x: x, y: x, kind: .mouse, pressure: 0.5, timestamp: 0,
+                    id: 0, phase: phase, x: x, y: x, kind: .mouse, button: .primary, pressure: 0.5, timestamp: 0,
                     modifiers: Modifiers(shift: false, ctrl: false, alt: false, meta: false)))
         }
         drawing.editorDidChange()
@@ -325,7 +325,7 @@ import Testing
         for (phase, x) in [(PointerPhase.down, 10.0), (.move, 90), (.up, 90)] {
             drawing.editor.pointer(
                 event: PointerEvent(
-                    id: 0, phase: phase, x: x, y: x, kind: .mouse, pressure: 0.5, timestamp: 0,
+                    id: 0, phase: phase, x: x, y: x, kind: .mouse, button: .primary, pressure: 0.5, timestamp: 0,
                     modifiers: Modifiers(shift: false, ctrl: false, alt: false, meta: false)))
         }
 

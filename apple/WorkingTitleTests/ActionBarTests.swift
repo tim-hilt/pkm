@@ -42,7 +42,7 @@ import Testing
     ) {
         setup.canvas.send(
             PointerEvent(
-                id: 0, phase: phase, x: point.0, y: point.1, kind: kind, pressure: 0.5,
+                id: 0, phase: phase, x: point.0, y: point.1, kind: kind, button: .primary, pressure: 0.5,
                 timestamp: time, modifiers: Modifiers(shift: false, ctrl: false, alt: false, meta: false)))
     }
 
@@ -151,7 +151,7 @@ import Testing
 
     private func shiftPointer(_ phase: PointerPhase, at point: (Double, Double)) -> PointerEvent {
         PointerEvent(
-            id: 0, phase: phase, x: point.0, y: point.1, kind: .mouse, pressure: 0.5,
+            id: 0, phase: phase, x: point.0, y: point.1, kind: .mouse, button: .primary, pressure: 0.5,
             timestamp: 0, modifiers: Modifiers(shift: true, ctrl: false, alt: false, meta: false))
     }
 

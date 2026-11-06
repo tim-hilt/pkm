@@ -43,7 +43,8 @@ import Testing
         for (phase, delay) in [(PointerPhase.down, 0.0), (.up, 0.05)] {
             setup.canvas.send(
                 PointerEvent(
-                    id: 1, phase: phase, x: x, y: y, kind: .finger, pressure: 0.5, timestamp: time + delay,
+                    id: 1, phase: phase, x: x, y: y, kind: .finger, button: .primary, pressure: 0.5,
+                    timestamp: time + delay,
                     modifiers: Modifiers(shift: false, ctrl: false, alt: false, meta: false)))
         }
     }

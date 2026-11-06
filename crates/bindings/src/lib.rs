@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use workingtitle_core::scene::{FillPattern, LineStyle};
 use workingtitle_core::{
     ActionBar, Command, Edges, ExportScope, FontSize, ImageFile, MagnifyEvent, Modifiers,
-    PencilDoubleTap, PointerEvent, PointerKind, PointerPhase, Properties, Property, ScrollEvent,
-    Shortcut, Sloppiness, StrokeWidth, TextAlign, TextEditor, Tool, ZOrder,
+    PencilDoubleTap, PointerButton, PointerEvent, PointerKind, PointerPhase, Properties, Property,
+    ScrollEvent, Shortcut, Sloppiness, StrokeWidth, TextAlign, TextEditor, Tool, ZOrder,
 };
 
 uniffi::setup_scaffolding!("WorkingTitleCore");
@@ -71,6 +71,13 @@ pub enum PointerKind {
 }
 
 #[uniffi::remote(Enum)]
+pub enum PointerButton {
+    Primary,
+    Secondary,
+    Middle,
+}
+
+#[uniffi::remote(Enum)]
 pub enum PointerPhase {
     Down,
     Move,
@@ -85,6 +92,7 @@ pub struct PointerEvent {
     pub x: f64,
     pub y: f64,
     pub kind: PointerKind,
+    pub button: PointerButton,
     pub pressure: f32,
     pub timestamp: f64,
     pub modifiers: Modifiers,
@@ -643,6 +651,12 @@ impl Editor {
         self.editor().pointer(event);
     }
 
+    /// The space bar went down (`true`) or up; see
+    /// [`workingtitle_core::Editor::set_pan_key`].
+    pub fn set_pan_key(&self, held: bool) {
+        self.editor().set_pan_key(held);
+    }
+
     /// A scroll wheel or trackpad scroll (Mac).
     pub fn scroll(&self, event: ScrollEvent) {
         self.editor().scroll(event);
@@ -920,6 +934,7 @@ mod tests {
                 x: 100.0,
                 y: 200.0,
                 kind: PointerKind::Finger,
+                button: PointerButton::Primary,
                 pressure: 0.5,
                 timestamp: 1.0,
                 modifiers: Modifiers {
@@ -994,6 +1009,7 @@ mod tests {
             x,
             y: 0.0,
             kind: PointerKind::Finger,
+            button: PointerButton::Primary,
             pressure: 0.5,
             timestamp: 0.0,
             modifiers: Modifiers::default(),
@@ -1014,6 +1030,7 @@ mod tests {
             x,
             y,
             kind: PointerKind::Mouse,
+            button: PointerButton::Primary,
             pressure: 0.5,
             timestamp: 0.0,
             modifiers: Modifiers::default(),
@@ -1051,6 +1068,7 @@ mod tests {
             x: 20.0,
             y: 30.0,
             kind: PointerKind::Mouse,
+            button: PointerButton::Primary,
             pressure: 0.5,
             timestamp: 0.0,
             modifiers: Modifiers::default(),
@@ -1084,6 +1102,7 @@ mod tests {
             x: 20.0,
             y: 30.0,
             kind: PointerKind::Mouse,
+            button: PointerButton::Primary,
             pressure: 0.5,
             timestamp: 0.0,
             modifiers: Modifiers::default(),
@@ -1122,6 +1141,7 @@ mod tests {
             x,
             y: 20.0,
             kind: PointerKind::Mouse,
+            button: PointerButton::Primary,
             pressure: 0.5,
             timestamp: 0.0,
             modifiers: Modifiers {

@@ -20,6 +20,18 @@ pub enum PointerKind {
     Mouse,
 }
 
+/// Which button of a mouse is down. Fingers and the Pencil always send
+/// `Primary`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PointerButton {
+    #[default]
+    Primary,
+    /// The right button.
+    Secondary,
+    /// The wheel button.
+    Middle,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PointerPhase {
     Down,
@@ -42,6 +54,8 @@ pub struct PointerEvent {
     pub x: f64,
     pub y: f64,
     pub kind: PointerKind,
+    /// The button that is down; see [`PointerButton`].
+    pub button: PointerButton,
     /// `0.0..=1.0`; `0.5` where the device does not report pressure.
     pub pressure: f32,
     /// Seconds on any monotonic clock.

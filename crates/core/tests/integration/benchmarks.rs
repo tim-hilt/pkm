@@ -82,6 +82,7 @@ fn pointer(
         x,
         y,
         kind,
+        button: workingtitle_core::PointerButton::Primary,
         pressure: 0.5,
         timestamp: t,
         modifiers: Modifiers::default(),
