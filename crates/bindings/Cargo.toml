@@ -1,7 +1,7 @@
 # UniFFI surface of the core. Compiled to a static library that the Apple app
 # links; Swift bindings are generated from it by `make core-apple`.
 [package]
-name = "workingtitle-bindings"
+name = "excalidraw-native-bindings"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -18,7 +18,7 @@ required-features = ["bindgen"]
 bindgen = ["uniffi/cli"]
 
 # Every crate linked into the app is listed on its licences screen
-# (apple/WorkingTitle/Licenses.swift); update it when this list changes.
+# (apple/ExcalidrawNative/Licenses.swift); update it when this list changes.
 [dependencies]
 uniffi = "0.32"
-workingtitle-core = { path = "../core" }
+excalidraw-native-core = { path = "../core" }

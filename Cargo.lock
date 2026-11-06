@@ -189,6 +189,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "excalidraw-native-bindings"
+version = "0.1.0"
+dependencies = [
+ "excalidraw-native-core",
+ "uniffi",
+]
+
+[[package]]
+name = "excalidraw-native-core"
+version = "0.1.0"
+
+[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -737,18 +749,6 @@ checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 dependencies = [
  "memchr",
 ]
-
-[[package]]
-name = "workingtitle-bindings"
-version = "0.1.0"
-dependencies = [
- "uniffi",
- "workingtitle-core",
-]
-
-[[package]]
-name = "workingtitle-core"
-version = "0.1.0"
 
 [[package]]
 name = "zmij"

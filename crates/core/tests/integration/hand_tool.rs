@@ -2,7 +2,7 @@
 //! pointer of any kind drags the Canvas around. Expected viewports are worked
 //! out by hand in the comments.
 
-use workingtitle_core::{
+use excalidraw_native_core::{
     Editor, MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase, Tool,
 };
 
@@ -16,7 +16,7 @@ fn send(editor: &mut Editor, id: u64, kind: PointerKind, phase: PointerPhase, x:
         x,
         y,
         kind,
-        button: workingtitle_core::PointerButton::Primary,
+        button: excalidraw_native_core::PointerButton::Primary,
         pressure: 0.5,
         timestamp: 0.0,
         modifiers: Modifiers::default(),

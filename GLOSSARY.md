@@ -1,4 +1,4 @@
-# WORKING-TITLE
+# Excalidraw Native
 
 A native, touch-first re-implementation of Excalidraw for Apple devices (later Android and Linux), storing everything locally.
 

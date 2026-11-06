@@ -3,7 +3,7 @@
 //! They form a single test binary on purpose: every new test binary costs
 //! linking time and, on macOS, a first-launch security scan of about 13 s.
 //! Add new test files here as modules (`make lint` rejects files directly in
-//! `tests/`). Run one area with `cargo test -p workingtitle-core --test integration select::`.
+//! `tests/`). Run one area with `cargo test -p excalidraw-native-core --test integration select::`.
 
 mod common;
 

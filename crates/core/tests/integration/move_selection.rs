@@ -3,8 +3,8 @@
 //! events in, Selection and saved Drawing out. Expected positions are worked
 //! out by hand in the comments.
 
-use workingtitle_core::Editor;
-use workingtitle_core::json::{Value, parse};
+use excalidraw_native_core::Editor;
+use excalidraw_native_core::json::{Value, parse};
 
 use crate::common;
 use common::{editor_with, replay, tap};
@@ -225,7 +225,7 @@ fn dragging_empty_canvas_moves_nothing_and_keeps_the_selection() {
 
 #[test]
 fn only_the_selection_tool_moves() {
-    use workingtitle_core::Tool;
+    use excalidraw_native_core::Tool;
     let mut editor = editor_with(&[RECTANGLE]);
     editor.set_tool(Tool::Hand);
 
@@ -275,7 +275,7 @@ fn a_second_finger_ends_the_move_and_puts_the_element_back() {
 
 #[test]
 fn a_tool_change_during_a_drag_puts_the_element_back() {
-    use workingtitle_core::Tool;
+    use excalidraw_native_core::Tool;
     let mut editor = editor_with(&[RECTANGLE]);
 
     replay(

@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use workingtitle_core::{Editor, Tool, ZOrder};
+use excalidraw_native_core::{Editor, Tool, ZOrder};
 
 use crate::common::{editor_with, replay, tap};
 

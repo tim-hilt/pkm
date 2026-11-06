@@ -2,7 +2,7 @@
 
 Seam 2 of the test strategy (`.scratch/v1/spec.md`): the Swift renderer draws
 geometry offscreen with Metal, and the result is compared with PNG files stored
-in `apple/WorkingTitleTests/References`. `make test` runs them on macOS,
+in `apple/ExcalidrawNativeTests/References`. `make test` runs them on macOS,
 `make test-ios` on a simulator.
 
 ## Writing a test
@@ -26,9 +26,9 @@ specific test if needed.
 
 ## When a test fails
 
-The message names three files in `WorkingTitleReferenceFailures` inside the
+The message names three files in `ExcalidrawNativeReferenceFailures` inside the
 test process's temporary directory (for the sandboxed macOS host that is
-`~/Library/Containers/com.timhilt.workingtitle/Data/tmp`): `<name>-actual.png`, the committed reference and
+`~/Library/Containers/com.timhilt.excalidrawnative/Data/tmp`): `<name>-actual.png`, the committed reference and
 `<name>-diff.png`, which is the reference with every differing pixel in red.
 They are deleted again once the check passes.
 

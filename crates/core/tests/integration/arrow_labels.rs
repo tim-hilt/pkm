@@ -12,8 +12,8 @@
 
 use std::sync::Arc;
 
-use workingtitle_core::json::Value;
-use workingtitle_core::{Editor, TextAlign, TextEditor};
+use excalidraw_native_core::json::Value;
+use excalidraw_native_core::{Editor, TextAlign, TextEditor};
 
 use crate::common;
 use common::{FixedWidth, editor_with, saved_elements, tap};
@@ -98,7 +98,7 @@ fn arrow_labels_are_wrapped_and_placed_as_excalidraw_does() {
         editor.geometry()
     };
     let (labelled, expected) = (load(&fixture), load(&unbound));
-    let lines = |geometry: &workingtitle_core::Geometry| -> Vec<(String, f32, f32)> {
+    let lines = |geometry: &excalidraw_native_core::Geometry| -> Vec<(String, f32, f32)> {
         geometry
             .text_lines()
             .iter()

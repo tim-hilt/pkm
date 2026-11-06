@@ -7,8 +7,8 @@
 //! copying a labelled rectangle (in a group with its label), an ellipse and
 //! an arrow bound to both, with `serializeAsClipboardJSON`.
 
-use workingtitle_core::json::{Value, parse};
-use workingtitle_core::{Editor, ImageFile};
+use excalidraw_native_core::json::{Value, parse};
+use excalidraw_native_core::{Editor, ImageFile};
 
 use crate::common;
 use common::{editor_with, saved_elements};
@@ -490,11 +490,11 @@ fn an_element_that_is_in_a_frame_that_was_not_copied_is_pasted_without_one() {
 #[test]
 fn pasting_goes_back_to_the_selection_tool() {
     let mut editor = blank();
-    editor.set_tool(workingtitle_core::Tool::Rectangle);
+    editor.set_tool(excalidraw_native_core::Tool::Rectangle);
 
     editor.paste(FROM_EXCALIDRAW);
 
-    assert_eq!(editor.tool(), workingtitle_core::Tool::Selection);
+    assert_eq!(editor.tool(), excalidraw_native_core::Tool::Selection);
 }
 
 // --- Undo ----------------------------------------------------------------------

@@ -1,17 +1,17 @@
 //! UniFFI surface of the core (ADR-0007). Foreign clients see exactly what is
-//! exported here; the logic itself lives in `workingtitle-core`.
+//! exported here; the logic itself lives in `excalidraw-native-core`.
 
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use workingtitle_core::scene::{FillPattern, LineStyle};
-use workingtitle_core::{
+use excalidraw_native_core::scene::{FillPattern, LineStyle};
+use excalidraw_native_core::{
     ActionBar, Command, Edges, ExportScope, FontSize, ImageFile, MagnifyEvent, Modifiers,
     PencilDoubleTap, PointerButton, PointerEvent, PointerKind, PointerPhase, Properties, Property,
     ScrollEvent, Sections, Shortcut, Sloppiness, StrokeWidth, TextAlign, TextEditor, Tool, ZOrder,
 };
 
-uniffi::setup_scaffolding!("WorkingTitleCore");
+uniffi::setup_scaffolding!("ExcalidrawNativeCore");
 
 /// Why a file could not be opened as a Drawing, in words fit for a user.
 #[derive(Debug, uniffi::Error)]
@@ -26,8 +26,8 @@ impl fmt::Display for LoadError {
     }
 }
 
-impl From<workingtitle_core::LoadError> for LoadError {
-    fn from(error: workingtitle_core::LoadError) -> Self {
+impl From<excalidraw_native_core::LoadError> for LoadError {
+    fn from(error: excalidraw_native_core::LoadError) -> Self {
         LoadError::Invalid {
             message: error.to_string(),
         }
@@ -52,7 +52,7 @@ pub enum ExportScope {
 }
 
 /// An image export for the client to rasterise; see
-/// [`workingtitle_core::Export`].
+/// [`excalidraw_native_core::Export`].
 #[derive(uniffi::Record)]
 pub struct Export {
     pub geometry: Arc<Geometry>,
@@ -144,7 +144,7 @@ pub enum ZOrder {
 }
 
 // The properties panel's options and values; see
-// [`workingtitle_core::Property`].
+// [`excalidraw_native_core::Property`].
 
 #[uniffi::remote(Enum)]
 pub enum FillPattern {
@@ -237,10 +237,10 @@ pub struct Shortcut {
     pub command: Command,
 }
 
-/// Every keyboard shortcut; see [`workingtitle_core::shortcuts`].
+/// Every keyboard shortcut; see [`excalidraw_native_core::shortcuts`].
 #[uniffi::export]
 pub fn shortcuts() -> Vec<Shortcut> {
-    workingtitle_core::shortcuts()
+    excalidraw_native_core::shortcuts()
 }
 
 #[uniffi::remote(Record)]
@@ -272,7 +272,7 @@ pub struct Sections {
 }
 
 /// The text view to show over the Canvas while a text is edited, in view
-/// coordinates; see [`workingtitle_core::TextEditor`].
+/// coordinates; see [`excalidraw_native_core::TextEditor`].
 #[uniffi::remote(Record)]
 pub struct TextEditor {
     pub text: String,
@@ -292,7 +292,7 @@ pub struct TextEditor {
 }
 
 /// Where the Action Bar is shown, in view coordinates; see
-/// [`workingtitle_core::ActionBar`].
+/// [`excalidraw_native_core::ActionBar`].
 #[uniffi::remote(Record)]
 pub struct ActionBar {
     pub x: f64,
@@ -301,7 +301,7 @@ pub struct ActionBar {
     pub can_ungroup: bool,
 }
 
-/// An image to paste or drop; see [`workingtitle_core::ImageFile`].
+/// An image to paste or drop; see [`excalidraw_native_core::ImageFile`].
 #[uniffi::remote(Record)]
 pub struct ImageFile {
     pub file_id: String,
@@ -311,7 +311,7 @@ pub struct ImageFile {
     pub height: u32,
 }
 
-/// What the Canvas shows; see [`workingtitle_core::Viewport`]. Small and
+/// What the Canvas shows; see [`excalidraw_native_core::Viewport`]. Small and
 /// cheap enough to read after every input event.
 #[derive(uniffi::Record)]
 pub struct ViewportState {
@@ -322,8 +322,8 @@ pub struct ViewportState {
     pub zoom: f64,
 }
 
-impl From<workingtitle_core::Viewport> for ViewportState {
-    fn from(viewport: workingtitle_core::Viewport) -> Self {
+impl From<excalidraw_native_core::Viewport> for ViewportState {
+    fn from(viewport: excalidraw_native_core::Viewport) -> Self {
         let (origin_x, origin_y) = viewport.origin();
         Self {
             origin_x,
@@ -334,7 +334,7 @@ impl From<workingtitle_core::Viewport> for ViewportState {
 }
 
 /// Measures text for the core; implemented by clients with their font
-/// machinery. See [`workingtitle_core::TextMeasurer`].
+/// machinery. See [`excalidraw_native_core::TextMeasurer`].
 #[uniffi::export(with_foreign)]
 pub trait TextMeasurer: Send + Sync {
     /// The advance width in Scene units of `text`, a single line, set in
@@ -345,23 +345,23 @@ pub trait TextMeasurer: Send + Sync {
 /// Lets the core call a client's measurer.
 struct Measurer(Arc<dyn TextMeasurer>);
 
-impl workingtitle_core::TextMeasurer for Measurer {
+impl excalidraw_native_core::TextMeasurer for Measurer {
     fn line_width(&self, text: &str, font_size: f64) -> f64 {
         self.0.line_width(text.to_owned(), font_size)
     }
 }
 
-/// Handle to the core's editor; see [`workingtitle_core::Editor`].
+/// Handle to the core's editor; see [`excalidraw_native_core::Editor`].
 ///
 /// UniFFI objects are shared, so the editor sits behind a lock; clients drive
 /// it from one thread and never contend for it.
 #[derive(uniffi::Object)]
 pub struct Editor {
-    inner: Mutex<workingtitle_core::Editor>,
+    inner: Mutex<excalidraw_native_core::Editor>,
 }
 
 impl Editor {
-    fn editor(&self) -> MutexGuard<'_, workingtitle_core::Editor> {
+    fn editor(&self) -> MutexGuard<'_, excalidraw_native_core::Editor> {
         // A panic while holding the lock cannot leave the editor half-edited
         // in a way that matters more than carrying on does.
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
@@ -373,12 +373,12 @@ impl Editor {
     #[uniffi::constructor]
     pub fn new() -> Self {
         Self {
-            inner: Mutex::new(workingtitle_core::Editor::new()),
+            inner: Mutex::new(excalidraw_native_core::Editor::new()),
         }
     }
 
     /// Replaces the Scene with the Drawing in `bytes` (a `.excalidraw` file's
-    /// content); see [`workingtitle_core::Editor::load`].
+    /// content); see [`excalidraw_native_core::Editor::load`].
     pub fn load(&self, bytes: Vec<u8>) -> Result<(), LoadError> {
         Ok(self.editor().load(&bytes)?)
     }
@@ -394,7 +394,7 @@ impl Editor {
     }
 
     /// Hands the core the client's way to measure text; see
-    /// [`workingtitle_core::Editor::set_text_measurer`]. Call it before
+    /// [`excalidraw_native_core::Editor::set_text_measurer`]. Call it before
     /// reading geometry that has labels in it.
     pub fn set_text_measurer(&self, measurer: Arc<dyn TextMeasurer>) {
         self.editor()
@@ -408,7 +408,7 @@ impl Editor {
     }
 
     /// Shows the Scene from the given viewport, e.g. the one a Drawing was
-    /// left at; see [`workingtitle_core::Editor::set_viewport`]. Not a change
+    /// left at; see [`excalidraw_native_core::Editor::set_viewport`]. Not a change
     /// of the Scene.
     pub fn set_viewport(&self, viewport: ViewportState) {
         self.editor()
@@ -499,7 +499,7 @@ impl Editor {
     }
 
     /// Takes back the latest change to the Scene; see
-    /// [`workingtitle_core::Editor::undo`].
+    /// [`excalidraw_native_core::Editor::undo`].
     pub fn undo(&self) {
         self.editor().undo();
     }
@@ -515,131 +515,131 @@ impl Editor {
     }
 
     /// What the properties panel shows; see
-    /// [`workingtitle_core::Editor::properties`]. Read it after forwarding
+    /// [`excalidraw_native_core::Editor::properties`]. Read it after forwarding
     /// input or a command.
     pub fn properties(&self) -> Properties {
         self.editor().properties()
     }
 
     /// Whether the properties panel is shown; see
-    /// [`workingtitle_core::Editor::shows_properties`]. Read it with
+    /// [`excalidraw_native_core::Editor::shows_properties`]. Read it with
     /// [`Editor::properties`].
     pub fn shows_properties(&self) -> bool {
         self.editor().shows_properties()
     }
 
     /// Sets a property on the Selection and as the style of the next Element;
-    /// see [`workingtitle_core::Editor::set_property`].
+    /// see [`excalidraw_native_core::Editor::set_property`].
     pub fn set_property(&self, property: Property) {
         self.editor().set_property(property);
     }
 
     /// The text view to show over the Canvas, `None` if no text is being
-    /// edited; see [`workingtitle_core::Editor::text_editor`]. Read it with
+    /// edited; see [`excalidraw_native_core::Editor::text_editor`]. Read it with
     /// the viewport after forwarding input or a command.
     pub fn text_editor(&self) -> Option<TextEditor> {
         self.editor().text_editor()
     }
 
     /// Tells the core what the text view says now; see
-    /// [`workingtitle_core::Editor::set_editing_text`].
+    /// [`excalidraw_native_core::Editor::set_editing_text`].
     pub fn set_editing_text(&self, text: String) {
         self.editor().set_editing_text(&text);
     }
 
     /// Ends the editing of the text and keeps it; see
-    /// [`workingtitle_core::Editor::commit_text`].
+    /// [`excalidraw_native_core::Editor::commit_text`].
     pub fn commit_text(&self) {
         self.editor().commit_text();
     }
 
     /// Opens the text view on the text of the Selection (Enter on a Mac):
     /// the label of a selected shape, which is made if it has none, or a
-    /// selected text; see [`workingtitle_core::Editor::edit_selected_text`].
+    /// selected text; see [`excalidraw_native_core::Editor::edit_selected_text`].
     pub fn edit_selected_text(&self) {
         self.editor().edit_selected_text();
     }
 
     /// Ends the editing of the text and keeps it as it was; see
-    /// [`workingtitle_core::Editor::cancel_text`].
+    /// [`excalidraw_native_core::Editor::cancel_text`].
     pub fn cancel_text(&self) {
         self.editor().cancel_text();
     }
 
     /// Where the Action Bar is shown, `None` if it is hidden; see
-    /// [`workingtitle_core::Editor::action_bar`]. Read it with the viewport
+    /// [`excalidraw_native_core::Editor::action_bar`]. Read it with the viewport
     /// after forwarding input or a command.
     pub fn action_bar(&self) -> Option<ActionBar> {
         self.editor().action_bar()
     }
 
     /// Duplicates the Selection and selects the copies; see
-    /// [`workingtitle_core::Editor::duplicate`].
+    /// [`excalidraw_native_core::Editor::duplicate`].
     pub fn duplicate(&self) {
         self.editor().duplicate();
     }
 
     /// The text to put on the clipboard for copying the Selection, `None`
     /// with nothing selected; see
-    /// [`workingtitle_core::Editor::copy_selection`].
+    /// [`excalidraw_native_core::Editor::copy_selection`].
     pub fn copy_selection(&self) -> Option<String> {
         self.editor().copy_selection()
     }
 
     /// Copies the Selection and deletes it; see
-    /// [`workingtitle_core::Editor::cut_selection`].
+    /// [`excalidraw_native_core::Editor::cut_selection`].
     pub fn cut_selection(&self) -> Option<String> {
         self.editor().cut_selection()
     }
 
     /// Pastes Excalidraw clipboard JSON in the middle of the view, returns
-    /// whether `text` was one; see [`workingtitle_core::Editor::paste`].
+    /// whether `text` was one; see [`excalidraw_native_core::Editor::paste`].
     pub fn paste(&self, text: String) -> bool {
         self.editor().paste(&text)
     }
 
     /// Pastes Excalidraw clipboard JSON around the point `(x, y)` of the
-    /// view; see [`workingtitle_core::Editor::paste_at`].
+    /// view; see [`excalidraw_native_core::Editor::paste_at`].
     pub fn paste_at(&self, text: String, x: f64, y: f64) -> bool {
         self.editor().paste_at(&text, x, y)
     }
 
     /// Puts pasted images in the middle of the view; see
-    /// [`workingtitle_core::Editor::insert_images`].
+    /// [`excalidraw_native_core::Editor::insert_images`].
     pub fn insert_images(&self, images: Vec<ImageFile>) {
         self.editor().insert_images(images);
     }
 
     /// Puts dropped images around the point `(x, y)` of the view; see
-    /// [`workingtitle_core::Editor::insert_images_at`].
+    /// [`excalidraw_native_core::Editor::insert_images_at`].
     pub fn insert_images_at(&self, images: Vec<ImageFile>, x: f64, y: f64) {
         self.editor().insert_images_at(images, x, y);
     }
 
     /// Deletes the Selection; see
-    /// [`workingtitle_core::Editor::delete_selection`].
+    /// [`excalidraw_native_core::Editor::delete_selection`].
     pub fn delete_selection(&self) {
         self.editor().delete_selection();
     }
 
-    /// Groups the Selection; see [`workingtitle_core::Editor::group`].
+    /// Groups the Selection; see [`excalidraw_native_core::Editor::group`].
     pub fn group(&self) {
         self.editor().group();
     }
 
     /// Dissolves the groups that are selected; see
-    /// [`workingtitle_core::Editor::ungroup`].
+    /// [`excalidraw_native_core::Editor::ungroup`].
     pub fn ungroup(&self) {
         self.editor().ungroup();
     }
 
-    /// Carries out `command`; see [`workingtitle_core::Editor::perform`].
+    /// Carries out `command`; see [`excalidraw_native_core::Editor::perform`].
     pub fn perform(&self, command: Command) {
         self.editor().perform(command);
     }
 
     /// Moves the Selection in z-order; see
-    /// [`workingtitle_core::Editor::move_in_z_order`].
+    /// [`excalidraw_native_core::Editor::move_in_z_order`].
     pub fn move_in_z_order(&self, how: ZOrder) {
         self.editor().move_in_z_order(how);
     }
@@ -651,7 +651,7 @@ impl Editor {
     }
 
     /// The selection frames to draw over the Scene, in Scene coordinates and
-    /// for the current zoom; see [`workingtitle_core::Editor::overlay`].
+    /// for the current zoom; see [`excalidraw_native_core::Editor::overlay`].
     pub fn overlay(&self) -> Arc<Geometry> {
         Arc::new(Geometry {
             inner: self.editor().overlay(),
@@ -659,13 +659,13 @@ impl Editor {
     }
 
     /// A step of a finger, Pencil or mouse; see
-    /// [`workingtitle_core::Editor::pointer`].
+    /// [`excalidraw_native_core::Editor::pointer`].
     pub fn pointer(&self, event: PointerEvent) {
         self.editor().pointer(event);
     }
 
     /// The space bar went down (`true`) or up; see
-    /// [`workingtitle_core::Editor::set_pan_key`].
+    /// [`excalidraw_native_core::Editor::set_pan_key`].
     pub fn set_pan_key(&self, held: bool) {
         self.editor().set_pan_key(held);
     }
@@ -688,7 +688,7 @@ impl Editor {
     }
 
     /// What a PNG export of `scope` shows, `None` if nothing; see
-    /// [`workingtitle_core::Editor::export`].
+    /// [`excalidraw_native_core::Editor::export`].
     pub fn export(&self, scope: ExportScope) -> Option<Export> {
         let export = self.editor().export(scope)?;
         Some(Export {
@@ -702,7 +702,7 @@ impl Editor {
         })
     }
 
-    /// The paths to draw for the Scene; see [`workingtitle_core::Editor::geometry`].
+    /// The paths to draw for the Scene; see [`excalidraw_native_core::Editor::geometry`].
     pub fn geometry(&self) -> Arc<Geometry> {
         Arc::new(Geometry {
             inner: self.editor().geometry(),
@@ -711,25 +711,25 @@ impl Editor {
 }
 
 /// Zero-copy geometry (ADR-0007): the format is documented in
-/// [`workingtitle_core::geometry`].
+/// [`excalidraw_native_core::geometry`].
 ///
 /// Only sizes and buffer addresses cross UniFFI; the data itself stays where
 /// it is and the client reads it in place. An address is valid exactly as long
 /// as the client holds this object, and the buffers never change.
 #[derive(uniffi::Object)]
 pub struct Geometry {
-    inner: workingtitle_core::Geometry,
+    inner: excalidraw_native_core::Geometry,
 }
 
 #[uniffi::export]
 impl Geometry {
     /// Tells whether cached per-Element results are still valid; see
-    /// [`workingtitle_core::Geometry::generation`].
+    /// [`excalidraw_native_core::Geometry::generation`].
     pub fn generation(&self) -> u64 {
         self.inner.generation()
     }
 
-    /// Number of [`workingtitle_core::Part`] records at `parts_address`.
+    /// Number of [`excalidraw_native_core::Part`] records at `parts_address`.
     pub fn part_count(&self) -> u64 {
         self.inner.parts().len() as u64
     }
@@ -737,7 +737,7 @@ impl Geometry {
     /// Size in bytes of one part record, so clients can check that their
     /// mirror of the record has the same layout.
     pub fn part_stride(&self) -> u64 {
-        size_of::<workingtitle_core::Part>() as u64
+        size_of::<excalidraw_native_core::Part>() as u64
     }
 
     pub fn parts_address(&self) -> u64 {
@@ -762,7 +762,7 @@ impl Geometry {
         self.inner.coords().as_ptr() as u64
     }
 
-    /// Number of [`workingtitle_core::TextLine`] records at
+    /// Number of [`excalidraw_native_core::TextLine`] records at
     /// `text_lines_address`.
     pub fn text_line_count(&self) -> u64 {
         self.inner.text_lines().len() as u64
@@ -770,7 +770,7 @@ impl Geometry {
 
     /// Size in bytes of one text line record; see `part_stride`.
     pub fn text_line_stride(&self) -> u64 {
-        size_of::<workingtitle_core::TextLine>() as u64
+        size_of::<excalidraw_native_core::TextLine>() as u64
     }
 
     pub fn text_lines_address(&self) -> u64 {
@@ -786,14 +786,14 @@ impl Geometry {
         self.inner.text().as_ptr() as u64
     }
 
-    /// Number of [`workingtitle_core::Image`] records at `images_address`.
+    /// Number of [`excalidraw_native_core::Image`] records at `images_address`.
     pub fn image_count(&self) -> u64 {
         self.inner.images().len() as u64
     }
 
     /// Size in bytes of one image record; see `part_stride`.
     pub fn image_stride(&self) -> u64 {
-        size_of::<workingtitle_core::Image>() as u64
+        size_of::<excalidraw_native_core::Image>() as u64
     }
 
     pub fn images_address(&self) -> u64 {
@@ -841,10 +841,10 @@ mod tests {
         // SAFETY: the addresses come from `geometry`, which is alive and
         // whose buffers hold at least the counts reported above.
         unsafe {
-            let parts = geometry.parts_address() as *const workingtitle_core::Part;
+            let parts = geometry.parts_address() as *const excalidraw_native_core::Part;
             assert_eq!((*parts).width, 2.0);
             let verbs = geometry.verbs_address() as *const u8;
-            assert_eq!(*verbs, workingtitle_core::Verb::Move as u8);
+            assert_eq!(*verbs, excalidraw_native_core::Verb::Move as u8);
             let coords = geometry.coords_address() as *const f32;
             assert_eq!(*coords, 10.0);
         }
@@ -881,7 +881,7 @@ mod tests {
         // SAFETY: the addresses come from `geometry`, which is alive and
         // whose buffers hold at least the counts reported above.
         unsafe {
-            let lines = geometry.text_lines_address() as *const workingtitle_core::TextLine;
+            let lines = geometry.text_lines_address() as *const excalidraw_native_core::TextLine;
             let second = *lines.add(1);
             let text = std::slice::from_raw_parts(
                 (geometry.text_address() as *const u8).add(second.text_start as usize),
@@ -911,7 +911,7 @@ mod tests {
         // SAFETY: the addresses come from `geometry`, which is alive and
         // whose buffers hold at least the counts reported above.
         unsafe {
-            let image = *(geometry.images_address() as *const workingtitle_core::Image);
+            let image = *(geometry.images_address() as *const excalidraw_native_core::Image);
             assert_eq!((image.x, image.width), (1.0, 30.0));
             let id = std::slice::from_raw_parts(
                 (geometry.file_ids_address() as *const u8).add(image.file_id_start as usize),

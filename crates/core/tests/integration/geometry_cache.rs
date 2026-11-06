@@ -3,7 +3,7 @@
 //! output equals that of a fresh `Editor` loaded with the same Scene, and
 //! unchanged Elements are not generated again.
 
-use workingtitle_core::{Editor, Geometry, Tool, ZOrder};
+use excalidraw_native_core::{Editor, Geometry, Tool, ZOrder};
 
 use crate::common::{editor_with, replay, tap};
 

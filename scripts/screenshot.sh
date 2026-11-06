@@ -17,9 +17,9 @@ ipad) SIM='iPad Pro (12.9-inch) (4th generation)' ;;
 esac
 
 if [ "$DEVICE" = mac ]; then
-    xcodebuild -quiet -scheme WorkingTitle -destination 'platform=macOS' -derivedDataPath "$DERIVED" build
-    app="$DERIVED/Build/Products/Debug/WorkingTitle.app"
-    pkill -x WorkingTitle 2>/dev/null || true
+    xcodebuild -quiet -scheme ExcalidrawNative -destination 'platform=macOS' -derivedDataPath "$DERIVED" build
+    app="$DERIVED/Build/Products/Debug/ExcalidrawNative.app"
+    pkill -x ExcalidrawNative 2>/dev/null || true
     open -n "$app" --args -UITestingOpenSampleDrawing
     sleep 8
     # Capture just the app's window, so other windows never end up in the file.
@@ -28,18 +28,18 @@ if [ "$DEVICE" = mac ]; then
         const list = ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo(1, 0)));
         let id = "";
         for (const w of Array.from(list)) {
-            if (w.kCGWindowOwnerName === "WorkingTitle" && w.kCGWindowLayer === 0) { id = w.kCGWindowNumber; break; }
+            if (w.kCGWindowOwnerName === "ExcalidrawNative" && w.kCGWindowLayer === 0) { id = w.kCGWindowNumber; break; }
         }
         id')
     screencapture -x -o -l "$window" "$OUT"
-    pkill -x WorkingTitle || true
+    pkill -x ExcalidrawNative || true
 else
     xcrun simctl list devices available | grep -qF "    $SIM (" || xcrun simctl create "$SIM" "$SIM" >/dev/null
-    xcodebuild -quiet -scheme WorkingTitle -destination "platform=iOS Simulator,name=$SIM" -derivedDataPath "$DERIVED" build
+    xcodebuild -quiet -scheme ExcalidrawNative -destination "platform=iOS Simulator,name=$SIM" -derivedDataPath "$DERIVED" build
     xcrun simctl boot "$SIM" 2>/dev/null || true
     xcrun simctl bootstatus "$SIM" >/dev/null
-    xcrun simctl install "$SIM" "$DERIVED/Build/Products/Debug-iphonesimulator/WorkingTitle.app"
-    xcrun simctl launch --terminate-running-process "$SIM" com.timhilt.workingtitle -UITestingOpenSampleDrawing >/dev/null
+    xcrun simctl install "$SIM" "$DERIVED/Build/Products/Debug-iphonesimulator/ExcalidrawNative.app"
+    xcrun simctl launch --terminate-running-process "$SIM" com.timhilt.excalidrawnative -UITestingOpenSampleDrawing >/dev/null
     sleep 8
     xcrun simctl io "$SIM" screenshot "$OUT"
 fi

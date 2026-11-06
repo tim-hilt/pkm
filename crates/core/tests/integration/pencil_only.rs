@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use workingtitle_core::{Editor, Tool};
+use excalidraw_native_core::{Editor, Tool};
 
 use crate::common;
 use common::{FixedWidth, editor_with, replay, saved_elements, tap};

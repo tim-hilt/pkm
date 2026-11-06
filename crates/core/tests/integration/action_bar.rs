@@ -6,8 +6,8 @@
 //! Expected values (anchors, offsets) are worked out by hand in the comments,
 //! not computed with the formulas of the code under test.
 
-use workingtitle_core::json::Value;
-use workingtitle_core::{Editor, MagnifyEvent, Modifiers, ScrollEvent};
+use excalidraw_native_core::json::Value;
+use excalidraw_native_core::{Editor, MagnifyEvent, Modifiers, ScrollEvent};
 
 use crate::common;
 use common::{editor_with, replay, saved_elements, tap};

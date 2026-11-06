@@ -10,7 +10,7 @@
 use crate::common;
 
 use common::{Fixture, Op, Shape};
-use workingtitle_core::json::Value;
+use excalidraw_native_core::json::Value;
 
 const FIXTURES: [&str; 5] = [
     "shapes",

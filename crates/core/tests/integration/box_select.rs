@@ -6,7 +6,7 @@
 //! are worked out by hand in the comments, not computed with the formulas of
 //! the code under test.
 
-use workingtitle_core::{Editor, PartKind, Tool, Verb};
+use excalidraw_native_core::{Editor, PartKind, Tool, Verb};
 
 use crate::common;
 use common::{editor_with, replay, tap};
@@ -347,7 +347,7 @@ fn box_parts(editor: &Editor) -> (Corners, Corners, f32) {
         .filter(|p| p.element == u32::MAX)
         .collect();
     assert_eq!(parts.len(), 2, "a fill and a stroke");
-    let corners = |part: &workingtitle_core::Part| {
+    let corners = |part: &excalidraw_native_core::Part| {
         let ops = common::ops(&overlay, part);
         let verbs: Vec<_> = ops.iter().map(|(verb, _)| *verb).collect();
         assert_eq!(
@@ -526,7 +526,7 @@ fn shift_click_changes_the_overlay_revision() {
 /// The x of the Element `id` in the saved Drawing.
 fn x_of(editor: &Editor, id: &str) -> f64 {
     let saved = String::from_utf8(editor.save()).unwrap();
-    let drawing = workingtitle_core::json::parse(&saved).unwrap();
+    let drawing = excalidraw_native_core::json::parse(&saved).unwrap();
     drawing
         .get("elements")
         .and_then(|e| e.as_array())

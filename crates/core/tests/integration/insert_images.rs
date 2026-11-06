@@ -4,8 +4,8 @@
 //! the bytes in the Drawing's `files` as Excalidraw does and selects it, as
 //! one undo step.
 
-use workingtitle_core::json::{Value, parse};
-use workingtitle_core::{Editor, ImageFile, MagnifyEvent, Tool};
+use excalidraw_native_core::json::{Value, parse};
+use excalidraw_native_core::{Editor, ImageFile, MagnifyEvent, Tool};
 
 use crate::common;
 use common::saved_elements;
@@ -115,7 +115,7 @@ fn an_image_can_be_put_at_a_point_of_the_view() {
 #[test]
 fn the_point_is_in_the_view_so_it_follows_panning() {
     let mut editor = editor();
-    editor.scroll(workingtitle_core::ScrollEvent {
+    editor.scroll(excalidraw_native_core::ScrollEvent {
         x: 0.0,
         y: 0.0,
         dx: -50.0,

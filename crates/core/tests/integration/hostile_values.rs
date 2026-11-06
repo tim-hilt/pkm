@@ -6,7 +6,7 @@
 //! out of memory: they are safe to run on any machine. The full probe Drawing
 //! is only meant for code that has the bounds.
 
-use workingtitle_core::{Editor, ExportScope};
+use excalidraw_native_core::{Editor, ExportScope};
 
 fn editor_with(elements: &str) -> Editor {
     let json =

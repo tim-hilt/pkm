@@ -5,8 +5,8 @@
 //! Expected orders follow Excalidraw's `zindex.ts` and expected keys its
 //! `fractional-indexing` (worked out with the vendored implementation).
 
-use workingtitle_core::json::Value;
-use workingtitle_core::{Editor, ZOrder};
+use excalidraw_native_core::json::Value;
+use excalidraw_native_core::{Editor, ZOrder};
 
 use crate::common;
 use common::{editor_with, replay, saved_elements, tap};

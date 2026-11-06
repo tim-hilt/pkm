@@ -1,6 +1,6 @@
-# XcodeGen spec; `make apple-project` generates WorkingTitle.xcodeproj from it.
+# XcodeGen spec; `make apple-project` generates ExcalidrawNative.xcodeproj from it.
 # Edit this file, never the generated project.
-name: WorkingTitle
+name: ExcalidrawNative
 options:
   bundleIdPrefix: com.timhilt
   developmentLanguage: en
@@ -9,15 +9,15 @@ options:
     macOS: "27.0"
 targets:
   # One multiplatform target serves iOS, iPadOS and macOS.
-  WorkingTitle:
+  ExcalidrawNative:
     type: application
     platform: auto
     supportedDestinations: [iOS, macOS]
     # Generated/ holds the Rust core's Swift bindings and XCFramework, built by
     # `make core-apple` (which `make apple-project` depends on).
-    sources: [WorkingTitle, Generated/WorkingTitleCore.swift]
+    sources: [ExcalidrawNative, Generated/ExcalidrawNativeCore.swift]
     dependencies:
-      - framework: Generated/WorkingTitleCoreFFI.xcframework
+      - framework: Generated/ExcalidrawNativeCoreFFI.xcframework
         embed: false
     configFiles:
       Debug: Config/Signing.xcconfig
@@ -45,19 +45,19 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.timhilt.workingtitle
+        PRODUCT_BUNDLE_IDENTIFIER: com.timhilt.excalidrawnative
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: $(inherited)
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "6.0"
-        # User-facing strings live in WorkingTitle/Localizable.xcstrings.
+        # User-facing strings live in ExcalidrawNative/Localizable.xcstrings.
         SWIFT_EMIT_LOC_STRINGS: YES
         LOCALIZATION_PREFERS_STRING_CATALOGS: YES
         STRING_CATALOG_GENERATE_SYMBOLS: NO
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_FILE: Config/Info.plist
-        INFOPLIST_KEY_CFBundleDisplayName: WorkingTitle
+        INFOPLIST_KEY_CFBundleDisplayName: Excalidraw Native
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
@@ -74,18 +74,18 @@ targets:
           SWIFT_OPTIMIZATION_LEVEL: -Osize
           DEAD_CODE_STRIPPING: YES
     scheme:
-      testTargets: [WorkingTitleTests]
+      testTargets: [ExcalidrawNativeTests]
   # Run by `make test-ui` (iOS Simulator); not part of the unit-test scheme.
-  WorkingTitleUITests:
+  ExcalidrawNativeUITests:
     type: bundle.ui-testing
     platform: auto
     supportedDestinations: [iOS, macOS]
-    sources: [WorkingTitleUITests]
+    sources: [ExcalidrawNativeUITests]
     configFiles:
       Debug: Config/Signing.xcconfig
       Release: Config/Signing.xcconfig
     dependencies:
-      - target: WorkingTitle
+      - target: ExcalidrawNative
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
@@ -94,17 +94,17 @@ targets:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: $(inherited)
         "CODE_SIGN_IDENTITY[sdk=macosx*]": "-"
-        TEST_TARGET_NAME: WorkingTitle
-  WorkingTitleTests:
+        TEST_TARGET_NAME: ExcalidrawNative
+  ExcalidrawNativeTests:
     type: bundle.unit-test
     platform: auto
     supportedDestinations: [iOS, macOS]
-    sources: [WorkingTitleTests]
+    sources: [ExcalidrawNativeTests]
     configFiles:
       Debug: Config/Signing.xcconfig
       Release: Config/Signing.xcconfig
     dependencies:
-      - target: WorkingTitle
+      - target: ExcalidrawNative
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
@@ -114,12 +114,12 @@ targets:
         DEVELOPMENT_TEAM: $(inherited)
         "CODE_SIGN_IDENTITY[sdk=macosx*]": "-"
         # macOS app bundles keep the executable under Contents/MacOS.
-        "TEST_HOST[sdk=macosx*]": "$(BUILT_PRODUCTS_DIR)/WorkingTitle.app/Contents/MacOS/WorkingTitle"
+        "TEST_HOST[sdk=macosx*]": "$(BUILT_PRODUCTS_DIR)/ExcalidrawNative.app/Contents/MacOS/ExcalidrawNative"
         "BUNDLE_LOADER[sdk=macosx*]": "$(TEST_HOST)"
 schemes:
-  WorkingTitleUITests:
+  ExcalidrawNativeUITests:
     build:
       targets:
-        WorkingTitle: all
+        ExcalidrawNative: all
     test:
-      targets: [WorkingTitleUITests]
+      targets: [ExcalidrawNativeUITests]

@@ -1,6 +1,6 @@
 # Terminal-only build entry points; no Xcode GUI needed.
-SWIFT_SRC := apple/WorkingTitle apple/WorkingTitleTests apple/WorkingTitleUITests
-XCODEBUILD := cd apple && xcodebuild -quiet -scheme WorkingTitle
+SWIFT_SRC := apple/ExcalidrawNative apple/ExcalidrawNativeTests apple/ExcalidrawNativeUITests
+XCODEBUILD := cd apple && xcodebuild -quiet -scheme ExcalidrawNative
 XCTEST := scripts/apple-test.sh
 
 # Simulators matching the project's target devices.
@@ -8,7 +8,7 @@ SIM_IPHONE := iPhone 15 Pro
 SIM_IPAD := iPad Pro (12.9-inch) (4th generation)
 SIM ?= $(SIM_IPHONE)
 
-CORE_XCFRAMEWORK := apple/Generated/WorkingTitleCoreFFI.xcframework
+CORE_XCFRAMEWORK := apple/Generated/ExcalidrawNativeCoreFFI.xcframework
 CORE_SOURCES := Cargo.toml Cargo.lock scripts/build-core-apple.sh $(shell find crates -type f)
 
 .PHONY: core-apple apple-project build ipa test test-ios test-ui record-references lint fmt check sim run clean golden-fixtures bench visual-parity visual-parity-app screenshot
@@ -29,18 +29,18 @@ build: apple-project
 	$(XCODEBUILD) build -destination 'platform=macOS'
 	$(XCODEBUILD) build -destination 'generic/platform=iOS Simulator'
 
-# Builds an unsigned WorkingTitle.ipa for sideloading on an iPhone or iPad
+# Builds an unsigned ExcalidrawNative.ipa for sideloading on an iPhone or iPad
 # (TARGETED_DEVICE_FAMILY is 1,2). SideStore, AltStore and similar tools
 # re-sign it on the device, so no provisioning profile is embedded.
-IPA_PRODUCT := apple/build/Build/Products/Release-iphoneos/WorkingTitle.app
+IPA_PRODUCT := apple/build/Build/Products/Release-iphoneos/ExcalidrawNative.app
 ipa: apple-project
 	$(XCODEBUILD) build -configuration Release -destination 'generic/platform=iOS' \
 		-derivedDataPath build CODE_SIGNING_ALLOWED=NO
-	rm -rf apple/build/Payload apple/build/WorkingTitle.ipa
+	rm -rf apple/build/Payload apple/build/ExcalidrawNative.ipa
 	mkdir -p apple/build/Payload
 	cp -R $(IPA_PRODUCT) apple/build/Payload/
-	cd apple/build && zip -qry WorkingTitle.ipa Payload
-	@echo "apple/build/WorkingTitle.ipa"
+	cd apple/build && zip -qry ExcalidrawNative.ipa Payload
+	@echo "apple/build/ExcalidrawNative.ipa"
 
 test: apple-project
 	cargo test --workspace --locked
@@ -52,10 +52,10 @@ test-ios: apple-project sim
 # XCUITests (Gallery → Canvas → back, Gallery → licences); kept out of `make test`, as UI tests on
 # macOS need the Accessibility permission.
 test-ui: apple-project sim
-	SCHEME=WorkingTitleUITests LOG=/tmp/workingtitle-ui-test.log $(XCTEST) -destination 'platform=iOS Simulator,name=$(SIM)'
+	SCHEME=ExcalidrawNativeUITests LOG=/tmp/excalidraw-native-ui-test.log $(XCTEST) -destination 'platform=iOS Simulator,name=$(SIM)'
 
 # Re-records the renderer reference images that no longer match (and creates
-# missing ones) on macOS; review the diff of apple/WorkingTitleTests/References
+# missing ones) on macOS; review the diff of apple/ExcalidrawNativeTests/References
 # before committing. See docs/renderer-reference-images.md.
 record-references: apple-project
 	TEST_RUNNER_RECORD_REFERENCES=1 $(XCTEST) -destination 'platform=macOS' ENABLE_APP_SANDBOX=NO
@@ -69,7 +69,7 @@ lint:
 	cargo fmt --all --check
 	cargo clippy --workspace --all-targets --locked -q -- -D warnings
 	@# ADR-0009: the core crate has no dependencies.
-	@test "$$(cargo tree -p workingtitle-core -e normal --depth 1 --prefix none --locked | wc -l)" -eq 1 \
+	@test "$$(cargo tree -p excalidraw-native-core -e normal --depth 1 --prefix none --locked | wc -l)" -eq 1 \
 		|| { echo 'error: crates/core must not have dependencies (ADR-0009)'; exit 1; }
 
 fmt:
@@ -89,8 +89,8 @@ sim:
 run: apple-project sim
 	$(XCODEBUILD) build -destination 'platform=iOS Simulator,name=$(SIM)' -derivedDataPath build
 	xcrun simctl boot '$(SIM)' 2>/dev/null || true
-	xcrun simctl install '$(SIM)' apple/build/Build/Products/Debug-iphonesimulator/WorkingTitle.app
-	xcrun simctl launch --terminate-running-process '$(SIM)' com.timhilt.workingtitle
+	xcrun simctl install '$(SIM)' apple/build/Build/Products/Debug-iphonesimulator/ExcalidrawNative.app
+	xcrun simctl launch --terminate-running-process '$(SIM)' com.timhilt.excalidrawnative
 
 # Regenerates the committed golden fixtures from the pinned Excalidraw checkout
 # (see scripts/golden/README.md). Needs Node; `make test` does not.
@@ -105,16 +105,16 @@ visual-parity: visual-parity-app
 
 visual-parity-app: apple-project
 	TEST_RUNNER_RECORD_VISUAL_PARITY=1 $(XCTEST) -destination 'platform=macOS' ENABLE_APP_SANDBOX=NO \
-		-only-testing:WorkingTitleTests/VisualParityTests
+		-only-testing:ExcalidrawNativeTests/VisualParityTests
 
 # Measures the core's open time for the 1,000-Element Benchmark Scene and its
 # share of one input event in the 5,000-Element one.
 # See docs/performance-benchmarks.md for the full procedure.
 bench:
-	cargo test --release --locked -q -p workingtitle-core --test integration -- --ignored --nocapture --test-threads=1 benchmarks::
+	cargo test --release --locked -q -p excalidraw-native-core --test integration -- --ignored --nocapture --test-threads=1 benchmarks::
 
 clean:
-	rm -rf apple/WorkingTitle.xcodeproj apple/build apple/Generated target
+	rm -rf apple/ExcalidrawNative.xcodeproj apple/build apple/Generated target
 
 # Screenshot of the Canvas with the sample Drawing open, for looking at layout:
 # make screenshot DEVICE=mac|ipad|iphone [OUT=/tmp/wt-<device>.png]

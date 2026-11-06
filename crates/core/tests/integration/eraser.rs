@@ -4,8 +4,8 @@
 //! Excalidraw's `eraser/index.ts` (which Elements a step of the eraser path
 //! touches) and `App.tsx` (previewing at 20 % opacity, erasing on release).
 
-use workingtitle_core::json::Value;
-use workingtitle_core::{Editor, Geometry, Tool};
+use excalidraw_native_core::json::Value;
+use excalidraw_native_core::{Editor, Geometry, Tool};
 
 use crate::common;
 use common::{editor_with, replay, saved_elements, text};

@@ -8,9 +8,9 @@
 
 use std::sync::Arc;
 
-use workingtitle_core::json::Value;
-use workingtitle_core::scene::LineStyle;
-use workingtitle_core::{Editor, FontSize, Property, TextAlign, TextEditor, Tool};
+use excalidraw_native_core::json::Value;
+use excalidraw_native_core::scene::LineStyle;
+use excalidraw_native_core::{Editor, FontSize, Property, TextAlign, TextEditor, Tool};
 
 use crate::common;
 use common::{FixedWidth, editor_with, replay, saved_elements, tap};

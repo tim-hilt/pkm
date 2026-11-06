@@ -5,8 +5,8 @@
 use crate::common;
 
 use common::editor_with_element;
-use workingtitle_core::json::parse;
-use workingtitle_core::{Editor, Geometry, Image, ImageStatus, PartKind};
+use excalidraw_native_core::json::parse;
+use excalidraw_native_core::{Editor, Geometry, Image, ImageStatus, PartKind};
 
 const PHOTO: &str = r#""id":"i","type":"image","x":100,"y":50,"width":200,"height":100,
     "fileId":"f1","status":"saved","scale":[1,1],"crop":null,"opacity":50"#;

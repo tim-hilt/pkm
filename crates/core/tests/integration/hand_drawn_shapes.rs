@@ -11,7 +11,7 @@ use crate::common;
 use std::f64::consts::FRAC_PI_2;
 
 use common::{Fixture, assert_rough_elements_match_golden, editor_with_element, ops};
-use workingtitle_core::{Editor, Geometry, Part, Verb};
+use excalidraw_native_core::{Editor, Geometry, Part, Verb};
 
 // --- Parity with rough.js ---------------------------------------------------
 

@@ -3,7 +3,7 @@
 //! excalidraw.com's `App.setActiveTool` and `clearSelectionIfNotUsingSelection`.
 //! Tested at the Editor seam with recorded sequences.
 
-use workingtitle_core::{Command, Editor, PencilDoubleTap, Tool};
+use excalidraw_native_core::{Command, Editor, PencilDoubleTap, Tool};
 
 use crate::common;
 use common::{editor_with, replay, tap};

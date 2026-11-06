@@ -8,7 +8,7 @@
 //! Expected viewports are worked out by hand in the comments, not computed
 //! with the formulas of the code under test.
 
-use workingtitle_core::{
+use excalidraw_native_core::{
     Editor, MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase, ScrollEvent,
 };
 
@@ -42,7 +42,7 @@ fn replay(editor: &mut Editor, recording: &str) {
                 "mouse" => PointerKind::Mouse,
                 _ => panic!("unknown kind in: {line}"),
             },
-            button: workingtitle_core::PointerButton::Primary,
+            button: excalidraw_native_core::PointerButton::Primary,
             pressure: 0.5,
             timestamp: n as f64 * 0.01,
             modifiers: Modifiers::default(),

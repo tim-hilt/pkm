@@ -3,8 +3,8 @@
 //! and geometry out. Expected values are worked out by hand from Excalidraw's
 //! `App.tsx` (pointer down, move and up of a freedraw element).
 
-use workingtitle_core::json::Value;
-use workingtitle_core::{Editor, Modifiers, PointerEvent, PointerKind, PointerPhase, Tool};
+use excalidraw_native_core::json::Value;
+use excalidraw_native_core::{Editor, Modifiers, PointerEvent, PointerKind, PointerPhase, Tool};
 
 use PointerKind::{Finger, Mouse, Pencil};
 use PointerPhase::{Cancel, Down, Move, Up};
@@ -32,7 +32,7 @@ fn send(
         x,
         y,
         kind,
-        button: workingtitle_core::PointerButton::Primary,
+        button: excalidraw_native_core::PointerButton::Primary,
         pressure,
         timestamp: 0.0,
         modifiers: Modifiers::default(),

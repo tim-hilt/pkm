@@ -8,8 +8,8 @@
 //! switching Tool, or for lines closing the loop) finishes it, as on
 //! excalidraw.com.
 
-use workingtitle_core::json::Value;
-use workingtitle_core::{Editor, Tool};
+use excalidraw_native_core::json::Value;
+use excalidraw_native_core::{Editor, Tool};
 
 use crate::common;
 use common::{replay, saved_elements, saved_points, tap};

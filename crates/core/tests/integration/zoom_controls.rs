@@ -3,7 +3,7 @@
 //! 0.1, limits 0.1..=30, fit never zooms in past 100 %). Expected viewports
 //! are worked out by hand in the comments.
 
-use workingtitle_core::{Editor, MAX_ZOOM, MIN_ZOOM, MagnifyEvent};
+use excalidraw_native_core::{Editor, MAX_ZOOM, MIN_ZOOM, MagnifyEvent};
 
 const EPSILON: f64 = 1e-9;
 

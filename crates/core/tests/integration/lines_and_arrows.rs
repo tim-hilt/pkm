@@ -9,8 +9,8 @@
 use crate::common;
 
 use common::{assert_rough_elements_match_golden, editor_with_element, ops, text};
-use workingtitle_core::json::Value;
-use workingtitle_core::{PartKind, Verb};
+use excalidraw_native_core::json::Value;
+use excalidraw_native_core::{PartKind, Verb};
 
 fn is_a(kind: &'static str) -> impl Fn(&Value) -> bool {
     move |element| text(element, "type") == kind
@@ -62,7 +62,7 @@ fn a_line_is_drawn_as_its_points_with_nothing_else() {
 const ARROW: &str = r#""id":"a","type":"arrow","x":10,"y":20,"width":100,"height":0,
     "roughness":0,"points":[[0,0],[100,0]]"#;
 
-fn first_move(geometry: &workingtitle_core::Geometry, part: usize) -> (f32, f32) {
+fn first_move(geometry: &excalidraw_native_core::Geometry, part: usize) -> (f32, f32) {
     let (verb, operands) = &ops(geometry, &geometry.parts()[part])[0];
     assert_eq!(*verb, Verb::Move);
     (operands[0], operands[1])
@@ -158,7 +158,7 @@ fn outline_arrowheads_are_filled_with_the_colour_of_the_canvas() {
         r##"{{"type":"excalidraw","version":2,"appState":{{"viewBackgroundColor":"#112233"}},
         "elements":[{{{ARROW},"endArrowhead":"triangle_outline","strokeColor":"#e03131"}}]}}"##
     );
-    let mut editor = workingtitle_core::Editor::new();
+    let mut editor = excalidraw_native_core::Editor::new();
     editor.load(drawing.as_bytes()).unwrap();
     let geometry = editor.geometry();
 
@@ -298,7 +298,7 @@ fn an_elbow_arrow_survives_open_and_save_unchanged() {
     }
   ]
 }"#;
-    let mut editor = workingtitle_core::Editor::new();
+    let mut editor = excalidraw_native_core::Editor::new();
     editor.load(drawing.as_bytes()).unwrap();
     let saved = String::from_utf8(editor.save()).unwrap();
 

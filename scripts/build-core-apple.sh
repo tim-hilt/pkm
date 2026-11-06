@@ -2,15 +2,15 @@
 # Usage: scripts/build-core-apple.sh   (normally via `make core-apple`)
 # Builds the Rust bindings crate for iOS device, iOS simulator and macOS
 # (arm64) and packages the static libraries into
-#   apple/Generated/WorkingTitleCoreFFI.xcframework
+#   apple/Generated/ExcalidrawNativeCoreFFI.xcframework
 # next to the generated Swift bindings
-#   apple/Generated/WorkingTitleCore.swift
+#   apple/Generated/ExcalidrawNativeCore.swift
 # Both are build artefacts (git-ignored) that the Xcode project links/compiles.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 out=apple/Generated
-lib=libworkingtitle_bindings.a
+lib=libexcalidraw_native_bindings.a
 targets=(aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim)
 
 # Keep in sync with deploymentTarget in apple/project.yml.
@@ -23,12 +23,12 @@ for t in "${targets[@]}"; do
 done
 
 for t in "${targets[@]}"; do
-  cargo build --release --locked -p workingtitle-bindings --target "$t"
+  cargo build --release --locked -p excalidraw-native-bindings --target "$t"
 done
 
 # The generator runs on the host and reads the interface metadata embedded in
 # the library, so the Swift code always matches the compiled Rust.
-cargo build --release --locked -p workingtitle-bindings --features bindgen --bin uniffi-bindgen
+cargo build --release --locked -p excalidraw-native-bindings --features bindgen --bin uniffi-bindgen
 rm -rf "$out"
 mkdir -p "$out/headers"
 target/release/uniffi-bindgen generate --language swift --metadata-no-deps \
@@ -42,5 +42,5 @@ args=()
 for t in "${targets[@]}"; do
   args+=(-library "target/$t/release/$lib" -headers "$out/headers")
 done
-xcodebuild -create-xcframework "${args[@]}" -output "$out/WorkingTitleCoreFFI.xcframework" >/dev/null
+xcodebuild -create-xcframework "${args[@]}" -output "$out/ExcalidrawNativeCoreFFI.xcframework" >/dev/null
 rm -rf "$out/headers"

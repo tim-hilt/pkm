@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Usage: scripts/install.sh <device-name|mac>
-# Builds WorkingTitle (Release) and installs it on a connected device, or into
+# Builds Excalidraw Native (Release) and installs it on a connected device, or into
 # /Applications for "mac".
 set -euo pipefail
 
@@ -8,8 +8,8 @@ config=Release
 target="${1:?usage: $0 <device-name|mac>}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 build="$root/apple/build"
-bundle_id=com.timhilt.workingtitle
-app=WorkingTitle
+bundle_id=com.timhilt.excalidrawnative
+app=ExcalidrawNative
 
 cd "$root"
 make apple-project

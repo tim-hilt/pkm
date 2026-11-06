@@ -2,8 +2,8 @@
 //! sequences: pointer events and commands in, saved Drawing, Selection and
 //! undo/redo availability out.
 
-use workingtitle_core::json::{Value, parse};
-use workingtitle_core::{Editor, Tool};
+use excalidraw_native_core::json::{Value, parse};
+use excalidraw_native_core::{Editor, Tool};
 
 use crate::common;
 use common::{editor_with, replay, tap};

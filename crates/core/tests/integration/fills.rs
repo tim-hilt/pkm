@@ -10,7 +10,7 @@
 use crate::common;
 
 use common::{assert_rough_elements_match_golden, editor_with_element, ops};
-use workingtitle_core::{Geometry, PartKind, Verb};
+use excalidraw_native_core::{Geometry, PartKind, Verb};
 
 // --- Parity with rough.js ---------------------------------------------------
 

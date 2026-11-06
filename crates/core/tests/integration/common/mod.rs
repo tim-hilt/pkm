@@ -7,8 +7,8 @@
 use std::fs;
 use std::path::PathBuf;
 
-use workingtitle_core::json::{Object, Value, parse};
-use workingtitle_core::{
+use excalidraw_native_core::json::{Object, Value, parse};
+use excalidraw_native_core::{
     Editor, Geometry, Modifiers, Part, PartKind, PointerButton, PointerEvent, PointerKind,
     PointerPhase, TextMeasurer, Verb,
 };

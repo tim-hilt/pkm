@@ -44,4 +44,4 @@ Single-context: one root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md
 
 ## Sideloading
 
-`make ipa` builds an unsigned `apple/build/WorkingTitle.ipa` for an iPhone or iPad. SideStore, AltStore and similar tools re-sign it on the device; no provisioning profile is embedded.
+`make ipa` builds an unsigned `apple/build/ExcalidrawNative.ipa` for an iPhone or iPad. SideStore, AltStore and similar tools re-sign it on the device; no provisioning profile is embedded.

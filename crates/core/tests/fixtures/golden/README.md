@@ -83,6 +83,6 @@ doubles upstream produced. Tests compare with a small tolerance anyway.
 ## Reading from Rust
 
 `crates/core/tests/integration/common/mod.rs` reads both files with the core's own JSON
-(`workingtitle_core::json`) into `Shape`, `OpSet` and `Op` values:
+(`excalidraw_native_core::json`) into `Shape`, `OpSet` and `Op` values:
 `Fixture::load("shapes").shapes("rectangle-r0-solid-sharp")`.
 `crates/core/tests/integration/golden.rs` checks that the fixtures are complete.
