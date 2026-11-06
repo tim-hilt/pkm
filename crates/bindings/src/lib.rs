@@ -8,7 +8,7 @@ use workingtitle_core::scene::{FillPattern, LineStyle};
 use workingtitle_core::{
     ActionBar, Command, Edges, ExportScope, FontSize, ImageFile, MagnifyEvent, Modifiers,
     PencilDoubleTap, PointerButton, PointerEvent, PointerKind, PointerPhase, Properties, Property,
-    ScrollEvent, Shortcut, Sloppiness, StrokeWidth, TextAlign, TextEditor, Tool, ZOrder,
+    ScrollEvent, Sections, Shortcut, Sloppiness, StrokeWidth, TextAlign, TextEditor, Tool, ZOrder,
 };
 
 uniffi::setup_scaffolding!("WorkingTitleCore");
@@ -255,7 +255,20 @@ pub struct Properties {
     pub opacity: Option<f64>,
     pub font_size: Option<FontSize>,
     pub text_align: Option<TextAlign>,
-    pub has_text_options: bool,
+    pub sections: Sections,
+}
+
+#[uniffi::remote(Record)]
+pub struct Sections {
+    pub stroke_color: bool,
+    pub background_color: bool,
+    pub fill_style: bool,
+    pub stroke_width: bool,
+    pub stroke_style: bool,
+    pub sloppiness: bool,
+    pub edges: bool,
+    pub opacity: bool,
+    pub text: bool,
 }
 
 /// The text view to show over the Canvas while a text is edited, in view

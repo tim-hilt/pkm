@@ -201,7 +201,7 @@ import Testing
     @Test func fontSizeAndAlignmentReachTheCoreThroughThePanel() throws {
         let setup = try makeSetup()
         setup.controller.setTool(.text)
-        #expect(setup.controller.properties?.hasTextOptions == true)
+        #expect(setup.controller.properties?.sections.text == true)
 
         setup.controller.setProperty(.fontSize(.large))
         setup.controller.setProperty(.textAlign(.center))

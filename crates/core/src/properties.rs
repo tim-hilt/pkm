@@ -54,11 +54,67 @@ pub struct Properties {
     pub opacity: Option<f64>,
     pub font_size: Option<FontSize>,
     pub text_align: Option<TextAlign>,
-    /// Whether the panel offers the font size and alignment: for a Selection
-    /// with a text or a labelled container in it, a text that is edited, and
-    /// the next Element if it is a text. They are shown mixed (`None`) where
-    /// texts differ.
-    pub has_text_options: bool,
+    /// Which sections the panel shows; the values of a section that applies
+    /// are still `None` where they are mixed.
+    pub sections: Sections,
+}
+
+/// The sections of the panel that apply, following Excalidraw's
+/// `getShapeActionPredicates`: a section applies if it applies to the active
+/// Tool (so that it can be set before drawing) or to any covered Element.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sections {
+    pub stroke_color: bool,
+    pub background_color: bool,
+    /// Only where the background is not transparent.
+    pub fill_style: bool,
+    pub stroke_width: bool,
+    pub stroke_style: bool,
+    pub sloppiness: bool,
+    pub edges: bool,
+    pub opacity: bool,
+    /// Font size and alignment: for a text, a labelled shape (its label is
+    /// covered) and the text Tool.
+    pub text: bool,
+}
+
+impl Sections {
+    /// The sections for the active Tool (the type of Element it draws, if
+    /// any) and the `covered` Elements (the Selection with the labels of its
+    /// containers, or the text that is edited). `next_background` is the
+    /// background colour the Tool draws with.
+    pub(crate) fn new(
+        tool: Option<ElementType>,
+        covered: &[Element],
+        next_background: &str,
+    ) -> Self {
+        let any = |applies: fn(ElementType) -> bool| {
+            tool.is_some_and(applies) || covered.iter().any(|e| applies(e.kind()))
+        };
+        Self {
+            stroke_color: any(has_stroke_color),
+            background_color: any(has_background),
+            fill_style: tool.is_some_and(|t| has_background(t) && !is_transparent(next_background))
+                || covered
+                    .iter()
+                    .any(|e| has_background(e.kind()) && !is_transparent(e.background_color())),
+            stroke_width: any(has_stroke_width),
+            stroke_style: any(has_stroke_style),
+            sloppiness: any(has_stroke_style),
+            edges: any(takes_edges),
+            opacity: true,
+            text: any(has_font),
+        }
+    }
+}
+
+/// Whether a CSS colour draws nothing: `transparent` or a hex colour with
+/// zero alpha.
+fn is_transparent(color: &str) -> bool {
+    color == "transparent"
+        || color.strip_prefix('#').is_some_and(|hex| {
+            matches!(hex.len(), 4 | 8) && hex.ends_with(&"0".repeat(hex.len() / 4))
+        })
 }
 
 impl Property {
@@ -147,7 +203,7 @@ impl Style {
 impl Properties {
     /// What the panel shows with nothing selected: the style of the next
     /// Element.
-    pub(crate) fn of_style(style: &Style) -> Self {
+    pub(crate) fn of_style(style: &Style, tool: Option<ElementType>) -> Self {
         Self {
             stroke_color: Some(style.stroke_color.clone()),
             background_color: Some(style.background_color.clone()),
@@ -159,12 +215,16 @@ impl Properties {
             opacity: Some(style.opacity),
             font_size: Some(style.font_size),
             text_align: Some(style.text_align),
-            has_text_options: false,
+            sections: Sections::new(tool, &[], &style.background_color),
         }
     }
 
     /// What the panel shows for the Elements `selected`.
-    pub(crate) fn of_selection(selected: &[Element]) -> Self {
+    pub(crate) fn of_selection(
+        selected: &[Element],
+        tool: Option<ElementType>,
+        style: &Style,
+    ) -> Self {
         Self {
             stroke_color: common(selected, has_stroke_color, |e| {
                 Some(e.stroke_color().to_owned())
@@ -184,7 +244,7 @@ impl Properties {
             opacity: common(selected, |_| true, |e| Some(opacity_of(e))),
             font_size: common(selected, has_font, |e| FontSize::from_size(e.font_size())),
             text_align: common(selected, has_font, |e| Some(e.text_align())),
-            has_text_options: selected.iter().any(|e| has_font(e.kind())),
+            sections: Sections::new(tool, selected, &style.background_color),
         }
     }
 }

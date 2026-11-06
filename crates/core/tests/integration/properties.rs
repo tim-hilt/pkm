@@ -5,7 +5,7 @@
 
 use workingtitle_core::json::Value;
 use workingtitle_core::scene::{FillPattern, LineStyle};
-use workingtitle_core::{Edges, Editor, Property, Sloppiness, StrokeWidth, Tool};
+use workingtitle_core::{Edges, Editor, Property, Sections, Sloppiness, StrokeWidth, Tool};
 
 use crate::common;
 use common::{editor_with, replay, saved_elements, tap};
@@ -413,4 +413,217 @@ fn the_panel_is_shown_for_a_drawing_tool_or_a_selection() {
     assert!(editor.shows_properties());
     editor.commit_text(); // an empty text is dropped
     assert!(!editor.shows_properties());
+}
+
+// --- Which sections apply (Excalidraw's `getShapeActionPredicates`) ---------------
+
+const NONE: Sections = Sections {
+    stroke_color: false,
+    background_color: false,
+    fill_style: false,
+    stroke_width: false,
+    stroke_style: false,
+    sloppiness: false,
+    edges: false,
+    opacity: true,
+    text: false,
+};
+
+fn element_json(kind: &str, extra: &str) -> String {
+    format!(
+        r##"{{"id":"e","type":"{kind}","x":100,"y":100,"width":100,"height":50,
+        "backgroundColor":"transparent","strokeWidth":2,"roundness":null,
+        "fontSize":20,"fontFamily":5,"text":"Hi","originalText":"Hi","lineHeight":1.25,
+        "points":[[0,0],[100,50]],{extra}"version":3,"versionNonce":7}}"##
+    )
+}
+
+fn sections_of_selected(kind: &str, extra: &str) -> Sections {
+    let mut editor = editor_with(&[&element_json(kind, extra)]);
+    editor.select_all();
+    editor.properties().sections
+}
+
+#[test]
+fn a_text_has_no_fill_stroke_width_style_sloppiness_or_edges() {
+    assert_eq!(
+        sections_of_selected("text", ""),
+        Sections {
+            stroke_color: true,
+            text: true,
+            ..NONE
+        }
+    );
+}
+
+#[test]
+fn an_image_has_edges_and_opacity_only() {
+    assert_eq!(
+        sections_of_selected("image", ""),
+        Sections {
+            edges: true,
+            ..NONE
+        }
+    );
+}
+
+#[test]
+fn a_filled_ellipse_has_everything_but_edges_and_text() {
+    assert_eq!(
+        sections_of_selected("ellipse", r##""backgroundColor":"#ffc9c9","##),
+        Sections {
+            stroke_color: true,
+            background_color: true,
+            fill_style: true,
+            stroke_width: true,
+            stroke_style: true,
+            sloppiness: true,
+            ..NONE
+        }
+    );
+}
+
+#[test]
+fn the_fill_style_is_offered_only_for_a_background_that_is_not_transparent() {
+    for (color, offered) in [
+        ("transparent", false),
+        ("#ffffff00", false),
+        ("#ffc9c9", true),
+    ] {
+        let sections =
+            sections_of_selected("rectangle", &format!(r#""backgroundColor":"{color}","#));
+        assert!(sections.background_color);
+        assert_eq!(sections.fill_style, offered, "{color}");
+    }
+}
+
+#[test]
+fn a_rectangle_and_a_line_have_edges_but_an_arrow_does_not() {
+    assert!(sections_of_selected("rectangle", "").edges);
+    assert!(sections_of_selected("diamond", "").edges);
+    assert!(sections_of_selected("line", "").edges);
+    assert!(!sections_of_selected("arrow", "").edges);
+    assert!(!sections_of_selected("ellipse", "").edges);
+}
+
+#[test]
+fn a_line_has_a_background_but_an_arrow_has_none() {
+    assert!(sections_of_selected("line", "").background_color);
+    assert!(!sections_of_selected("arrow", "").background_color);
+}
+
+#[test]
+fn a_freedraw_stroke_has_width_and_background_but_no_style_or_sloppiness() {
+    assert_eq!(
+        sections_of_selected("freedraw", ""),
+        Sections {
+            stroke_color: true,
+            background_color: true,
+            stroke_width: true,
+            ..NONE
+        }
+    );
+}
+
+#[test]
+fn a_mixed_selection_has_the_sections_of_any_of_its_elements() {
+    let text = element_json("text", "").replace(r#""id":"e""#, r#""id":"t""#);
+    let image = element_json("image", "");
+    let mut editor = editor_with(&[&text, &image]);
+    editor.select_all();
+    assert_eq!(
+        editor.properties().sections,
+        Sections {
+            stroke_color: true,
+            edges: true,
+            text: true,
+            ..NONE
+        }
+    );
+}
+
+#[test]
+fn a_section_that_applies_but_differs_is_shown_mixed() {
+    let editor = both();
+    let shown = editor.properties();
+    assert!(shown.sections.stroke_width);
+    assert_eq!(shown.stroke_width, None);
+}
+
+#[test]
+fn with_nothing_selected_the_sections_are_those_of_the_tool() {
+    let mut editor = editor_with(&[]);
+    let sections = |editor: &mut Editor, tool| {
+        editor.set_tool(tool);
+        editor.properties().sections
+    };
+    let with_everything = Sections {
+        stroke_color: true,
+        stroke_width: true,
+        stroke_style: true,
+        sloppiness: true,
+        ..NONE
+    };
+    // The default background is transparent: no fill style yet.
+    assert_eq!(
+        sections(&mut editor, Tool::Rectangle),
+        Sections {
+            background_color: true,
+            edges: true,
+            ..with_everything
+        }
+    );
+    assert_eq!(
+        sections(&mut editor, Tool::Ellipse),
+        Sections {
+            background_color: true,
+            ..with_everything
+        }
+    );
+    assert_eq!(
+        sections(&mut editor, Tool::Diamond),
+        Sections {
+            background_color: true,
+            edges: true,
+            ..with_everything
+        }
+    );
+    assert_eq!(
+        sections(&mut editor, Tool::Line),
+        Sections {
+            background_color: true,
+            edges: true,
+            ..with_everything
+        }
+    );
+    assert_eq!(sections(&mut editor, Tool::Arrow), with_everything);
+    assert_eq!(
+        sections(&mut editor, Tool::Freedraw),
+        Sections {
+            stroke_color: true,
+            background_color: true,
+            stroke_width: true,
+            ..NONE
+        }
+    );
+    assert_eq!(
+        sections(&mut editor, Tool::Text),
+        Sections {
+            stroke_color: true,
+            text: true,
+            ..NONE
+        }
+    );
+    assert_eq!(sections(&mut editor, Tool::Selection), NONE);
+}
+
+#[test]
+fn the_tool_offers_the_fill_style_once_the_next_background_is_not_transparent() {
+    let mut editor = editor_with(&[]);
+    editor.set_tool(Tool::Rectangle);
+    assert!(!editor.properties().sections.fill_style);
+    editor.set_property(Property::BackgroundColor("#ffc9c9".into()));
+    assert!(editor.properties().sections.fill_style);
+    editor.set_tool(Tool::Arrow);
+    assert!(!editor.properties().sections.fill_style);
 }

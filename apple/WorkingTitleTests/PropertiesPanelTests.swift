@@ -52,6 +52,17 @@ import Testing
         #expect(setup.editor.properties().strokeColor == "#e03131")
     }
 
+    @Test func thePanelFollowsTheSectionsTheCoreSaysApply() throws {
+        let setup = try makeSetup()
+        setup.controller.setTool(.text)
+        let text = try #require(setup.controller.properties?.sections)
+        #expect(text.text && !text.edges && !text.strokeWidth)
+
+        setup.controller.setTool(.arrow)
+        let arrow = try #require(setup.controller.properties?.sections)
+        #expect(!arrow.text && !arrow.edges && arrow.strokeWidth)
+    }
+
     @Test func aCommandRestylesTheSelectionAndCanBeUndone() throws {
         let setup = try makeSetup()
         select(setup)

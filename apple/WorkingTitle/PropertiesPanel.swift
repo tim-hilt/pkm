@@ -40,50 +40,64 @@ struct PropertiesPanel: View {
         if let shown = controller.properties {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
-                    section("Stroke") {
-                        swatches(Self.strokeColors, selected: shown.strokeColor) {
-                            .strokeColor($0)
+                    if shown.sections.strokeColor {
+                        section("Stroke") {
+                            swatches(Self.strokeColors, selected: shown.strokeColor) {
+                                .strokeColor($0)
+                            }
                         }
                     }
-                    section("Background") {
-                        swatches(Self.backgroundColors, selected: shown.backgroundColor) {
-                            .backgroundColor($0)
+                    if shown.sections.backgroundColor {
+                        section("Background") {
+                            swatches(Self.backgroundColors, selected: shown.backgroundColor) {
+                                .backgroundColor($0)
+                            }
                         }
                     }
-                    section("Fill") {
-                        options(
-                            "Fill",
-                            [(.hachure, "Hachure"), (.crossHatch, "Cross-hatch"), (.solid, "Solid")],
-                            selected: shown.fillStyle
-                        ) { .fillStyle($0) }
-                    }
-                    section("Stroke width") {
-                        options(
-                            "Stroke width",
-                            [(.thin, "Thin"), (.medium, "Bold"), (.bold, "Extra bold")],
-                            selected: shown.strokeWidth
-                        ) { .strokeWidth($0) }
-                    }
-                    section("Stroke style") {
-                        options(
-                            "Stroke style",
-                            [(.solid, "Solid"), (.dashed, "Dashed"), (.dotted, "Dotted")],
-                            selected: shown.strokeStyle
-                        ) { .strokeStyle($0) }
-                    }
-                    section("Sloppiness") {
-                        options(
-                            "Sloppiness",
-                            [(.architect, "Architect"), (.artist, "Artist"), (.cartoonist, "Cartoonist")],
-                            selected: shown.sloppiness
-                        ) { .sloppiness($0) }
-                    }
-                    section("Edges") {
-                        options("Edges", [(.sharp, "Sharp"), (.round, "Round")], selected: shown.edges) {
-                            .edges($0)
+                    if shown.sections.fillStyle {
+                        section("Fill") {
+                            options(
+                                "Fill",
+                                [(.hachure, "Hachure"), (.crossHatch, "Cross-hatch"), (.solid, "Solid")],
+                                selected: shown.fillStyle
+                            ) { .fillStyle($0) }
                         }
                     }
-                    if shown.hasTextOptions {
+                    if shown.sections.strokeWidth {
+                        section("Stroke width") {
+                            options(
+                                "Stroke width",
+                                [(.thin, "Thin"), (.medium, "Bold"), (.bold, "Extra bold")],
+                                selected: shown.strokeWidth
+                            ) { .strokeWidth($0) }
+                        }
+                    }
+                    if shown.sections.strokeStyle {
+                        section("Stroke style") {
+                            options(
+                                "Stroke style",
+                                [(.solid, "Solid"), (.dashed, "Dashed"), (.dotted, "Dotted")],
+                                selected: shown.strokeStyle
+                            ) { .strokeStyle($0) }
+                        }
+                    }
+                    if shown.sections.sloppiness {
+                        section("Sloppiness") {
+                            options(
+                                "Sloppiness",
+                                [(.architect, "Architect"), (.artist, "Artist"), (.cartoonist, "Cartoonist")],
+                                selected: shown.sloppiness
+                            ) { .sloppiness($0) }
+                        }
+                    }
+                    if shown.sections.edges {
+                        section("Edges") {
+                            options("Edges", [(.sharp, "Sharp"), (.round, "Round")], selected: shown.edges) {
+                                .edges($0)
+                            }
+                        }
+                    }
+                    if shown.sections.text {
                         section("Font size") {
                             options(
                                 "Font size",
@@ -102,14 +116,16 @@ struct PropertiesPanel: View {
                             ) { .textAlign($0) }
                         }
                     }
-                    section("Opacity") {
-                        Slider(
-                            value: Binding(
-                                get: { shown.opacity ?? 100 },
-                                set: { controller.setProperty(.opacity($0)) }),
-                            in: 0...100, step: 10
-                        )
-                        .accessibilityLabel(Text("Opacity"))
+                    if shown.sections.opacity {
+                        section("Opacity") {
+                            Slider(
+                                value: Binding(
+                                    get: { shown.opacity ?? 100 },
+                                    set: { controller.setProperty(.opacity($0)) }),
+                                in: 0...100, step: 10
+                            )
+                            .accessibilityLabel(Text("Opacity"))
+                        }
                     }
                 }
                 .padding(12)

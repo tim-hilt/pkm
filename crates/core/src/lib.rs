@@ -70,7 +70,7 @@ pub use input::{
 };
 pub use insert_image::ImageFile;
 pub use pencil_double_tap::PencilDoubleTap;
-pub use properties::{Properties, Property};
+pub use properties::{Properties, Property, Sections};
 pub use scene::LoadError;
 pub use shortcut::{Command, Shortcut, shortcuts};
 pub use style::{Edges, FontSize, Sloppiness, StrokeWidth};

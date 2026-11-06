@@ -582,23 +582,23 @@ fn the_panel_offers_font_size_and_alignment_for_texts_only() {
         "version":3,"versionNonce":7}"##;
     let mut editor = measured(editor_with(&[HELLO, rectangle]));
     // Nothing selected: for the next Element, which is a text with the text Tool.
-    assert!(!editor.properties().has_text_options);
+    assert!(!editor.properties().sections.text);
     editor.set_tool(Tool::Text);
-    assert!(editor.properties().has_text_options);
+    assert!(editor.properties().sections.text);
     editor.set_tool(Tool::Selection);
 
     tap(&mut editor, "finger", (320.0, 300.0), 1.0);
     assert_eq!(editor.selection(), ["r"]);
-    assert!(!editor.properties().has_text_options);
+    assert!(!editor.properties().sections.text);
 
     editor.select_all();
-    assert!(editor.properties().has_text_options);
+    assert!(editor.properties().sections.text);
 }
 
 #[test]
 fn the_panel_offers_font_size_and_alignment_while_a_text_is_edited() {
     let editor = typing("Hi", (100.0, 200.0));
-    assert!(editor.properties().has_text_options);
+    assert!(editor.properties().sections.text);
 }
 
 #[test]

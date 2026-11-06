@@ -559,7 +559,7 @@ fn stroke_colour_and_opacity_of_a_selected_shape_reach_its_label() {
 fn the_panel_offers_the_text_options_of_the_label_of_a_selected_shape() {
     let editor = labelled("rectangle", 200.0, "Hello");
     let shown = editor.properties();
-    assert!(shown.has_text_options);
+    assert!(shown.sections.text);
     assert_eq!(shown.font_size, Some(FontSize::Medium));
     assert_eq!(shown.text_align, Some(TextAlign::Center));
 }

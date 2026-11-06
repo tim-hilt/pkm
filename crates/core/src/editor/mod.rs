@@ -559,22 +559,20 @@ impl Editor {
     /// Elements (`None` where they differ), or, with nothing selected, the
     /// style of the next Element. See [`crate::properties`].
     pub fn properties(&self) -> Properties {
+        let tool = self.tool.element();
         // The text being edited is what the panel is for.
         if let Some(editing) = &self.text
             && let Some(element) = self.scene.element_by_id(editing.id())
         {
-            return Properties::of_selection(&[element]);
+            return Properties::of_selection(&[element], tool, &self.style);
         }
         if self.selection.is_empty() {
-            return Properties {
-                has_text_options: self.tool == Tool::Text,
-                ..Properties::of_style(&self.style)
-            };
+            return Properties::of_style(&self.style, tool);
         }
         // With the labels of selected containers, whose text options the
         // panel offers, as excalidraw.com does.
         let covered: Vec<Element> = self.selection.covered(&self.scene).collect();
-        Properties::of_selection(&covered)
+        Properties::of_selection(&covered, tool, &self.style)
     }
 
     /// Whether the chrome shows the properties panel (Excalidraw's

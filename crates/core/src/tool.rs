@@ -33,6 +33,15 @@ pub enum Tool {
 }
 
 impl Tool {
+    /// The type of Element this Tool draws, if it draws any.
+    pub(crate) fn element(self) -> Option<ElementType> {
+        match self {
+            Tool::Freedraw => Some(ElementType::Freedraw),
+            Tool::Text => Some(ElementType::Text),
+            _ => self.shape().or(self.linear()),
+        }
+    }
+
     /// The type of Element dragging with this Tool draws, if it draws shapes.
     pub(crate) fn shape(self) -> Option<ElementType> {
         match self {
