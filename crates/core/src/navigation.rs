@@ -181,6 +181,17 @@ impl Navigation {
         self.drag.is_some_and(|d| d.source != DragSource::Hand)
     }
 
+    /// Whether the Canvas is really being navigated by pinching or by a pan
+    /// that overrides the Tool: a right-button press that has not yet
+    /// travelled [`SECONDARY_SLOP`] is only a click so far, as the long-press
+    /// of a secondary click needs it to be.
+    pub fn is_navigating(&self) -> bool {
+        self.is_pinching()
+            || self
+                .drag
+                .is_some_and(|d| d.source != DragSource::Hand && !d.pending)
+    }
+
     /// Whether the Tool's gestures are suspended: pinching or overridden
     /// panning.
     pub fn suspends_tool(&self) -> bool {

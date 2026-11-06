@@ -46,6 +46,12 @@ final class CanvasMetalView: MTKView {
     private var shownOverlayRevision: UInt64?
     /// The native text view over the Canvas while a text is edited.
     let textOverlay = TextEditorOverlay()
+    #if !os(macOS)
+        /// The system's edit menu (see `CanvasContextMenu`) and the menu it is
+        /// about to show.
+        var editMenuInteraction: UIEditMenuInteraction?
+        var pendingContextMenu: UIMenu?
+    #endif
 
     init() {
         let device = MTLCreateSystemDefaultDevice()
@@ -66,6 +72,7 @@ final class CanvasMetalView: MTKView {
         #if !os(macOS)
             isMultipleTouchEnabled = true
             enablePencilInput()
+            enableContextMenu()
             observeKeyboard()
         #endif
         enableImageInput()

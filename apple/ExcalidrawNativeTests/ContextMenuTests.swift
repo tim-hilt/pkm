@@ -1,0 +1,142 @@
+import Foundation
+import Testing
+
+@testable import ExcalidrawNative
+
+#if canImport(UIKit)
+    import UIKit
+
+    /// The Element menu handed to the system's edit menu, through the Canvas:
+    /// which menu opens and what a press selects is the core's decision (tested
+    /// there), so these check the entries, their order and state, and that each
+    /// does what the matching command does. The hold itself and the system's
+    /// presentation are checked by hand.
+    @MainActor @Suite struct ContextMenuTests {
+        private static let drawing = """
+            {"type":"excalidraw","version":2,"elements":[
+            {"id":"a","type":"rectangle","x":100,"y":100,"width":100,"height":50,"strokeWidth":2,\
+            "backgroundColor":"#ffc9c9","roundness":null,"version":3,"versionNonce":7},
+            {"id":"b","type":"rectangle","x":300,"y":100,"width":100,"height":50,"strokeWidth":2,\
+            "backgroundColor":"#ffc9c9","roundness":null,"version":3,"versionNonce":7}]}
+            """
+
+        @MainActor private struct Setup {
+            let canvas = CanvasMetalView()
+            let editor = Editor()
+        }
+
+        private func makeSetup() throws -> Setup {
+            let setup = Setup()
+            _ = try #require(setup.canvas.renderer)
+            setup.editor.setViewSize(width: 800, height: 600)
+            try setup.editor.load(bytes: Data(Self.drawing.utf8))
+            setup.canvas.editor = setup.editor
+            return setup
+        }
+
+        private func titles(_ menu: UIMenu) -> [String] { menu.children.map(\.title) }
+
+        private func action(_ title: String, in menu: UIMenu) throws -> UIAction {
+            try #require(menu.children.first { $0.title == title } as? UIAction)
+        }
+
+        private func press(_ setup: Setup, at point: CGPoint, kind: PointerKind = .finger) -> UIMenu? {
+            setup.canvas.contextMenuForPress(at: point, kind: kind)
+        }
+
+        // MARK: Entries
+
+        @Test func theElementMenuHasTheEntriesInOrderWithArrangeAsASubmenu() throws {
+            let menu = try makeSetup().canvas.elementMenu(canGroup: false, canUngroup: false)
+
+            #expect(titles(menu) == ["Cut", "Copy", "Duplicate", "Group", "Ungroup", "Arrange", "Delete"])
+            let arrange = try #require(menu.children.first { $0.title == "Arrange" } as? UIMenu)
+            #expect(titles(arrange) == ["Bring to Front", "Bring Forward", "Send Backward", "Send to Back"])
+            #expect(try action("Delete", in: menu).attributes.contains(.destructive))
+        }
+
+        @Test func groupAndUngroupAreEnabledAsTheCoreSays() throws {
+            for (canGroup, canUngroup) in [(true, false), (false, true), (false, false)] {
+                let menu = try makeSetup().canvas.elementMenu(canGroup: canGroup, canUngroup: canUngroup)
+
+                #expect(try action("Group", in: menu).attributes.contains(.disabled) != canGroup)
+                #expect(try action("Ungroup", in: menu).attributes.contains(.disabled) != canUngroup)
+            }
+        }
+
+        // MARK: What a press opens
+
+        @Test func pressingAnElementSelectsItAndGivesTheElementMenu() throws {
+            let setup = try makeSetup()
+
+            let menu = try #require(press(setup, at: CGPoint(x: 150, y: 125)))
+
+            #expect(setup.editor.selection() == ["a"])
+            #expect(titles(menu).first == "Cut")
+        }
+
+        @Test func groupIsEnabledForTwoSelectedElements() throws {
+            let setup = try makeSetup()
+            setup.editor.perform(command: .selectAll)
+
+            let menu = try #require(press(setup, at: CGPoint(x: 150, y: 125)))
+
+            #expect(try !action("Group", in: menu).attributes.contains(.disabled))
+            #expect(try action("Ungroup", in: menu).attributes.contains(.disabled))
+        }
+
+        @Test func nothingOpensOnEmptyCanvasOrForThePencil() throws {
+            let setup = try makeSetup()
+
+            #expect(press(setup, at: CGPoint(x: 600, y: 500)) == nil)
+            #expect(press(setup, at: CGPoint(x: 150, y: 125), kind: .pencil) == nil)
+            #expect(setup.editor.selection().isEmpty)
+        }
+
+        // MARK: What the entries do
+
+        @Test func eachEntryDoesWhatTheMatchingCommandDoes() throws {
+            let setup = try makeSetup()
+            setup.editor.perform(command: .selectAll)
+            var menu = try #require(press(setup, at: CGPoint(x: 150, y: 125)))
+
+            try action("Group", in: menu).performWithSender(nil, target: nil)
+            menu = try #require(press(setup, at: CGPoint(x: 150, y: 125)))
+            #expect(try action("Ungroup", in: menu).attributes.contains(.disabled) == false)
+
+            try action("Ungroup", in: menu).performWithSender(nil, target: nil)
+            try action("Duplicate", in: menu).performWithSender(nil, target: nil)
+            #expect(setup.editor.elementCount() == 4)
+
+            try action("Delete", in: menu).performWithSender(nil, target: nil)
+            #expect(setup.editor.elementCount() == 2)
+        }
+
+        @Test func arrangeMovesTheSelectionInZOrder() throws {
+            let setup = try makeSetup()
+            let menu = try #require(press(setup, at: CGPoint(x: 150, y: 125)))
+            let arrange = try #require(menu.children.first { $0.title == "Arrange" } as? UIMenu)
+
+            let toFront = try #require(arrange.children.first as? UIAction)
+            toFront.performWithSender(nil, target: nil)
+
+            let saved = String(decoding: setup.editor.save(), as: UTF8.self)
+            let (a, b) = (saved.range(of: #""id": "a""#), saved.range(of: #""id": "b""#))
+            #expect(try #require(b).lowerBound < #require(a).lowerBound)
+        }
+
+        @Test func copyPutsTheSelectionOnThePasteboardAndCutAlsoDeletesIt() throws {
+            let setup = try makeSetup()
+            let menu = try #require(press(setup, at: CGPoint(x: 150, y: 125)))
+
+            try action("Copy", in: menu).performWithSender(nil, target: nil)
+            #expect(UIPasteboard.general.string?.contains("excalidraw/clipboard") == true)
+            #expect(setup.editor.elementCount() == 2)
+
+            UIPasteboard.general.string = ""
+            try action("Cut", in: menu).performWithSender(nil, target: nil)
+            #expect(UIPasteboard.general.string?.contains("excalidraw/clipboard") == true)
+            #expect(setup.editor.elementCount() == 1)
+        }
+    }
+#endif

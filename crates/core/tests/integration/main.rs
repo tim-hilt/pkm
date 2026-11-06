@@ -14,6 +14,7 @@ mod benchmarks;
 mod bound_text;
 mod box_select;
 mod clipboard;
+mod context_menu;
 mod draw_freedraw;
 mod draw_lines;
 mod draw_shapes;

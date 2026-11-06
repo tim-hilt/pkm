@@ -6,9 +6,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use excalidraw_native_core::scene::{FillPattern, LineStyle};
 use excalidraw_native_core::{
-    ActionBar, Command, Edges, ExportScope, FontSize, ImageFile, MagnifyEvent, Modifiers,
-    PencilDoubleTap, PointerButton, PointerEvent, PointerKind, PointerPhase, Properties, Property,
-    ScrollEvent, Sections, Shortcut, Sloppiness, StrokeWidth, TextAlign, TextEditor, Tool, ZOrder,
+    ActionBar, Command, ContextMenu, Edges, ExportScope, FontSize, ImageFile, MagnifyEvent,
+    Modifiers, PencilDoubleTap, PointerButton, PointerEvent, PointerKind, PointerPhase, Properties,
+    Property, ScrollEvent, Sections, Shortcut, Sloppiness, StrokeWidth, TextAlign, TextEditor,
+    Tool, ZOrder,
 };
 
 uniffi::setup_scaffolding!("ExcalidrawNativeCore");
@@ -299,6 +300,13 @@ pub struct ActionBar {
     pub y: f64,
     pub can_group: bool,
     pub can_ungroup: bool,
+}
+
+/// Which menu a long-press opens; see [`excalidraw_native_core::ContextMenu`].
+#[uniffi::remote(Enum)]
+pub enum ContextMenu {
+    Element { can_group: bool, can_ungroup: bool },
+    Canvas,
 }
 
 /// An image to paste or drop; see [`excalidraw_native_core::ImageFile`].
@@ -662,6 +670,13 @@ impl Editor {
     /// [`excalidraw_native_core::Editor::pointer`].
     pub fn pointer(&self, event: PointerEvent) {
         self.editor().pointer(event);
+    }
+
+    /// A finger or mouse held at a view point; see
+    /// [`excalidraw_native_core::Editor::long_press`]. `None` if the press
+    /// means nothing.
+    pub fn long_press(&self, x: f64, y: f64, kind: PointerKind) -> Option<ContextMenu> {
+        self.editor().long_press(x, y, kind)
     }
 
     /// The space bar went down (`true`) or up; see
@@ -1133,6 +1148,33 @@ mod tests {
         editor.delete_selection();
         assert_eq!(editor.element_count(), 1);
         assert!(editor.action_bar().is_none());
+    }
+
+    #[test]
+    fn a_long_press_passes_through_the_bindings() {
+        let editor = Editor::new();
+        editor
+            .load(
+                br##"{"type":"excalidraw","elements":[
+                    {"id":"a","type":"rectangle","x":10,"y":20,"width":30,"height":40,
+                     "backgroundColor":"#ffc9c9"}]}"##
+                    .to_vec(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            editor.long_press(20.0, 30.0, PointerKind::Finger),
+            Some(ContextMenu::Element {
+                can_group: false,
+                can_ungroup: false
+            })
+        );
+        assert_eq!(editor.selection(), ["a"]);
+        assert_eq!(
+            editor.long_press(300.0, 300.0, PointerKind::Finger),
+            Some(ContextMenu::Canvas)
+        );
+        assert_eq!(editor.long_press(20.0, 30.0, PointerKind::Pencil), None);
     }
 
     #[test]

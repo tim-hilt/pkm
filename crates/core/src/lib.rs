@@ -9,6 +9,7 @@ mod binding;
 mod box_select;
 mod clipboard;
 mod color;
+mod context_menu;
 mod delete;
 mod draw_freedraw;
 mod draw_linear;
@@ -60,6 +61,7 @@ mod wrap;
 mod z_order;
 
 pub use action_bar::ActionBar;
+pub use context_menu::ContextMenu;
 pub use editor::{Editor, Export, ExportScope};
 pub use geometry::{
     Dash, FillRule, FillStyle, Geometry, Image, ImageStatus, Part, PartKind, PartWriter,

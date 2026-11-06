@@ -656,3 +656,65 @@ impl Editor {
         }
     }
 }
+
+impl Editor {
+    /// A finger or mouse held at the view point `(x, y)` for the client's
+    /// long-press (see [`crate::context_menu`]); returns the menu to show,
+    /// or `None` if the press means nothing.
+    ///
+    /// A press on an Element that is not selected selects it (and its
+    /// outermost group, as a tap does); on a selected Element, or on a
+    /// handle of the Selection, it keeps the Selection; on empty Canvas it
+    /// keeps it too, so that only a tap deselects. Nothing is ever moved.
+    ///
+    /// Ignored for other Tools than selection (a finger in Pencil-only
+    /// drawing counts as using it), for the Pencil, while a pointer is
+    /// drawing, moving or transforming, while a text is edited and with two
+    /// fingers down. The press is then no tap: lifting afterwards changes
+    /// nothing.
+    pub fn long_press(&mut self, x: f64, y: f64, kind: PointerKind) -> Option<ContextMenu> {
+        let tool = if self.pencil_only.restricts(kind) {
+            Tool::Selection
+        } else {
+            self.tool
+        };
+        if kind == PointerKind::Pencil
+            || tool != Tool::Selection
+            || self.text.is_some()
+            || self.is_gesturing()
+            || self.navigation.is_navigating()
+        {
+            return None;
+        }
+        self.taps.abandon_press();
+        let on_handle =
+            self.grabbed_point(x, y, kind).is_some() || self.grabbed_handle(x, y, kind).is_some();
+        let hit = if on_handle {
+            None
+        } else {
+            self.hit(x, y, kind)
+        };
+        match hit {
+            Some(id) if !self.selection.contains(&id) => {
+                if self.select_unit(&id, false) {
+                    self.overlay_revision += 1;
+                }
+            }
+            Some(_) => {}
+            None if on_handle => {}
+            None => return Some(ContextMenu::Canvas),
+        }
+        Some(ContextMenu::Element {
+            can_group: group::can_group(
+                &self.scene,
+                &self.selection,
+                self.editing_group.as_deref(),
+            ),
+            can_ungroup: group::can_ungroup(
+                &self.scene,
+                &self.selection,
+                self.editing_group.as_deref(),
+            ),
+        })
+    }
+}

@@ -7,6 +7,7 @@ use crate::action_bar::ActionBar;
 use crate::binding::{self, Attachments, End};
 use crate::box_select::BoxSelect;
 use crate::clipboard;
+use crate::context_menu::ContextMenu;
 use crate::delete;
 use crate::draw_freedraw::StrokeDrawing;
 use crate::draw_linear::{LinearDrawing, Update};
