@@ -1475,17 +1475,6 @@
         }
       }
     },
-    "Zoom to fit": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Zoom to fit"
-          }
-        }
-      }
-    },
     "“%@” already exists. Choose another name.": {
       "extractionState": "manual",
       "localizations": {

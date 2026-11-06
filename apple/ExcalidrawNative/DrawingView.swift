@@ -57,7 +57,7 @@ struct DrawingView: View {
         .focusedSceneValue(controller)
         .overlay {
             GeometryReader { container in
-                chrome(in: container.size)
+                chrome(in: container.size, bottomInset: container.safeAreaInsets.bottom)
             }
             .dynamicTypeSize(...Self.largestChromeType)
         }
@@ -83,14 +83,14 @@ struct DrawingView: View {
     /// Excalidraw's floating controls, laid out per `DrawingLayout` for the
     /// container's current size, so that they switch on every resize (Split
     /// View, Stage Manager, window resizing).
-    @ViewBuilder private func chrome(in size: CGSize) -> some View {
+    @ViewBuilder private func chrome(in size: CGSize, bottomInset: CGFloat) -> some View {
         switch DrawingLayout(containerSize: size) {
-        case .desktop: desktopChrome(in: size)
+        case .desktop: desktopChrome(in: size, bottomInset: bottomInset)
         case .mobile: mobileChrome(in: size)
         }
     }
 
-    private func desktopChrome(in size: CGSize) -> some View {
+    private func desktopChrome(in size: CGSize, bottomInset: CGFloat) -> some View {
         ZStack {
             ToolBar(controller: controller).fixedSize()
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -108,6 +108,9 @@ struct DrawingView: View {
                 ZoomControls(controller: controller)
                 HistoryControls(controller: controller)
             }
+            // Sits as far from the bottom edge as from the left one: the
+            // home indicator's inset (iPad) is not added to the margin.
+            .offset(y: bottomInset)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         }
         .padding(DrawingLayout.margin)
@@ -397,7 +400,8 @@ private struct MobileActionRow: View {
     }
 }
 
-/// Excalidraw's zoom group: out, reset, in; plus zoom to fit (ticket 09).
+/// Excalidraw's zoom group: out, reset (tap the percentage), in. Zoom to fit
+/// is a menu command (`CanvasCommands`).
 private struct ZoomControls: View {
     let controller: CanvasController
 
@@ -413,10 +417,6 @@ private struct ZoomControls: View {
             .accessibilityLabel(Text("Reset zoom"))
             .accessibilityValue(Text(verbatim: "\(controller.zoomPercent)%"))
             Button("Zoom in", systemImage: "plus") { controller.zoomIn() }.controlButton()
-            Button("Zoom to fit", systemImage: "arrow.up.left.and.down.right.magnifyingglass") {
-                controller.zoomToFit()
-            }
-            .controlButton()
         }
         .controlGroup()
     }
