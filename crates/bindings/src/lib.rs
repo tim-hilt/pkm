@@ -4,7 +4,7 @@
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use excalidraw_native_cloud::{ConnectError, WebDavStorage};
+use excalidraw_native_cloud::{ConnectError, SyncLoop, SyncState, Timing, WebDavStorage};
 use excalidraw_native_core::scene::{FillPattern, LineStyle};
 use excalidraw_native_core::{
     Command, ContextMenu, Cursor, Edges, ExportScope, FontSize, ImageFile, MagnifyEvent, Modifiers,
@@ -32,6 +32,90 @@ pub enum ConnectError {
 #[uniffi::export]
 pub fn connect_webdav(url: String, username: String, password: String) -> Result<(), ConnectError> {
     WebDavStorage::connect(&url, &username, &password).map(drop)
+}
+
+/// Hears what Sync did to the Drawings folder.
+#[uniffi::export(with_foreign)]
+pub trait SyncObserver: Send + Sync {
+    /// Sync wrote or deleted the files of these Drawings (names without
+    /// `.excalidraw`; a rename is the old name and the new one). Called on a
+    /// thread of the Sync loop, not the main thread.
+    fn changed(&self, names: Vec<String>);
+}
+
+/// Why Sync could not start.
+#[derive(Debug, uniffi::Error)]
+pub enum SyncStartError {
+    /// The WebDAV URL doesn't start with `https://`.
+    NotHttps,
+    /// The folder for the Sync state could not be made.
+    StateUnavailable,
+}
+
+impl fmt::Display for SyncStartError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
+/// Sync between the Drawings folder and a Cloud Provider, running until this
+/// object is released. Releasing it cancels a step that is running. Nothing
+/// runs while the app is in the background.
+#[derive(uniffi::Object)]
+pub struct CloudSync {
+    sync_loop: SyncLoop,
+}
+
+#[uniffi::export]
+impl CloudSync {
+    /// Starts Syncing the Drawings in `drawings_directory` with the WebDAV
+    /// server, remembering what was Synced in `state_directory`, which must be
+    /// outside the Drawings folder. Contacts nobody before returning, so it
+    /// works offline; the first step runs at once.
+    #[uniffi::constructor]
+    pub fn start_webdav(
+        url: String,
+        username: String,
+        password: String,
+        drawings_directory: String,
+        state_directory: String,
+        observer: Arc<dyn SyncObserver>,
+    ) -> Result<Arc<Self>, SyncStartError> {
+        let storage = WebDavStorage::resume(&url, &username, &password)
+            .map_err(|_| SyncStartError::NotHttps)?;
+        let state =
+            SyncState::open(state_directory).map_err(|_| SyncStartError::StateUnavailable)?;
+        let sync_loop = SyncLoop::start(
+            drawings_directory.into(),
+            state,
+            Arc::new(storage),
+            Timing::default(),
+            Arc::new(move |names| observer.changed(names)),
+        );
+        Ok(Arc::new(Self { sync_loop }))
+    }
+
+    /// The app came to the front: Sync at once.
+    pub fn came_to_front(&self) {
+        self.sync_loop.came_to_front();
+    }
+
+    /// The app went to the background: nothing runs until it is back.
+    pub fn went_to_background(&self) {
+        self.sync_loop.went_to_background();
+    }
+
+    /// A Drawing changed on this Device: Sync a few seconds after the last
+    /// change.
+    pub fn local_change(&self) {
+        self.sync_loop.local_change();
+    }
+}
+
+/// Forgets what was Synced (Disconnect). Release the `CloudSync` first.
+#[uniffi::export]
+pub fn forget_sync_state(state_directory: String) {
+    let _ = SyncState::forget(state_directory.as_ref());
 }
 
 /// Why a file could not be opened as a Drawing, in words fit for a user.

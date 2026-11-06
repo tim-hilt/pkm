@@ -23,6 +23,8 @@ final class OpenDrawing {
     /// Called once when the file was deleted outside the app: the Drawing is
     /// gone, unsaved edits are dropped and nothing is saved any more.
     @ObservationIgnored var onDeleted: (() -> Void)?
+    /// Called after every save of the Drawing's file.
+    @ObservationIgnored var onSaved: (() -> Void)?
 
     @ObservationIgnored private let store: DrawingStore
     @ObservationIgnored private let autosaveDelay: Duration
@@ -146,6 +148,7 @@ final class OpenDrawing {
         guard (try? store.save(editor.save(), as: name)) != nil else { return }
         savedRevision = revision
         savedStamp = store.stamp(of: name)
+        onSaved?()
     }
 
     private var hasUnsavedChanges: Bool { editor.revision() != savedRevision }

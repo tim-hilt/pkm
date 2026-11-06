@@ -92,7 +92,7 @@ pub(crate) fn unique_name() -> String {
 /// does, e.g. the rename that puts it in place: a crash then leaves the old
 /// file or the new one, never a torn one. Doesn't wait for the disk itself,
 /// which is far cheaper on Apple platforms (`F_BARRIERFSYNC`).
-fn flush_ordered(file: &File) -> io::Result<()> {
+pub(crate) fn flush_ordered(file: &File) -> io::Result<()> {
     #[cfg(target_vendor = "apple")]
     {
         use std::os::fd::AsRawFd;
@@ -105,6 +105,23 @@ fn flush_ordered(file: &File) -> io::Result<()> {
     }
     #[cfg(not(target_vendor = "apple"))]
     file.sync_data()
+}
+
+/// Writes `bytes` to `path` so that it is whole with either its old or its new
+/// content whatever happens part-way: into a hidden sibling first, then renamed
+/// over `path`. A failure leaves no sibling.
+pub(crate) fn write_file_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let staged = path.with_file_name(format!(".{}.tmp", unique_name()));
+    let written = (|| {
+        let mut file = File::create_new(&staged)?;
+        io::Write::write_all(&mut file, bytes)?;
+        flush_ordered(&file)?;
+        fs::rename(&staged, path)
+    })();
+    if written.is_err() {
+        let _ = fs::remove_file(&staged);
+    }
+    written
 }
 
 /// Where blobs are written before they are renamed into place. Starts with a

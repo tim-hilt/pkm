@@ -20,6 +20,10 @@ final class Gallery {
 
     @ObservationIgnored private let store: DrawingStore
 
+    /// Called when a Drawing changed on this Device (made, saved, renamed,
+    /// deleted here or outside the app), so that Cloud Backing can Sync.
+    @ObservationIgnored var onLocalChange: (() -> Void)?
+
     /// Also clears out the caches of Drawings deleted in Files or Finder
     /// since the last launch.
     init(store: DrawingStore) {
@@ -29,9 +33,30 @@ final class Gallery {
         reload()
     }
 
+    /// The folder of the Drawings.
+    var drawingsDirectory: URL { store.directory }
+
+    /// Where Sync remembers what it Synced: in Application Support, not in the
+    /// Drawings folder. Nil for the temporary stores of tests, which never Sync.
+    var syncStateDirectory: URL? {
+        store.directory == .documentsDirectory
+            ? .applicationSupportDirectory.appending(path: "Sync", directoryHint: .isDirectory) : nil
+    }
+
     func reload() {
         let listed = (try? store.list()) ?? []
-        if listed != drawings { drawings = listed }
+        if listed != drawings {
+            drawings = listed
+            onLocalChange?()
+        }
+    }
+
+    /// Sync wrote or deleted the files of these Drawings: lists again (the
+    /// thumbnails of changed ones follow their new modification dates) and
+    /// clears the caches of Drawings that are gone.
+    func syncDidChange(_ names: [String]) {
+        store.removeOrphanedCaches()
+        reload()
     }
 
     /// Lists the Drawings now and again whenever they are added, removed or
@@ -48,6 +73,7 @@ final class Gallery {
     func createDrawing() {
         attempt("Could not create a Drawing.") {
             let name = try store.create(contents: Editor().save())
+            onLocalChange?()
             show(try OpenDrawing(name: name, store: store))
         }
     }
@@ -94,6 +120,7 @@ final class Gallery {
 
     private func show(_ drawing: OpenDrawing) {
         // Deleted outside the app: back to the Gallery, without saving.
+        drawing.onSaved = { [weak self] in self?.onLocalChange?() }
         drawing.onDeleted = { [weak self, weak drawing] in
             guard let self, open === drawing else { return }
             open = nil

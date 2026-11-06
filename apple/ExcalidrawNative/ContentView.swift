@@ -3,6 +3,8 @@ import SwiftUI
 /// The single window: the Gallery, or the open Drawing in the Canvas.
 struct ContentView: View {
     @State private var gallery = Gallery.forLaunch()
+    @Environment(CloudBackingModel.self) private var cloud
+    @Environment(\.scenePhase) private var scenePhase
     #if os(macOS)
         @Environment(\.openSettings) private var openSettings
     #endif
@@ -20,9 +22,23 @@ struct ContentView: View {
                 GalleryView(gallery: gallery)
             }
         }
+        .task { attachCloudBacking() }
+        .onChange(of: scenePhase) { cloud.appBecame(inFront: scenePhase == .active) }
         #if os(macOS)
             .task { if Gallery.opensSettingsAtLaunch { openSettings() } }
         #endif
+    }
+}
+
+extension ContentView {
+    /// Lets Cloud Backing Sync the Gallery's Drawings, and the Gallery tell it
+    /// of changes. Not for the temporary stores of UI tests and screenshots.
+    private func attachCloudBacking() {
+        guard let stateDirectory = gallery.syncStateDirectory else { return }
+        gallery.onLocalChange = { [cloud] in cloud.drawingsChanged() }
+        cloud.startSyncing(
+            drawings: gallery.drawingsDirectory, stateDirectory: stateDirectory,
+            onChanged: { [gallery] names in gallery.syncDidChange(names) })
     }
 }
 
