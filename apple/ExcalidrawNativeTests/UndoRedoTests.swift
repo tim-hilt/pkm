@@ -3,9 +3,8 @@ import Testing
 
 @testable import ExcalidrawNative
 
-/// Undo and redo through the Canvas: the buttons' commands reach the core, the
-/// undone Scene reaches the renderer, and the buttons' state follows the
-/// editor. What is undone, and how, is tested in the core.
+/// Undo and redo through the Canvas: the commands reach the core, the undone
+/// Scene reaches the renderer, and `canUndo`/`canRedo` follow the editor. What is undone, and how, is tested in the core.
 @MainActor @Suite struct UndoRedoTests {
     @MainActor private struct Setup {
         let canvas = CanvasMetalView()
@@ -36,7 +35,7 @@ import Testing
         setup.canvas.send(mouse(.up, 110, 60))
     }
 
-    @Test func theButtonsAreEnabledExactlyWhenThereIsSomethingToUndoOrRedo() throws {
+    @Test func canUndoAndCanRedoAreTrueExactlyWhenThereIsSomethingToUndoOrRedo() throws {
         let setup = try makeSetup()
         #expect(!setup.controller.canUndo && !setup.controller.canRedo)
 
@@ -77,4 +76,25 @@ import Testing
         #expect(setup.editor.selection().isEmpty)
         #expect((setup.renderer.overlay as? Geometry)?.partCount() ?? 0 == 0)
     }
+
+    #if !os(macOS)
+        /// The system's undo gestures (three-finger swipe, three-finger
+        /// double-tap, shake) go to the first responder's undo manager.
+        @Test func theSystemUndoGesturesReachTheCore() throws {
+            let setup = try makeSetup()
+            let manager = try #require(setup.canvas.undoManager)
+            #expect(!manager.canUndo && !manager.canRedo)
+
+            drawRectangle(setup)
+            #expect(manager.canUndo && !manager.canRedo)
+
+            manager.undo()
+            #expect(setup.editor.elementCount() == 0)
+            #expect(!manager.canUndo && manager.canRedo)
+
+            manager.redo()
+            #expect(setup.editor.elementCount() == 1)
+            #expect(manager.canUndo && !manager.canRedo)
+        }
+    #endif
 }

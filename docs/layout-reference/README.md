@@ -92,6 +92,8 @@ States (all radius 8): normal – transparent, glyph `#1b1b1f`; hover – `#f1f0
 
 ### 2.3 Zoom/undo on touch hardware
 
+**This app has no on-screen Undo/Redo buttons** (neither the desktop group nor the phone action row's): undo and redo are the system gestures on iOS/iPadOS (three-finger swipe left/right, three-finger double-tap, shake) and ⌘Z / ⇧⌘Z on a keyboard or on macOS.
+
 Unchanged on iPad Pro (same form factor). Target sizes are 36 pt (buttons) and 32 pt (panel buttons), i.e. **below Apple's 44 pt minimum**; excalidraw.com does not enlarge them for touch. For this app, keep the visual size but extend hit areas to ≥ 44 pt (project goal: touch-first).
 
 ### 2.4 Properties panel ("styles panel")

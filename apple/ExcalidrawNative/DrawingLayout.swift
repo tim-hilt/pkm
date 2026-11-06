@@ -20,7 +20,7 @@ enum DrawingLayout: Equatable {
     /// Top of the desktop properties panel, below the toolbar.
     static let propertiesTop: CGFloat = 76
     /// Excalidraw's `containerHeight − 166`: the desktop properties panel
-    /// scrolls beyond this, clear of the zoom and undo controls.
+    /// scrolls beyond this, clear of the zoom controls.
     static func propertiesMaxHeight(containerHeight: CGFloat) -> CGFloat {
         max(0, containerHeight - 166)
     }

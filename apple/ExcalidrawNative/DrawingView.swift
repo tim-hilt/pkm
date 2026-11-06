@@ -104,14 +104,11 @@ struct DrawingView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
 
-            HStack(spacing: 9.6) {
-                ZoomControls(controller: controller)
-                HistoryControls(controller: controller)
-            }
-            // Sits as far from the bottom edge as from the left one: the
-            // home indicator's inset (iPad) is not added to the margin.
-            .offset(y: bottomInset)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            ZoomControls(controller: controller)
+                // Sits as far from the bottom edge as from the left one: the
+                // home indicator's inset (iPad) is not added to the margin.
+                .offset(y: bottomInset)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         }
         .padding(DrawingLayout.margin)
     }
@@ -361,8 +358,8 @@ private struct MobileToolButton: View {
 
 /// The phone action row over the toolbar (docs/layout-reference §4.3):
 /// properties on the left while a Tool or Selection has them, opening in a
-/// sheet (the spec's native adaptation of excalidraw.com's popovers); undo/redo
-/// on the right.
+/// sheet (the spec's native adaptation of excalidraw.com's popovers). Undo and
+/// redo have no buttons: they are the system gestures (`CanvasUndoManager`).
 private struct MobileActionRow: View {
     let controller: CanvasController
     let showsProperties: Bool
@@ -377,12 +374,6 @@ private struct MobileActionRow: View {
                     .accessibilityIdentifier("properties-sheet")
             }
             Spacer(minLength: 0)
-            Button("Undo", systemImage: "arrow.uturn.backward") { controller.undo() }
-                .controlButton(width: 32, height: 32)
-                .disabled(!controller.canUndo)
-            Button("Redo", systemImage: "arrow.uturn.forward") { controller.redo() }
-                .controlButton(width: 32, height: 32)
-                .disabled(!controller.canRedo)
         }
         .labelStyle(.iconOnly)
         .buttonStyle(.borderless)
@@ -417,23 +408,6 @@ private struct ZoomControls: View {
             .accessibilityLabel(Text("Reset zoom"))
             .accessibilityValue(Text(verbatim: "\(controller.zoomPercent)%"))
             Button("Zoom in", systemImage: "plus") { controller.zoomIn() }.controlButton()
-        }
-        .controlGroup()
-    }
-}
-
-/// Excalidraw's undo/redo group, enabled as the history allows.
-private struct HistoryControls: View {
-    let controller: CanvasController
-
-    var body: some View {
-        HStack(spacing: 0) {
-            Button("Undo", systemImage: "arrow.uturn.backward") { controller.undo() }
-                .controlButton()
-                .disabled(!controller.canUndo)
-            Button("Redo", systemImage: "arrow.uturn.forward") { controller.redo() }
-                .controlButton()
-                .disabled(!controller.canRedo)
         }
         .controlGroup()
     }

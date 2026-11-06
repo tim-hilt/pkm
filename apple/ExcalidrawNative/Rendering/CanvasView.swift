@@ -54,6 +54,8 @@ final class CanvasMetalView: MTKView {
         /// Where the open menu was pressed, in the Canvas's coordinates, for a
         /// Paste from it.
         var contextMenuPoint: CGPoint?
+        /// Takes the system's undo gestures to the core's history.
+        private lazy var historyManager = CanvasUndoManager { [weak self] in self }
     #endif
 
     init() {
@@ -86,6 +88,8 @@ final class CanvasMetalView: MTKView {
     required init(coder: NSCoder) { fatalError("CanvasMetalView is created in code") }
 
     #if !os(macOS)
+        override var undoManager: UndoManager? { historyManager }
+
         /// The Canvas is a single element for assistive technology only while
         /// it offers the Element menu's actions. While a text is edited, the
         /// text view inside must stay reachable instead.
@@ -537,8 +541,7 @@ final class CanvasController {
     @ObservationIgnored private var restoredEditor: Editor?
     @ObservationIgnored private let settings: UserDefaults
     private static let pencilOnlyKey = "pencilOnlyDrawing"
-    /// Whether there is something to undo or redo; the buttons are enabled
-    /// exactly then.
+    /// Whether there is something to undo or redo.
     private(set) var canUndo = false
     private(set) var canRedo = false
     /// What the properties panel shows: the Selection's values, or the style
