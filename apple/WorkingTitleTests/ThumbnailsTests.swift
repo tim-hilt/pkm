@@ -81,6 +81,38 @@ import Testing
         #expect(thumbnails.rendered == 1)
     }
 
+    /// A busy GPU may fail a draw now and then: that is tried again, a few times.
+    @Test func aFailedDrawIsTriedAgain() async throws {
+        try store.save(sampleBytes(), as: "sample")
+        let real = try #require(ThumbnailRenderer())
+        var attempts = 0
+        let thumbnails = Thumbnails(store: store, retryDelay: .zero) { scene in
+            attempts += 1
+            return attempts < 3 ? nil : real.render(scene)
+        }
+
+        let image = try await thumbnails.thumbnail(for: entry("sample")).image
+
+        #expect(image != nil)
+        #expect(attempts == 3)
+        #expect(thumbnails.rendered == 1)
+    }
+
+    @Test func aDrawThatKeepsFailingGivesUpAfterAFewTries() async throws {
+        try store.save(sampleBytes(), as: "sample")
+        var attempts = 0
+        let thumbnails = Thumbnails(store: store, retryDelay: .zero) { _ in
+            attempts += 1
+            return nil
+        }
+
+        let thumbnail = try await thumbnails.thumbnail(for: entry("sample"))
+
+        #expect(thumbnail.image == nil && !thumbnail.isUnreadable)
+        #expect(attempts == Thumbnails.drawAttempts)
+        #expect(thumbnails.rendered == 0)
+    }
+
     @Test func aChangedDrawingGetsAFreshThumbnail() async throws {
         try store.save(Editor().save(), as: "a")
         try FileManager.default.setAttributes(
