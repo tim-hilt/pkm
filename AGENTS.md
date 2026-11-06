@@ -42,6 +42,10 @@ Single-context: one root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md
 
 `make screenshot DEVICE=mac|ipad|iphone [OUT=path]` builds the app, launches it with the sample Drawing open (launch argument `-UITestingOpenSampleDrawing`, temporary store) and writes a PNG (default `/tmp/wt-<device>.png`) that you can read to check layout by eye.
 
+## Installing on a device
+
+`scripts/install.sh "<device-name>"` builds Release and installs over `devicectl` (or into `/Applications` for `mac`). Apple registers an App ID on the first device build under a new bundle ID and allows only 10 per team every 7 days; when that quota is exhausted the script installs under `com.timhilt.workingtitle`, the app's pre-rebrand ID that is already registered, and says so. `BUNDLE_ID=<id>` picks the ID explicitly.
+
 ## Sideloading
 
 `make ipa` builds an unsigned `apple/build/ExcalidrawNative.ipa` for an iPhone or iPad. SideStore, AltStore and similar tools re-sign it on the device; no provisioning profile is embedded.
