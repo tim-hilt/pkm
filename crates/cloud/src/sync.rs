@@ -19,6 +19,10 @@
 //!   the open Drawing may have saved over newer versions Sync wrote (it keeps
 //!   its own version of an Element being dragged): they are not taken back.
 //!
+//! A poll costs one listing and a scan of the Drawings folder's names and
+//! stamps (`Stamp`): a Drawing whose cloud marker and local stamp are the ones
+//! remembered is unchanged and is not read.
+//!
 //! A file that can't be parsed never replaces a Drawing on the other side: it
 //! is skipped, and left as it is on both sides.
 
@@ -27,6 +31,7 @@ use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use excalidraw_native_core::{are_same_drawing, is_drawing, merge_drawings};
 
@@ -43,6 +48,63 @@ pub struct SyncState {
     dir: PathBuf,
 }
 
+/// Which file a local Drawing is, cheaply: its inode, modification time and
+/// size. Sync writes files by renaming a new one into place, which gives a new
+/// inode, and an edit in place changes the modification time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Stamp {
+    inode: u64,
+    mtime_ns: u128,
+    size: u64,
+}
+
+/// How long a file must have been left alone for its stamp to be trusted:
+/// file systems with coarse clocks can give two writes the same time.
+const SETTLED: Duration = Duration::from_secs(2);
+
+impl Stamp {
+    fn of(meta: &fs::Metadata) -> Self {
+        #[cfg(unix)]
+        let inode = std::os::unix::fs::MetadataExt::ino(meta);
+        #[cfg(not(unix))]
+        let inode = 0;
+        Self {
+            inode,
+            mtime_ns: meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map_or(0, |t| t.as_nanos()),
+            size: meta.len(),
+        }
+    }
+
+    /// Whether the file has been unchanged for long enough to rely on. Not
+    /// when its time is unknown or in the future.
+    fn settled(&self) -> bool {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |t| t.as_nanos());
+        self.mtime_ns != 0
+            && now.saturating_sub(self.mtime_ns) >= SETTLED.as_nanos()
+            && self.mtime_ns <= now
+    }
+
+    fn to_text(self) -> String {
+        format!("{} {} {}", self.inode, self.mtime_ns, self.size)
+    }
+
+    fn from_text(text: &str) -> Option<Self> {
+        let mut parts = text.split_whitespace();
+        let stamp = Self {
+            inode: parts.next()?.parse().ok()?,
+            mtime_ns: parts.next()?.parse().ok()?,
+            size: parts.next()?.parse().ok()?,
+        };
+        parts.next().is_none().then_some(stamp)
+    }
+}
+
 /// A Drawing as of the last Sync.
 struct Synced {
     bytes: Vec<u8>,
@@ -56,6 +118,7 @@ impl SyncState {
         let dir = dir.into();
         fs::create_dir_all(dir.join("bytes"))?;
         fs::create_dir_all(dir.join("markers"))?;
+        fs::create_dir_all(dir.join("stamps"))?;
         Ok(Self { dir })
     }
 
@@ -81,15 +144,52 @@ impl SyncState {
             .map(|marker| Synced { bytes, marker }))
     }
 
+    /// The cloud blob's change marker as last seen, without the bytes.
+    fn marker(&self, file: &str) -> io::Result<Option<String>> {
+        match fs::read_to_string(self.dir.join("markers").join(file)) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) if e.kind() == io::ErrorKind::InvalidData => Ok(None),
+            other => other.map(Some),
+        }
+    }
+
+    /// The stamp the local file had when it was read and found equal to the
+    /// remembered bytes. Gone as soon as those change.
+    fn stamp(&self, file: &str) -> io::Result<Option<Stamp>> {
+        match fs::read_to_string(self.dir.join("stamps").join(file)) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) if e.kind() == io::ErrorKind::InvalidData => Ok(None),
+            other => other.map(|text| Stamp::from_text(&text)),
+        }
+    }
+
+    /// Remembers that the local file with `stamp` holds the remembered bytes.
+    /// `stamp` must have been taken before the read that showed it.
+    fn set_stamp(&self, file: &str, stamp: Stamp) -> io::Result<()> {
+        write_file_atomically(
+            &self.dir.join("stamps").join(file),
+            stamp.to_text().as_bytes(),
+        )
+    }
+
+    fn remove_stamp(&self, file: &str) -> io::Result<()> {
+        match fs::remove_file(self.dir.join("stamps").join(file)) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        }
+    }
+
     /// Remembers `bytes` and `marker`. The marker goes last: without it the
-    /// bytes count for nothing.
+    /// bytes count for nothing. The stamp goes first: it says nothing about
+    /// other bytes.
     fn set(&self, file: &str, bytes: &[u8], marker: &str) -> io::Result<()> {
+        self.remove_stamp(file)?;
         write_file_atomically(&self.dir.join("bytes").join(file), bytes)?;
         write_file_atomically(&self.dir.join("markers").join(file), marker.as_bytes())
     }
 
     fn remove(&self, file: &str) -> io::Result<()> {
-        for kind in ["markers", "bytes"] {
+        for kind in ["stamps", "markers", "bytes"] {
             match fs::remove_file(self.dir.join(kind).join(file)) {
                 Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
                 _ => {}
@@ -102,6 +202,10 @@ impl SyncState {
         file_names(&self.dir.join("markers"))
     }
 }
+
+/// The marker remembered for an upload another Device overwrote: no storage
+/// gives a blob this one, so the next step finds the blob changed.
+const OVERWRITTEN: &str = "\0overwritten";
 
 /// What one Sync step did.
 #[derive(Debug, Default)]
@@ -188,20 +292,35 @@ struct Step<'a> {
 impl Step<'_> {
     fn run(&mut self) -> io::Result<()> {
         self.remote = self.list_remote()?;
+        // Taken before any Drawing is read: a stamp shows what was read only
+        // if the file didn't change between the two.
+        let stamps: HashMap<String, Stamp> = drawing_files(self.drawings)?
+            .into_iter()
+            .map(|(file, meta)| (file, Stamp::of(&meta)))
+            .collect();
         let mut files: BTreeSet<String> = self.remote.keys().cloned().collect();
-        files.extend(file_names(self.drawings)?);
+        files.extend(stamps.keys().cloned());
         files.extend(self.state.files()?);
 
-        // Each Drawing is read once when nothing is to be done with it.
+        // A Drawing is read only if it may have changed, and once if nothing
+        // is to be done with it.
         let mut pending = Vec::new();
         for file in files {
             self.check_cancelled()?;
+            let stamp = stamps.get(&file).copied();
+            if self.unchanged_by_stamp(&file, stamp)? {
+                continue;
+            }
             let (local, remote, base) = self.facts(&file)?;
             let action = decide(local.as_deref(), remote.as_deref(), base.as_ref());
             if action.is_transfer() {
                 self.total += 1;
             }
-            if action != Action::Idle {
+            if action == Action::Idle {
+                if let Some(stamp) = stamp.filter(Stamp::settled) {
+                    self.state.set_stamp(&file, stamp)?;
+                }
+            } else {
                 pending.push(file);
             }
         }
@@ -220,6 +339,17 @@ impl Step<'_> {
             }
         }
         self.remember_uploads()
+    }
+
+    /// Whether the Drawing is known to be unchanged on both sides without
+    /// reading it: the cloud's marker and the local file's stamp are those it
+    /// had when the local bytes were last found equal to the remembered ones.
+    fn unchanged_by_stamp(&self, file: &str, stamp: Option<Stamp>) -> io::Result<bool> {
+        let (Some(stamp), Some(remote)) = (stamp, self.remote.get(file)) else {
+            return Ok(false);
+        };
+        Ok(self.state.stamp(file)? == Some(stamp)
+            && self.state.marker(file)?.as_deref() == Some(&remote[..]))
     }
 
     /// Notes what went wrong: lost access and a full cloud are problems of
@@ -510,6 +640,12 @@ impl Step<'_> {
     /// Remembers the uploads with the markers the cloud gave them, which a
     /// listing tells. One listing for all of them. Without it they are
     /// uploaded again next time, which does no harm.
+    ///
+    /// Another Device may have overwritten an upload before the listing, and
+    /// the marker would then be its blob's. So each blob is read back after
+    /// the listing: if it isn't what was uploaded, the upload is remembered
+    /// under a marker no blob has, and the next step merges what is in the
+    /// cloud with it as the base, as for any change made there.
     fn remember_uploads(&mut self) -> io::Result<()> {
         if self.uploaded.is_empty() {
             return Ok(());
@@ -517,9 +653,13 @@ impl Step<'_> {
         self.check_cancelled()?;
         let markers = self.list_remote()?;
         for (file, bytes) in std::mem::take(&mut self.uploaded) {
-            if let Some(marker) = markers.get(&file) {
-                self.state.set(&file, &bytes, marker)?;
-            }
+            let Some(marker) = markers.get(&file) else {
+                continue;
+            };
+            self.check_cancelled()?;
+            let ours = self.fetch(&file)?.as_deref() == Some(&bytes[..]);
+            self.state
+                .set(&file, &bytes, if ours { marker } else { OVERWRITTEN })?;
         }
         Ok(())
     }
@@ -609,13 +749,24 @@ fn name_of(file: &str) -> String {
 
 /// The names of the Drawing files in `dir`.
 fn file_names(dir: &Path) -> io::Result<Vec<String>> {
-    let mut names = Vec::new();
+    Ok(drawing_files(dir)?
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect())
+}
+
+/// The Drawing files in `dir` with their metadata, from one scan.
+fn drawing_files(dir: &Path) -> io::Result<Vec<(String, fs::Metadata)>> {
+    let mut files = Vec::new();
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
-        if !name.starts_with('.') && entry.metadata()?.is_file() {
-            names.push(name);
+        if is_drawing_file(&name) {
+            let meta = entry.metadata()?;
+            if meta.is_file() {
+                files.push((name, meta));
+            }
         }
     }
-    Ok(names.into_iter().filter(|n| is_drawing_file(n)).collect())
+    Ok(files)
 }

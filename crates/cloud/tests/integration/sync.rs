@@ -43,12 +43,18 @@ struct Calls {
 struct Counting {
     inner: DirStorage,
     calls: Mutex<Calls>,
+    /// Another Device's write that lands right after the next `put`.
+    overwrite_after_put: Mutex<Option<Vec<u8>>>,
 }
 
 impl Storage for Counting {
     fn put(&self, name: &str, data: &mut dyn Read) -> io::Result<()> {
         self.calls.lock().unwrap().puts.push(name.into());
-        self.inner.put(name, data)
+        self.inner.put(name, data)?;
+        if let Some(other) = self.overwrite_after_put.lock().unwrap().take() {
+            self.inner.put(name, &mut &other[..])?;
+        }
+        Ok(())
     }
     fn get(&self, name: &str) -> io::Result<Option<Box<dyn Read + Send>>> {
         self.calls.lock().unwrap().gets.push(name.into());
@@ -76,6 +82,7 @@ impl Cloud {
         let storage = Counting {
             inner: DirStorage::open(&dir.0).unwrap(),
             calls: Mutex::default(),
+            overwrite_after_put: Mutex::default(),
         };
         Cloud { dir, storage }
     }
@@ -91,6 +98,12 @@ impl Cloud {
 
     fn read(&self, file: &str) -> Option<Vec<u8>> {
         fs::read(self.dir.0.join(file)).ok()
+    }
+
+    /// The next upload is overwritten with `bytes` before anything else
+    /// happens, as by another Device.
+    fn overwrite_next_upload(&self, bytes: Vec<u8>) {
+        *self.storage.overwrite_after_put.lock().unwrap() = Some(bytes);
     }
 
     fn take_calls(&self) -> Calls {
@@ -114,6 +127,17 @@ impl Device {
 
     fn write(&self, file: &str, bytes: &[u8]) {
         fs::write(self.drawings.0.join(file), bytes).unwrap();
+    }
+
+    /// Dates the file an hour back: a file that was left alone for a while.
+    fn settle(&self, file: &str) {
+        let hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        fs::File::options()
+            .write(true)
+            .open(self.drawings.0.join(file))
+            .unwrap()
+            .set_modified(hour_ago)
+            .unwrap();
     }
 
     fn remove(&self, file: &str) {
@@ -142,6 +166,8 @@ impl Device {
             &AtomicBool::new(false),
         );
         assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        // A file that can't be read is `PermissionDenied`, as lost access is.
+        assert!(!outcome.access_lost && !outcome.storage_full);
         let mut changed = outcome.changed;
         changed.sort();
         changed
@@ -314,6 +340,87 @@ fn an_idle_poll_is_one_listing_and_transfers_nothing() {
     assert!(calls.gets.is_empty() && calls.puts.is_empty() && calls.deletes.is_empty());
 }
 
+#[cfg(unix)]
+#[test]
+fn an_idle_poll_does_not_read_the_drawings() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let cloud = Cloud::new();
+    let phone = Device::new();
+    phone.write("Sketch.excalidraw", b"one");
+    phone.settle("Sketch.excalidraw");
+    phone.sync(&cloud); // uploads
+    phone.sync(&cloud); // reads it again, finds it unchanged, remembers its stamp
+
+    // What can't be read can only be found unchanged without reading it.
+    let path = phone.drawings.0.join("Sketch.excalidraw");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+    if fs::read(&path).is_ok() {
+        return; // running as root: permissions don't keep anything out
+    }
+    let changed = phone.sync(&cloud);
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+
+    assert!(changed.is_empty());
+}
+
+#[test]
+fn a_drawing_edited_after_polls_without_reading_is_still_synced() {
+    let cloud = Cloud::new();
+    let (phone, tablet) = (Device::new(), Device::new());
+    phone.write("Sketch.excalidraw", b"one");
+    phone.settle("Sketch.excalidraw");
+    phone.sync(&cloud);
+    phone.sync(&cloud);
+    phone.sync(&cloud);
+
+    // Same size, edited in place.
+    let path = phone.drawings.0.join("Sketch.excalidraw");
+    let file = fs::OpenOptions::new().write(true).open(&path).unwrap();
+    io::Write::write_all(&mut &file, b"two").unwrap();
+    drop(file);
+    phone.sync(&cloud);
+    tablet.sync(&cloud);
+
+    assert_eq!(tablet.read("Sketch.excalidraw").unwrap(), b"two");
+}
+
+#[test]
+fn a_drawing_replaced_by_another_file_of_the_same_size_is_still_synced() {
+    let cloud = Cloud::new();
+    let (phone, tablet) = (Device::new(), Device::new());
+    phone.write("Sketch.excalidraw", b"one");
+    phone.settle("Sketch.excalidraw");
+    phone.sync(&cloud);
+    phone.sync(&cloud);
+    phone.sync(&cloud);
+
+    // As an editor that saves by renaming a new file over it does.
+    phone.write("Other.excalidraw", b"two");
+    phone.settle("Other.excalidraw");
+    phone.rename("Other.excalidraw", "Sketch.excalidraw");
+    phone.sync(&cloud);
+    tablet.sync(&cloud);
+
+    assert_eq!(tablet.read("Sketch.excalidraw").unwrap(), b"two");
+}
+
+#[test]
+fn a_cloud_change_is_found_without_reading_the_local_drawing() {
+    let cloud = Cloud::new();
+    let (phone, tablet) = (Device::new(), Device::new());
+    phone.write("Sketch.excalidraw", b"one");
+    phone.settle("Sketch.excalidraw");
+    phone.sync(&cloud);
+    phone.sync(&cloud);
+    tablet.sync(&cloud);
+
+    cloud.write("Sketch.excalidraw", b"two");
+    phone.sync(&cloud);
+
+    assert_eq!(phone.read("Sketch.excalidraw").unwrap(), b"two");
+}
+
 #[test]
 fn only_changed_drawings_are_transferred() {
     let cloud = Cloud::new();
@@ -329,7 +436,8 @@ fn only_changed_drawings_are_transferred() {
     phone.sync(&cloud);
     let calls = cloud.take_calls();
     assert_eq!(calls.puts, ["B.excalidraw"]);
-    assert!(calls.gets.is_empty());
+    // Only what was uploaded is read back, to see that nobody overwrote it.
+    assert_eq!(calls.gets, ["B.excalidraw"]);
 
     tablet.sync(&cloud);
     let calls = cloud.take_calls();
@@ -602,6 +710,39 @@ fn an_upload_that_another_device_overwrote_is_written_again_and_all_devices_conv
         elements_of(&tablet.read("Sketch.excalidraw").unwrap()),
         merged
     );
+    assert_eq!(
+        phone.read("Sketch.excalidraw"),
+        tablet.read("Sketch.excalidraw")
+    );
+}
+
+#[test]
+fn an_upload_overwritten_before_the_listing_is_still_repaired() {
+    let (cloud, phone, tablet) = two_devices_apart();
+    phone.write(
+        "Sketch.excalidraw",
+        &drawing(&[element("a", 2, "a0", 10), element("b", 1, "a1", 0)]),
+    );
+    // The tablet's write lands right after the phone's upload, before the
+    // phone could list the cloud folder.
+    cloud.overwrite_next_upload(drawing(&[
+        element("a", 1, "a0", 0),
+        element("b", 2, "a1", 20),
+    ]));
+    phone.sync(&cloud);
+
+    phone.sync(&cloud); // sees the overwrite, writes its newer Element again
+    tablet.sync(&cloud);
+    phone.sync(&cloud);
+
+    let merged = [e("a", 2, false), e("b", 2, false)];
+    for bytes in [
+        cloud.read("Sketch.excalidraw").unwrap(),
+        phone.read("Sketch.excalidraw").unwrap(),
+        tablet.read("Sketch.excalidraw").unwrap(),
+    ] {
+        assert_eq!(elements_of(&bytes), merged);
+    }
     assert_eq!(
         phone.read("Sketch.excalidraw"),
         tablet.read("Sketch.excalidraw")
