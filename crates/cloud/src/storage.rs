@@ -8,6 +8,7 @@ use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
 use std::time::UNIX_EPOCH;
 
@@ -34,6 +35,10 @@ pub enum ConnectError {
     NotHttps,
     /// WebDAV: the server answers, but not as a WebDAV server.
     NotWebDav,
+    /// iCloud Drive: it is off, or the Device is not signed in.
+    ICloudDriveUnavailable,
+    /// iCloud Drive: the folder granted is not iCloud Drive's root.
+    WrongFolder,
 }
 
 /// The variant's name; clients word the message for the user.
@@ -128,10 +133,25 @@ pub(crate) fn write_file_atomically(path: &Path, bytes: &[u8]) -> io::Result<()>
 /// dot, so it is no valid name and never listed.
 const INCOMING: &str = ".incoming";
 
+/// Asks the system to download a file that is in iCloud Drive only.
+type RequestDownload = Arc<dyn Fn(&Path) + Send + Sync>;
+
 /// A storage in a directory of the file system.
-#[derive(Debug)]
+///
+/// In iCloud Drive a file that is not on the Device is a hidden placeholder,
+/// `.name.icloud`. Such a blob is absent until it is downloaded: listing or
+/// reading it asks the client to download it, and a later call finds it.
 pub struct DirStorage {
     root: PathBuf,
+    request_download: Option<RequestDownload>,
+}
+
+impl fmt::Debug for DirStorage {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("DirStorage")
+            .field("root", &self.root)
+            .finish()
+    }
 }
 
 impl DirStorage {
@@ -152,7 +172,41 @@ impl DirStorage {
                 }
             }
         }
-        Ok(Self { root })
+        Ok(Self {
+            root,
+            request_download: None,
+        })
+    }
+
+    /// Like `open`, for a directory in iCloud Drive: `request_download` is
+    /// called with the path a not-yet-downloaded blob will have once the
+    /// system has downloaded it.
+    pub fn open_downloading(
+        root: impl Into<PathBuf>,
+        request_download: impl Fn(&Path) + Send + Sync + 'static,
+    ) -> io::Result<Self> {
+        let mut storage = Self::open(root)?;
+        storage.request_download = Some(Arc::new(request_download));
+        Ok(storage)
+    }
+
+    /// The placeholder `.<name>.icloud` of blob `name`.
+    fn placeholder(&self, name: &str) -> PathBuf {
+        self.root.join(format!(".{name}.icloud"))
+    }
+
+    /// The name of the blob a placeholder file stands for.
+    fn placeholder_target(file_name: &str) -> Option<&str> {
+        file_name
+            .strip_prefix('.')?
+            .strip_suffix(".icloud")
+            .filter(|name| !name.is_empty())
+    }
+
+    fn download(&self, name: &str) {
+        if let Some(request) = &self.request_download {
+            request(&self.root.join(name));
+        }
     }
 
     fn path(&self, name: &str) -> io::Result<PathBuf> {
@@ -187,7 +241,12 @@ impl Storage for DirStorage {
         match File::open(self.path(name)?) {
             Ok(file) if file.metadata()?.is_file() => Ok(Some(Box::new(file))),
             Ok(_) => Ok(None),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                if self.placeholder(name).exists() {
+                    self.download(name);
+                }
+                Ok(None)
+            }
             Err(e) => Err(e),
         }
     }
@@ -198,7 +257,9 @@ impl Storage for DirStorage {
             let entry = entry?;
             let meta = entry.metadata()?;
             let name = entry.file_name().to_string_lossy().into_owned();
-            if meta.is_file() && !name.starts_with('.') {
+            if let Some(target) = Self::placeholder_target(&name) {
+                self.download(target);
+            } else if meta.is_file() && !name.starts_with('.') {
                 let modified = meta
                     .modified()?
                     .duration_since(UNIX_EPOCH)
@@ -213,10 +274,13 @@ impl Storage for DirStorage {
     }
 
     fn delete(&self, name: &str) -> io::Result<()> {
-        match fs::remove_file(self.path(name)?) {
-            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
-            _ => Ok(()),
+        for path in [self.path(name)?, self.placeholder(name)] {
+            match fs::remove_file(path) {
+                Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+                _ => {}
+            }
         }
+        Ok(())
     }
 }
 
@@ -407,8 +471,9 @@ pub(crate) mod contract {
 
 #[cfg(test)]
 mod tests {
-    use super::contract::{Scratch, storage_contract_tests};
+    use super::contract::{self, Scratch, storage_contract_tests};
     use super::*;
+    use std::sync::{Arc, Mutex};
 
     fn scratch_storage() -> Option<(Scratch, DirStorage)> {
         let scratch = Scratch::new("storage");
@@ -419,6 +484,74 @@ mod tests {
     mod dir_storage {
         use super::*;
         storage_contract_tests!(scratch_storage);
+    }
+
+    /// A storage that records the files it is asked to have downloaded.
+    fn storage_asking_downloads() -> (Scratch, DirStorage, Arc<Mutex<Vec<PathBuf>>>) {
+        let scratch = Scratch::new("placeholders");
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let log = Arc::clone(&asked);
+        let storage = DirStorage::open_downloading(&scratch.0, move |path| {
+            log.lock().unwrap().push(path.to_path_buf());
+        })
+        .unwrap();
+        (scratch, storage, asked)
+    }
+
+    #[test]
+    fn a_placeholder_is_absent_while_its_download_is_requested() {
+        let (alive, storage, asked) = storage_asking_downloads();
+        fs::write(alive.0.join(".Sketch.excalidraw.icloud"), b"stub").unwrap();
+
+        assert!(storage.list().unwrap().is_empty());
+        assert!(get_bytes(&storage, "Sketch.excalidraw").unwrap().is_none());
+
+        let asked = asked.lock().unwrap();
+        assert!(!asked.is_empty());
+        assert!(
+            asked
+                .iter()
+                .all(|p| p == &alive.0.join("Sketch.excalidraw"))
+        );
+    }
+
+    #[test]
+    fn once_downloaded_a_later_listing_finds_the_file() {
+        let (alive, storage, _asked) = storage_asking_downloads();
+        let placeholder = alive.0.join(".Sketch.excalidraw.icloud");
+        fs::write(&placeholder, b"stub").unwrap();
+        assert!(storage.list().unwrap().is_empty());
+
+        // What the system does when the download is done.
+        fs::remove_file(&placeholder).unwrap();
+        fs::write(alive.0.join("Sketch.excalidraw"), b"{}").unwrap();
+
+        assert_eq!(contract::names(&storage), ["Sketch.excalidraw"]);
+        assert_eq!(
+            get_bytes(&storage, "Sketch.excalidraw").unwrap().unwrap(),
+            b"{}"
+        );
+    }
+
+    #[test]
+    fn deleting_a_placeholder_deletes_it() {
+        let (alive, storage, _asked) = storage_asking_downloads();
+        let placeholder = alive.0.join(".Sketch.excalidraw.icloud");
+        fs::write(&placeholder, b"stub").unwrap();
+
+        storage.delete("Sketch.excalidraw").unwrap();
+
+        assert!(!placeholder.exists());
+    }
+
+    #[test]
+    fn other_hidden_files_are_neither_listed_nor_downloaded() {
+        let (alive, storage, asked) = storage_asking_downloads();
+        fs::write(alive.0.join(".DS_Store"), b"x").unwrap();
+        fs::write(alive.0.join(".icloud"), b"x").unwrap();
+
+        assert!(storage.list().unwrap().is_empty());
+        assert!(asked.lock().unwrap().is_empty());
     }
 
     #[test]

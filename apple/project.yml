@@ -69,6 +69,9 @@ targets:
         ENABLE_APP_SANDBOX: YES
         # Cloud Backing talks to the user's WebDAV server.
         ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
+        # iCloud Drive is granted through a folder picker and kept as a bookmark.
+        ENABLE_USER_SELECTED_FILES: readwrite
+        "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": Config/Mac.entitlements
         ENABLE_HARDENED_RUNTIME: YES
         # Apple silicon only: smaller binary, no x86_64 slice.
         ARCHS: arm64

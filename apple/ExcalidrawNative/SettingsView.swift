@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The Settings: only Cloud Backing so far. A window on the Mac (⌘,), a sheet
 /// from the Gallery's gear on iPhone and iPad.
@@ -13,8 +14,8 @@ struct SettingsView: View {
 }
 
 /// Cloud Backing: pick a Cloud Provider, enter the WebDAV server's URL,
-/// username and password and Connect; once Connected, see where the Drawings
-/// go and Disconnect.
+/// username and password, or grant iCloud Drive, and Connect; once Connected,
+/// see where the Drawings go and Disconnect.
 struct CloudBackingSection: View {
     @Environment(CloudBackingModel.self) private var cloud
 
@@ -24,6 +25,7 @@ struct CloudBackingSection: View {
     @State private var password = ""
     @State private var error: String?
     @State private var isConnecting = false
+    @State private var isPickingFolder = false
 
     var body: some View {
         Section("Cloud Backing") {
@@ -41,9 +43,14 @@ struct CloudBackingSection: View {
             .accessibilityIdentifier("cloud-provider")
             if let connection = cloud.connection {
                 connected(to: connection)
+            } else if provider == .iCloudDrive {
+                iCloudDriveForm
             } else {
                 webDAVForm
             }
+        }
+        .fileImporter(isPresented: $isPickingFolder, allowedContentTypes: [.folder]) { result in
+            granted(result)
         }
         .confirmationDialog(
             "Disconnect \(cloud.connection?.provider.name ?? "")?", isPresented: isSwitching,
@@ -94,7 +101,14 @@ struct CloudBackingSection: View {
             LabeledContent("Last Sync") { Text(lastSync, format: .dateTime.hour().minute().second()) }
                 .accessibilityIdentifier("cloud-last-sync")
         }
-        if cloud.status == .accessLost {
+        if cloud.status == .accessLost, connection.provider == .iCloudDrive {
+            if let error {
+                Text(error).foregroundStyle(.red).accessibilityIdentifier("cloud-error")
+            }
+            Button("Reconnect", action: pickFolder)
+                .disabled(isConnecting)
+                .accessibilityIdentifier("cloud-reconnect")
+        } else if cloud.status == .accessLost {
             SecureField("Password", text: $password)
                 .accessibilityIdentifier("cloud-password")
             if let error {
@@ -130,6 +144,47 @@ struct CloudBackingSection: View {
         Button("Connect", action: connect)
             .disabled(isConnecting || url.isEmpty || username.isEmpty || password.isEmpty)
             .accessibilityIdentifier("cloud-connect")
+    }
+
+    @ViewBuilder private var iCloudDriveForm: some View {
+        Text("You are asked once to grant iCloud Drive. Your Drawings are kept in its ExcalidrawNative folder.")
+            .font(.footnote).foregroundStyle(.secondary)
+        if let error {
+            Text(error).foregroundStyle(.red).accessibilityIdentifier("cloud-error")
+        }
+        Button("Connect", action: pickFolder)
+            .disabled(isConnecting)
+            .accessibilityIdentifier("cloud-connect")
+    }
+
+    /// Shows the folder picker, unless iCloud Drive is off.
+    private func pickFolder() {
+        do {
+            try cloud.prepareICloudDriveConnect()
+            error = nil
+            isPickingFolder = true
+        } catch let failure as ConnectError {
+            error = failure.message
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    /// The user picked a folder, or backed out of the picker, which does nothing.
+    private func granted(_ result: Result<URL, Error>) {
+        guard case .success(let folder) = result else { return }
+        Task {
+            isConnecting = true
+            defer { isConnecting = false }
+            do {
+                try await cloud.connectICloudDrive(granted: folder)
+                error = nil
+            } catch let failure as ConnectError {
+                error = failure.message
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
     }
 
     private func reconnect() {

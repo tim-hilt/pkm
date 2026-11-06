@@ -1,9 +1,10 @@
 //! Cloud Providers (ADR-0012): the storage interface, the directory storage,
-//! the WebDAV storage and the HTTP client they share, and the Sync engine and
+//! the WebDAV storage, iCloud Drive and the HTTP client they share, and the Sync engine and
 //! loop on top of them. Blocking, no async
 //! runtime.
 
 mod http;
+pub mod icloud;
 mod percent;
 pub mod storage;
 mod sync;

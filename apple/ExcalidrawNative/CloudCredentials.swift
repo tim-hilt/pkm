@@ -10,13 +10,15 @@ struct WebDAVAccount: Equatable, Sendable {
 
 /// Where the credentials of the Connected Cloud Provider are kept on this
 /// Device: URL and username in `defaults`, the password in the Keychain under
-/// `service`. Never synced. Losing any part means not Connected.
+/// `service`; for iCloud Drive the bookmark of the grant in `defaults`. Never
+/// synced. Losing any part means not Connected.
 struct CloudCredentials {
     let defaults: UserDefaults
     let service: String
 
     private static let urlKey = "cloud.webdav.url"
     private static let usernameKey = "cloud.webdav.username"
+    private static let bookmarkKey = "cloud.icloud.bookmark"
     private static let passwordName = "WebDAV password"
 
     /// What `save` kept; nil if there is none or a part is missing.
@@ -26,6 +28,16 @@ struct CloudCredentials {
             let password = secret()
         else { return nil }
         return WebDAVAccount(url: url, username: username, password: password)
+    }
+
+    /// The security-scoped bookmark of the iCloud Drive grant, if iCloud Drive
+    /// is Connected.
+    func loadBookmark() -> Data? { defaults.data(forKey: Self.bookmarkKey) }
+
+    /// Replaces what was saved with the iCloud Drive grant `bookmark`.
+    func saveBookmark(_ bookmark: Data) {
+        forget()
+        defaults.set(bookmark, forKey: Self.bookmarkKey)
     }
 
     /// Replaces what was saved. False if the Keychain refused the password;
@@ -43,6 +55,7 @@ struct CloudCredentials {
     func forget() {
         defaults.removeObject(forKey: Self.urlKey)
         defaults.removeObject(forKey: Self.usernameKey)
+        defaults.removeObject(forKey: Self.bookmarkKey)
         SecItemDelete(query() as CFDictionary)
     }
 

@@ -2,8 +2,8 @@ import Foundation
 import Network
 import SwiftUI
 
-/// Where Drawings can be backed up. Only WebDAV can be Connected so far; the
-/// picker shows the others, disabled.
+/// Where Drawings can be backed up. WebDAV and iCloud Drive can be Connected
+/// so far; the picker shows the others, disabled.
 enum CloudProvider: CaseIterable, Hashable {
     case webDAV
     case iCloudDrive
@@ -20,7 +20,7 @@ enum CloudProvider: CaseIterable, Hashable {
     }
 
     /// Whether the app can Connect it yet.
-    var isAvailable: Bool { self == .webDAV }
+    var isAvailable: Bool { self == .webDAV || self == .iCloudDrive }
 
     /// What Settings calls the detail of a Connection to it.
     var detailLabel: String {
@@ -63,6 +63,9 @@ extension ConnectError {
         case .Unreachable: "Server not reachable, or its certificate is not trusted"
         case .NotHttps: "URL must start with https://, so your password never travels in plain text"
         case .NotWebDav: "Not a WebDAV server"
+        case .ICloudDriveUnavailable: "Turn on iCloud Drive in Settings"
+        case .WrongFolder:
+            "Pick iCloud Drive itself, not a folder in it, so your Drawings end up in iCloud Drive/ExcalidrawNative"
         }
     }
 }
@@ -160,6 +163,7 @@ final class CloudBackingModel {
 
     @ObservationIgnored private let credentials: CloudCredentials
     @ObservationIgnored private let checkWebDAV: @Sendable (String, String, String) throws -> Void
+    @ObservationIgnored private let isICloudDriveOn: () -> Bool
 
     /// Where Drawings are Synced, once the Gallery says so (`startSyncing`).
     private struct SyncTarget {
@@ -171,24 +175,58 @@ final class CloudBackingModel {
     @ObservationIgnored private var target: SyncTarget?
     /// The running Sync; nil while not Connected or not attached.
     @ObservationIgnored private var sync: CloudSync?
+    /// iCloud Drive's root while Sync uses it, which needs its security scope.
+    @ObservationIgnored private var scopedRoot: URL?
     @ObservationIgnored private var isInFront = true
     @ObservationIgnored private var isOnline = true
     @ObservationIgnored private var network: NetworkMonitor?
 
     /// Cloud Backing keeping its credentials in `credentials`. The Connection
     /// saved there is shown again without contacting the server, so launching
-    /// offline works. `checkWebDAV` is the core's Connect; tests replace it.
+    /// offline works. `checkWebDAV` is the core's Connect and `isICloudDriveOn`
+    /// tells whether the user is signed in to iCloud Drive; tests replace them.
     init(
         credentials: CloudCredentials = .app,
         checkWebDAV: @escaping @Sendable (String, String, String) throws -> Void = {
             try connectWebdav(url: $0, username: $1, password: $2)
-        }
+        },
+        isICloudDriveOn: @escaping () -> Bool = { FileManager.default.ubiquityIdentityToken != nil }
     ) {
         self.credentials = credentials
         self.checkWebDAV = checkWebDAV
+        self.isICloudDriveOn = isICloudDriveOn
         if let account = credentials.load() {
             connection = CloudConnection(provider: .webDAV, detail: account.url)
+        } else if credentials.loadBookmark() != nil {
+            connection = Self.iCloudConnection
         }
+    }
+
+    private static let iCloudFolder = "ExcalidrawNative"
+    private static let iCloudConnection = CloudConnection(provider: .iCloudDrive, detail: iCloudFolder)
+
+    /// Checks that iCloud Drive is on, before the folder picker is shown.
+    /// Throws `ConnectError.ICloudDriveUnavailable` if it is not.
+    func prepareICloudDriveConnect() throws {
+        guard isICloudDriveOn() else { throw ConnectError.ICloudDriveUnavailable }
+    }
+
+    /// Connects iCloud Drive through `granted`, the folder the user picked
+    /// (also to Reconnect after the grant was lost). Throws a `ConnectError`
+    /// if it is not iCloud Drive's root; then nothing is kept. Creates
+    /// `ExcalidrawNative` in it if missing and keeps the grant, as a bookmark,
+    /// until `disconnect`.
+    func connectICloudDrive(granted: URL) async throws {
+        let scoped = granted.startAccessingSecurityScopedResource()
+        defer { if scoped { granted.stopAccessingSecurityScopedResource() } }
+        let path = granted.path(percentEncoded: false)
+        try await Task.detached { _ = try connectIcloudDrive(grantedDirectory: path) }.value
+        let bookmark = try ICloudGrant.bookmark(for: granted)
+        // What was Synced with another Cloud Provider says nothing about this one.
+        if let old = connection, old.provider != .iCloudDrive { clearSyncState() }
+        credentials.saveBookmark(bookmark)
+        connection = Self.iCloudConnection
+        restartSync()
     }
 
     /// Connects to the WebDAV server at `url`: checks it and creates the
@@ -240,20 +278,58 @@ final class CloudBackingModel {
         if status == .upToDate || status == .full { lastSync = Date() }
     }
 
+    /// Stops Sync, cancelling a running step, and gives up iCloud Drive's scope.
+    private func stopSync() {
+        sync = nil
+        scopedRoot?.stopAccessingSecurityScopedResource()
+        scopedRoot = nil
+    }
+
     private func restartSync() {
-        sync = nil  // cancels the running step
+        stopSync()
         (status, progress) = (nil, nil)
-        guard let target, let account = credentials.load() else { return }
-        sync = try? CloudSync.startWebdav(
+        guard let target else { return }
+        if let bookmark = credentials.loadBookmark() {
+            sync = startICloudDriveSync(bookmark: bookmark, target: target)
+        } else if let account = credentials.load() {
+            sync = startWebDAVSync(account: account, target: target)
+        }
+        if !isInFront { sync?.wentToBackground() }
+        if !isOnline { sync?.setOnline(online: false) }
+    }
+
+    private func observer(for target: SyncTarget) -> SyncEvents {
+        SyncEvents(
+            onChanged: target.onChanged,
+            onProgress: { [weak self] in self?.progress = $0 },
+            onStatus: { [weak self] in self?.apply(status: $0) })
+    }
+
+    /// Syncs with iCloud Drive; without the grant, the status is `accessLost`.
+    private func startICloudDriveSync(bookmark: Data, target: SyncTarget) -> CloudSync? {
+        guard let grant = ICloudGrant.resolve(bookmark), grant.folder.startAccessingSecurityScopedResource()
+        else {
+            status = .accessLost
+            return nil
+        }
+        scopedRoot = grant.folder
+        if let renewed = grant.renewed { credentials.saveBookmark(renewed) }
+        let sync = try? CloudSync.startIcloudDrive(
+            folder: grant.folder.appending(path: Self.iCloudFolder).path(percentEncoded: false),
+            downloader: ICloudDownloader(),
+            drawingsDirectory: target.drawings.path(percentEncoded: false),
+            stateDirectory: target.stateDirectory.path(percentEncoded: false),
+            observer: observer(for: target))
+        if sync == nil { status = .accessLost }
+        return sync
+    }
+
+    private func startWebDAVSync(account: WebDAVAccount, target: SyncTarget) -> CloudSync? {
+        try? CloudSync.startWebdav(
             url: account.url, username: account.username, password: account.password,
             drawingsDirectory: target.drawings.path(percentEncoded: false),
             stateDirectory: target.stateDirectory.path(percentEncoded: false),
-            observer: SyncEvents(
-                onChanged: target.onChanged,
-                onProgress: { [weak self] in self?.progress = $0 },
-                onStatus: { [weak self] in self?.apply(status: $0) }))
-        if !isInFront { sync?.wentToBackground() }
-        if !isOnline { sync?.setOnline(online: false) }
+            observer: observer(for: target))
     }
 
     /// Reconnects after Sync lost access (the password changed): checks the
@@ -288,7 +364,7 @@ final class CloudBackingModel {
     func cancelSwitch() { pendingSwitch = nil }
 
     private func clearSyncState() {
-        sync = nil
+        stopSync()
         if let target { forgetSyncState(stateDirectory: target.stateDirectory.path(percentEncoded: false)) }
     }
 

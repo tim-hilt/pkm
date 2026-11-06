@@ -878,3 +878,43 @@ fn a_drawing_deleted_while_disconnected_comes_back_on_the_next_connect() {
     assert_eq!(phone.sync(&cloud), ["Sketch"]);
     assert_eq!(phone.files(), ["Sketch.excalidraw"]);
 }
+
+#[test]
+fn an_icloud_placeholder_is_absent_until_downloaded_and_a_later_step_finds_the_file() {
+    let cloud_dir = Scratch::new("icloud");
+    let asked = std::sync::Arc::new(Mutex::new(Vec::new()));
+    let log = std::sync::Arc::clone(&asked);
+    let storage = DirStorage::open_downloading(&cloud_dir.0, move |path| {
+        log.lock().unwrap().push(path.to_path_buf());
+    })
+    .unwrap();
+    let device = Device::new();
+    let step = |device: &Device| {
+        let state = SyncState::open(&device.state.0).unwrap();
+        let outcome = sync_step(
+            &device.drawings.0,
+            &state,
+            &storage,
+            &AtomicBool::new(false),
+        );
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        outcome.changed
+    };
+    fs::write(cloud_dir.0.join(".Sketch.excalidraw.icloud"), b"stub").unwrap();
+
+    assert!(step(&device).is_empty());
+    assert!(device.files().is_empty(), "not copied, not deleted");
+    assert!(
+        asked
+            .lock()
+            .unwrap()
+            .contains(&cloud_dir.0.join("Sketch.excalidraw"))
+    );
+
+    // The system has downloaded it.
+    fs::remove_file(cloud_dir.0.join(".Sketch.excalidraw.icloud")).unwrap();
+    fs::write(cloud_dir.0.join("Sketch.excalidraw"), b"one").unwrap();
+
+    assert_eq!(step(&device), ["Sketch"]);
+    assert_eq!(device.read("Sketch.excalidraw").unwrap(), b"one");
+}

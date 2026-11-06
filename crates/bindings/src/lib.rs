@@ -5,7 +5,8 @@ use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use excalidraw_native_cloud::{
-    ConnectError, Observer, Progress, Status, SyncLoop, SyncState, Timing, WebDavStorage,
+    ConnectError, DirStorage, Observer, Progress, Status, SyncLoop, SyncState, Timing,
+    WebDavStorage,
 };
 use excalidraw_native_core::scene::{FillPattern, LineStyle};
 use excalidraw_native_core::{
@@ -25,6 +26,8 @@ pub enum ConnectError {
     Unreachable,
     NotHttps,
     NotWebDav,
+    ICloudDriveUnavailable,
+    WrongFolder,
 }
 
 /// Connects to the WebDAV server at `url` as `username` with `password`, which
@@ -34,6 +37,36 @@ pub enum ConnectError {
 #[uniffi::export]
 pub fn connect_webdav(url: String, username: String, password: String) -> Result<(), ConnectError> {
     WebDavStorage::connect(&url, &username, &password).map(drop)
+}
+
+/// Connects to iCloud Drive through `granted_directory`, the folder the user
+/// picked: it must be iCloud Drive's root. Creates `ExcalidrawNative` in it if
+/// missing and returns its path, which `CloudSync::start_icloud_drive` Syncs
+/// with. The client must have access to the folder while this and Sync run.
+#[uniffi::export]
+pub fn connect_icloud_drive(granted_directory: String) -> Result<String, ConnectError> {
+    excalidraw_native_cloud::icloud::connect(granted_directory.as_ref())
+        .map(|folder| folder.to_string_lossy().into_owned())
+}
+
+/// Asks the system to download files that are in iCloud Drive only.
+#[uniffi::export(with_foreign)]
+pub trait Downloader: Send + Sync {
+    /// Start downloading the file at `path`, which does not exist on the
+    /// Device yet. Must not block.
+    fn download(&self, path: String);
+}
+
+fn icloud_storage(
+    folder: &str,
+    downloader: Arc<dyn Downloader>,
+) -> Result<Arc<DirStorage>, SyncStartError> {
+    DirStorage::open_downloading(folder, move |path| {
+        downloader.download(path.to_string_lossy().into_owned());
+    })
+    .map(Arc::new)
+    // The grant is gone: the status then says so.
+    .map_err(|_| SyncStartError::AccessLost)
 }
 
 /// Hears what Sync did to the Drawings folder.
@@ -99,6 +132,8 @@ pub enum SyncStartError {
     NotHttps,
     /// The folder for the Sync state could not be made.
     StateUnavailable,
+    /// iCloud Drive's folder cannot be opened: the grant is lost.
+    AccessLost,
 }
 
 impl fmt::Display for SyncStartError {
@@ -138,6 +173,30 @@ impl CloudSync {
             drawings_directory.into(),
             state,
             Arc::new(storage),
+            Timing::default(),
+            Arc::new(ForeignObserver(observer)),
+        );
+        Ok(Arc::new(Self { sync_loop }))
+    }
+
+    /// Starts Syncing like `start_webdav`, with the `ExcalidrawNative` folder
+    /// that `connect_icloud_drive` returned. The client must have access to it
+    /// (security scope) as long as this object lives.
+    #[uniffi::constructor]
+    pub fn start_icloud_drive(
+        folder: String,
+        downloader: Arc<dyn Downloader>,
+        drawings_directory: String,
+        state_directory: String,
+        observer: Arc<dyn SyncObserver>,
+    ) -> Result<Arc<Self>, SyncStartError> {
+        let storage = icloud_storage(&folder, downloader)?;
+        let state =
+            SyncState::open(state_directory).map_err(|_| SyncStartError::StateUnavailable)?;
+        let sync_loop = SyncLoop::start(
+            drawings_directory.into(),
+            state,
+            storage,
             Timing::default(),
             Arc::new(ForeignObserver(observer)),
         );
