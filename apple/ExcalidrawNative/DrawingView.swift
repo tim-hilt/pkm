@@ -226,6 +226,7 @@ extension View {
                 .accessibilityIdentifier("export-drawing")
                 Menu {
                     Toggle("Background", isOn: $background)
+                        .menuActionDismissBehavior(.disabled)
                     share("Export Scene as PNG", scope: .scene)
                     share("Export Selection as PNG", scope: .selection)
                         .disabled(!controller.hasSelection)
