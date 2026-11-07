@@ -7,7 +7,7 @@ import CoreGraphics
 enum DrawingLayout: Equatable {
     /// Top toolbar, properties panel on the left.
     case desktop
-    /// Bottom toolbar, properties in a sheet.
+    /// Bottom toolbar, properties in popovers.
     case mobile
 
     init(containerSize size: CGSize) {

@@ -13,6 +13,11 @@ struct DrawingView: View {
     /// The phone toolbar's Tool family picker, and the toolbar's top it sits above.
     @State private var family = FamilyPopoverState()
     @State private var toolbarTop: CGFloat = 0
+    /// The phone Action row: its items and open popover, where its triggers are
+    /// and its top, the popovers' bar.
+    @State private var actionRow = ActionRowModel()
+    @State private var actionAnchors: [ActionRowItem: CGRect] = [:]
+    @State private var actionRowTop: CGFloat = 0
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -118,16 +123,25 @@ struct DrawingView: View {
 
     /// excalidraw.com's phone layout (docs/layout-reference §4): everything
     /// in the bottom bar within thumb reach; no zoom buttons (pinch),
-    /// properties in a sheet.
+    /// properties in popovers.
     private func mobileChrome(in size: CGSize) -> some View {
-        VStack(spacing: 4) {
-            MobileActionRow(controller: controller, showsProperties: showsProperties)
-            MobileToolBar(controller: controller, family: $family)
+        let width = DrawingLayout.bottomBarWidth(containerWidth: size.width)
+        let inputs = ActionRowInputs(
+            sections: controller.properties?.sections, hasSelection: controller.hasSelection, width: width)
+        return VStack(spacing: 4) {
+            MobileActionRow(
+                controller: controller, model: actionRow, onTap: tapTrigger, anchors: $actionAnchors,
+                space: Self.chromeSpace
+            )
+            .onGeometryChange(for: CGFloat.self, of: { $0.frame(in: .named(Self.chromeSpace)).minY }) {
+                actionRowTop = $0
+            }
+            MobileToolBar(controller: controller, family: $family, onOpenFamily: { actionRow.close() })
                 .onGeometryChange(for: CGFloat.self, of: { $0.frame(in: .named(Self.chromeSpace)).minY }) {
                     toolbarTop = $0
                 }
         }
-        .frame(width: DrawingLayout.bottomBarWidth(containerWidth: size.width))
+        .frame(width: width)
         .padding(.bottom, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .overlay {
@@ -135,16 +149,33 @@ struct DrawingView: View {
                 PhonePopover(anchor: anchor, container: size, barTop: toolbarTop, onClose: closePopover) {
                     FamilyPicker(controller: controller, family: $family, slot: open)
                 }
+            } else if let open = actionRow.open, let anchor = actionAnchors[open] {
+                PhonePopover(anchor: anchor, container: size, barTop: actionRowTop, onClose: closePopover) {
+                    ActionPopoverContent(item: open, model: actionRow, controller: controller)
+                }
             }
         }
         .animation(.easeOut(duration: 0.15), value: family.open)
-        .popoverScrim(isOpen: family.open != nil, onClose: closePopover)
+        .animation(.easeOut(duration: 0.15), value: actionRow.open)
+        .popoverScrim(isOpen: family.open != nil || actionRow.open != nil, onClose: closePopover)
         .coordinateSpace(name: Self.chromeSpace)
+        .onChange(of: inputs, initial: true) {
+            actionRow.update(sections: inputs.sections, hasSelection: inputs.hasSelection, width: inputs.width)
+        }
     }
 
     private static let chromeSpace = "chrome"
 
-    private func closePopover() { family.open = nil }
+    /// A Canvas touch only closes whichever popover is open (ADR-0013).
+    private func closePopover() {
+        family.open = nil
+        _ = actionRow.canvasTouch()
+    }
+
+    private func tapTrigger(_ item: ActionRowItem) {
+        family.open = nil
+        actionRow.tap(item)
+    }
 
     /// The core decides when there is something to style.
     private var showsProperties: Bool { controller.properties != nil }
@@ -292,6 +323,8 @@ struct ToolBar: View {
 private struct MobileToolBar: View {
     let controller: CanvasController
     @Binding var family: FamilyPopoverState
+    /// Called when a family picker opens, so that no other popover stays open.
+    let onOpenFamily: () -> Void
 
     var body: some View {
         HStack(spacing: 4) {
@@ -312,6 +345,7 @@ private struct MobileToolBar: View {
         return MobileToolButton(tool: shown, checked: armed) {
             if armed && slot.tools.count > 1 {
                 family.open = family.open == index ? nil : index
+                onOpenFamily()
             } else {
                 controller.setTool(shown)
             }
@@ -390,40 +424,11 @@ private struct MobileToolButton: View {
     }
 }
 
-/// The phone action row over the toolbar (docs/layout-reference §4.3):
-/// properties on the left while a Tool or Selection has them, opening in a
-/// sheet (the spec's native adaptation of excalidraw.com's popovers). Undo and
-/// redo have no buttons: they are the system gestures (`CanvasUndoManager`).
-private struct MobileActionRow: View {
-    let controller: CanvasController
-    let showsProperties: Bool
-    @State private var sheetShown = false
-
-    var body: some View {
-        HStack(spacing: 6) {
-            if showsProperties {
-                Button("Properties", systemImage: "slider.horizontal.3") { sheetShown = true }
-                    .controlButton(width: 32, height: 32)
-                    .buttonPointer()
-                    .background(Chrome.island, in: RoundedRectangle(cornerRadius: 8))
-                    .accessibilityIdentifier("properties-sheet")
-            }
-            Spacer(minLength: 0)
-        }
-        .labelStyle(.iconOnly)
-        .buttonStyle(.borderless)
-        .tint(.primary)
-        .frame(height: 43.2)
-        .sheet(
-            isPresented: Binding(
-                get: { sheetShown && showsProperties }, set: { sheetShown = $0 })
-        ) {
-            PropertiesPanel(controller: controller, width: nil)
-                .padding()
-                .presentationDetents([.medium, .large])
-                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
-        }
-    }
+/// The phone Action row's inputs: a change closes a popover whose trigger is gone.
+private struct ActionRowInputs: Equatable {
+    let sections: Sections?
+    let hasSelection: Bool
+    let width: CGFloat
 }
 
 /// Excalidraw's zoom group: out, reset (tap the percentage), in. Zoom to fit

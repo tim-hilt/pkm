@@ -165,7 +165,7 @@ private struct SwatchButton: View {
 
 /// A colour filled into a rounded square of `size`, with a hairline ring so
 /// that white shows; transparent is a checkerboard, as in Excalidraw.
-private struct ColorSwatch: View {
+struct ColorSwatch: View {
     let color: String
     let size: CGFloat
 

@@ -228,15 +228,20 @@ struct LayersGroup: View {
     }
 }
 
+/// Duplicate and Delete; on the phone, whichever sit on the Action row instead are left out.
 struct ActionsGroup: View {
     let controller: CanvasController
+    var showsDuplicate = true
+    var showsDelete = true
 
     var body: some View {
-        PanelSection(title: "Actions") {
-            ActionRow(buttons: [
-                (.symbol("plus.square.on.square"), "Duplicate", { controller.duplicate() }),
-                (.symbol("trash"), "Delete", { controller.deleteSelection() }),
-            ])
+        if showsDuplicate || showsDelete {
+            PanelSection(title: "Actions") {
+                ActionRow(
+                    buttons: (showsDuplicate
+                        ? [(.symbol("plus.square.on.square"), "Duplicate", { controller.duplicate() })] : [])
+                        + (showsDelete ? [(.symbol("trash"), "Delete", { controller.deleteSelection() })] : []))
+            }
         }
     }
 }
