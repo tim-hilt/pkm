@@ -77,8 +77,12 @@ The system's own menu opened by a long-press with a finger (or a secondary click
 _Avoid_: Action Bar (the removed floating bar), popover, popup, long-press menu
 
 **Dark mode**:
-The dark look of the app's screens (Canvas, chrome and Gallery), following the system's appearance; the Canvas shows each colour as excalidraw.com's dark theme does. It only changes what is shown: never the Drawing, never an export.
+The dark look of the app's screens (Canvas, chrome and Gallery), on when the Appearance is Dark, or System while the system's appearance is dark; the Canvas shows each colour as excalidraw.com's dark theme does. It only changes what is shown: never the Drawing, never an export.
 _Avoid_: Theme, dark theme, night mode
+
+**Appearance**:
+The user's setting for Dark mode: System (follow the system's appearance, the default), Light or Dark. Picked in Settings (the Gallery's gear on iPhone and iPad, ⌘, on the Mac) and in the Mac's View menu; it applies to the whole app at once and is kept per Device.
+_Avoid_: Theme, colour scheme
 
 **Properties panel**:
 The panel that sets stroke colour, background colour, fill style, stroke width, stroke style, sloppiness, edges and opacity (and, for text, font size and text alignment) on the Selection, and, with an empty Selection, as the style of the next Element. It shows the Selection's current values, or none chosen where they are mixed. Shown as a panel beside the Canvas on wide screens; on a phone it is split by concern into popovers opened from the Action row.

@@ -1,15 +1,18 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The Settings: only Cloud Backing so far. A window on the Mac (⌘,), a sheet
-/// from the Gallery's gear on iPhone and iPad.
+/// The Settings: Appearance and Cloud Backing. A window on the Mac (⌘,), a
+/// sheet from the Gallery's gear on iPhone and iPad.
 struct SettingsView: View {
     var body: some View {
-        Form { CloudBackingSection() }
-            .formStyle(.grouped)
-            #if os(macOS)
-                .frame(width: 460, height: 460)
-            #endif
+        Form {
+            Section { AppearancePicker() }
+            CloudBackingSection()
+        }
+        .formStyle(.grouped)
+        #if os(macOS)
+            .frame(width: 460, height: 460)
+        #endif
     }
 }
 

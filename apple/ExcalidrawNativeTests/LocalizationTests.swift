@@ -30,6 +30,12 @@ import Testing
         }
     }
 
+    @Test func appearanceTitlesAreInTheStringCatalog() {
+        for appearance in Appearance.allCases {
+            #expect(isInCatalog(appearance.title), "\(appearance)")
+        }
+    }
+
     @Test func menuTitlesAreEnglish() {
         #expect(String(localized: CanvasCommands.title(.zoomToFit)) == "Zoom to Fit")
         #expect(String(localized: CanvasCommands.title(.setTool(.freedraw))) == "Draw")

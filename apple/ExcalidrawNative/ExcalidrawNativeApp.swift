@@ -15,13 +15,16 @@ struct ExcalidrawNativeApp: App {
         // iPadOS get one window as the app does not declare multiple scenes.
         #if os(macOS)
             Window(Text(verbatim: "Excalidraw Native"), id: "main") {
-                ContentView().firstLaunchWindowSize().environment(cloud)
+                ContentView().firstLaunchWindowSize().environment(cloud).appliesAppearance()
             }
-            .commands { CanvasCommands() }
+            .commands {
+                CanvasCommands()
+                AppearanceCommands()
+            }
             // ⌘, opens it.
             Settings { SettingsView().environment(cloud) }
         #else
-            WindowGroup { ContentView().environment(cloud) }
+            WindowGroup { ContentView().environment(cloud).appliesAppearance() }
                 .commands { CanvasCommands() }
         #endif
     }
