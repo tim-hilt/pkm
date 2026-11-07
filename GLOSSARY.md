@@ -1,6 +1,6 @@
 # Excalidraw Native
 
-A native, touch-first re-implementation of Excalidraw for Apple devices (later Android and Linux), storing everything locally.
+A native, touch-first re-implementation of Excalidraw for Apple devices (later Android and Linux), with a web app for everywhere else, storing everything locally.
 
 ## Language
 
@@ -73,7 +73,7 @@ The text bound to a rectangle, diamond or ellipse (its container), as Excalidraw
 _Avoid_: Caption, bound text (Excalidraw's name for it)
 
 **Context menu**:
-The system's own menu opened by a long-press with a finger (or a secondary click) with the selection Tool, never by itself: on an Element (selecting it first, unless it is already selected) it offers cut, copy, paste, duplicate, group, ungroup, arrange (z-order) and delete; on empty Canvas, paste and select all, and the Selection stays. Paste puts the Elements where it was opened. VoiceOver and Switch Control reach the Element menu's actions as custom actions on the Canvas while there is a Selection. Offered on iPhone and iPad; the Mac has the Edit and Arrange menus.
+The platform's menu (on the web, the app's own) opened by a long-press with a finger (or a secondary click) with the selection Tool, never by itself: on an Element (selecting it first, unless it is already selected) it offers cut, copy, paste, duplicate, group, ungroup, arrange (z-order) and delete; on empty Canvas, paste and select all, and the Selection stays. Paste puts the Elements where it was opened. VoiceOver and Switch Control reach the Element menu's actions as custom actions on the Canvas while there is a Selection. Offered on iPhone and iPad and in the web app, where it replaces the browser's own menu on the Canvas; the Mac has the Edit and Arrange menus.
 _Avoid_: Action Bar (the removed floating bar), popover, popup, long-press menu
 
 **Dark mode**:
@@ -95,7 +95,7 @@ _Avoid_: Style bar, bottom bar (that is the Action row and toolbar together)
 ### Cloud
 
 **Device**:
-One installation of the app.
+One installation of the app; for the web app, one browser profile on its site (clearing the site's data removes that Device's Drawings).
 _Avoid_: Client, installation
 
 **Cloud Backing**:
