@@ -1,6 +1,6 @@
 /** Where the images that reach the Canvas from outside go. */
 export interface ImageSink {
-  /** The bytes of image files, and where on the Canvas (in its coordinates) they were dropped; none for a paste. */
+  /** The bytes of image files, and where on the Canvas (in its coordinates) they go; none for the middle of the view. */
   images(sources: Uint8Array[], at?: { x: number; y: number }): void;
 }
 
@@ -29,10 +29,9 @@ export async function pickImages(sink: ImageSink): Promise<void> {
 }
 
 /**
- * Makes the Canvas take images dropped on it and pasted while it has the
- * page's attention, as the Swift `CanvasImageInput` does: a drop goes where it
- * was dropped, a paste to the middle of the view. Pastes of text (Excalidraw's
- * Elements, which have their own route) and into the Text view are left alone.
+ * Makes the Canvas take images dropped on it, where they were dropped, as the
+ * Swift `CanvasImageInput` does. Pasted images arrive through
+ * `CanvasClipboard`, with the Elements a paste may hold instead.
  */
 export class ImageInput {
   private readonly listeners = new AbortController();
@@ -61,17 +60,6 @@ export class ImageInput {
         const bounds = canvas.getBoundingClientRect();
         const at = { x: e.clientX - bounds.left, y: e.clientY - bounds.top };
         void bytesOf(files).then((sources) => sink.images(sources, at));
-      },
-      { signal },
-    );
-    document.addEventListener(
-      "paste",
-      (e) => {
-        if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) return;
-        const files = imagesOf(e.clipboardData);
-        if (files.length === 0) return;
-        e.preventDefault();
-        void bytesOf(files).then((sources) => sink.images(sources));
       },
       { signal },
     );

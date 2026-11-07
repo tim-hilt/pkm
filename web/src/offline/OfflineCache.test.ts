@@ -25,11 +25,14 @@ class FakeCaches {
 /** A deployment: files by URL, and a switch to go offline. */
 class FakeNetwork {
   online = true;
+  /** The tunnel answers, but the server behind it does not: every request gets an error page. */
+  serverDown = false;
   requests: string[] = [];
   constructor(public files: Record<string, string>) {}
   fetch = async (request: Request): Promise<Response> => {
     this.requests.push(request.url);
     if (!this.online) throw new TypeError("offline");
+    if (this.serverDown) return new Response("Bad gateway", { status: 502 });
     const path = new URL(request.url).pathname;
     const body = this.files[path === "/" ? "/index.html" : path];
     return body === undefined ? new Response("", { status: 404 }) : new Response(body);
@@ -89,6 +92,15 @@ describe("OfflineCache", () => {
     expect(await text(offline.respond(navigate()))).toBe(`<app v1.1>${buildMarker("v1")}`);
     network.online = false;
     expect(await text(offline.respond(navigate()))).toBe(`<app v1.1>${buildMarker("v1")}`);
+  });
+
+  it("opens the app from the cache when the server answers with an error", async () => {
+    const network = new FakeNetwork(files);
+    const { offline } = setup("v1", network);
+    await offline.install();
+    network.serverDown = true;
+
+    expect(await text(offline.respond(navigate()))).toBe(`<app v1>${buildMarker("v1")}`);
   });
 
   it("keeps the old build working while a newer deployment is live", async () => {

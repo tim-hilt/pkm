@@ -87,7 +87,7 @@ export function showCanvas(
   let pointer: { x: number; y: number } | undefined;
   const zoomControls = new ZoomControls(editor, () => didReachEditor());
   const undoRedo = new UndoRedoControls(editor, () => didReachEditor());
-  /** Images from the file picker, a drop or a paste; they are prepared off the main thread's critical path and inserted once ready. */
+  /** Images from the file picker, a drop or a paste; they are prepared asynchronously and inserted once ready. */
   const images = {
     images: (sources: Uint8Array[], at?: { x: number; y: number }) =>
       void insertImages(editor, sources, at).then((inserted) => {
@@ -205,9 +205,6 @@ export function showCanvas(
       if (handled) didReachEditor();
       return handled;
     },
-    copy: () => void clipboard.copy(),
-    cut: () => void clipboard.cut(),
-    paste: () => void clipboard.paste(pointer),
     contextMenu: (x, y, kind) => {
       // Selecting what is pressed is the core's: the chrome shows it.
       const entries = openContextMenu(editor, clipboard, { x, y }, kind);
@@ -223,6 +220,9 @@ export function showCanvas(
   });
 
   const imageInput = new ImageInput(canvas, images);
+  const stopClipboard = clipboard.listen(document, () => pointer);
+  // Off the Canvas, a paste from the keyboard lands in the middle of the view.
+  canvas.addEventListener("pointerleave", () => (pointer = undefined));
 
   const resize = () => {
     const ratio = window.devicePixelRatio;
@@ -258,7 +258,6 @@ export function showCanvas(
     renderer.isDark = isDark();
     sync.showScene();
     didReachEditor();
-    renderer.onNeedsDisplay?.();
   });
   const resizing = new ResizeObserver(resize);
   resizing.observe(canvas);
@@ -281,6 +280,7 @@ export function showCanvas(
     stopFollowingAppearance();
     input.dispose();
     imageInput.dispose();
+    stopClipboard();
     mainMenu.dispose();
     contextMenu.hide();
     visual?.removeEventListener("resize", keyboardChanged);

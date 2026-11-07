@@ -32,11 +32,14 @@ const punctuation: Record<string, string> = {
 
 /**
  * The character the key types without Shift and Alt, which change it (⇧1 types
- * "!", ⌥] types "‘"): from the physical key where they are held.
+ * "!", ⌥] types "‘"): from the physical key where they are held. Shift only
+ * capitalises a letter, which keeps the layout's letter (⌘⇧Z on a German
+ * keyboard is no ⌘⇧Y), as the Mac client's `keyName` does.
  */
 function nameOf({ key, code, shiftKey, altKey }: KeyLike): string | undefined {
   if (key in named) return named[key];
-  if (shiftKey || altKey) {
+  const capital = [...key].length === 1 && key !== key.toLowerCase();
+  if ((shiftKey && !capital) || altKey) {
     if (/^Key[A-Z]$/.test(code)) return code.slice(3).toLowerCase();
     if (/^Digit[0-9]$/.test(code)) return code.slice(5);
     if (code in punctuation) return punctuation[code];

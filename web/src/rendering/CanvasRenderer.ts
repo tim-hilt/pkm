@@ -587,6 +587,8 @@ export class CanvasRenderer {
   dispose(): void {
     this.onNeedsDisplay = undefined;
     this.destroyCache();
+    // Loads still under way drop their texture on arrival.
+    this.textures.keepOnly(new Set());
     this.overlayDraws.forEach((draw) => draw.destroy());
     this.overlayDraws = [];
     this.frameTargets?.color.destroy();

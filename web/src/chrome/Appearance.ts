@@ -66,6 +66,7 @@ export class Appearance {
     const dark = this.isDark;
     if (dark === this.shownDark) return;
     this.shownDark = dark;
-    for (const listener of [...this.listeners]) listener();
+    // A copy: a listener may subscribe another while being told.
+    for (const listener of Array.from(this.listeners)) listener();
   }
 }

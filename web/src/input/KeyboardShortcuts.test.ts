@@ -75,6 +75,14 @@ describe("the key's name", () => {
     });
   });
 
+  it("is the letter typed with Shift, wherever the layout has it", () => {
+    // ⌘⇧Z on a German keyboard: Z is where US keyboards have Y.
+    expect(shortcutOf(key("Z", { code: "KeyY", metaKey: true, shiftKey: true }), true)).toEqual({
+      key: "z",
+      modifiers: { ...none, shift: true, meta: true },
+    });
+  });
+
   it("is the character without Alt, which types another on a Mac", () => {
     expect(
       shortcutOf(key("‘", { code: "BracketRight", metaKey: true, altKey: true }), true)?.key,

@@ -9,20 +9,23 @@ import type { MenuEntry } from "./ContextMenuModel";
  */
 export class ContextMenu {
   readonly element = document.createElement("div");
-  private stopWatching: (() => void) | undefined;
+  /** Ends the watch for a press outside or the window losing focus, while open. */
+  private watching: AbortController | undefined;
 
   constructor() {
     this.element.className = "context-menu";
     this.element.hidden = true;
     this.element.setAttribute("role", "menu");
     this.element.setAttribute("aria-label", "Context menu");
-    this.element.addEventListener("keydown", (e) => this.key(e));
+    // The menu takes the keys, none reaching the Canvas's shortcuts; an entry
+    // has the focus only once moved to.
+    this.element.tabIndex = -1;
+    this.element.addEventListener("keydown", (e) => {
+      this.key(e);
+      e.stopPropagation();
+    });
     // The browser's own menu never shows, on the menu either.
     this.element.addEventListener("contextmenu", (e) => e.preventDefault());
-  }
-
-  get isOpen(): boolean {
-    return !this.element.hidden;
   }
 
   /** Shows `entries` with the top left corner at the client point `(x, y)`, kept inside the window. */
@@ -40,15 +43,16 @@ export class ContextMenu {
       e.preventDefault();
       this.hide();
     };
-    document.addEventListener("pointerdown", away, true);
-    window.addEventListener("blur", () => this.hide(), { once: true });
-    this.stopWatching = () => document.removeEventListener("pointerdown", away, true);
-    this.items()[0]?.focus();
+    this.watching = new AbortController();
+    const { signal } = this.watching;
+    document.addEventListener("pointerdown", away, { capture: true, signal });
+    window.addEventListener("blur", () => this.hide(), { signal });
+    this.element.focus();
   }
 
   hide(): void {
-    this.stopWatching?.();
-    this.stopWatching = undefined;
+    this.watching?.abort();
+    this.watching = undefined;
     this.element.hidden = true;
     this.element.replaceChildren();
   }

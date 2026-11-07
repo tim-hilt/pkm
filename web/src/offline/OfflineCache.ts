@@ -65,26 +65,27 @@ export class OfflineCache {
     return this.cacheFirst(request);
   }
 
-  // Every navigation within the scope is the app, whatever its query.
+  // Every navigation within the scope is the app, whatever its query. An
+  // error page (the tunnel up, the server behind it down) counts as no
+  // network: the cached app opens instead.
   private async networkFirst(request: Request): Promise<Response> {
     const cache = await this.options.caches.open(this.cacheName);
+    let response: Response;
     try {
-      const response = await this.options.fetch(request);
-      // Only an index of this build is kept: one of a newer deployment names
-      // assets this cache does not hold, and the worker of that build will
-      // keep it once it has taken over.
-      if (
-        response.ok &&
-        (await response.clone().text()).includes(buildMarker(this.options.version))
-      ) {
-        await cache.put(this.indexUrl, response.clone());
-      }
-      return response;
+      response = await this.options.fetch(request);
     } catch (error) {
       const cached = await cache.match(this.indexUrl);
       if (cached) return cached;
       throw error;
     }
+    if (!response.ok) return (await cache.match(this.indexUrl)) ?? response;
+    // Only an index of this build is kept: one of a newer deployment names
+    // assets this cache does not hold, and the worker of that build will
+    // keep it once it has taken over.
+    if ((await response.clone().text()).includes(buildMarker(this.options.version))) {
+      await cache.put(this.indexUrl, response.clone());
+    }
+    return response;
   }
 
   private async cacheFirst(request: Request): Promise<Response> {

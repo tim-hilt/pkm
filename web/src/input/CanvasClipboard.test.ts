@@ -153,3 +153,93 @@ describe("pasting an image", () => {
     expect(inserted).toEqual([]);
   });
 });
+
+/** The `clipboardData` of a copy, cut or paste event, as a fake. */
+class FakeTransfer {
+  constructor(
+    readonly data = new Map<string, string>(),
+    readonly files: File[] = [],
+  ) {}
+  setData(type: string, text: string) {
+    this.data.set(type, text);
+  }
+  getData(type: string) {
+    return this.data.get(type) ?? "";
+  }
+}
+
+/** Dispatches a clipboard event on `target`; whether the clipboard took it from the browser. */
+function dispatch(target: EventTarget, type: string, transfer: FakeTransfer): boolean {
+  const event = Object.assign(new Event(type, { cancelable: true }), { clipboardData: transfer });
+  target.dispatchEvent(event);
+  return event.defaultPrevented;
+}
+
+describe("the browser's copy, cut and paste (⌘/Ctrl+C, X, V and the Edit menu)", () => {
+  const listening = (editor: Editor, point?: { x: number; y: number }) => {
+    const page = new EventTarget();
+    const parts = setup(editor);
+    parts.clipboard.listen(page, () => point);
+    return { page, ...parts };
+  };
+
+  it("copies the Selection into the event, which pastes into another Canvas at the pointer", () => {
+    const transfer = new FakeTransfer();
+    expect(dispatch(listening(withSelection()).page, "copy", transfer)).toBe(true);
+    expect(transfer.getData("text/plain")).toContain(`"type":"excalidraw/clipboard"`);
+
+    const target = empty();
+    const pasting = listening(target, { x: 100, y: 80 });
+    expect(dispatch(pasting.page, "paste", transfer)).toBe(true);
+    expect(target.elementCount()).toBe(1);
+    expect(new TextDecoder().decode(target.save())).toMatch(/"x": 50\b/);
+    expect(pasting.changes()).toBe(1);
+  });
+
+  it("cuts the Selection into the event", () => {
+    const editor = withSelection();
+    const { page, changes } = listening(editor);
+    const transfer = new FakeTransfer();
+    expect(dispatch(page, "cut", transfer)).toBe(true);
+    expect(transfer.getData("text/plain")).toContain("excalidraw/clipboard");
+    expect(editor.elementCount()).toBe(0);
+    expect(changes()).toBe(1);
+  });
+
+  it("leaves the browser alone with nothing selected and nothing of ours to paste", () => {
+    const editor = empty();
+    const { page, inserted } = listening(editor);
+    expect(dispatch(page, "copy", new FakeTransfer())).toBe(false);
+    expect(dispatch(page, "cut", new FakeTransfer())).toBe(false);
+    const words = new FakeTransfer(new Map([["text/plain", "just some words"]]));
+    expect(dispatch(page, "paste", words)).toBe(false);
+    expect(editor.elementCount()).toBe(0);
+    expect(inserted).toEqual([]);
+  });
+
+  it("pastes images at the pointer", async () => {
+    const { page, inserted } = listening(empty(), { x: 5, y: 6 });
+    const png = new File([new Uint8Array([1, 2, 3])], "a.png", { type: "image/png" });
+    const text = new File(["x"], "a.txt", { type: "text/plain" });
+    expect(dispatch(page, "paste", new FakeTransfer(new Map(), [png, text]))).toBe(true);
+    await expect.poll(() => inserted.length).toBe(1);
+    expect(inserted[0].sources.map((s) => [...s])).toEqual([[1, 2, 3]]);
+    expect(inserted[0].at).toEqual({ x: 5, y: 6 });
+  });
+
+  it("leaves text fields their own copy, cut and paste", () => {
+    const field = Object.assign(new EventTarget(), { tagName: "TEXTAREA" });
+    const editor = withSelection();
+    setup(editor).clipboard.listen(field, () => undefined);
+    expect(dispatch(field, "copy", new FakeTransfer())).toBe(false);
+    expect(dispatch(field, "cut", new FakeTransfer())).toBe(false);
+    expect(editor.elementCount()).toBe(1);
+  });
+
+  it("stops listening when told", () => {
+    const page = new EventTarget();
+    const stop = setup(withSelection()).clipboard.listen(page, () => undefined);
+    stop();
+    expect(dispatch(page, "copy", new FakeTransfer())).toBe(false);
+  });
+});

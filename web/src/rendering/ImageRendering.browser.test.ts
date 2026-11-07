@@ -248,6 +248,19 @@ describe("textures", () => {
     expect(renderer.textures.count).toBe(0);
   });
 
+  it("are released with the renderer", async () => {
+    const { editor, geometry } = scene([image("a", 10, 10, [50, 50])]);
+    const renderer = harness.makeRenderer();
+    renderer.files = editor;
+    renderer.setGeometry(geometry);
+    await harness.draw(renderer);
+    expect(renderer.textures.count).toBe(1);
+
+    renderer.dispose();
+
+    expect(renderer.textures.count).toBe(0);
+  });
+
   it("are kept for a moved image: its file is not decoded again", async () => {
     const first = scene([image("a", 10, 10, [50, 50], { extra: `,"version":1` })]);
     const renderer = harness.makeRenderer();

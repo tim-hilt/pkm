@@ -24,10 +24,6 @@ export interface InputSink {
   setPanKey(held: boolean): void;
   /** A shortcut was pressed (see `shortcutOf`); whether the core has a Command for it. */
   shortcut(chord: KeyChord): boolean;
-  /** ⌘/Ctrl+C, +X and +V; the clipboard is the browser's, so it is asked from here, in the key press. */
-  copy(): void;
-  cut(): void;
-  paste(): void;
   /** A finger was held, or the mouse clicked with its secondary button, at the Canvas point `(x, y)`: the Context menu. */
   contextMenu(x: number, y: number, kind: PointerKind): void;
   /** The mouse moved over the Canvas without a button down. */
@@ -207,23 +203,9 @@ export class CanvasInput {
     if (!down || e.defaultPrevented) return;
     const inField = typing && !(target instanceof HTMLButtonElement);
     if (inField || (typing && e.key === "Enter")) return;
+    // ⌘/Ctrl+C, X and V are no Commands: the browser turns them into the
+    // clipboard events `CanvasClipboard` takes.
     const chord = shortcutOf(e, this.apple);
-    if (!chord) return;
-    const clipboard = this.clipboardAction(chord);
-    if (clipboard) {
-      e.preventDefault();
-      clipboard();
-    } else if (this.sink.shortcut(chord)) {
-      e.preventDefault();
-    }
-  }
-
-  /** What ⌘/Ctrl+C, +X or +V does; Edit commands of the clipboard are not in the core's shortcut list. */
-  private clipboardAction({ key, modifiers: m }: KeyChord): (() => void) | undefined {
-    if (!m.meta || m.shift || m.alt || m.ctrl) return undefined;
-    if (key === "c") return () => this.sink.copy();
-    if (key === "x") return () => this.sink.cut();
-    if (key === "v") return () => this.sink.paste();
-    return undefined;
+    if (chord && this.sink.shortcut(chord)) e.preventDefault();
   }
 }
