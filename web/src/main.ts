@@ -1,4 +1,5 @@
 import { startApp } from "./App";
+import { registerServiceWorker } from "./offline/registerServiceWorker";
 import { loadCore } from "./core/Core";
 import { MemoryStorage } from "./storage/MemoryStorage";
 import { OpfsStorage } from "./storage/OpfsStorage";
@@ -33,4 +34,5 @@ async function main(): Promise<void> {
   }
 }
 
+registerServiceWorker();
 void main();

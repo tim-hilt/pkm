@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun ./index.html",
-    "build": "bun build ./index.html --outdir dist --minify",
+    "build": "bun scripts/build.ts",
     "test": "vitest run",
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "typecheck": "tsc --noEmit",
@@ -13,6 +13,7 @@
     "format:check": "oxfmt --check"
   },
   "devDependencies": {
+    "@types/bun": "^1.4.4",
     "@types/node": "^26.6.6",
     "@vitest/browser-playwright": "^5.1.0",
     "@webgpu/types": "^0.1.74",
