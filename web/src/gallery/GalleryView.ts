@@ -24,6 +24,7 @@ function button(className: string, label: string, onClick: () => void): HTMLButt
 }
 
 const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
+const importGlyph = `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M5 14v5h14v-5"/></svg>`;
 const moreGlyph = `<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`;
 
 /** One Drawing's card: its thumbnail, name and date, and its menu. */
@@ -212,9 +213,39 @@ export class GalleryView {
     create.setAttribute("aria-label", "New Drawing");
     create.title = "New Drawing";
 
+    // Opening files: a picker, and dropping them anywhere on the Gallery.
+    const picker = document.createElement("input");
+    picker.type = "file";
+    picker.accept = ".excalidraw";
+    picker.multiple = true;
+    picker.hidden = true;
+    picker.addEventListener("change", () => {
+      void this.importFiles([...(picker.files ?? [])]);
+      picker.value = "";
+    });
+    const open = button("gallery-import", "", () => picker.click());
+    open.innerHTML = importGlyph;
+    open.setAttribute("aria-label", "Open .excalidraw files");
+    open.title = "Open .excalidraw files";
+    this.element.addEventListener("dragover", (event) => {
+      if (!event.dataTransfer?.types.includes("Files")) return;
+      event.preventDefault();
+      this.element.classList.add("dropping");
+    });
+    this.element.addEventListener("dragleave", (event) => {
+      if (!this.element.contains(event.relatedTarget as Node | null)) {
+        this.element.classList.remove("dropping");
+      }
+    });
+    this.element.addEventListener("drop", (event) => {
+      event.preventDefault();
+      this.element.classList.remove("dropping");
+      void this.importFiles([...(event.dataTransfer?.files ?? [])]);
+    });
+
     this.grid.setAttribute("aria-label", "Drawings");
     this.empty.setAttribute("role", "status");
-    this.element.append(heading, this.grid, this.empty, create);
+    this.element.append(heading, this.grid, this.empty, open, create, picker);
     this.buildDialogs();
 
     this.observer = new IntersectionObserver((records) => {
@@ -261,6 +292,16 @@ export class GalleryView {
     this.observer.disconnect();
     for (const card of this.cards.values()) card.dispose();
     this.cards.clear();
+  }
+
+  private async importFiles(files: File[]): Promise<void> {
+    const read = await Promise.all(
+      files.map(async (file) => ({
+        name: file.name,
+        bytes: new Uint8Array(await file.arrayBuffer()),
+      })),
+    );
+    await this.gallery.importDrawings(read);
   }
 
   private readonly cardActions = {

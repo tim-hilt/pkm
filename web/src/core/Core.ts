@@ -1,6 +1,7 @@
 import init, {
   Cursor,
   Editor as WasmEditor,
+  ExportScope,
   PointerButton,
   PointerKind,
   PointerPhase,
@@ -16,7 +17,16 @@ import {
   readGeometry,
 } from "../rendering/GeometryBuffers";
 
-export { Cursor, PointerButton, PointerKind, PointerPhase, Tool };
+export { Cursor, ExportScope, PointerButton, PointerKind, PointerPhase, Tool };
+
+/** What a PNG export shows: the geometry of it and the rectangle of the Scene, in Scene units, that the image is of. Free the geometry when done. */
+export interface ImageExport {
+  geometry: Geometry;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 /** What the Canvas shows: a plain value, as the wasm object is freed on reading. */
 export interface Viewport {
@@ -249,6 +259,31 @@ export class Editor {
 
   geometry(): Geometry {
     return new Geometry(this.inner.geometry(), this.views);
+  }
+
+  /** The ids of the selected Elements. */
+  selection(): string[] {
+    return this.inner.selection();
+  }
+
+  /** What to rasterise for a PNG of `scope`; `undefined` if there is nothing to export. */
+  export(scope: ExportScope): ImageExport | undefined {
+    const inner = this.inner.export(scope);
+    if (!inner) return undefined;
+    const { x, y, width, height } = inner;
+    const geometry = new Geometry(inner.takeGeometry()!, this.views);
+    inner.free();
+    return { geometry, x, y, width, height };
+  }
+
+  /** Whether Pencil-only drawing is on; the first Pencil input may turn it on, so read it after input. */
+  pencilOnlyDrawing(): boolean {
+    return this.inner.pencilOnlyDrawing();
+  }
+
+  /** The user's choice or the stored one; Pencil input no longer turns it on by itself after that. */
+  setPencilOnlyDrawing(on: boolean): void {
+    this.inner.setPencilOnlyDrawing(on);
   }
 
   free(): void {

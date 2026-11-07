@@ -312,6 +312,103 @@
         cursor: pointer;
         touch-action: manipulation;
       }
+      .gallery.dropping {
+        outline: 3px dashed #6965db;
+        outline-offset: -8px;
+      }
+      .gallery-import {
+        position: fixed;
+        right: max(88px, calc(env(safe-area-inset-right) + 68px));
+        bottom: max(28px, calc(env(safe-area-inset-bottom) + 8px));
+        width: 40px;
+        height: 40px;
+        padding: 0;
+        border: 0;
+        border-radius: 20px;
+        background: var(--island-fill);
+        color: var(--control-ink);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 0 3px rgb(0 0 0 / 0.3);
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+      /* The main menu, top right. */
+      .main-menu {
+        position: absolute;
+        top: 16px;
+        right: 16px;
+      }
+      .main-menu-button {
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        border: 0;
+        border-radius: 8px;
+        background: var(--island-fill);
+        color: var(--control-ink);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 0 3px rgb(0 0 0 / 0.2);
+        cursor: pointer;
+        touch-action: manipulation;
+        position: relative;
+      }
+      .main-menu-button::after {
+        content: "";
+        position: absolute;
+        inset: -4px;
+      }
+      .main-menu-items {
+        position: absolute;
+        top: 44px;
+        right: 0;
+        min-width: 220px;
+        padding: 4px;
+        border-radius: 8px;
+        background: var(--island-fill);
+        color: var(--control-ink);
+        box-shadow: 0 2px 10px rgb(0 0 0 / 0.3);
+      }
+      .main-menu-items[hidden] {
+        display: none;
+      }
+      .main-menu-item {
+        display: block;
+        width: 100%;
+        min-height: 44px;
+        padding: 0 12px;
+        border: 0;
+        border-radius: 6px;
+        background: none;
+        color: inherit;
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+      }
+      .main-menu-item:hover:not(:disabled),
+      .main-menu-item:focus-visible {
+        background: rgb(128 128 128 / 0.2);
+      }
+      .main-menu-item:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .main-menu-item[role="menuitemcheckbox"]::before {
+        content: "";
+        display: inline-block;
+        width: 1.4em;
+      }
+      .main-menu-item[aria-checked="true"]::before {
+        content: "✓";
+      }
+      .main-menu-heading {
+        padding: 8px 12px 2px;
+        font-size: 0.75rem;
+        opacity: 0.6;
+      }
       .gallery-empty {
         position: absolute;
         inset: 0;

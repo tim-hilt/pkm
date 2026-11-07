@@ -5,6 +5,9 @@ import { CanvasInput } from "./input/CanvasInput";
 import { ZoomControls } from "./chrome/ZoomControls";
 import { Toolbar } from "./chrome/Toolbar";
 import { UndoRedoControls } from "./chrome/UndoRedoControls";
+import { MainMenu } from "./chrome/MainMenu";
+import type { DrawingSettings } from "./chrome/DrawingSettings";
+import type { DrawingExport } from "./export/DrawingExport";
 import type { Editor } from "./core/Core";
 import type { Excalifont } from "./text/Excalifont";
 
@@ -14,6 +17,9 @@ export interface CanvasHandlers {
   edited(): void;
   /** The user asked to go back to the Gallery. */
   back(): void;
+  /** What the main menu downloads. */
+  export: DrawingExport;
+  settings: DrawingSettings;
 }
 
 /**
@@ -56,6 +62,19 @@ export function showCanvas(
   const zoomControls = new ZoomControls(editor, () => didReachEditor());
   const undoRedo = new UndoRedoControls(editor, () => didReachEditor());
   const toolbar = new Toolbar(editor, () => didReachEditor());
+  const mainMenu = new MainMenu({
+    downloadDrawing: () => void handlers.export.downloadDrawing(),
+    downloadPng: (scope) =>
+      void handlers.export.downloadPng(scope, handlers.settings.exportBackground),
+    hasSelection: () => editor.selection().length > 0,
+    exportBackground: () => handlers.settings.exportBackground,
+    setExportBackground: (on) => (handlers.settings.exportBackground = on),
+    pencilOnlyDrawing: () => handlers.settings.pencilOnlyDrawing(editor),
+    setPencilOnlyDrawing: (on) => {
+      handlers.settings.setPencilOnlyDrawing(editor, on);
+      didReachEditor();
+    },
+  });
   const back = document.createElement("button");
   back.type = "button";
   back.className = "back-to-gallery";
@@ -72,6 +91,7 @@ export function showCanvas(
     zoomControls.update();
     undoRedo.update();
     toolbar.update();
+    mainMenu.update();
     // What a press would do may change with any input or command (a Tool,
     // the space bar, a drag).
     if (pointer) canvas.style.cursor = cssCursor(editor.cursor(pointer.x, pointer.y));
@@ -105,7 +125,7 @@ export function showCanvas(
     didReachEditor();
     renderer.onNeedsDisplay?.();
   };
-  root.replaceChildren(canvas, back, toolbar.element, bottomLeft);
+  root.replaceChildren(canvas, back, toolbar.element, mainMenu.element, bottomLeft);
   const resizing = new ResizeObserver(resize);
   resizing.observe(canvas);
   // The pixel ratio also changes on its own, when the window moves to a
@@ -125,6 +145,7 @@ export function showCanvas(
 
   return () => {
     input.dispose();
+    mainMenu.dispose();
     resizing.disconnect();
     stopWatchingPixelRatio();
     gone = true;

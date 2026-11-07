@@ -364,6 +364,68 @@ impl Editor {
             inner: self.inner.borrow_mut().geometry(),
         }
     }
+
+    /// The ids of the selected Elements.
+    pub fn selection(&self) -> Vec<String> {
+        self.inner.borrow().selection().to_vec()
+    }
+
+    /// What a PNG export shows; `undefined` if there is nothing to export.
+    pub fn export(&self, scope: ExportScope) -> Option<Export> {
+        let export = self.inner.borrow().export(scope.into())?;
+        Some(Export {
+            geometry: Some(Geometry {
+                inner: export.geometry,
+            }),
+            x: export.x,
+            y: export.y,
+            width: export.width,
+            height: export.height,
+        })
+    }
+
+    /// Whether Pencil-only drawing is on; read it after every input, as the
+    /// first Pencil input may turn it on.
+    #[wasm_bindgen(js_name = pencilOnlyDrawing)]
+    pub fn pencil_only_drawing(&self) -> bool {
+        self.inner.borrow().pencil_only_drawing()
+    }
+
+    /// The user's choice (or the stored one) of Pencil-only drawing.
+    #[wasm_bindgen(js_name = setPencilOnlyDrawing)]
+    pub fn set_pencil_only_drawing(&self, on: bool) {
+        self.inner.borrow_mut().set_pencil_only_drawing(on);
+    }
+}
+
+mirror_enum! {
+    /// What to export as an image.
+    ExportScope { Scene, Selection }
+}
+
+/// An image export for the client to rasterise; see
+/// [`excalidraw_native_core::Export`].
+#[wasm_bindgen]
+pub struct Export {
+    geometry: Option<Geometry>,
+    /// The Scene rectangle the image shows, in Scene units.
+    #[wasm_bindgen(readonly)]
+    pub x: f64,
+    #[wasm_bindgen(readonly)]
+    pub y: f64,
+    #[wasm_bindgen(readonly)]
+    pub width: f64,
+    #[wasm_bindgen(readonly)]
+    pub height: f64,
+}
+
+#[wasm_bindgen]
+impl Export {
+    /// The geometry of what is exported; it can be taken once.
+    #[wasm_bindgen(js_name = takeGeometry)]
+    pub fn take_geometry(&mut self) -> Option<Geometry> {
+        self.geometry.take()
+    }
 }
 
 impl Default for Editor {

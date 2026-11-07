@@ -1,4 +1,7 @@
 import { showCanvas } from "./CanvasView";
+import { DrawingSettings } from "./chrome/DrawingSettings";
+import { DrawingExport, downloadInBrowser } from "./export/DrawingExport";
+import { exportPng } from "./export/PngExport";
 import type { Core } from "./core/Core";
 import { DrawingStore } from "./gallery/DrawingStore";
 import { Gallery } from "./gallery/Gallery";
@@ -39,6 +42,8 @@ export async function startApp(
   const gallery = await Gallery.start(store, core, thumbnails);
   if (sample) await gallery.openDrawing(await store.add(sample, "Sample"));
 
+  const settings = new DrawingSettings(localStorage);
+
   let canvas: { drawing: OpenDrawing; stop: () => void } | undefined;
   let galleryView: GalleryView | undefined;
 
@@ -56,6 +61,11 @@ export async function startApp(
         stop: showCanvas(root, device, drawing.editor, font, {
           edited: () => drawing.editorDidChange(),
           back: () => void gallery.close(),
+          settings,
+          export: new DrawingExport(drawing, {
+            save: downloadInBrowser,
+            png: (scope, background) => exportPng(device, font, drawing.editor, scope, background),
+          }),
         }),
       };
     } else {

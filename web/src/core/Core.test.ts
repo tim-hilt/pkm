@@ -3,7 +3,15 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { dashOf, fillKind, stringOf, strokeKind, verbsOf } from "../rendering/GeometryBuffers";
 import { Excalifont } from "../text/Excalifont";
 import { drag, press, step } from "../testing/Gestures";
-import { type Core, type Editor, PointerKind, PointerPhase, Tool, loadCore } from "./Core";
+import {
+  type Core,
+  type Editor,
+  ExportScope,
+  PointerKind,
+  PointerPhase,
+  Tool,
+  loadCore,
+} from "./Core";
 
 const generated = new URL("../../generated/", import.meta.url);
 const sample = readFileSync(new URL("sample.excalidraw", generated));
@@ -98,6 +106,8 @@ describe("the core as wasm", () => {
     const editor = core.makeEditor();
     editor.load(sample);
     editor.setViewSize(800, 600);
+    editor.setViewport({ originX: 0, originY: 0, zoom: 1 });
+    editor.setTool(Tool.Selection);
     expect(editor.canvasColor()).toBe(0xffffffff);
     expect(editor.viewport().zoom).toBeGreaterThan(0);
     editor.setDarkMode(true);
@@ -277,5 +287,100 @@ describe("tools, overlay and undo through the wasm editor", () => {
     editor.zoomIn();
     expect(editor.overlayRevision()).not.toBe(revision);
     editor.free();
+  });
+
+  describe("export", () => {
+    const twoRectangles = () => {
+      const editor = core.makeEditor();
+      const rectangle = (id: string, x: number) =>
+        `{"id":"${id}","type":"rectangle","x":${x},"y":100,"width":100,"height":50,"roundness":null}`;
+      editor.load(drawing(`${rectangle("a", 100)},${rectangle("b", 300)}`));
+      editor.setViewSize(800, 600);
+      return editor;
+    };
+
+    it("frames the Scene with Excalidraw's padding of 10", () => {
+      const editor = twoRectangles();
+      const exported = editor.export(ExportScope.Scene)!;
+      expect([exported.x, exported.y, exported.width, exported.height]).toEqual([90, 90, 320, 70]);
+      exported.geometry.free();
+      editor.free();
+    });
+
+    it("exports the Selection alone, and nothing if there is none", () => {
+      const editor = twoRectangles();
+      expect(editor.export(ExportScope.Selection)).toBeUndefined();
+
+      drag(editor, [[300, 125]]);
+      expect(editor.selection()).toEqual(["b"]);
+      const exported = editor.export(ExportScope.Selection)!;
+      expect([exported.x, exported.width]).toEqual([290, 120]);
+      exported.geometry.free();
+      editor.free();
+    });
+
+    it("has nothing to export from an empty Scene", () => {
+      const editor = core.makeEditor();
+      expect(editor.export(ExportScope.Scene)).toBeUndefined();
+      editor.free();
+    });
+  });
+
+  describe("Pencil-only drawing", () => {
+    it("is off, turns on by itself with the first pen input and is then chosen", () => {
+      const editor = core.makeEditor();
+      expect(editor.pencilOnlyDrawing()).toBe(false);
+      editor.setTool(Tool.Rectangle);
+      drag(
+        editor,
+        [
+          [10, 10],
+          [60, 60],
+        ],
+        PointerKind.Pencil,
+      );
+      expect(editor.pencilOnlyDrawing()).toBe(true);
+      editor.free();
+    });
+
+    it("lets fingers pan, not draw, while it is on", () => {
+      const editor = core.makeEditor();
+      editor.setPencilOnlyDrawing(true);
+      editor.setTool(Tool.Rectangle);
+      drag(
+        editor,
+        [
+          [10, 10],
+          [60, 60],
+        ],
+        PointerKind.Finger,
+      );
+      expect(editor.elementCount()).toBe(0);
+      drag(
+        editor,
+        [
+          [10, 10],
+          [60, 60],
+        ],
+        PointerKind.Pencil,
+      );
+      expect(editor.elementCount()).toBe(1);
+      editor.free();
+    });
+
+    it("stays off when the user chose so, whatever the pen does", () => {
+      const editor = core.makeEditor();
+      editor.setPencilOnlyDrawing(false);
+      drag(
+        editor,
+        [
+          [10, 10],
+          [60, 60],
+        ],
+        PointerKind.Pencil,
+      );
+      expect(editor.pencilOnlyDrawing()).toBe(false);
+      editor.free();
+    });
   });
 });

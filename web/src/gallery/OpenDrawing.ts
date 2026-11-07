@@ -82,6 +82,12 @@ export class OpenDrawing {
     return this.closed ? this.writes : this.enqueue(this.saveViewport(), this.saveScene());
   }
 
+  /** The Drawing's file exactly as stored, with every change so far saved into it. */
+  async file(): Promise<Uint8Array> {
+    await this.saveNow();
+    return this.store.open(this.name);
+  }
+
   /**
    * Leaves the Drawing and saves everything. An empty Scene is not worth a
    * file: it is not saved, and a file that exists is removed, also if the

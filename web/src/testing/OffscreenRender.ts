@@ -22,6 +22,7 @@ export interface RenderHarness {
   scenes: TestScenes;
   /** The core, to load Drawings into. */
   core: Core;
+  font: Excalifont;
   /** A production renderer on the GPU. */
   makeRenderer(): CanvasRenderer;
   /**
@@ -49,6 +50,7 @@ export async function makeRenderHarness(): Promise<RenderHarness> {
   const harness: RenderHarness = {
     device,
     core,
+    font,
     scenes: new TestScenes(core),
     makeRenderer: () => new CanvasRenderer(device, offscreenFormat, font),
     async render(geometry, viewport = defaultViewport, options) {
