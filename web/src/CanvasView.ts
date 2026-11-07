@@ -6,6 +6,7 @@ import { ZoomControls } from "./chrome/ZoomControls";
 import { Toolbar } from "./chrome/Toolbar";
 import { UndoRedoControls } from "./chrome/UndoRedoControls";
 import { PropertiesPanel } from "./chrome/PropertiesPanel";
+import { PhoneChrome } from "./chrome/PhoneChrome";
 import { MainMenu } from "./chrome/MainMenu";
 import type { DrawingSettings } from "./chrome/DrawingSettings";
 import type { DrawingExport } from "./export/DrawingExport";
@@ -69,6 +70,11 @@ export function showCanvas(
     () => didReachEditor(),
     () => false,
   );
+  const phone = new PhoneChrome(
+    editor,
+    () => didReachEditor(),
+    () => false,
+  );
   const mainMenu = new MainMenu({
     downloadDrawing: () => void handlers.export.downloadDrawing(),
     downloadPng: (scope) =>
@@ -99,6 +105,7 @@ export function showCanvas(
     undoRedo.update();
     toolbar.update();
     properties.update();
+    phone.update();
     mainMenu.update();
     // What a press would do may change with any input or command (a Tool,
     // the space bar, a drag).
@@ -131,6 +138,7 @@ export function showCanvas(
     editor.setViewSize(canvas.clientWidth, canvas.clientHeight);
     renderer.paperColor = editor.canvasColor();
     properties.place(canvas.clientWidth, canvas.clientHeight, toolbar.element.offsetWidth);
+    phone.place(canvas.clientWidth);
     didReachEditor();
     renderer.onNeedsDisplay?.();
   };
@@ -139,6 +147,7 @@ export function showCanvas(
     back,
     toolbar.element,
     properties.element,
+    phone.element,
     mainMenu.element,
     bottomLeft,
   );

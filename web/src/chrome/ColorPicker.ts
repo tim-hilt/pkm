@@ -34,6 +34,8 @@ export class ColorPicker {
     topPicks: readonly string[],
     private readonly pick: (color: string) => void,
     private readonly isDark: () => boolean,
+    /** Shows the full picker at once, without the top picks (the phone's popover). */
+    fullAtOnce = false,
   ) {
     this.element.className = "color-picker";
     const row = this.row();
@@ -83,6 +85,11 @@ export class ColorPicker {
     this.invalid.hidden = true;
     this.full.append(field, this.invalid);
     this.element.append(row, this.full);
+    if (fullAtOnce) {
+      row.hidden = true;
+      this.shown = true;
+      this.full.hidden = false;
+    }
   }
 
   /** Shows `selected`, the colour of the Selection (`undefined` where its Elements differ). */

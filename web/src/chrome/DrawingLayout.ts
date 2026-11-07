@@ -35,3 +35,56 @@ export function propertiesMaxHeight(
 ): number {
   return Math.max(0, containerHeight - 166 + (propertiesTopBelowToolbar - top));
 }
+
+/** The phone layout as a CSS media query, the same rule as `layoutFor` (the chrome of the other layout is hidden by it, so that the layout follows resizing and rotation without script). */
+export const phoneQuery = "(max-width: 599px), (max-height: 499px) and (max-width: 999px)";
+
+/** The phone bottom bar (Action row over the toolbar): Excalidraw's `min(100% − 28, 450)`, centred. */
+export function bottomBarWidth(containerWidth: number): number {
+  return Math.max(0, Math.min(containerWidth - 28, 450));
+}
+
+export interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Where a phone popover sits. */
+export interface PopoverPlacement {
+  /** The popover's frame in the container: its content size, capped to the container's width less the edge margins and to `maxHeight`. */
+  frame: Rect;
+  /** The pointer tip's x in the container: always on the anchor's centre. */
+  pointerX: number;
+  /** The tallest the popover may be; it scrolls beyond. */
+  maxHeight: number;
+}
+
+/** Least distance of a popover from the container's edges. */
+export const popoverEdgeMargin = 8;
+/** Gap between a popover's bottom and the bar it belongs to. */
+export const popoverGap = 12;
+
+/** A popover as wide as its content, centred on the anchor but kept `popoverEdgeMargin` from the container's edges, its bottom `popoverGap` above the bar. `barTop` is the bar's top in the container. */
+export function popoverPlacement(
+  anchor: Rect,
+  content: { width: number; height: number },
+  container: { width: number },
+  barTop: number,
+): PopoverPlacement {
+  const maxHeight = Math.max(0, barTop - popoverGap - popoverEdgeMargin);
+  const height = Math.min(content.height, maxHeight);
+  const widest = Math.max(0, container.width - 2 * popoverEdgeMargin);
+  const width = Math.min(content.width, widest);
+  const midX = anchor.x + anchor.width / 2;
+  const x = Math.min(
+    Math.max(midX - width / 2, popoverEdgeMargin),
+    popoverEdgeMargin + widest - width,
+  );
+  return {
+    frame: { x, y: barTop - popoverGap - height, width, height },
+    pointerX: midX,
+    maxHeight,
+  };
+}

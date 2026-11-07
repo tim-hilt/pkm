@@ -58,3 +58,31 @@ export function focusTarget(key: string, current: number, count: number): number
       return undefined;
   }
 }
+
+/**
+ * One button of the phone toolbar. The phone bar has no room for every Tool,
+ * so a family of Tools shares a slot: tapping the slot's armed Tool again
+ * offers the others of its family.
+ */
+export interface MobileToolSlot {
+  /** The family, the slot's default Tool first. */
+  tools: readonly Tool[];
+}
+
+/** Excalidraw's phone order; Insert image and Frame have no Tool yet. */
+export const mobileToolSlots: readonly MobileToolSlot[] = [
+  [Tool.Hand],
+  [Tool.Selection],
+  [Tool.Freedraw],
+  [Tool.Eraser],
+  [Tool.Rectangle, Tool.Diamond, Tool.Ellipse],
+  [Tool.Arrow, Tool.Line],
+  [Tool.Text],
+].map((tools) => ({ tools }));
+
+/** What a slot shows: the armed Tool if it is of the family, else the family's last chosen one, else its default. */
+export function shownTool(slot: MobileToolSlot, current: Tool, last: Tool | undefined): Tool {
+  if (slot.tools.includes(current)) return current;
+  if (last !== undefined && slot.tools.includes(last)) return last;
+  return slot.tools[0];
+}

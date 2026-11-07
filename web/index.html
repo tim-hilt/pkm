@@ -334,6 +334,185 @@
         cursor: pointer;
         touch-action: manipulation;
       }
+      [hidden] {
+        display: none !important;
+      }
+      /* The phone layout (DrawingLayout's phoneQuery, the same rule as
+         layoutFor): the bottom bar in place of the top toolbar and the
+         Properties panel, no zoom buttons (pinch) and undo and redo at the
+         top left. */
+      .phone-chrome {
+        display: none;
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        color: var(--control-ink);
+      }
+      @media (max-width: 599px), (max-height: 499px) and (max-width: 999px) {
+        .phone-chrome {
+          display: block;
+        }
+        .toolbar,
+        .properties-panel,
+        .zoom-controls {
+          display: none;
+        }
+        .bottom-left {
+          bottom: auto;
+          top: max(16px, env(safe-area-inset-top));
+        }
+      }
+      .phone-chrome > * {
+        pointer-events: auto;
+      }
+      .bottom-bar {
+        position: absolute;
+        left: 50%;
+        bottom: max(10px, env(safe-area-inset-bottom));
+        transform: translateX(-50%);
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .action-row {
+        display: flex;
+        gap: 6px;
+        min-height: 43px;
+        align-items: center;
+        pointer-events: none;
+      }
+      .action-row > * {
+        pointer-events: auto;
+      }
+      .mobile-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 4px;
+        background: var(--island-fill);
+        border-radius: 8px;
+        box-shadow: 0 0 3px rgb(0 0 0 / 0.2);
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      .mobile-toolbar button,
+      .family-picker button {
+        position: relative;
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        border: 0;
+        border-radius: 4px;
+        background: none;
+        color: var(--control-ink);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+      .mobile-toolbar button.checked,
+      .family-picker button.checked {
+        background: var(--checked-fill);
+        color: var(--checked-ink);
+      }
+      .row-button {
+        position: relative;
+        width: 32px;
+        height: 32px;
+        padding: 0;
+        border: 0;
+        border-radius: 8px;
+        background: var(--island-fill);
+        color: var(--control-ink);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 0 3px rgb(0 0 0 / 0.2);
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+      .row-button::after,
+      .mobile-toolbar button::after {
+        content: "";
+        position: absolute;
+        inset: -6px;
+      }
+      .row-button.checked {
+        background: var(--checked-fill);
+        color: var(--checked-ink);
+      }
+      .row-swatch {
+        border-radius: 5px;
+        background: var(--swatch);
+        box-shadow: inset 0 0 0 1px var(--divider);
+        color: #fff;
+      }
+      /* The stroke swatch's hatch glyph reads on any colour. */
+      .row-swatch svg {
+        mix-blend-mode: difference;
+      }
+      .row-swatch.checked {
+        background: var(--swatch);
+        outline: 2px solid #6965db;
+        outline-offset: 1px;
+      }
+      .row-swatch.transparent {
+        background:
+          conic-gradient(
+              rgb(128 128 128 / 0.35) 25%,
+              transparent 0 50%,
+              rgb(128 128 128 / 0.35) 0 75%,
+              transparent 0
+            )
+            0 0 / 50% 50%,
+          var(--swatch);
+      }
+      .popover-scrim {
+        position: absolute;
+        inset: 0;
+        touch-action: none;
+      }
+      /* The phone's popover: an island with a pointer tip toward its anchor. */
+      .phone-popover {
+        position: absolute;
+        box-sizing: border-box;
+        width: max-content;
+        background: var(--island-fill);
+        border-radius: 8px;
+        box-shadow:
+          0 0 0.5px rgb(0 0 0 / 0.17),
+          0 0 1.5px rgb(0 0 0 / 0.08),
+          0 7px 7px rgb(0 0 0 / 0.05);
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      .popover-content {
+        box-sizing: border-box;
+        max-height: 100%;
+        height: 100%;
+        padding: 12px;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+      }
+      .popover-tip {
+        position: absolute;
+        top: 100%;
+        width: 14px;
+        height: 7px;
+        margin-left: -7px;
+        background: var(--island-fill);
+        clip-path: polygon(0 0, 100% 0, 50% 100%);
+      }
+      .popover-sections {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .family-picker {
+        display: flex;
+        gap: 4px;
+      }
       /* The Properties panel, on the left (placed by DrawingLayout). */
       .properties-panel {
         position: absolute;

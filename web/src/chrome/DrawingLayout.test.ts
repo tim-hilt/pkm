@@ -1,5 +1,13 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { layoutFor, propertiesMaxHeight, propertiesTop } from "./DrawingLayout";
+import {
+  bottomBarWidth,
+  layoutFor,
+  phoneQuery,
+  popoverPlacement,
+  propertiesMaxHeight,
+  propertiesTop,
+} from "./DrawingLayout";
 
 describe("the layout of a Drawing's container", () => {
   it.each([
@@ -39,5 +47,67 @@ describe("the desktop Properties panel's placement", () => {
 
   it("gets room as it grows above the default top", () => {
     expect(propertiesMaxHeight(832, 16)).toBe(726);
+  });
+});
+
+describe("the phone's bottom bar", () => {
+  it.each([
+    [393, 365], // iPhone portrait: the container less 28
+    [478, 450],
+    [852, 450], // capped
+    [20, 0],
+  ])("is %d wide in a container of that width: %d", (container, bar) => {
+    expect(bottomBarWidth(container)).toBe(bar);
+  });
+});
+
+describe("a phone popover's placement", () => {
+  const container = { width: 393, height: 852 };
+  const content = { width: 200, height: 150 };
+  const anchor = (midX: number) => ({ x: midX - 16, y: 700, width: 32, height: 32 });
+
+  it("is centred on its anchor, its bottom a gap above the bar", () => {
+    const place = popoverPlacement(anchor(200), content, container, 690);
+    expect(place.frame).toEqual({ x: 100, y: 690 - 12 - 150, width: 200, height: 150 });
+    expect(place.pointerX).toBe(200);
+  });
+
+  it("keeps clear of the container's edges while the pointer stays on the anchor", () => {
+    const left = popoverPlacement(anchor(30), content, container, 690);
+    expect(left.frame.x).toBe(8);
+    expect(left.pointerX).toBe(30);
+    const right = popoverPlacement(anchor(380), content, container, 690);
+    expect(right.frame.x + right.frame.width).toBe(385);
+  });
+
+  it("is capped to the room above the bar and to the width of the container", () => {
+    const place = popoverPlacement(anchor(200), { width: 900, height: 900 }, container, 300);
+    expect(place.maxHeight).toBe(300 - 12 - 8);
+    expect(place.frame).toEqual({ x: 8, y: 300 - 12 - 280, width: 377, height: 280 });
+  });
+});
+
+describe("the phone's media query", () => {
+  it("is the one the page's stylesheet uses", () => {
+    const page = readFileSync(new URL("../../index.html", import.meta.url), "utf8");
+    expect(page).toContain(`@media ${phoneQuery} {`);
+  });
+
+  it("is the same rule as layoutFor", () => {
+    // Evaluates the query's two clauses at the layout's boundary sizes.
+    const matches = (width: number, height: number) =>
+      phoneQuery.split(", ").some((clause) => {
+        const limit = (name: string) =>
+          Number(new RegExp(`\\(${name}: (\\d+)px\\)`).exec(clause)?.[1] ?? Infinity);
+        const minmax = (name: string, size: number) =>
+          size <= limit(`max-${name}`) &&
+          size >= Number(new RegExp(`\\(min-${name}: (\\d+)px\\)`).exec(clause)?.[1] ?? 0);
+        return minmax("width", width) && minmax("height", height);
+      });
+    for (const width of [598, 599, 600, 999, 1000])
+      for (const height of [499, 500, 501])
+        expect(matches(width, height), `${width}x${height}`).toBe(
+          layoutFor(width, height) === "mobile",
+        );
   });
 });
