@@ -1,5 +1,5 @@
 //! Cloud Providers (ADR-0012): the storage interface, the directory storage,
-//! the WebDAV storage, iCloud Drive, Google Drive and OneDrive with the OAuth
+//! the WebDAV protocol and storage, iCloud Drive, Google Drive and OneDrive with the OAuth
 //! sign-in and the HTTP client they share, and the Sync engine and loop on
 //! top of them. Blocking, no async runtime. What needs the operating system or
 //! a blocking network sits behind the `native` feature (on by default); without
@@ -15,7 +15,6 @@ pub mod icloud;
 mod oauth;
 #[cfg(feature = "native")]
 pub mod onedrive;
-#[cfg(feature = "native")]
 mod percent;
 pub mod schedule;
 #[cfg(feature = "native")]
@@ -28,6 +27,7 @@ mod sync;
 mod sync_loop;
 #[cfg(feature = "native")]
 pub mod webdav;
+pub mod webdav_protocol;
 
 #[cfg(all(test, feature = "native"))]
 mod fake_google;
