@@ -89,12 +89,15 @@ export class OpenDrawing {
   }
 
   /**
-   * Leaves the Drawing and saves everything. An empty Scene is not worth a
-   * file: it is not saved, and a file that exists is removed, also if the
-   * Drawing was emptied just now. Nothing is written after that.
+   * Leaves the Drawing and saves everything: a text being edited is committed
+   * as typed (its Text view is gone with the Canvas, before it could end the
+   * editing). An empty Scene is not worth a file: it is not saved, and a file
+   * that exists is removed, also if the Drawing was emptied just now. Nothing
+   * is written after that.
    */
   close(): Promise<void> {
     if (this.closed) return this.writes;
+    this.editor.commitText();
     this.stopTimer();
     const writes =
       this.editor.elementCount() > 0

@@ -3,7 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { type Core, type Editor, Tool, loadCore } from "../core/Core";
 import { MemoryStorage } from "../storage/MemoryStorage";
 import { Excalifont } from "../text/Excalifont";
-import { drag } from "../testing/Gestures";
+import { drag, tap } from "../testing/Gestures";
 import { DrawingStore } from "./DrawingStore";
 import { OpenDrawing } from "./OpenDrawing";
 
@@ -172,6 +172,21 @@ describe("leaving", () => {
     const drawing = await openNew();
     drawRectangle(drawing);
     await drawing.close();
+    expect(await savedElementCount(drawing.name)).toBe(1);
+  });
+
+  it("commits a text being edited, as typed", async () => {
+    const drawing = await openNew();
+    drawing.editor.setViewSize(800, 600);
+    drawing.editor.setTool(Tool.Text);
+    tap(drawing.editor, 300, 200);
+    drawing.editor.setEditingText("Hi");
+    drawing.editorDidChange();
+
+    await drawing.close();
+
+    expect(drawing.editor.textEditor()).toBeUndefined();
+    expect(drawing.editor.canUndo()).toBe(true);
     expect(await savedElementCount(drawing.name)).toBe(1);
   });
 

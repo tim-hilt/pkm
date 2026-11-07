@@ -92,9 +92,12 @@ export class CanvasInput {
     if (this.pressed.has(e.pointerId)) return;
     // Keeps the browser from selecting, dragging or focusing; but the chrome
     // loses focus as on any press elsewhere, or a toolbar button clicked last
-    // would keep the space bar from panning.
+    // would keep the space bar from panning. The Text view (the only
+    // textarea) keeps it: the core ends its editing with this press (a tap
+    // commits), and its blur would end it first, letting the press act anew.
     e.preventDefault();
-    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && !(focused instanceof HTMLTextAreaElement)) focused.blur();
     if (e.pointerType === "touch") this.touches++;
     const button = pointerButton(e.button);
     this.pressed.set(e.pointerId, button);

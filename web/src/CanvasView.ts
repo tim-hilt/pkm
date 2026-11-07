@@ -87,6 +87,15 @@ export function showCanvas(
     () => didReachEditor(),
     () => false,
   );
+  // The properties' chrome leaves the focus in the Text view, as the native
+  // app's does: a property picked while typing styles the text being edited,
+  // which stays open (the core's rule), where the Text view's blur would
+  // commit it first. Fields still take the focus.
+  const keepTextViewFocus = (e: MouseEvent) => {
+    if (textView.isOpen && !(e.target instanceof HTMLInputElement)) e.preventDefault();
+  };
+  properties.element.addEventListener("mousedown", keepTextViewFocus);
+  phone.element.addEventListener("mousedown", keepTextViewFocus);
   const mainMenu = new MainMenu({
     downloadDrawing: () => void handlers.export.downloadDrawing(),
     downloadPng: (scope) =>

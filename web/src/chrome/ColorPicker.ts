@@ -26,6 +26,8 @@ export class ColorPicker {
   private readonly hex = document.createElement("input");
   private readonly invalid = document.createElement("div");
   private selected: string | undefined;
+  /** The colour the shades row was made for; `null` before it is made. */
+  private shadesOf: string | undefined | null = null;
   private shown = false;
 
   constructor(
@@ -51,6 +53,8 @@ export class ColorPicker {
       this.full.hidden = !this.shown;
       this.more.setAttribute("aria-expanded", String(this.shown));
       this.more.classList.toggle("open", this.shown);
+      // The shades and the hex code are filled in only while shown.
+      this.update(this.selected);
     });
     row.append(divider, this.more);
 
@@ -102,10 +106,14 @@ export class ColorPicker {
     this.more.setAttribute("aria-description", selected ? colorName(selected) : "");
 
     if (!this.full.hidden) {
-      const colors = shadesOf(selected);
-      this.shades.replaceChildren(
-        ...(colors?.map((color) => this.swatch(color, 26, false)) ?? [this.noShades()]),
-      );
+      // Made again only for another colour, not on every event.
+      if (this.shadesOf !== selected) {
+        this.shadesOf = selected;
+        const colors = shadesOf(selected);
+        this.shades.replaceChildren(
+          ...(colors?.map((color) => this.swatch(color, 26, false)) ?? [this.noShades()]),
+        );
+      }
       if (document.activeElement !== this.hex) {
         this.hex.value = hexDigits(selected);
         this.invalid.hidden = true;

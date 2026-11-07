@@ -44,7 +44,7 @@ export class PhoneChrome {
           this.openFamily = undefined;
           this.model.tap(item);
         },
-        changed: () => this.changed(),
+        changed: onChange,
       },
       isDark,
     );
@@ -52,16 +52,16 @@ export class PhoneChrome {
       openFamily: (slot) => {
         this.model.close();
         this.openFamily = this.openFamily === slot ? undefined : slot;
-        this.changed();
+        this.onChange();
       },
       changed: () => {
         this.close();
-        this.changed();
+        this.onChange();
       },
     });
     this.popover = new PhonePopover(this.element, () => {
       this.close();
-      this.changed();
+      this.onChange();
     });
     this.bar.append(this.row.element, this.toolbar.element);
     this.element.append(this.popover.scrim, this.bar, this.popover.element);
@@ -84,10 +84,6 @@ export class PhoneChrome {
     this.row.update();
     this.toolbar.update();
     this.showPopover();
-  }
-
-  private changed(): void {
-    this.onChange();
   }
 
   private close(): void {
@@ -136,7 +132,7 @@ export class PhoneChrome {
       button.addEventListener("click", () => {
         this.toolbar.choose(slot, tool);
         this.close();
-        this.changed();
+        this.onChange();
       });
       picker.append(button);
     }

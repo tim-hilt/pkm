@@ -15,7 +15,7 @@ import {
  * The groups of the Properties panel as data: each has a title, its option
  * set (with the icon and the name a screen reader reads), what the editor
  * says is chosen, and the property a pick sets. The panel stacks them; the
- * phone's popovers will pick the ones they need. A port of the Swift
+ * phone's popovers pick the ones they need. A port of the Swift
  * `PropertyGroups`.
  */
 
