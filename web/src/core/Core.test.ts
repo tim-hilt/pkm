@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
 import { dashOf, fillKind, stringOf, strokeKind, verbsOf } from "../rendering/GeometryBuffers";
 import { Excalifont } from "../text/Excalifont";
-import { drag, press, step } from "../testing/Gestures";
+import { drag, press, step, tap } from "../testing/Gestures";
 import {
   type Core,
   type Editor,
@@ -382,5 +382,131 @@ describe("tools, overlay and undo through the wasm editor", () => {
       expect(editor.pencilOnlyDrawing()).toBe(false);
       editor.free();
     });
+  });
+});
+
+/** Creating and editing text through the editor: taps open the text editor where the core says, and what is typed reaches it. */
+describe("editing text", () => {
+  const hello = drawing(
+    `{"id":"hello","type":"text","x":100,"y":50,"width":50,"height":25,"text":"Hello","originalText":"Hello","fontSize":20,"fontFamily":5,"lineHeight":1.25,"textAlign":"left","verticalAlign":"top","containerId":null,"autoResize":true,"version":3,"versionNonce":7}`,
+  );
+  const rectangle = drawing(
+    `{"id":"r","type":"rectangle","x":100,"y":100,"width":200,"height":100,"strokeColor":"#1e1e1e","strokeWidth":2}`,
+  );
+
+  const open = (scene = hello) => {
+    const editor = core.makeEditor();
+    editor.load(scene);
+    editor.setViewSize(800, 600);
+    return editor;
+  };
+
+  it("opens the text editor at a tap with the text Tool, as the core says", () => {
+    const editor = open();
+    editor.setTool(Tool.Text);
+    expect(editor.textEditor()).toBeUndefined();
+
+    tap(editor, 300, 200);
+
+    const shown = editor.textEditor()!;
+    expect(shown.y).toBe(187.5);
+    expect(shown.fontSize).toBe(20);
+    expect(shown.text).toBe("");
+    editor.free();
+  });
+
+  it("sizes the text editor to what is typed", () => {
+    const editor = open();
+    editor.setTool(Tool.Text);
+    tap(editor, 300, 200);
+
+    editor.setEditingText("ll");
+
+    // Excalifont's "l" advances 225 units of 1000: two at 20 points.
+    const shown = editor.textEditor()!;
+    expect(shown.text).toBe("ll");
+    expect(shown.width).toBeCloseTo(9, 9);
+    editor.free();
+  });
+
+  it("follows zooming with the font size and position", () => {
+    const editor = open();
+    editor.setTool(Tool.Text);
+    tap(editor, 300, 200);
+    const before = editor.textEditor()!;
+
+    editor.zoomIn();
+
+    const shown = editor.textEditor()!;
+    expect(shown.zoom).toBeCloseTo(1.1, 9);
+    expect(shown.fontSize).toBeCloseTo(22, 9);
+    expect(shown.x).not.toBe(before.x);
+    editor.free();
+  });
+
+  it("keeps the text and ends the editing on commit, as one undo step", () => {
+    const editor = open();
+    editor.setTool(Tool.Text);
+    tap(editor, 300, 200);
+    editor.setEditingText("Hi");
+
+    editor.commitText();
+
+    expect(editor.textEditor()).toBeUndefined();
+    expect(editor.elementCount()).toBe(2);
+    expect(editor.canUndo()).toBe(true);
+    editor.free();
+  });
+
+  it("does not keep empty text", () => {
+    const editor = open();
+    editor.setTool(Tool.Text);
+    tap(editor, 300, 200);
+
+    editor.commitText();
+
+    expect(editor.elementCount()).toBe(1);
+    expect(editor.canUndo()).toBe(false);
+    editor.free();
+  });
+
+  it("commits on a tap elsewhere on the Canvas", () => {
+    const editor = open();
+    editor.setTool(Tool.Text);
+    tap(editor, 300, 200);
+    editor.setEditingText("Hi");
+
+    tap(editor, 600, 500);
+
+    expect(editor.textEditor()).toBeUndefined();
+    expect(editor.elementCount()).toBe(2);
+    editor.free();
+  });
+
+  it("opens a double-tap on a text with its text", () => {
+    const editor = open();
+
+    tap(editor, 120, 60);
+    expect(editor.textEditor()).toBeUndefined();
+    tap(editor, 120, 60);
+
+    expect(editor.textEditor()?.text).toBe("Hello");
+    editor.free();
+  });
+
+  it("opens the Label of a double-tapped shape and of a selected shape on Enter", () => {
+    const editor = open(rectangle);
+    tap(editor, 200, 150);
+    tap(editor, 200, 150);
+    expect(editor.textEditor()).toBeDefined();
+    editor.cancelText();
+    expect(editor.textEditor()).toBeUndefined();
+
+    editor.setTool(Tool.Selection);
+    // An empty shape is hit on its edge.
+    tap(editor, 100, 150);
+    editor.editSelectedText();
+    expect(editor.textEditor()).toBeDefined();
+    editor.free();
   });
 });

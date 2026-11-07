@@ -3,6 +3,7 @@ import { loadCore } from "./core/Core";
 import { MemoryStorage } from "./storage/MemoryStorage";
 import { OpfsStorage } from "./storage/OpfsStorage";
 import { Excalifont } from "./text/Excalifont";
+import { loadExcalifontWebFont } from "./text/WebFont";
 import { acquireDevice, showUnsupportedPage } from "./WebGPUSupport";
 import wasmUrl from "../generated/excalidraw_native_web_bg.wasm";
 import fontUrl from "../generated/Excalifont-Regular.ttf";
@@ -15,7 +16,9 @@ async function main(): Promise<void> {
   if (!device) return showUnsupportedPage(root);
 
   // The font is loaded before the first frame: text is measured and drawn with it.
-  const font = new Excalifont(new Uint8Array(await (await fetch(fontUrl)).arrayBuffer()));
+  const fontBytes = new Uint8Array(await (await fetch(fontUrl)).arrayBuffer());
+  const font = new Excalifont(fontBytes);
+  await loadExcalifontWebFont(fontBytes);
   const core = await loadCore(fetch(wasmUrl), font);
   // `?sample` opens the sample Drawing, in temporary storage: nothing of it is kept.
   if (new URLSearchParams(location.search).has("sample")) {

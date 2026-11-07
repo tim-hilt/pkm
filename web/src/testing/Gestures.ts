@@ -50,3 +50,11 @@ export function press(editor: Editor, points: [number, number][]): void {
   editor.pointer(step(PointerPhase.Down, points[0]));
   for (const point of points.slice(1)) editor.pointer(step(PointerPhase.Move, point));
 }
+
+/** A finger going down and up at `(x, y)`, 50 ms apart; successive taps are 150 ms apart, a double-tap. */
+export function tap(editor: Editor, x: number, y: number): void {
+  clock += 0.15;
+  editor.pointer(step(PointerPhase.Down, [x, y], PointerKind.Finger));
+  clock += 0.04;
+  editor.pointer(step(PointerPhase.Up, [x, y], PointerKind.Finger));
+}

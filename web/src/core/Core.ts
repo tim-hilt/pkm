@@ -104,6 +104,32 @@ export interface Viewport {
   zoom: number;
 }
 
+/** The text view to show over the Canvas while a text is edited, in Canvas points. */
+export interface TextEditor {
+  /** The text as typed: what the text view starts with. */
+  text: string;
+  /** The top left corner of the box, from the Canvas's top left. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** In view points: the Scene's times the zoom. */
+  fontSize: number;
+  /** Relative to the font size. */
+  lineHeight: number;
+  fontFamily: number;
+  align: TextAlign;
+  /** `0xRRGGBBAA`. */
+  color: number;
+  /** `0..1`. */
+  opacity: number;
+  /** Clockwise, in radians. */
+  angle: number;
+  zoom: number;
+  /** Whether the text wraps to the width of the box instead of growing. */
+  fixedWidth: boolean;
+}
+
 /** Modifier keys held while an event happened. */
 export interface Modifiers {
   shift: boolean;
@@ -402,6 +428,50 @@ export class Editor {
     else if ("opacity" in property) this.inner.setOpacity(property.opacity);
     else if ("fontSize" in property) this.inner.setFontSize(property.fontSize);
     else this.inner.setTextAlign(property.textAlign);
+  }
+
+  /** The text view to show, `undefined` if no text is edited; read it with the viewport after every input or command. */
+  textEditor(): TextEditor | undefined {
+    const shown = this.inner.textEditor();
+    if (!shown) return undefined;
+    const result: TextEditor = {
+      text: shown.text,
+      x: shown.x,
+      y: shown.y,
+      width: shown.width,
+      height: shown.height,
+      fontSize: shown.fontSize,
+      lineHeight: shown.lineHeight,
+      fontFamily: shown.fontFamily,
+      align: shown.align,
+      color: shown.color,
+      opacity: shown.opacity,
+      angle: shown.angle,
+      zoom: shown.zoom,
+      fixedWidth: shown.fixedWidth,
+    };
+    shown.free();
+    return result;
+  }
+
+  /** Tells the core what the text view says now. */
+  setEditingText(text: string): void {
+    this.inner.setEditingText(text);
+  }
+
+  /** Ends the editing and keeps the text (one undo step); empty text is not kept. */
+  commitText(): void {
+    this.inner.commitText();
+  }
+
+  /** Ends the editing and keeps the text as it was. */
+  cancelText(): void {
+    this.inner.cancelText();
+  }
+
+  /** Enter: edits the text or the Label of the selected Element. */
+  editSelectedText(): void {
+    this.inner.editSelectedText();
   }
 
   duplicate(): void {

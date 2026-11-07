@@ -8,6 +8,8 @@ import { UndoRedoControls } from "./chrome/UndoRedoControls";
 import { PropertiesPanel } from "./chrome/PropertiesPanel";
 import { PhoneChrome } from "./chrome/PhoneChrome";
 import { MainMenu } from "./chrome/MainMenu";
+import { TextEditorOverlay } from "./text/TextEditorOverlay";
+import { caretClearOf, keyboardCovering } from "./text/KeyboardAvoidance";
 import type { DrawingSettings } from "./chrome/DrawingSettings";
 import type { DrawingExport } from "./export/DrawingExport";
 import type { Editor } from "./core/Core";
@@ -57,6 +59,16 @@ export function showCanvas(
     });
   };
 
+  const textView = new TextEditorOverlay();
+  textView.onChange = (text) => {
+    editor.setEditingText(text);
+    didReachEditor();
+  };
+  textView.onEnd = () => {
+    editor.commitText();
+    didReachEditor();
+  };
+
   const sync = new SceneSync(editor, renderer);
   sync.showScene();
 
@@ -97,8 +109,33 @@ export function showCanvas(
   const bottomLeft = document.createElement("div");
   bottomLeft.className = "bottom-left";
   bottomLeft.append(zoomControls.element, undoRedo.element);
+  /**
+   * Shows the Text view where the core says, or takes it away if no text is
+   * edited; like the viewport it follows panning and zooming. Keeps the
+   * caret's line above the on-screen keyboard, which only pans the viewport
+   * (and does not pan back afterwards). Returns whether it panned.
+   */
+  const syncTextView = (): boolean => {
+    const shown = editor.textEditor();
+    if (!shown) {
+      textView.hide();
+      return false;
+    }
+    textView.show(shown, root);
+    const visual = window.visualViewport;
+    const caret = textView.caret(shown);
+    if (!visual || !caret) return false;
+    const bounds = canvas.getBoundingClientRect();
+    const keyboard = keyboardCovering(bounds, visual, document.documentElement.clientHeight);
+    const panned = caretClearOf(keyboard, caret, editor.viewport());
+    if (!panned) return false;
+    editor.setViewport(panned);
+    return true;
+  };
   /** Shows whatever the editor did with an input or command. */
   const didReachEditor = () => {
+    // Panning for the keyboard moves the Text view too: shown once more.
+    if (syncTextView()) syncTextView();
     sync.sync();
     handlers.edited();
     zoomControls.update();
@@ -125,6 +162,7 @@ export function showCanvas(
     scroll: send((e) => editor.scroll(e)),
     magnify: send((e) => editor.magnify(e)),
     setPanKey: send((held) => editor.setPanKey(held)),
+    editSelectedText: send(() => editor.editSelectedText()),
     hover: (x, y) => {
       pointer = { x, y };
       canvas.style.cursor = cssCursor(editor.cursor(x, y));
@@ -151,6 +189,12 @@ export function showCanvas(
     mainMenu.element,
     bottomLeft,
   );
+  // The keyboard coming up or going shrinks or grows the visual viewport.
+  const visual = window.visualViewport;
+  const keyboardChanged = () => {
+    if (syncTextView()) didReachEditor();
+  };
+  visual?.addEventListener("resize", keyboardChanged);
   const resizing = new ResizeObserver(resize);
   resizing.observe(canvas);
   // The pixel ratio also changes on its own, when the window moves to a
@@ -171,6 +215,8 @@ export function showCanvas(
   return () => {
     input.dispose();
     mainMenu.dispose();
+    visual?.removeEventListener("resize", keyboardChanged);
+    textView.hide();
     resizing.disconnect();
     stopWatchingPixelRatio();
     gone = true;

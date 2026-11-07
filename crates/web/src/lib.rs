@@ -201,6 +201,54 @@ impl Editor {
         ViewportState::new(origin_x, origin_y, viewport.zoom())
     }
 
+    /// The text view to show over the Canvas, `undefined` if no text is being
+    /// edited; see [`excalidraw_native_core::Editor::text_editor`]. Read it
+    /// with the viewport after every input or command.
+    #[wasm_bindgen(js_name = textEditor)]
+    pub fn text_editor(&self) -> Option<TextEditor> {
+        let e = self.inner.borrow().text_editor()?;
+        Some(TextEditor {
+            text: e.text,
+            x: e.x,
+            y: e.y,
+            width: e.width,
+            height: e.height,
+            font_size: e.font_size,
+            line_height: e.line_height,
+            font_family: e.font_family,
+            align: e.align.into(),
+            color: e.color,
+            opacity: e.opacity,
+            angle: e.angle,
+            zoom: e.zoom,
+            fixed_width: e.fixed_width,
+        })
+    }
+
+    /// Tells the core what the text view says now.
+    #[wasm_bindgen(js_name = setEditingText)]
+    pub fn set_editing_text(&self, text: &str) {
+        self.inner.borrow_mut().set_editing_text(text);
+    }
+
+    /// Ends the editing of the text and keeps it.
+    #[wasm_bindgen(js_name = commitText)]
+    pub fn commit_text(&self) {
+        self.inner.borrow_mut().commit_text();
+    }
+
+    /// Ends the editing of the text and keeps it as it was.
+    #[wasm_bindgen(js_name = cancelText)]
+    pub fn cancel_text(&self) {
+        self.inner.borrow_mut().cancel_text();
+    }
+
+    /// Opens the text view on the text or label of the Selection (Enter).
+    #[wasm_bindgen(js_name = editSelectedText)]
+    pub fn edit_selected_text(&self) {
+        self.inner.borrow_mut().edit_selected_text();
+    }
+
     /// Shows the Scene from the given viewport; not a change of the Scene.
     #[wasm_bindgen(js_name = setViewport)]
     pub fn set_viewport(&self, viewport: &ViewportState) {
@@ -561,6 +609,34 @@ impl Editor {
     fn set_property(&self, property: excalidraw_native_core::Property) {
         self.inner.borrow_mut().set_property(property);
     }
+}
+
+/// The text view to show over the Canvas while a text is edited, in view
+/// coordinates; see [`excalidraw_native_core::TextEditor`].
+#[wasm_bindgen(getter_with_clone)]
+pub struct TextEditor {
+    /// The text as typed: what the text view starts with.
+    pub text: String,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    #[wasm_bindgen(js_name = fontSize)]
+    pub font_size: f64,
+    #[wasm_bindgen(js_name = lineHeight)]
+    pub line_height: f64,
+    #[wasm_bindgen(js_name = fontFamily)]
+    pub font_family: u32,
+    pub align: TextAlign,
+    /// `0xRRGGBBAA`.
+    pub color: u32,
+    /// `0..1`.
+    pub opacity: f64,
+    /// Clockwise, in radians.
+    pub angle: f64,
+    pub zoom: f64,
+    #[wasm_bindgen(js_name = fixedWidth)]
+    pub fixed_width: bool,
 }
 
 /// What the properties panel shows: `undefined` where the Selection's

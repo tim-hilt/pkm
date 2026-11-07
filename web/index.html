@@ -45,6 +45,21 @@
       #app {
         position: relative;
       }
+      /* The Text view (TextEditorOverlay): the box of the text, nothing else.
+         Placement and look come from the core, inline. */
+      .text-view {
+        position: absolute;
+        box-sizing: border-box;
+        margin: 0;
+        border: 0;
+        outline: none;
+        background: transparent;
+        resize: none;
+        overflow: hidden;
+        transform-origin: center;
+        /* The page never zooms for it: 16px or more is not what it is set in. */
+        touch-action: manipulation;
+      }
       /* Excalidraw's bottom-left controls; 16px margins as in DrawingLayout. */
       .bottom-left {
         position: absolute;

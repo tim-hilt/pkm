@@ -19,6 +19,8 @@ export interface InputSink {
   scroll(event: CoreScrollEvent): void;
   magnify(event: CoreMagnifyEvent): void;
   setPanKey(held: boolean): void;
+  /** Enter was pressed with nothing else taking it: edits the text of the Selection. */
+  editSelectedText(): void;
   /** The mouse moved over the Canvas without a button down. */
   hover(x: number, y: number): void;
 }
@@ -62,6 +64,9 @@ export class CanvasInput {
     on("contextmenu", (e) => e.preventDefault());
     on("dragstart", (e) => e.preventDefault());
     on("selectstart", (e) => e.preventDefault());
+    // The browser would move the focus from the Text view to the page when the
+    // Canvas is pressed; the core ends the editing itself (a tap commits).
+    on("mousedown", (e) => e.preventDefault());
     for (const type of ["gesturestart", "gesturechange", "gestureend"]) {
       canvas.addEventListener(type, (e) => this.gesture(type, e as GestureEvent), {
         passive: false,
@@ -145,13 +150,22 @@ export class CanvasInput {
     this.lastGestureScale = e.scale;
   }
 
-  /** The space bar pans while held. A text field keeps its space. */
+  /** The space bar pans while held, Enter edits the text of the Selection. A text field keeps its keys, a button its Enter. */
   private key(e: KeyboardEvent, down: boolean): void {
-    if (e.code !== "Space") return;
+    const isSpace = e.code === "Space";
+    const isEnter = e.key === "Enter" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey;
+    if (!isSpace && !isEnter) return;
     const target = e.target;
     const typing =
       target instanceof HTMLElement &&
       (target.isContentEditable || /^(input|textarea|select|button)$/i.test(target.tagName));
+    if (isEnter) {
+      if (down && !typing) {
+        e.preventDefault();
+        this.sink.editSelectedText();
+      }
+      return;
+    }
     if (down && typing) return;
     if (down) e.preventDefault();
     this.sink.setPanKey(down);
