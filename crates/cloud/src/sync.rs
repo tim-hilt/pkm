@@ -1,44 +1,18 @@
-//! The Sync engine (ADR-0011): one step makes the Device's Drawings folder and
-//! the cloud folder agree for every Drawing changed on one side only.
-//!
-//! A Drawing is its file name, `<name>.excalidraw`, on both sides. For each
-//! name the step compares the local file and the cloud blob with what this
-//! Device remembers of the last Sync (`SyncState`): the bytes then, and the
-//! blob's change marker then.
-//!
-//! A Drawing present on both sides without any history is merged without a
-//! base if both are the same Drawing (`are_same_drawing`); otherwise both are
-//! kept and the local one is renamed to the next free name ("Sketch 2").
-//!
-//! A Drawing changed on both sides is merged (`merge_drawings`) and the result
-//! written to both. The same merge runs when only one side changed:
-//! - the cloud, since the change may be another Device's upload overwriting
-//!   ours without having seen it (there is no conditional write): what the
-//!   cloud then lacks is uploaded again;
-//! - this Device, against the last-Synced bytes the cloud still holds, since
-//!   the open Drawing may have saved over newer versions Sync wrote (it keeps
-//!   its own version of an Element being dragged): they are not taken back.
-//!
-//! A poll costs one listing and a scan of the Drawings folder's names and
-//! stamps (`Stamp`): a Drawing whose cloud marker and local stamp are the ones
-//! remembered is unchanged and is not read.
-//!
-//! A file that can't be parsed never replaces a Drawing on the other side: it
-//! is skipped, and left as it is on both sides.
+//! The native Sync runner (ADR-0016): answers the requests of the Sync step
+//! machine (`step`, where the rules of ADR-0011 live) with file access in the
+//! Drawings folder and the Sync state folder, and the blocking `Storage`.
 
-use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use excalidraw_native_core::{are_same_drawing, is_drawing, merge_drawings};
-
+use crate::step::{
+    LocalFile, Marks, Next, Progress, Request, Response, StepOutcome, SyncStep, Synced,
+    is_drawing_file,
+};
 use crate::storage::{Storage, write_file_atomically};
-
-/// The file extension of a Drawing, with its dot.
-const EXTENSION: &str = ".excalidraw";
 
 /// What this Device remembers of each Drawing at its last Sync, in a folder of
 /// its own: never inside the Drawings folder, never Synced. Forgotten on
@@ -46,70 +20,6 @@ const EXTENSION: &str = ".excalidraw";
 #[derive(Debug, Clone)]
 pub struct SyncState {
     dir: PathBuf,
-}
-
-/// Which file a local Drawing is, cheaply: its inode, modification time and
-/// size. Sync writes files by renaming a new one into place, which gives a new
-/// inode, and an edit in place changes the modification time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Stamp {
-    inode: u64,
-    mtime_ns: u128,
-    size: u64,
-}
-
-/// How long a file must have been left alone for its stamp to be trusted:
-/// file systems with coarse clocks can give two writes the same time.
-const SETTLED: Duration = Duration::from_secs(2);
-
-impl Stamp {
-    fn of(meta: &fs::Metadata) -> Self {
-        #[cfg(unix)]
-        let inode = std::os::unix::fs::MetadataExt::ino(meta);
-        #[cfg(not(unix))]
-        let inode = 0;
-        Self {
-            inode,
-            mtime_ns: meta
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .map_or(0, |t| t.as_nanos()),
-            size: meta.len(),
-        }
-    }
-
-    /// Whether the file has been unchanged for long enough to rely on. Not
-    /// when its time is unknown or in the future.
-    fn settled(&self) -> bool {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |t| t.as_nanos());
-        self.mtime_ns != 0
-            && now.saturating_sub(self.mtime_ns) >= SETTLED.as_nanos()
-            && self.mtime_ns <= now
-    }
-
-    fn to_text(self) -> String {
-        format!("{} {} {}", self.inode, self.mtime_ns, self.size)
-    }
-
-    fn from_text(text: &str) -> Option<Self> {
-        let mut parts = text.split_whitespace();
-        let stamp = Self {
-            inode: parts.next()?.parse().ok()?,
-            mtime_ns: parts.next()?.parse().ok()?,
-            size: parts.next()?.parse().ok()?,
-        };
-        parts.next().is_none().then_some(stamp)
-    }
-}
-
-/// A Drawing as of the last Sync.
-struct Synced {
-    bytes: Vec<u8>,
-    /// The cloud blob's change marker when it was last seen.
-    marker: String,
 }
 
 impl SyncState {
@@ -155,21 +65,18 @@ impl SyncState {
 
     /// The stamp the local file had when it was read and found equal to the
     /// remembered bytes. Gone as soon as those change.
-    fn stamp(&self, file: &str) -> io::Result<Option<Stamp>> {
+    fn stamp(&self, file: &str) -> io::Result<Option<String>> {
         match fs::read_to_string(self.dir.join("stamps").join(file)) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(e) if e.kind() == io::ErrorKind::InvalidData => Ok(None),
-            other => other.map(|text| Stamp::from_text(&text)),
+            other => other.map(Some),
         }
     }
 
     /// Remembers that the local file with `stamp` holds the remembered bytes.
     /// `stamp` must have been taken before the read that showed it.
-    fn set_stamp(&self, file: &str, stamp: Stamp) -> io::Result<()> {
-        write_file_atomically(
-            &self.dir.join("stamps").join(file),
-            stamp.to_text().as_bytes(),
-        )
+    fn set_stamp(&self, file: &str, stamp: &str) -> io::Result<()> {
+        write_file_atomically(&self.dir.join("stamps").join(file), stamp.as_bytes())
     }
 
     fn remove_stamp(&self, file: &str) -> io::Result<()> {
@@ -203,34 +110,31 @@ impl SyncState {
     }
 }
 
-/// The marker remembered for an upload another Device overwrote: no storage
-/// gives a blob this one, so the next step finds the blob changed.
-const OVERWRITTEN: &str = "\0overwritten";
-
-/// What one Sync step did.
-#[derive(Debug, Default)]
-pub struct StepOutcome {
-    /// The names of the Drawings whose local file the step wrote or deleted.
-    /// A rename shows as the old name and the new one.
-    pub changed: Vec<String>,
-    /// The first thing that went wrong. The step carries on with the other
-    /// Drawings, unless it was cancelled, so changes still arrive while e.g.
-    /// uploads fail. Cancelling is `io::ErrorKind::Interrupted`.
-    pub error: Option<io::Error>,
-    /// The cloud rejected the credentials. The step stopped.
-    pub access_lost: bool,
-    /// An upload found the cloud full (or over its quota). Uploads stopped for
-    /// this step, downloads went on.
-    pub storage_full: bool,
+/// Which file a local Drawing is, cheaply: its inode, modification time and
+/// size. Sync writes files by renaming a new one into place, which gives a new
+/// inode, and an edit in place changes the modification time. The text is
+/// what the stamps folder holds.
+fn stamp_of(meta: &fs::Metadata) -> LocalFile {
+    #[cfg(unix)]
+    let inode = std::os::unix::fs::MetadataExt::ino(meta);
+    #[cfg(not(unix))]
+    let inode = 0;
+    let mtime_ns = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map_or(0, |t| t.as_nanos());
+    LocalFile {
+        file: String::new(),
+        stamp: format!("{inode} {mtime_ns} {}", meta.len()),
+        mtime_ms: (mtime_ns / 1_000_000) as u64,
+    }
 }
 
-/// How far a step is through the Drawings it transfers. Deletes and the
-/// exchange of state alone don't count: a step with nothing to transfer
-/// reports no progress at all.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Progress {
-    pub done: u32,
-    pub total: u32,
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |t| t.as_millis() as u64)
 }
 
 /// Runs one Sync step between `drawings` (the Device's Drawings folder) and
@@ -254,199 +158,132 @@ pub fn sync_step_reporting(
     cancel: &AtomicBool,
     progress: &dyn Fn(Progress),
 ) -> StepOutcome {
-    let mut step = Step {
+    let runner = Runner {
         drawings,
         state,
         storage,
         cancel,
-        progress,
-        done: 0,
-        total: 0,
-        remote: HashMap::new(),
-        uploaded: Vec::new(),
-        outcome: StepOutcome::default(),
     };
-    if let Err(error) = step.run() {
-        let error = step.cancelled_or(error);
-        step.record(error);
+    let mut step = SyncStep::new(now_ms());
+    let mut reported = None;
+    let mut reply = None;
+    loop {
+        let next = step.resume(reply.take());
+        if step.progress() != reported {
+            reported = step.progress();
+            if let Some(p) = reported {
+                progress(p);
+            }
+        }
+        let Next::Request(request) = next else {
+            let Next::Done(outcome) = next else {
+                unreachable!()
+            };
+            return outcome;
+        };
+        if cancel.load(Relaxed) {
+            return step.cancel();
+        }
+        let result = runner.answer(request);
+        // Whatever the error, cancelling is why the transfer failed.
+        if result.is_err() && cancel.load(Relaxed) {
+            return step.cancel();
+        }
+        reply = Some(result);
     }
-    step.outcome
 }
 
-struct Step<'a> {
+struct Runner<'a> {
     drawings: &'a Path,
     state: &'a SyncState,
     storage: &'a dyn Storage,
     cancel: &'a AtomicBool,
-    progress: &'a dyn Fn(Progress),
-    /// Drawings to transfer in this step, and how many are done.
-    total: u32,
-    done: u32,
-    /// File name → change marker of the Drawings in the cloud.
-    remote: HashMap<String, String>,
-    /// The Drawings put in the cloud, whose new markers are not known yet.
-    uploaded: Vec<(String, Vec<u8>)>,
-    outcome: StepOutcome,
 }
 
-impl Step<'_> {
-    fn run(&mut self) -> io::Result<()> {
-        self.remote = self.list_remote()?;
-        // Taken before any Drawing is read: a stamp shows what was read only
-        // if the file didn't change between the two.
-        let stamps: HashMap<String, Stamp> = drawing_files(self.drawings)?
+impl Runner<'_> {
+    fn answer(&self, request: Request) -> io::Result<Response> {
+        Ok(match request {
+            Request::ListCloud => Response::Cloud(self.storage.list()?),
+            Request::ListLocal => Response::Local(self.list_local()?),
+            Request::ReadLocal { file } => Response::Bytes(self.read_local(&file)?),
+            Request::ReadMarks { file } => Response::Marks(Marks {
+                marker: self.state.marker(&file)?,
+                stamp: self.state.stamp(&file)?,
+            }),
+            Request::ReadSynced { file } => Response::Synced(self.state.get(&file)?),
+            Request::ListSynced => Response::Names(self.state.files()?),
+            Request::WriteSynced {
+                file,
+                bytes,
+                marker,
+            } => {
+                self.state.set(&file, &bytes, &marker)?;
+                Response::Done
+            }
+            Request::WriteStamp { file, stamp } => {
+                self.state.set_stamp(&file, &stamp)?;
+                Response::Done
+            }
+            Request::ForgetSynced { file } => {
+                self.state.remove(&file)?;
+                Response::Done
+            }
+            Request::Download { file } => Response::Bytes(self.download(&file)?),
+            Request::Upload { file, bytes } => {
+                let mut data = Cancellable {
+                    inner: &bytes[..],
+                    cancel: self.cancel,
+                };
+                self.storage.put(&file, &mut data)?;
+                Response::Done
+            }
+            Request::DeleteCloud { file } => {
+                self.storage.delete(&file)?;
+                Response::Done
+            }
+            Request::WriteLocal {
+                file,
+                bytes,
+                expected,
+            } => Response::Happened(
+                if self.read_local(&file)?.as_deref() == expected.as_deref() {
+                    write_file_atomically(&self.drawings.join(&file), &bytes)?;
+                    true
+                } else {
+                    false
+                },
+            ),
+            Request::RenameLocal { from, to, expected } => Response::Happened(
+                if self.read_local(&from)?.as_deref() == Some(&expected[..]) {
+                    fs::rename(self.drawings.join(&from), self.drawings.join(&to))?;
+                    true
+                } else {
+                    false
+                },
+            ),
+            Request::DeleteLocal { file, expected } => Response::Happened(
+                if self.read_local(&file)?.as_deref() == Some(&expected[..]) {
+                    fs::remove_file(self.drawings.join(&file))?;
+                    true
+                } else {
+                    false
+                },
+            ),
+        })
+    }
+
+    fn list_local(&self) -> io::Result<Vec<LocalFile>> {
+        Ok(drawing_files(self.drawings)?
             .into_iter()
-            .map(|(file, meta)| (file, Stamp::of(&meta)))
-            .collect();
-        let mut files: BTreeSet<String> = self.remote.keys().cloned().collect();
-        files.extend(stamps.keys().cloned());
-        files.extend(self.state.files()?);
-
-        // A Drawing is read only if it may have changed, and once if nothing
-        // is to be done with it.
-        let mut pending = Vec::new();
-        for file in files {
-            self.check_cancelled()?;
-            let stamp = stamps.get(&file).copied();
-            if self.unchanged_by_stamp(&file, stamp)? {
-                continue;
-            }
-            let (local, remote, base) = self.facts(&file)?;
-            let action = decide(local.as_deref(), remote.as_deref(), base.as_ref());
-            if action.is_transfer() {
-                self.total += 1;
-            }
-            if action == Action::Idle {
-                if let Some(stamp) = stamp.filter(Stamp::settled) {
-                    self.state.set_stamp(&file, stamp)?;
-                }
-            } else {
-                pending.push(file);
-            }
-        }
-        self.report();
-
-        // Read again: the app may have written a Drawing meanwhile.
-        for file in pending {
-            self.check_cancelled()?;
-            if let Err(error) = self.sync_drawing(&file) {
-                // Whatever the error, cancelling is why the transfer failed.
-                self.check_cancelled()?;
-                self.record(error);
-                if self.outcome.access_lost {
-                    return Ok(()); // every further call would be rejected too
-                }
-            }
-        }
-        self.remember_uploads()
-    }
-
-    /// Whether the Drawing is known to be unchanged on both sides without
-    /// reading it: the cloud's marker and the local file's stamp are those it
-    /// had when the local bytes were last found equal to the remembered ones.
-    fn unchanged_by_stamp(&self, file: &str, stamp: Option<Stamp>) -> io::Result<bool> {
-        let (Some(stamp), Some(remote)) = (stamp, self.remote.get(file)) else {
-            return Ok(false);
-        };
-        Ok(self.state.stamp(file)? == Some(stamp)
-            && self.state.marker(file)?.as_deref() == Some(&remote[..]))
-    }
-
-    /// Notes what went wrong: lost access and a full cloud are problems of
-    /// their own, anything else is an error (offline, most likely).
-    fn record(&mut self, error: io::Error) {
-        match error.kind() {
-            io::ErrorKind::PermissionDenied => self.outcome.access_lost = true,
-            io::ErrorKind::StorageFull => self.outcome.storage_full = true,
-            _ => {
-                self.outcome.error.get_or_insert(error);
-            }
-        }
-    }
-
-    fn report(&self) {
-        if self.total > 0 {
-            (self.progress)(Progress {
-                done: self.done,
-                total: self.total,
-            });
-        }
-    }
-
-    /// The local file, the cloud blob's marker and the last-Synced state.
-    #[allow(clippy::type_complexity)]
-    fn facts(&self, file: &str) -> io::Result<(Option<Vec<u8>>, Option<String>, Option<Synced>)> {
-        Ok((
-            self.read_local(file)?,
-            self.remote.get(file).cloned(),
-            self.state.get(file)?,
-        ))
-    }
-
-    fn list_remote(&self) -> io::Result<HashMap<String, String>> {
-        Ok(self
-            .storage
-            .list()?
-            .into_iter()
-            .filter(|blob| is_drawing_file(&blob.name))
-            .map(|blob| (blob.name, blob.marker))
+            .map(|(file, meta)| LocalFile {
+                file,
+                ..stamp_of(&meta)
+            })
             .collect())
     }
 
-    /// `error`, or `Interrupted` if the step was cancelled meanwhile: readers
-    /// can't fail with `Interrupted` themselves, since `std` retries those.
-    fn cancelled_or(&self, error: io::Error) -> io::Error {
-        match self.check_cancelled() {
-            Err(cancelled) => cancelled,
-            Ok(()) => error,
-        }
-    }
-
-    fn check_cancelled(&self) -> io::Result<()> {
-        if self.cancel.load(Relaxed) {
-            Err(io::Error::from(io::ErrorKind::Interrupted))
-        } else {
-            Ok(())
-        }
-    }
-
-    /// The rules of the spec for one name (`decide`).
-    fn sync_drawing(&mut self, file: &str) -> io::Result<()> {
-        let (local, remote, base) = self.facts(file)?;
-        let action = decide(local.as_deref(), remote.as_deref(), base.as_ref());
-        let result = match (action, local, remote, base) {
-            (Action::Forget, ..) => self.state.remove(file),
-            (Action::Upload, Some(local), Some(marker), Some(base)) => {
-                self.upload_onto_base(file, &marker, local, &base)
-            }
-            (Action::Upload, Some(local), ..) => self.upload(file, local),
-            (Action::Download, _, Some(marker), _) => self.download(file, &marker, None),
-            (Action::FirstMeeting, Some(local), Some(marker), _) => {
-                self.first_meeting(file, &marker, local)
-            }
-            (Action::Reconcile { local_changed }, Some(local), Some(marker), Some(base)) => {
-                self.reconcile(file, &marker, local, &base, local_changed)
-            }
-            (Action::DeleteRemote, ..) => {
-                self.storage.delete(file)?;
-                self.state.remove(file)
-            }
-            (Action::DeleteLocal, Some(local), ..) => self.delete_local(file, &local),
-            _ => Ok(()),
-        };
-        if action.is_transfer() {
-            self.done += 1;
-            self.report();
-        }
-        result
-    }
-
-    fn path(&self, file: &str) -> PathBuf {
-        self.drawings.join(file)
-    }
-
     fn read_local(&self, file: &str) -> io::Result<Option<Vec<u8>>> {
-        match fs::read(self.path(file)) {
+        match fs::read(self.drawings.join(file)) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
             // Not a file (a folder called so): not a Drawing.
             Err(e) if e.kind() == io::ErrorKind::IsADirectory => Ok(None),
@@ -454,138 +291,8 @@ impl Step<'_> {
         }
     }
 
-    /// The cloud's Drawing changed since the last Sync: merges it with the
-    /// local one. What the merge gives goes to the side that lacks it.
-    fn reconcile(
-        &mut self,
-        file: &str,
-        marker: &str,
-        local: Vec<u8>,
-        base: &Synced,
-        local_changed: bool,
-    ) -> io::Result<()> {
-        let Some(remote) = self.fetch(file)? else {
-            return Ok(()); // deleted since the listing
-        };
-        match merge_drawings(Some(&base.bytes), &local, &remote) {
-            Ok(merged) => self.write_merged(file, marker, &local, &remote, merged),
-            // Not a Drawing on one side. The cloud's file replaces the local
-            // one only if that is unchanged and no Drawing either. Until then
-            // every step downloads it again.
-            Err(_) if local_changed || is_drawing(&local) => Ok(()),
-            Err(_) => self.write_local(file, &remote, marker, Some(&local)),
-        }
-    }
-
-    /// The local Drawing changed, the cloud's did not: it still holds
-    /// `base`. The local one is merged with it before the upload.
-    fn upload_onto_base(
-        &mut self,
-        file: &str,
-        marker: &str,
-        local: Vec<u8>,
-        base: &Synced,
-    ) -> io::Result<()> {
-        match merge_drawings(Some(&base.bytes), &local, &base.bytes) {
-            Ok(merged) => self.write_merged(file, marker, &local, &base.bytes, merged),
-            // Not a Drawing on one side: it replaces the cloud's file only if
-            // that is no Drawing either.
-            Err(_) if is_drawing(&base.bytes) => Ok(()),
-            Err(_) => self.upload(file, local),
-        }
-    }
-
-    /// Writes `merged`, what `local` and `remote` (the cloud's Drawing with
-    /// `marker`) merge to, to each side that doesn't hold it yet. Leaves it
-    /// for the next step if the app wrote the local file meanwhile.
-    fn write_merged(
-        &mut self,
-        file: &str,
-        marker: &str,
-        local: &[u8],
-        remote: &[u8],
-        merged: Vec<u8>,
-    ) -> io::Result<()> {
-        if merged != local && !self.replace_local(file, &merged, Some(local))? {
-            return Ok(());
-        }
-        if merged == remote {
-            self.state.set(file, remote, marker)
-        } else {
-            self.upload(file, merged)
-        }
-    }
-
-    /// A name both sides have, with no history between them. The same
-    /// Drawing is merged without a base; unrelated ones are both kept, the
-    /// local one under the next free name. A file that is no Drawing is
-    /// skipped.
-    fn first_meeting(&mut self, file: &str, marker: &str, local: Vec<u8>) -> io::Result<()> {
-        let Some(remote) = self.fetch(file)? else {
-            return Ok(()); // deleted since the listing
-        };
-        match are_same_drawing(&local, &remote) {
-            Err(_) => Ok(()),
-            Ok(true) => {
-                let merged = merge_drawings(None, &local, &remote).map_err(io::Error::other)?;
-                self.write_merged(file, marker, &local, &remote, merged)
-            }
-            Ok(false) => {
-                let renamed = self.next_free_name(file)?;
-                if self.read_local(file)?.as_deref() != Some(&local[..]) {
-                    return Ok(()); // the app wrote it meanwhile
-                }
-                fs::rename(self.path(file), self.path(&renamed))?;
-                self.outcome.changed.push(name_of(&renamed));
-                // Writing the cloud's Drawing reports `file` itself.
-                self.write_local(file, &remote, marker, None)?;
-                self.upload(&renamed, local)
-            }
-        }
-    }
-
-    /// `file` with the lowest number from 2 up that no side uses: "Sketch 2".
-    fn next_free_name(&self, file: &str) -> io::Result<String> {
-        let stem = name_of(file);
-        let taken: BTreeSet<String> = self
-            .remote
-            .keys()
-            .cloned()
-            .chain(file_names(self.drawings)?)
-            .chain(self.state.files()?)
-            .collect();
-        Ok((2..)
-            .map(|n| format!("{stem} {n}{EXTENSION}"))
-            .find(|candidate| !taken.contains(candidate))
-            .expect("a free name"))
-    }
-
-    fn upload(&mut self, file: &str, bytes: Vec<u8>) -> io::Result<()> {
-        if self.outcome.storage_full {
-            // Another upload just found the cloud full: don't ask again.
-            return Err(io::Error::from(io::ErrorKind::StorageFull));
-        }
-        let mut data = Cancellable {
-            inner: &bytes[..],
-            cancel: self.cancel,
-        };
-        self.storage.put(file, &mut data)?;
-        self.uploaded.push((file.to_owned(), bytes));
-        Ok(())
-    }
-
-    /// Writes the cloud's Drawing here and remembers it. `expected` is the
-    /// local file as it was read; if the app wrote it since, it is left for
-    /// the next step.
-    fn download(&mut self, file: &str, marker: &str, expected: Option<&[u8]>) -> io::Result<()> {
-        let Some(bytes) = self.fetch(file)? else {
-            return Ok(()); // deleted since the listing
-        };
-        self.write_local(file, &bytes, marker, expected)
-    }
-
     /// The cloud's Drawing, if it is still there.
-    fn fetch(&self, file: &str) -> io::Result<Option<Vec<u8>>> {
+    fn download(&self, file: &str) -> io::Result<Option<Vec<u8>>> {
         let Some(data) = self.storage.get(file)? else {
             return Ok(None);
         };
@@ -596,131 +303,6 @@ impl Step<'_> {
         }
         .read_to_end(&mut bytes)?;
         Ok(Some(bytes))
-    }
-
-    /// Writes `bytes`, the cloud's Drawing with `marker`, here and remembers it.
-    fn write_local(
-        &mut self,
-        file: &str,
-        bytes: &[u8],
-        marker: &str,
-        expected: Option<&[u8]>,
-    ) -> io::Result<()> {
-        if self.replace_local(file, bytes, expected)? {
-            self.state.set(file, bytes, marker)?;
-        }
-        Ok(())
-    }
-
-    /// Writes `bytes` here, unless the local file is not `expected` any more
-    /// (the app wrote it meanwhile; it is left for the next step). Whether it
-    /// was written.
-    fn replace_local(
-        &mut self,
-        file: &str,
-        bytes: &[u8],
-        expected: Option<&[u8]>,
-    ) -> io::Result<bool> {
-        if self.read_local(file)?.as_deref() != expected {
-            return Ok(false);
-        }
-        write_file_atomically(&self.path(file), bytes)?;
-        self.outcome.changed.push(name_of(file));
-        Ok(true)
-    }
-
-    fn delete_local(&mut self, file: &str, expected: &[u8]) -> io::Result<()> {
-        if self.read_local(file)?.as_deref() == Some(expected) {
-            fs::remove_file(self.path(file))?;
-            self.outcome.changed.push(name_of(file));
-        }
-        self.state.remove(file)
-    }
-
-    /// Remembers the uploads with the markers the cloud gave them, which a
-    /// listing tells. One listing for all of them. Without it they are
-    /// uploaded again next time, which does no harm.
-    ///
-    /// Another Device may have overwritten an upload before the listing, and
-    /// the marker would then be its blob's. So each blob is read back after
-    /// the listing: if it isn't what was uploaded, the upload is remembered
-    /// under a marker no blob has, and the next step merges what is in the
-    /// cloud with it as the base, as for any change made there.
-    fn remember_uploads(&mut self) -> io::Result<()> {
-        if self.uploaded.is_empty() {
-            return Ok(());
-        }
-        self.check_cancelled()?;
-        let markers = self.list_remote()?;
-        for (file, bytes) in std::mem::take(&mut self.uploaded) {
-            let Some(marker) = markers.get(&file) else {
-                continue;
-            };
-            self.check_cancelled()?;
-            let ours = self.fetch(&file)?.as_deref() == Some(&bytes[..]);
-            self.state
-                .set(&file, &bytes, if ours { marker } else { OVERWRITTEN })?;
-        }
-        Ok(())
-    }
-}
-
-/// What a step does for one name.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Action {
-    Idle,
-    /// Gone on both sides: forget it.
-    Forget,
-    Upload,
-    Download,
-    /// Present on both sides without history.
-    FirstMeeting,
-    /// The cloud changed (and maybe the local file too).
-    Reconcile {
-        local_changed: bool,
-    },
-    DeleteRemote,
-    DeleteLocal,
-}
-
-impl Action {
-    /// Whether it moves a Drawing's content, as opposed to deleting one or
-    /// only updating what is remembered.
-    fn is_transfer(self) -> bool {
-        matches!(
-            self,
-            Action::Upload | Action::Download | Action::FirstMeeting | Action::Reconcile { .. }
-        )
-    }
-}
-
-/// The rules of the spec for one name, with L the local file, R the cloud blob
-/// (its marker) and B the last-Synced state.
-fn decide(local: Option<&[u8]>, remote: Option<&str>, base: Option<&Synced>) -> Action {
-    match (local, remote, base) {
-        (None, None, _) => Action::Forget,
-        (Some(_), None, None) => Action::Upload,
-        (None, Some(_), None) => Action::Download,
-        // Never Synced under this name, present on both sides.
-        (Some(_), Some(_), None) => Action::FirstMeeting,
-        (local, remote, Some(base)) => {
-            let local_changed = local != Some(&base.bytes[..]);
-            let remote_changed = remote != Some(&base.marker[..]);
-            match (local, remote) {
-                (Some(_), Some(_)) => match (local_changed, remote_changed) {
-                    (true, false) => Action::Upload,
-                    (_, true) => Action::Reconcile { local_changed },
-                    (false, false) => Action::Idle,
-                },
-                // Deleted here: reaches the cloud, unless it was edited there.
-                (None, Some(_)) if remote_changed => Action::Download,
-                (None, Some(_)) => Action::DeleteRemote,
-                // Deleted there: reaches here, unless it was edited here.
-                (Some(_), None) if local_changed => Action::Upload,
-                (Some(_), None) => Action::DeleteLocal,
-                (None, None) => unreachable!("handled above"),
-            }
-        }
     }
 }
 
@@ -737,14 +319,6 @@ impl<R: Read> Read for Cancellable<'_, R> {
         }
         self.inner.read(buf)
     }
-}
-
-fn is_drawing_file(file: &str) -> bool {
-    file.len() > EXTENSION.len() && file.ends_with(EXTENSION) && !file.starts_with('.')
-}
-
-fn name_of(file: &str) -> String {
-    file.strip_suffix(EXTENSION).unwrap_or(file).to_owned()
 }
 
 /// The names of the Drawing files in `dir`.

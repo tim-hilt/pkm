@@ -17,8 +17,10 @@ mod oauth;
 pub mod onedrive;
 #[cfg(feature = "native")]
 mod percent;
+pub mod schedule;
 #[cfg(feature = "native")]
 mod sha256;
+pub mod step;
 pub mod storage;
 #[cfg(feature = "native")]
 mod sync;
@@ -38,12 +40,14 @@ mod fake_onedrive;
 pub use gdrive::GoogleDriveStorage;
 #[cfg(feature = "native")]
 pub use onedrive::OneDriveStorage;
+pub use schedule::{Schedule, Status, Timing};
+pub use step::{Next, Progress, Request, Response, StepOutcome, SyncStep};
 #[cfg(feature = "native")]
 pub use storage::DirStorage;
 pub use storage::{Blob, ConnectError, Storage};
 #[cfg(feature = "native")]
-pub use sync::{Progress, StepOutcome, SyncState, sync_step, sync_step_reporting};
+pub use sync::{SyncState, sync_step, sync_step_reporting};
 #[cfg(feature = "native")]
-pub use sync_loop::{Observer, Status, SyncLoop, Timing};
+pub use sync_loop::{Observer, SyncLoop};
 #[cfg(feature = "native")]
 pub use webdav::WebDavStorage;
