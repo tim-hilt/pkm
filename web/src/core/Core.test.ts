@@ -1,14 +1,19 @@
 import { readFileSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
-import { dashOf, fillKind, strokeKind, verbsOf } from "../rendering/GeometryBuffers";
+import { dashOf, fillKind, stringOf, strokeKind, verbsOf } from "../rendering/GeometryBuffers";
+import { Excalifont } from "../text/Excalifont";
 import { type Core, loadCore } from "./Core";
 
 const generated = new URL("../../generated/", import.meta.url);
 const sample = readFileSync(new URL("sample.excalidraw", generated));
 
+const font = new Excalifont(
+  new Uint8Array(readFileSync(new URL("Excalifont-Regular.ttf", generated))),
+);
+
 let core: Core;
 beforeAll(async () => {
-  core = await loadCore(readFileSync(new URL("excalidraw_native_web_bg.wasm", generated)));
+  core = await loadCore(readFileSync(new URL("excalidraw_native_web_bg.wasm", generated)), font);
 });
 
 const drawing = (elements: string) =>
@@ -96,6 +101,28 @@ describe("the core as wasm", () => {
     expect(editor.viewport().zoom).toBeGreaterThan(0);
     editor.setDarkMode(true);
     expect(editor.canvasColor()).not.toBe(0xffffffff);
+    editor.free();
+  });
+
+  it("wraps a Label to its container with the font's measurements", () => {
+    const editor = core.makeEditor();
+    editor.load(
+      drawing(
+        `{"id":"box","type":"rectangle","x":0,"y":0,"width":120,"height":200,"roughness":0,"boundElements":[{"type":"text","id":"t"}]},` +
+          `{"id":"t","type":"text","x":0,"y":0,"width":10,"height":25,"text":"A label that wraps","originalText":"A label that wraps","fontSize":20,"fontFamily":5,"lineHeight":1.25,"containerId":"box","textAlign":"center","verticalAlign":"middle"}`,
+      ),
+    );
+    const geometry = editor.geometry();
+    geometry.withBuffers((buffers) => {
+      const lines = Array.from({ length: buffers.textLines.length }, (_, i) =>
+        stringOf(buffers, buffers.textLines.at(i)),
+      );
+      expect(lines.join(" ")).toBe("A label that wraps");
+      expect(lines.length).toBeGreaterThan(1);
+      // The container is 120 wide with 5 of padding on each side.
+      for (const line of lines) expect(font.lineWidth(line, 20)).toBeLessThanOrEqual(110);
+    });
+    geometry.free();
     editor.free();
   });
 });

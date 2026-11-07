@@ -1,6 +1,6 @@
 // TS view of the core's geometry output (ADR-0007), a port of the Swift
-// client's `GeometryBuffers.swift`. Parts only so far; text lines and images
-// follow with the tickets that draw them. The format is documented in the core's
+// client's `GeometryBuffers.swift`. Parts and text lines so far; images follow
+// with the ticket that draws them. The format is documented in the core's
 // `geometry` module; this file mirrors it.
 
 /** Mirror of the core's `Part` record, read straight out of wasm memory. */
@@ -34,6 +34,41 @@ export interface GeometryPart {
   holeWidth: number;
   holeHeight: number;
 }
+
+/**
+ * Mirror of the core's `TextLine` record: one line of text to draw, set in
+ * Excalifont, read straight out of wasm memory.
+ */
+export interface GeometryTextLine {
+  /** Core-assigned Element handle; with `version` the cache key. */
+  element: number;
+  version: number;
+  /**
+   * Number of parts before this line in z-order: draw the line after the
+   * parts before this index and before the part at it.
+   */
+  partIndex: number;
+  /** `0xRRGGBBAA`. */
+  color: number;
+  /** Element opacity, 0...1. */
+  opacity: number;
+  fontSize: number;
+  /** The Element's font family. Every family is drawn in Excalifont. */
+  fontFamily: number;
+  /** A `GeometryTextAlign` number. */
+  align: number;
+  /** Where the line is anchored on its baseline, in Scene units, already turned by `angle`. */
+  x: number;
+  y: number;
+  /** Clockwise rotation in radians about `(x, y)`. */
+  angle: number;
+  /** Range of the line's UTF-8 bytes in `GeometryBuffers.text`. */
+  textStart: number;
+  textLength: number;
+}
+
+/** Where a line of text sits relative to its anchor, as in the core's `TextAlign`. */
+export const GeometryTextAlign = { left: 0, center: 1, right: 2 } as const;
 
 /** Constant-width outline with round caps and joins. */
 export const strokeKind = 0;
@@ -110,6 +145,17 @@ export interface GeometryBuffers {
   parts: Records<GeometryPart>;
   verbs: Uint8Array;
   coords: Float32Array;
+  /** Lines of text, interleaved with `parts` in z-order by `partIndex`. */
+  textLines: Records<GeometryTextLine>;
+  /** The characters of all lines, as UTF-8. */
+  text: Uint8Array;
+}
+
+const utf8 = new TextDecoder();
+
+/** The characters of `line`. */
+export function stringOf(buffers: GeometryBuffers, line: GeometryTextLine): string {
+  return utf8.decode(buffers.text.subarray(line.textStart, line.textStart + line.textLength));
 }
 
 /** The verbs of `part`. */
@@ -141,6 +187,7 @@ export interface GeometrySource {
 
 /** Sizes in bytes of the core's records; `readGeometry` checks them against the core's. */
 export const partStride = 64;
+export const textLineStride = 52;
 
 /** What `readGeometry` needs of the wasm `Geometry` object. */
 export interface WasmGeometry {
@@ -151,9 +198,15 @@ export interface WasmGeometry {
   verbsAddress(): number;
   coordCount(): number;
   coordsAddress(): number;
+  textLineCount(): number;
+  textLineStride(): number;
+  textLinesAddress(): number;
+  textByteCount(): number;
+  textAddress(): number;
 }
 
 const partFields = partStride / 4;
+const textLineFields = textLineStride / 4;
 
 /**
  * Views onto wasm memory. A view is only good until memory grows, which
@@ -201,6 +254,9 @@ export function readGeometry<R>(
   if (geometry.partStride() !== partStride) {
     throw new Error("GeometryPart no longer mirrors the core's Part record");
   }
+  if (geometry.textLineStride() !== textLineStride) {
+    throw new Error("GeometryTextLine no longer mirrors the core's TextLine record");
+  }
   const { words, floats, bytes } = memory;
   const partsStart = geometry.partsAddress() / 4;
   const verbsStart = geometry.verbsAddress();
@@ -229,31 +285,78 @@ export function readGeometry<R>(
       };
     },
   };
+  const linesStart = geometry.textLinesAddress() / 4;
+  const textLines: Records<GeometryTextLine> = {
+    length: geometry.textLineCount(),
+    at(index) {
+      const o = linesStart + index * textLineFields;
+      return {
+        element: words[o],
+        version: words[o + 1],
+        partIndex: words[o + 2],
+        color: words[o + 3],
+        opacity: floats[o + 4],
+        fontSize: floats[o + 5],
+        fontFamily: words[o + 6],
+        align: words[o + 7],
+        x: floats[o + 8],
+        y: floats[o + 9],
+        angle: floats[o + 10],
+        textStart: words[o + 11],
+        textLength: words[o + 12],
+      };
+    },
+  };
+  const textStart = geometry.textAddress();
   return body({
     parts,
     verbs: bytes.subarray(verbsStart, verbsStart + geometry.verbCount()),
     coords: floats.subarray(coordsStart, coordsStart + geometry.coordCount()),
+    textLines,
+    text: bytes.subarray(textStart, textStart + geometry.textByteCount()),
   });
 }
 
-/** What one Element contributes to the geometry: a run of parts. */
+/**
+ * What one Element contributes to the geometry. An Element is drawn by a run
+ * of parts or by a run of lines of text, never a mix.
+ */
 export interface ElementGeometry {
   element: number;
   version: number;
-  /** Indices into `GeometryBuffers.parts`, from `start` up to but excluding `end`. */
+  /** Indices from `start` up to but excluding `end`, into `GeometryBuffers.parts` or `.textLines`. */
+  content: "parts" | "textLines";
   start: number;
   end: number;
 }
 
 /** Every Element's share of the buffers, in z-order (bottom first). */
 export function* elementsInZOrder(buffers: GeometryBuffers): Generator<ElementGeometry> {
-  const { parts } = buffers;
-  let start = 0;
-  while (start < parts.length) {
-    const first = parts.at(start);
-    let end = start + 1;
-    while (end < parts.length && parts.at(end).element === first.element) end++;
-    yield { element: first.element, version: first.version, start, end };
-    start = end;
+  const { parts, textLines } = buffers;
+  let part = 0;
+  let line = 0;
+  while (true) {
+    // Lines come before the part their `partIndex` names.
+    if (line < textLines.length && textLines.at(line).partIndex <= part) {
+      const first = textLines.at(line);
+      let end = line + 1;
+      while (end < textLines.length && textLines.at(end).element === first.element) end++;
+      yield {
+        element: first.element,
+        version: first.version,
+        content: "textLines",
+        start: line,
+        end,
+      };
+      line = end;
+    } else if (part < parts.length) {
+      const first = parts.at(part);
+      let end = part + 1;
+      while (end < parts.length && parts.at(end).element === first.element) end++;
+      yield { element: first.element, version: first.version, content: "parts", start: part, end };
+      part = end;
+    } else {
+      return;
+    }
   }
 }

@@ -20,3 +20,5 @@ wasm-bindgen --target web --out-dir web/generated \
 # Only the JS needs the wasm's types; the bundler treats the .wasm as an asset.
 rm web/generated/excalidraw_native_web_bg.wasm.d.ts
 cp apple/ExcalidrawNative/Resources/sample.excalidraw web/generated/
+# The font is served as is: the web app reads the TTF itself (no woff2).
+cp apple/ExcalidrawNative/Resources/Fonts/Excalifont-Regular.ttf web/generated/

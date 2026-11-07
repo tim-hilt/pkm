@@ -3,6 +3,7 @@ import init, {
   type InitInput,
   type ViewportState,
 } from "../../generated/excalidraw_native_web.js";
+import { type TextMeasurer } from "../text/Excalifont";
 import {
   type GeometryBuffers,
   type GeometrySource,
@@ -18,11 +19,24 @@ export interface Core {
   makeEditor(): Editor;
 }
 
-/** Loads the wasm from a URL, bytes or a compiled module. */
-export async function loadCore(source: InitInput | Promise<InitInput>): Promise<Core> {
+/**
+ * Loads the wasm from a URL, bytes or a compiled module. Editors measure text
+ * with `measurer`; without one, labels keep the lines saved in the file.
+ */
+export async function loadCore(
+  source: InitInput | Promise<InitInput>,
+  measurer?: TextMeasurer,
+): Promise<Core> {
   const exports = await init({ module_or_path: source });
   const views = new MemoryViews(exports.memory);
-  return { memory: exports.memory, makeEditor: () => new Editor(new WasmEditor(), views) };
+  return {
+    memory: exports.memory,
+    makeEditor() {
+      const editor = new WasmEditor();
+      if (measurer) editor.setTextMeasurer(measurer);
+      return new Editor(editor, views);
+    },
+  };
 }
 
 /**

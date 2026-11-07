@@ -5,8 +5,7 @@ import { handBuiltGeometry } from "../rendering/HandBuiltGeometry";
 
 /**
  * Scenes for renderer tests, made the way the app makes its own: by loading a
- * Drawing into the core's `Editor`. A port of the Swift `TestScenes` (text and
- * images follow with their tickets).
+ * Drawing into the core's `Editor`. A port of the Swift `TestScenes` (images follow with their ticket).
  */
 export class TestScenes {
   constructor(private readonly core: Core) {}
@@ -153,6 +152,42 @@ export class TestScenes {
     );
   }
 
+  /**
+   * Text in every alignment, size and font family, rotated, translucent, and
+   * labels wrapped to a rectangle, an ellipse and a diamond.
+   */
+  text(): Geometry {
+    const label = "A label that wraps to its container";
+    return this.geometryOf(
+      drawing(
+        textElement("left", 20, 20, [220, 25], "Left aligned", `,"textAlign":"left"`),
+        textElement("centre", 20, 60, [220, 25], "Centred", `,"textAlign":"center"`),
+        textElement("right", 20, 100, [220, 25], "Right aligned", `,"textAlign":"right"`),
+        textElement("lines", 20, 140, [120, 60], "Two\\nlines", `,"fontSize":24,"lineHeight":1.25`),
+        textElement(
+          "family",
+          20,
+          220,
+          [200, 23],
+          "Another family",
+          `,"fontFamily":2,"lineHeight":1.15`,
+        ),
+        textElement(
+          "red",
+          20,
+          260,
+          [220, 25],
+          "Red, translucent",
+          `,"strokeColor":"#e03131","opacity":50`,
+        ),
+        textElement("turned", 40, 340, [160, 25], "Turned about its middle", `,"angle":-0.3`),
+        ...labelled("rectangle", 260, 20, [220, 110], label),
+        ...labelled("ellipse", 260, 160, [220, 140], label),
+        ...labelled("diamond", 260, 330, [220, 160], "A diamond label"),
+      ),
+    );
+  }
+
   /** A concave outline and a pentagram, each by both fill rules. */
   fillRules(): GeometrySource {
     const ell: Point[] = [
@@ -230,4 +265,37 @@ function freedraw(
     ? `,"simulatePressure":false,"pressures":[${pressures.map(number).join(",")}]`
     : `,"simulatePressure":true,"pressures":[]`;
   return `{"id":"freedraw${seed}","type":"freedraw","x":${x},"y":${y},"width":150,"height":60,"seed":${seed},"points":[${path}]${pressure}${extra}}`;
+}
+
+/** A text Element at (x, y) with a box of `size`. */
+export function textElement(
+  id: string,
+  x: number,
+  y: number,
+  size: [number, number],
+  text: string,
+  extra = "",
+): string {
+  return `{"id":"${id}","type":"text","x":${x},"y":${y},"width":${size[0]},"height":${size[1]},"text":"${text}","originalText":"${text}","fontSize":20,"fontFamily":5,"lineHeight":1.25${extra}}`;
+}
+
+/** A shape with the label `text` bound to it. */
+function labelled(
+  type: string,
+  x: number,
+  y: number,
+  size: [number, number],
+  text: string,
+): string[] {
+  return [
+    `{"id":"${type}","type":"${type}","x":${x},"y":${y},"width":${size[0]},"height":${size[1]},"roughness":0,"boundElements":[{"type":"text","id":"${type}-label"}]}`,
+    textElement(
+      `${type}-label`,
+      x,
+      y,
+      [10, 25],
+      text,
+      `,"containerId":"${type}","textAlign":"center","verticalAlign":"middle"`,
+    ),
+  ];
 }

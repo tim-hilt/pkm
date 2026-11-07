@@ -5,13 +5,36 @@
 //! Wasm is single-threaded, so unlike in the bindings the editor needs no lock.
 
 use std::cell::RefCell;
+use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 extern "C" {
+    /// A JS object that measures text for the core: the client's font
+    /// machinery. See [`excalidraw_native_core::TextMeasurer`].
+    pub type TextMeasurer;
+
+    /// The advance width in Scene units of `text`, a single line, at `font_size`.
+    #[wasm_bindgen(method, js_name = lineWidth)]
+    fn line_width(this: &TextMeasurer, text: &str, font_size: f64) -> f64;
+
     /// `Date.now()`: milliseconds since 1970.
     #[wasm_bindgen(js_namespace = Date, js_name = now)]
     fn date_now() -> f64;
+}
+
+/// Lets the core call a client's measurer.
+struct Measurer(TextMeasurer);
+
+// SAFETY: wasm is single-threaded, so the JS object is never touched from
+// another thread.
+unsafe impl Send for Measurer {}
+unsafe impl Sync for Measurer {}
+
+impl excalidraw_native_core::TextMeasurer for Measurer {
+    fn line_width(&self, text: &str, font_size: f64) -> f64 {
+        self.0.line_width(text, font_size)
+    }
 }
 
 /// What the Canvas shows; see [`excalidraw_native_core::Viewport`].
@@ -68,6 +91,16 @@ impl Editor {
     /// The Scene as `.excalidraw` file content.
     pub fn save(&self) -> Vec<u8> {
         self.inner.borrow().save()
+    }
+
+    /// Hands the core the client's way to measure text; see
+    /// [`excalidraw_native_core::Editor::set_text_measurer`]. Call it before
+    /// loading a Drawing.
+    #[wasm_bindgen(js_name = setTextMeasurer)]
+    pub fn set_text_measurer(&self, measurer: TextMeasurer) {
+        self.inner
+            .borrow_mut()
+            .set_text_measurer(Arc::new(Measurer(measurer)));
     }
 
     /// Number of Elements shown in the Scene.

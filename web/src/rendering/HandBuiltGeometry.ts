@@ -1,6 +1,7 @@
 import {
   type GeometryBuffers,
   type GeometryPart,
+  type GeometryTextLine,
   type GeometrySource,
   GeometryFillRule,
   fillKind,
@@ -24,6 +25,41 @@ export interface HandBuiltPart extends Partial<GeometryPart> {
  * the other, as the core does.
  */
 export function handBuiltBuffers(...parts: HandBuiltPart[]): GeometryBuffers {
+  return handBuiltBuffersWithText(parts, []);
+}
+
+/** A line of hand-built text: its record's fields (the rest zero) and its characters. */
+export interface HandBuiltTextLine extends Partial<GeometryTextLine> {
+  characters: string;
+}
+
+/** Hand-built parts and lines of text; a line comes before the part its `partIndex` names. */
+export function handBuiltBuffersWithText(
+  parts: HandBuiltPart[],
+  lines: HandBuiltTextLine[],
+): GeometryBuffers {
+  const text: number[] = [];
+  const textLines: GeometryTextLine[] = lines.map(({ characters, ...fields }, index) => {
+    const bytes = new TextEncoder().encode(characters);
+    const record: GeometryTextLine = {
+      element: 100 + index,
+      version: 1,
+      partIndex: 0,
+      color: 0x1e1e1eff,
+      opacity: 1,
+      fontSize: 20,
+      fontFamily: 5,
+      align: 0,
+      x: 0,
+      y: 0,
+      angle: 0,
+      ...fields,
+      textStart: text.length,
+      textLength: bytes.length,
+    };
+    text.push(...bytes);
+    return record;
+  });
   const verbs: number[] = [];
   const coords: number[] = [];
   const records: GeometryPart[] = parts.map((part, element) => {
@@ -42,6 +78,8 @@ export function handBuiltBuffers(...parts: HandBuiltPart[]): GeometryBuffers {
     parts: recordsOf(records),
     verbs: Uint8Array.from(verbs),
     coords: Float32Array.from(coords),
+    textLines: recordsOf(textLines),
+    text: Uint8Array.from(text),
   };
 }
 

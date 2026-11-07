@@ -3,9 +3,11 @@ import { CanvasRenderer, type Viewport } from "../rendering/CanvasRenderer";
 import { type GeometrySource } from "../rendering/GeometryBuffers";
 import { offscreenFormat, renderOffscreen } from "../rendering/OffscreenFrame";
 import { type RenderedImage } from "../rendering/RenderedImage";
+import { Excalifont } from "../text/Excalifont";
 import { acquireDevice } from "../WebGPUSupport";
 import { TestScenes } from "./TestScenes";
 import wasmUrl from "../../generated/excalidraw_native_web_bg.wasm?url";
+import fontUrl from "../../generated/Excalifont-Regular.ttf?url";
 
 /** The default viewport: the Scene's origin at the top left, no zoom. */
 export const defaultViewport: Viewport = { originX: 0, originY: 0, zoom: 1 };
@@ -42,12 +44,13 @@ export interface RenderHarness {
 export async function makeRenderHarness(): Promise<RenderHarness> {
   const device = await acquireDevice(navigator.gpu);
   if (!device) throw new Error("these tests need WebGPU");
-  const core = await loadCore(fetch(wasmUrl));
+  const font = new Excalifont(new Uint8Array(await (await fetch(fontUrl)).arrayBuffer()));
+  const core = await loadCore(fetch(wasmUrl), font);
   const harness: RenderHarness = {
     device,
     core,
     scenes: new TestScenes(core),
-    makeRenderer: () => new CanvasRenderer(device, offscreenFormat),
+    makeRenderer: () => new CanvasRenderer(device, offscreenFormat, font),
     async render(geometry, viewport = defaultViewport, options) {
       const renderer = harness.makeRenderer();
       renderer.setGeometry(geometry);

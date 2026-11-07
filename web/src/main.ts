@@ -1,7 +1,9 @@
 import { CanvasRenderer } from "./rendering/CanvasRenderer";
 import { type Editor, loadCore } from "./core/Core";
+import { Excalifont } from "./text/Excalifont";
 import { acquireDevice, showUnsupportedPage } from "./WebGPUSupport";
 import wasmUrl from "../generated/excalidraw_native_web_bg.wasm";
+import fontUrl from "../generated/Excalifont-Regular.ttf";
 import sampleUrl from "../generated/sample.excalidraw";
 
 const root = document.getElementById("app")!;
@@ -10,24 +12,26 @@ async function main(): Promise<void> {
   const device = await acquireDevice(navigator.gpu);
   if (!device) return showUnsupportedPage(root);
 
-  const core = await loadCore(fetch(wasmUrl));
+  // The font is loaded before the first frame: text is measured and drawn with it.
+  const font = new Excalifont(new Uint8Array(await (await fetch(fontUrl)).arrayBuffer()));
+  const core = await loadCore(fetch(wasmUrl), font);
   const editor = core.makeEditor();
   // `?sample` opens the sample Drawing, in temporary storage (nothing is saved yet).
   if (new URLSearchParams(location.search).has("sample")) {
     editor.load(new Uint8Array(await (await fetch(sampleUrl)).arrayBuffer()));
   }
-  showCanvas(root, device, editor);
+  showCanvas(root, device, editor, font);
 }
 
 /** Puts a canvas that fills the window into `root` and draws `editor`'s Scene on it. */
-function showCanvas(root: HTMLElement, device: GPUDevice, editor: Editor): void {
+function showCanvas(root: HTMLElement, device: GPUDevice, editor: Editor, font: Excalifont): void {
   const canvas = document.createElement("canvas");
   root.replaceChildren(canvas);
   const context = canvas.getContext("webgpu")!;
   const format = navigator.gpu.getPreferredCanvasFormat();
   context.configure({ device, format, alphaMode: "opaque" });
 
-  const renderer = new CanvasRenderer(device, format);
+  const renderer = new CanvasRenderer(device, format, font);
   const geometry = editor.geometry();
   renderer.setGeometry(geometry);
   // On demand: one frame per request, however many changes asked for it.

@@ -1,14 +1,18 @@
-import { type FillMesh, fillMeshOfPart } from "./FillMesh";
+import { type FillMesh, fillMeshOfPart, fillMeshOfPath } from "./FillMesh";
 import {
   type GeometryBuffers,
   type GeometryPart,
   type GeometrySource,
+  type GeometryTextLine,
   GeometryFillRule,
   elementsInZOrder,
   fillKind,
   holeOf,
+  stringOf,
   strokeKind,
 } from "./GeometryBuffers";
+import { type Excalifont } from "../text/Excalifont";
+import { textLineOutline } from "../text/TextLineOutline";
 import { strokeSegments } from "./StrokeFlattener";
 import { fillShaders, strokeShaders } from "./StrokeShaders";
 
@@ -51,7 +55,11 @@ export interface Viewport {
  * Every draw leaves the stencil buffer zero where it ends, which is how no
  * stroke or fill sees what an earlier one did there.
  *
- * Text, images and the overlay follow with their own tickets.
+ * Text is filled too: each line of text becomes the outlines of its glyphs
+ * (cached per glyph, see `Excalifont`) in one fill, so it stays sharp at any
+ * zoom.
+ *
+ * Images and the overlay follow with their own tickets.
  */
 export class CanvasRenderer {
   /** Samples per pixel of the colour and stencil a frame is drawn into. */
@@ -97,6 +105,8 @@ export class CanvasRenderer {
   constructor(
     private readonly device: GPUDevice,
     readonly format: GPUTextureFormat,
+    /** Draws the lines of text; without it text is left out. */
+    private readonly font?: Excalifont,
   ) {
     this.uniformAlignment = device.limits.minUniformBufferOffsetAlignment;
     this.frameLayout = device.createBindGroupLayout({
@@ -388,7 +398,10 @@ export class CanvasRenderer {
           entry?.draws.forEach((draw) => draw.destroy());
           const draws: Draw[] = [];
           for (let index = item.start; index < item.end; index++) {
-            const draw = this.makeDraw(buffers.parts.at(index), buffers, tolerance);
+            const draw =
+              item.content === "parts"
+                ? this.makeDraw(buffers.parts.at(index), buffers, tolerance)
+                : this.textDraw(buffers.textLines.at(index), buffers, tolerance);
             if (draw) draws.push(draw);
           }
           entry = { version: item.version, level, draws };
@@ -475,6 +488,23 @@ export class CanvasRenderer {
         uniforms.destroy();
       },
     };
+  }
+
+  /** A line of text as one fill of its glyphs' outlines, by the non-zero rule. */
+  private textDraw(
+    line: GeometryTextLine,
+    buffers: GeometryBuffers,
+    tolerance: number,
+  ): FillDraw | undefined {
+    if (!this.font) return undefined;
+    const path = textLineOutline(line, stringOf(buffers, line), this.font);
+    const mesh = fillMeshOfPath(path.verbs, path.coords, tolerance);
+    if (!mesh) return undefined;
+    return this.uploadFill(
+      mesh,
+      partUniforms(premultipliedColor(line.color, line.opacity), 0, 0, [0, 0, 0, 0]),
+      "nonZero",
+    );
   }
 
   private fillDraw(
