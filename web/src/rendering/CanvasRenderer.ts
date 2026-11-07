@@ -460,6 +460,18 @@ export class CanvasRenderer {
     this.draws = all;
   }
 
+  /** Releases the GPU memory the renderer holds; it draws nothing afterwards. */
+  dispose(): void {
+    this.onNeedsDisplay = undefined;
+    this.destroyCache();
+    this.overlayDraws.forEach((draw) => draw.destroy());
+    this.overlayDraws = [];
+    this.frameTargets?.color.destroy();
+    this.frameTargets?.stencil.destroy();
+    this.frameTargets = undefined;
+    this.frameBuffer.destroy();
+  }
+
   private destroyCache(): void {
     for (const entry of this.cache.values()) entry.draws.forEach((draw) => draw.destroy());
     this.cache.clear();

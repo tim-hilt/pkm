@@ -1,5 +1,7 @@
-import { showCanvas } from "./CanvasView";
+import { startApp } from "./App";
 import { loadCore } from "./core/Core";
+import { MemoryStorage } from "./storage/MemoryStorage";
+import { OpfsStorage } from "./storage/OpfsStorage";
 import { Excalifont } from "./text/Excalifont";
 import { acquireDevice, showUnsupportedPage } from "./WebGPUSupport";
 import wasmUrl from "../generated/excalidraw_native_web_bg.wasm";
@@ -15,12 +17,17 @@ async function main(): Promise<void> {
   // The font is loaded before the first frame: text is measured and drawn with it.
   const font = new Excalifont(new Uint8Array(await (await fetch(fontUrl)).arrayBuffer()));
   const core = await loadCore(fetch(wasmUrl), font);
-  const editor = core.makeEditor();
-  // `?sample` opens the sample Drawing, in temporary storage (nothing is saved yet).
+  // `?sample` opens the sample Drawing, in temporary storage: nothing of it is kept.
   if (new URLSearchParams(location.search).has("sample")) {
-    editor.load(new Uint8Array(await (await fetch(sampleUrl)).arrayBuffer()));
+    const sample = new Uint8Array(await (await fetch(sampleUrl)).arrayBuffer());
+    await startApp(root, device, core, font, {
+      storage: new MemoryStorage(),
+      persistent: false,
+      sample,
+    });
+  } else {
+    await startApp(root, device, core, font, { storage: OpfsStorage.open(), persistent: true });
   }
-  showCanvas(root, device, editor, font);
 }
 
 void main();

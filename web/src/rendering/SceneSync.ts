@@ -72,6 +72,13 @@ export class SceneSync {
     old?.free();
   }
 
+  /** Frees what is shown; call once the target no longer draws it. */
+  dispose(): void {
+    this.shown?.free();
+    this.shownOverlay?.free();
+    this.shown = this.shownOverlay = undefined;
+  }
+
   private syncViewport(): void {
     this.target.viewport = this.editor.viewport();
   }

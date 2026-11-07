@@ -8,18 +8,28 @@ import { UndoRedoControls } from "./chrome/UndoRedoControls";
 import type { Editor } from "./core/Core";
 import type { Excalifont } from "./text/Excalifont";
 
+/** What a shown Canvas tells its owner. */
+export interface CanvasHandlers {
+  /** Input or a command reached the editor (the Scene may have changed). */
+  edited(): void;
+  /** The user asked to go back to the Gallery. */
+  back(): void;
+}
+
 /**
  * Puts a canvas that fills `root` and the chrome over it, draws `editor`'s
  * Scene on the canvas and forwards the input on it to the editor, as the Swift
  * `CanvasMetalView` does: after every input or command the Scene (if its
  * revision moved), the viewport, the cursor and the chrome are shown again.
+ * Returns what stops it all, for when the Drawing is left.
  */
 export function showCanvas(
   root: HTMLElement,
   device: GPUDevice,
   editor: Editor,
   font: Excalifont,
-): void {
+  handlers: CanvasHandlers,
+): () => void {
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("webgpu")!;
   const format = navigator.gpu.getPreferredCanvasFormat();
@@ -28,11 +38,13 @@ export function showCanvas(
   const renderer = new CanvasRenderer(device, format, font);
   // On demand: one frame per request, however many changes asked for it.
   let scheduled = false;
+  let gone = false;
   renderer.onNeedsDisplay = () => {
     if (scheduled) return;
     scheduled = true;
     requestAnimationFrame(() => {
       scheduled = false;
+      if (gone) return;
       renderer.renderFrame(context.getCurrentTexture(), window.devicePixelRatio);
     });
   };
@@ -44,12 +56,19 @@ export function showCanvas(
   const zoomControls = new ZoomControls(editor, () => didReachEditor());
   const undoRedo = new UndoRedoControls(editor, () => didReachEditor());
   const toolbar = new Toolbar(editor, () => didReachEditor());
+  const back = document.createElement("button");
+  back.type = "button";
+  back.className = "back-to-gallery";
+  back.textContent = "‹ Drawings";
+  back.setAttribute("aria-label", "Back to Drawings");
+  back.addEventListener("click", () => handlers.back());
   const bottomLeft = document.createElement("div");
   bottomLeft.className = "bottom-left";
   bottomLeft.append(zoomControls.element, undoRedo.element);
   /** Shows whatever the editor did with an input or command. */
   const didReachEditor = () => {
     sync.sync();
+    handlers.edited();
     zoomControls.update();
     undoRedo.update();
     toolbar.update();
@@ -63,7 +82,7 @@ export function showCanvas(
       forward(...args);
       didReachEditor();
     };
-  new CanvasInput(canvas, {
+  const input = new CanvasInput(canvas, {
     pointer: send((e) => {
       pointer = { x: e.x, y: e.y };
       editor.pointer(e);
@@ -86,19 +105,32 @@ export function showCanvas(
     didReachEditor();
     renderer.onNeedsDisplay?.();
   };
-  root.replaceChildren(canvas, toolbar.element, bottomLeft);
-  new ResizeObserver(resize).observe(canvas);
+  root.replaceChildren(canvas, back, toolbar.element, bottomLeft);
+  const resizing = new ResizeObserver(resize);
+  resizing.observe(canvas);
   // The pixel ratio also changes on its own, when the window moves to a
   // screen of another scale; the canvas keeps its size then.
-  const watchPixelRatio = () =>
-    matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener(
-      "change",
-      () => {
-        resize();
-        watchPixelRatio();
-      },
-      { once: true },
-    );
+  let stopWatchingPixelRatio = () => {};
+  const watchPixelRatio = () => {
+    const query = matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+    const changed = () => {
+      resize();
+      watchPixelRatio();
+    };
+    query.addEventListener("change", changed, { once: true });
+    stopWatchingPixelRatio = () => query.removeEventListener("change", changed);
+  };
   watchPixelRatio();
   resize();
+
+  return () => {
+    input.dispose();
+    resizing.disconnect();
+    stopWatchingPixelRatio();
+    gone = true;
+    renderer.dispose();
+    sync.dispose();
+    context.unconfigure();
+    root.replaceChildren();
+  };
 }

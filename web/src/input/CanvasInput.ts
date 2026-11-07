@@ -41,33 +41,41 @@ export class CanvasInput {
   private readonly pressed = new Map<number, PointerButton>();
   private lastGestureScale = 1;
   private touches = 0;
+  private readonly listeners = new AbortController();
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
     private readonly sink: InputSink,
   ) {
+    const { signal } = this.listeners;
     const on = <K extends keyof HTMLElementEventMap>(
       type: K,
       listener: (event: HTMLElementEventMap[K]) => void,
-    ) => canvas.addEventListener(type, listener);
+    ) => canvas.addEventListener(type, listener, { signal });
     on("pointerdown", (e) => this.down(e));
     on("pointermove", (e) => this.move(e));
     on("pointerup", (e) => this.up(e, PointerPhase.Up));
     on("pointercancel", (e) => this.up(e, PointerPhase.Cancel));
     on("lostpointercapture", (e) => this.up(e, PointerPhase.Cancel));
     // Passive listeners cannot stop the page from zooming or scrolling.
-    canvas.addEventListener("wheel", (e) => this.wheel(e), { passive: false });
+    canvas.addEventListener("wheel", (e) => this.wheel(e), { passive: false, signal });
     on("contextmenu", (e) => e.preventDefault());
     on("dragstart", (e) => e.preventDefault());
     on("selectstart", (e) => e.preventDefault());
     for (const type of ["gesturestart", "gesturechange", "gestureend"]) {
       canvas.addEventListener(type, (e) => this.gesture(type, e as GestureEvent), {
         passive: false,
+        signal,
       });
     }
-    window.addEventListener("keydown", (e) => this.key(e, true));
-    window.addEventListener("keyup", (e) => this.key(e, false));
-    window.addEventListener("blur", () => sink.setPanKey(false));
+    window.addEventListener("keydown", (e) => this.key(e, true), { signal });
+    window.addEventListener("keyup", (e) => this.key(e, false), { signal });
+    window.addEventListener("blur", () => sink.setPanKey(false), { signal });
+  }
+
+  /** Stops listening, for when the Canvas goes away. */
+  dispose(): void {
+    this.listeners.abort();
   }
 
   private origin() {
