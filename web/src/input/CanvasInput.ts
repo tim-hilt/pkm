@@ -12,6 +12,7 @@ import {
   pointerEvent,
   scrollEvent,
 } from "./InputMapping";
+import { isApplePlatform, type KeyChord, shortcutOf } from "./KeyboardShortcuts";
 
 /** Where the Canvas sends what the user does to it. */
 export interface InputSink {
@@ -19,8 +20,12 @@ export interface InputSink {
   scroll(event: CoreScrollEvent): void;
   magnify(event: CoreMagnifyEvent): void;
   setPanKey(held: boolean): void;
-  /** Enter was pressed with nothing else taking it: edits the text of the Selection. */
-  editSelectedText(): void;
+  /** A shortcut was pressed (see `shortcutOf`); whether the core has a Command for it. */
+  shortcut(chord: KeyChord): boolean;
+  /** ⌘/Ctrl+C, +X and +V; the clipboard is the browser's, so it is asked from here, in the key press. */
+  copy(): void;
+  cut(): void;
+  paste(): void;
   /** The mouse moved over the Canvas without a button down. */
   hover(x: number, y: number): void;
 }
@@ -33,7 +38,7 @@ interface GestureEvent extends UIEvent {
 }
 
 /**
- * Forwards the Pointer Events, wheel and space bar on a canvas to the core
+ * Forwards the Pointer Events, wheel and keys on a canvas to the core
  * (ADR-0006) as the Swift client does, and keeps the browser out of it: no
  * page zoom, text-selection callout, magnifier, browser context menu or
  * overscroll (the rest is CSS: `touch-action: none`, see `index.html`).
@@ -48,6 +53,7 @@ export class CanvasInput {
   constructor(
     private readonly canvas: HTMLCanvasElement,
     private readonly sink: InputSink,
+    private readonly apple = isApplePlatform(navigator.platform),
   ) {
     const { signal } = this.listeners;
     const on = <K extends keyof HTMLElementEventMap>(
@@ -153,24 +159,42 @@ export class CanvasInput {
     this.lastGestureScale = e.scale;
   }
 
-  /** The space bar pans while held, Enter edits the text of the Selection. A text field keeps its keys, a button its Enter. */
+  /**
+   * The space bar pans while held; the other keys are shortcuts, which act on
+   * the Canvas instead of the browser (zoom, select all, ...) where the core
+   * has a Command for them. A text field keeps its keys, a button its Enter.
+   */
   private key(e: KeyboardEvent, down: boolean): void {
-    const isSpace = e.code === "Space";
-    const isEnter = e.key === "Enter" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey;
-    if (!isSpace && !isEnter) return;
     const target = e.target;
     const typing =
       target instanceof HTMLElement &&
       (target.isContentEditable || /^(input|textarea|select|button)$/i.test(target.tagName));
-    if (isEnter) {
-      if (down && !typing) {
-        e.preventDefault();
-        this.sink.editSelectedText();
-      }
+    if (e.code === "Space") {
+      if (down && typing) return;
+      if (down) e.preventDefault();
+      this.sink.setPanKey(down);
       return;
     }
-    if (down && typing) return;
-    if (down) e.preventDefault();
-    this.sink.setPanKey(down);
+    if (!down || e.defaultPrevented) return;
+    const inField = typing && !(target instanceof HTMLButtonElement);
+    if (inField || (typing && e.key === "Enter")) return;
+    const chord = shortcutOf(e, this.apple);
+    if (!chord) return;
+    const clipboard = this.clipboardAction(chord);
+    if (clipboard) {
+      e.preventDefault();
+      clipboard();
+    } else if (this.sink.shortcut(chord)) {
+      e.preventDefault();
+    }
+  }
+
+  /** What ⌘/Ctrl+C, +X or +V does; Edit commands of the clipboard are not in the core's shortcut list. */
+  private clipboardAction({ key, modifiers: m }: KeyChord): (() => void) | undefined {
+    if (!m.meta || m.shift || m.alt || m.ctrl) return undefined;
+    if (key === "c") return () => this.sink.copy();
+    if (key === "x") return () => this.sink.cut();
+    if (key === "v") return () => this.sink.paste();
+    return undefined;
   }
 }

@@ -3,6 +3,7 @@ import { SceneSync } from "./rendering/SceneSync";
 import { cssCursor } from "./rendering/CursorStyle";
 import { CanvasInput } from "./input/CanvasInput";
 import { ImageInput, pickImages } from "./images/ImageInput";
+import { CanvasClipboard } from "./input/CanvasClipboard";
 import { insertImages } from "./images/ImageInsertion";
 import { ZoomControls } from "./chrome/ZoomControls";
 import { Toolbar } from "./chrome/Toolbar";
@@ -85,6 +86,10 @@ export function showCanvas(
         if (inserted && !gone) didReachEditor();
       }),
   };
+  const clipboard = new CanvasClipboard(editor, navigator.clipboard, {
+    ...images,
+    changed: () => didReachEditor(),
+  });
   const insertFromPicker = () => void pickImages(images);
   const toolbar = new Toolbar(editor, () => didReachEditor(), insertFromPicker);
   // Swatches are of the light Canvas until the Appearance setting brings Dark mode.
@@ -183,7 +188,14 @@ export function showCanvas(
     scroll: send((e) => editor.scroll(e)),
     magnify: send((e) => editor.magnify(e)),
     setPanKey: send((held) => editor.setPanKey(held)),
-    editSelectedText: send(() => editor.editSelectedText()),
+    shortcut: ({ key, modifiers }) => {
+      const handled = editor.pressKey(key, modifiers);
+      if (handled) didReachEditor();
+      return handled;
+    },
+    copy: () => void clipboard.copy(),
+    cut: () => void clipboard.cut(),
+    paste: () => void clipboard.paste(pointer),
     hover: (x, y) => {
       pointer = { x, y };
       canvas.style.cursor = cssCursor(editor.cursor(x, y));

@@ -420,6 +420,48 @@ impl Editor {
             });
     }
 
+    /// Performs the Command the core binds to the key `key` (see
+    /// [`excalidraw_native_core::Shortcut::key`]) with the modifier bits
+    /// `modifiers`; `false` if no Command is.
+    #[wasm_bindgen(js_name = pressKey)]
+    pub fn press_key(&self, key: &str, modifiers_bits: u8) -> bool {
+        let held = modifiers(modifiers_bits);
+        let Some(shortcut) = excalidraw_native_core::shortcuts()
+            .into_iter()
+            .find(|s| s.key == key && s.modifiers == held)
+        else {
+            return false;
+        };
+        self.inner.borrow_mut().perform(shortcut.command);
+        true
+    }
+
+    /// The clipboard text for copying the Selection; `undefined` with nothing
+    /// selected. See [`excalidraw_native_core::Editor::copy_selection`].
+    #[wasm_bindgen(js_name = copySelection)]
+    pub fn copy_selection(&self) -> Option<String> {
+        self.inner.borrow().copy_selection()
+    }
+
+    /// Copies the Selection and deletes it. See
+    /// [`excalidraw_native_core::Editor::cut_selection`].
+    #[wasm_bindgen(js_name = cutSelection)]
+    pub fn cut_selection(&self) -> Option<String> {
+        self.inner.borrow_mut().cut_selection()
+    }
+
+    /// Pastes Excalidraw clipboard JSON in the middle of the view; `false`
+    /// for any other text.
+    pub fn paste(&self, text: &str) -> bool {
+        self.inner.borrow_mut().paste(text)
+    }
+
+    /// Pastes Excalidraw clipboard JSON around the point `(x, y)` of the view.
+    #[wasm_bindgen(js_name = pasteAt)]
+    pub fn paste_at(&self, text: &str, x: f64, y: f64) -> bool {
+        self.inner.borrow_mut().paste_at(text, x, y)
+    }
+
     /// The space bar went down (`true`) or up.
     #[wasm_bindgen(js_name = setPanKey)]
     pub fn set_pan_key(&self, held: bool) {

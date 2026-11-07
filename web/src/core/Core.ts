@@ -287,6 +287,26 @@ export class Editor {
     this.inner.setToolLock(locked);
   }
 
+  /** Performs the Command the core binds to `key` (`"r"`, `"1"`, `"["`, `"backspace"`, `"escape"`, `"enter"`; the character typed without Shift) with `modifiers`, where `meta` is the primary modifier (⌘ or Ctrl, see `KeyboardShortcuts`); whether there is one. */
+  pressKey(key: string, modifiers: Modifiers): boolean {
+    return this.inner.pressKey(key, modifierBits(modifiers));
+  }
+
+  /** The clipboard text (Excalidraw's clipboard JSON) for copying the Selection; `undefined` with nothing selected. */
+  copySelection(): string | undefined {
+    return this.inner.copySelection();
+  }
+
+  /** Copies the Selection and deletes it (one undo step); `undefined`, and nothing deleted, with nothing selected. */
+  cutSelection(): string | undefined {
+    return this.inner.cutSelection();
+  }
+
+  /** Pastes `text` if it is Excalidraw clipboard JSON, around `at` (view points) or in the middle of the view; whether it was. */
+  paste(text: string, at?: { x: number; y: number }): boolean {
+    return at ? this.inner.pasteAt(text, at.x, at.y) : this.inner.paste(text);
+  }
+
   /** Whether there is something to undo; changes after any input or command. */
   canUndo(): boolean {
     return this.inner.canUndo();
