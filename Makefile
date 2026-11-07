@@ -11,7 +11,37 @@ SIM ?= $(SIM_IPHONE)
 CORE_XCFRAMEWORK := apple/Generated/ExcalidrawNativeCoreFFI.xcframework
 CORE_SOURCES := Cargo.toml Cargo.lock scripts/build-core-apple.sh $(shell find crates -type f)
 
-.PHONY: core-apple apple-project build ipa test test-ios test-ui record-references lint fmt check sim run clean golden-fixtures bench visual-parity visual-parity-app screenshot
+.PHONY: web-wasm web-install web-lint web-test web-fmt web-dev core-apple apple-project build ipa test test-ios test-ui record-references lint fmt check sim run clean golden-fixtures bench visual-parity visual-parity-app screenshot
+
+# The web app (web/): the core as wasm in web/generated (rebuilt only when the
+# Rust sources change), Bun for packages and the dev server.
+WEB_WASM := web/generated/excalidraw_native_web.js
+
+web-wasm: $(WEB_WASM)
+
+$(WEB_WASM): $(CORE_SOURCES) scripts/build-web-wasm.sh
+	scripts/build-web-wasm.sh
+
+web-install: web/node_modules
+
+web/node_modules: web/package.json web/bun.lock
+	cd web && bun install --frozen-lockfile
+	@touch web/node_modules
+
+web-fmt: web-install
+	cd web && bun run format
+
+# Cheapest first: formatting, lint and types need no wasm.
+web-lint: web-install
+	cd web && bun run format:check && bun run lint && bun run typecheck
+
+# Vitest on Node, against the real wasm.
+web-test: web-install web-wasm
+	cd web && bun run test
+
+# Dev server: http://localhost:3000/?sample
+web-dev: web-install web-wasm
+	cd web && bun run dev
 
 # Rust core -> XCFramework + Swift bindings in apple/Generated (rebuilt only
 # when the Rust sources change).
@@ -72,13 +102,14 @@ lint:
 	@test "$$(cargo tree -p excalidraw-native-core -e normal --depth 1 --prefix none --locked | wc -l)" -eq 1 \
 		|| { echo 'error: crates/core must not have dependencies (ADR-0009)'; exit 1; }
 
-fmt:
+fmt: web-fmt
 	swift format -i -r $(SWIFT_SRC)
 	cargo fmt --all
 
-# Fixes formatting, then lints, then runs the Rust tests: cheapest failure first.
+# The web app's formatting, lint, wasm build and Node tests, then fixes the
+# native formatting, lints and runs the Rust tests: cheapest failure first.
 # Run this before committing.
-check: fmt lint
+check: web-lint web-test fmt lint
 	cargo test --workspace --locked -q
 
 # Creates the SIM device unless it exists.
@@ -114,10 +145,10 @@ bench:
 	cargo test --release --locked -q -p excalidraw-native-core --test integration -- --ignored --nocapture --test-threads=1 benchmarks::
 
 clean:
-	rm -rf apple/ExcalidrawNative.xcodeproj apple/build apple/Generated target
+	rm -rf apple/ExcalidrawNative.xcodeproj apple/build apple/Generated target web/generated web/dist
 
 # Screenshot of the Canvas with the sample Drawing open, for looking at layout:
-# make screenshot DEVICE=mac|ipad|iphone [SCREEN=canvas|settings] [OUT=/tmp/wt-<device>.png]
+# make screenshot DEVICE=mac|ipad|iphone|web [SCREEN=canvas|settings] [OUT=/tmp/wt-<device>.png]
 DEVICE ?= iphone
-screenshot: apple-project
+screenshot: $(if $(filter web,$(DEVICE)),web-install web-wasm,apple-project)
 	DEVICE=$(DEVICE) SCREEN='$(SCREEN)' OUT='$(OUT)' scripts/screenshot.sh

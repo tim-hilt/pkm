@@ -7,6 +7,7 @@ mod base64;
 mod binding;
 mod box_select;
 mod clipboard;
+mod clock;
 mod color;
 mod context_menu;
 mod cursor;
@@ -61,6 +62,7 @@ mod viewport;
 mod wrap;
 mod z_order;
 
+pub use clock::set_clock;
 pub use color::dark_mode_color;
 pub use context_menu::ContextMenu;
 pub use cursor::Cursor;

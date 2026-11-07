@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
-# Usage: DEVICE=mac|ipad|iphone [SCREEN=canvas|settings] [OUT=path] scripts/screenshot.sh
+# Usage: DEVICE=mac|ipad|iphone|web [SCREEN=canvas|settings] [OUT=path] scripts/screenshot.sh
 # Builds the app, launches it with the sample Drawing already open
 # (-UITestingOpenSampleDrawing), or with Settings open (SCREEN=settings,
 # -UITestingOpenSettings) and saves a screenshot to $OUT
-# (default /tmp/wt-$DEVICE.png). On Mac only the app's window is captured.
+# (default /tmp/wt-$DEVICE.png). DEVICE=web captures the web app (see
+# screenshot-web.sh). On Mac only the app's window is captured.
 set -euo pipefail
+
+if [ "${DEVICE:-}" = web ]; then
+    exec "$(dirname "$0")/screenshot-web.sh"
+fi
 cd "$(dirname "$0")/../apple"
 
 DEVICE=${DEVICE:-iphone}

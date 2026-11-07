@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 
-use crate::draw_shape::now_ms;
+use crate::clock::now_ms;
 use crate::history::Step;
 use crate::json::{Object, Value};
 use crate::random::Entropy;

@@ -5,9 +5,10 @@
 //! and one editor to the next, so a small generator seeded from the system
 //! does; the core has no dependencies to take one from (ADR-0009).
 
+use crate::clock::now_ms;
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The characters of Excalidraw's ids (nanoid's alphabet).
 const ID_ALPHABET: &[u8; 64] = b"useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
@@ -25,11 +26,12 @@ impl Entropy {
     /// the same instant: the hasher's keys are random per process and change
     /// with every `RandomState`.
     pub fn from_system() -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |since| since.as_nanos());
+        // Without an operating system `RandomState` has fixed keys and the
+        // clock ticks in milliseconds, so a counter keeps editors apart.
+        static MADE: AtomicU64 = AtomicU64::new(0);
         let mut hasher = RandomState::new().build_hasher();
-        hasher.write_u128(nanos);
+        hasher.write_u64(now_ms().to_bits());
+        hasher.write_u64(MADE.fetch_add(1, Ordering::Relaxed));
         Self {
             state: hasher.finish(),
         }

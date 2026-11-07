@@ -1,7 +1,7 @@
 # Rust core (ADR-0001) and its UniFFI bindings (ADR-0007).
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/cloud", "crates/bindings"]
+members = ["crates/core", "crates/cloud", "crates/bindings", "crates/web"]
 
 [workspace.package]
 version = "0.1.0"
@@ -13,3 +13,9 @@ publish = false
 lto = true
 codegen-units = 1
 strip = true
+
+# The web app's wasm: smallest rather than fastest (ADR-0014). The native apps
+# keep `release` above.
+[profile.web]
+inherits = "release"
+opt-level = "z"

@@ -1,0 +1,23 @@
+{
+  "name": "excalidraw-native-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun ./index.html",
+    "build": "bun build ./index.html --outdir dist --minify",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@webgpu/types": "^0.1.74",
+    "oxfmt": "^0.77.0",
+    "oxlint": "^1.92.0",
+    "playwright-core": "^1.65.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}

@@ -5,8 +5,7 @@
 //! pointer lifts it stays, unless it never grew, in which case it was a tap
 //! and nothing is drawn.
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
+use crate::clock::now_ms;
 use crate::history::Step;
 use crate::json::{Object, Value};
 use crate::properties::{self, takes_edges};
@@ -222,11 +221,4 @@ pub(crate) fn new_element(
         shape.insert(key.into(), value);
     }
     shape
-}
-
-/// Milliseconds since 1970, as Excalidraw's `updated` and `created`.
-pub(crate) fn now_ms() -> f64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0.0, |since| since.as_millis() as f64)
 }

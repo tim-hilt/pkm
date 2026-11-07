@@ -8,7 +8,8 @@
 //! images are laid out in a grid, as a whole centred on the point they are
 //! put at.
 
-use crate::draw_shape::{new_element, now_ms};
+use crate::clock::now_ms;
+use crate::draw_shape::new_element;
 use crate::history::Step;
 use crate::json::Value;
 use crate::random::Entropy;
