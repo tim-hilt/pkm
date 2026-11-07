@@ -3,7 +3,8 @@
 #
 # Implements the ready-for-agent tasks in <project-directory>/issues/ one pi session
 # each, in file order and after their blockers, then reviews them all against
-# <project-directory>/spec.md.
+# <project-directory>/spec.md after every $review_every implemented tasks and once more
+# before exit if tasks remain unreviewed.
 
 set -uo pipefail
 
@@ -14,6 +15,7 @@ init_loop "$directory"
 tasks_dir="$directory/issues"
 spec_file="$directory/spec.md"
 review_session="review-$name"
+review_every=5
 
 shopt -s nullglob
 tasks=("$tasks_dir"/*.md) # glob expansion is sorted
@@ -30,6 +32,20 @@ pending_blockers() {
     fi
   done
   echo "${pending% }"
+}
+
+# Reviews the tasks implemented since the last review. An interrupted review
+# is resumed first, under its own session id.
+reviews=0
+unreviewed=0
+review() {
+  local session="$review_session-$((reviews + 1))"
+  if [[ $resume_session == "$review_session"* ]]; then session=$resume_session; fi
+  run_pi "Reviewing $spec_file" claude-opus-5-5 high "$session" \
+    "/skill:software-design the last $unreviewed commits implemented the tickets in @$tasks_dir. Please review \`git diff HEAD~$unreviewed\` according to @$spec_file. Also consider @$log_file to understand how we got to the current state. Pay special attention to correctness and simplicity. Fix found issues right away. If an issue is fully implemented, then please set its Status line to 'done'. Commit your changes using the commit-message 'Reviewed $spec_file'."
+  log_section "$spec_file reviewed in $status_elapsed" "$pi_output"
+  reviews=$((reviews + 1))
+  unreviewed=0
 }
 
 implemented=0
@@ -53,7 +69,9 @@ while ((progress)); do
     gate_on_tests "$task_file"
 
     implemented=$((implemented + 1))
+    unreviewed=$((unreviewed + 1))
     progress=1
+    if ((unreviewed >= review_every)); then review; fi
   done
 done
 
@@ -69,14 +87,12 @@ if [[ -n $still_blocked ]]; then
 fi
 
 # An interrupted review is finished even when there is nothing new to review.
-if ((implemented == 0)) && [[ $resume_session != "$review_session" ]]; then
-  echo "No ready-for-agent tasks found."
+if ((unreviewed == 0)) && [[ $resume_session != "$review_session"* ]]; then
+  ((implemented == 0)) && echo "No ready-for-agent tasks found."
   exit 0
 fi
 
-run_pi "Reviewing $spec_file" claude-opus-5-5 high "$review_session" \
-  "/skill:software-design the last commits implemented the tickets in @$tasks_dir. Please review these commits according to @$spec_file. Also consider @$log_file to understand how we got to the current state. Pay special attention to correctness and simplicity. Fix found issues right away. If an issue is fully implemented, then please set its Status line to 'done'. Commit your changes using the commit-message 'Reviewed $spec_file'."
-log_section "$spec_file reviewed in $status_elapsed" "$pi_output"
+review
 
 if [[ -n $resume_session ]]; then
   printf 'Interrupted session %s was not resumed; its task is no longer ready-for-agent. Open it with: pi --session-id %s\n' \
