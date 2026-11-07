@@ -291,6 +291,7 @@ version = "0.1.0"
 name = "excalidraw-native-web"
 version = "0.1.0"
 dependencies = [
+ "excalidraw-native-cloud",
  "excalidraw-native-core",
  "wasm-bindgen",
 ]

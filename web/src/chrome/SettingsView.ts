@@ -1,14 +1,19 @@
+import { CloudBackingSection } from "./CloudBackingSection";
+import type { CloudBacking } from "../cloud/CloudBacking";
 import { type Appearance, appearanceChoices, appearanceTitle } from "./Appearance";
 
 /**
  * The Settings, opened from the Gallery's gear: the Appearance (System, Light,
- * Dark). A dialog, as the native app's sheet; a port of the Swift
- * `SettingsView`, which has Appearance only here.
+ * Dark), below the Cloud Backing (WebDAV). A dialog, as the native app's
+ * sheet; a port of the Swift `SettingsView`.
  */
 export class SettingsView {
   readonly element = document.createElement("dialog");
 
-  constructor(private readonly appearance: Appearance) {
+  constructor(
+    private readonly appearance: Appearance,
+    cloud: CloudBacking,
+  ) {
     this.element.className = "gallery-dialog settings-dialog";
     this.element.setAttribute("aria-label", "Settings");
 
@@ -40,7 +45,7 @@ export class SettingsView {
 
     const title = document.createElement("h2");
     title.textContent = "Settings";
-    this.element.append(title, group, buttons);
+    this.element.append(title, new CloudBackingSection(cloud).element, group, buttons);
   }
 
   /** Shows the Settings with the Appearance as it is now. */

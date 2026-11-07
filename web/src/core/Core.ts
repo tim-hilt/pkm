@@ -18,6 +18,7 @@ import init, {
   darkModeColor,
   type InitInput,
   ViewportState,
+  WebDavProtocol,
 } from "../../generated/excalidraw_native_web.js";
 import { type TextMeasurer } from "../text/Excalifont";
 import {
@@ -194,6 +195,8 @@ const modifierBits = ({ shift, ctrl, alt, meta }: Modifiers) =>
 export interface Core {
   memory: WebAssembly.Memory;
   makeEditor(): Editor;
+  /** The WebDAV protocol for a server; throws if the URL is not https. Free it when done. */
+  webDav(url: string, username: string, password: string): WebDavProtocol;
 }
 
 /**
@@ -213,6 +216,7 @@ export async function loadCore(
       if (measurer) editor.setTextMeasurer(measurer);
       return new Editor(editor, views);
     },
+    webDav: (url, username, password) => new WebDavProtocol(url, username, password),
   };
 }
 

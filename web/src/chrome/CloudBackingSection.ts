@@ -1,0 +1,102 @@
+import { type CloudBacking, ConnectFailed, connectMessage } from "../cloud/CloudBacking";
+
+/**
+ * The Cloud Backing section of the Settings: while Disconnected the WebDAV
+ * form (Server URL, Username, Password, Connect) with the failure of the last
+ * try; while Connected the provider with its server and Disconnect. WebDAV is
+ * the only Cloud Provider of the web app, so there is no picker.
+ */
+export class CloudBackingSection {
+  readonly element = document.createElement("fieldset");
+  private readonly content = document.createElement("div");
+
+  constructor(private readonly cloud: CloudBacking) {
+    this.element.className = "cloud-backing";
+    const legend = document.createElement("legend");
+    legend.textContent = "Cloud Backing";
+    this.element.append(legend, this.content);
+    cloud.onConnectionChange(() => this.render());
+    this.render();
+  }
+
+  private render(error?: string): void {
+    const connection = this.cloud.connection;
+    this.content.replaceChildren(connection ? this.connected(connection.server) : this.form(error));
+  }
+
+  private connected(server: string): HTMLElement {
+    const box = document.createElement("div");
+    box.className = "cloud-fields";
+    const row = document.createElement("p");
+    row.className = "cloud-connected";
+    const provider = document.createElement("strong");
+    provider.textContent = "WebDAV";
+    const detail = document.createElement("span");
+    detail.className = "cloud-server";
+    detail.textContent = server;
+    row.append(provider, detail);
+    const disconnect = button("Disconnect", "danger");
+    disconnect.classList.add("cloud-disconnect");
+    disconnect.addEventListener("click", () => void this.cloud.disconnect());
+    box.append(row, disconnect);
+    return box;
+  }
+
+  private form(error?: string): HTMLElement {
+    const form = document.createElement("form");
+    form.className = "cloud-fields";
+    const url = field("Server URL", "url", "https://example.com/dav", "off");
+    const username = field("Username", "text", "", "username");
+    const password = field("Password", "password", "", "current-password");
+    const message = document.createElement("p");
+    message.className = "cloud-error";
+    message.setAttribute("role", "alert");
+    message.textContent = error ?? "";
+    message.hidden = !error;
+    const connect = button("Connect", "primary");
+    connect.type = "submit";
+    const inputs = [url.input, username.input, password.input];
+    const update = () => (connect.disabled = inputs.some((input) => input.value.trim() === ""));
+    for (const input of inputs) input.addEventListener("input", update);
+    update();
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      connect.disabled = true;
+      connect.textContent = "Connecting…";
+      try {
+        await this.cloud.connect(url.input.value, username.input.value, password.input.value);
+      } catch (failure) {
+        if (!(failure instanceof ConnectFailed)) throw failure;
+        message.textContent = connectMessage(failure.reason);
+        message.hidden = false;
+        connect.textContent = "Connect";
+        update();
+      }
+    });
+    form.append(url.label, username.label, password.label, message, connect);
+    return form;
+  }
+}
+
+function button(text: string, kind: string): HTMLButtonElement {
+  const element = document.createElement("button");
+  element.type = "button";
+  element.className = kind;
+  element.textContent = text;
+  return element;
+}
+
+function field(title: string, type: string, hint: string, autocomplete: AutoFill) {
+  const input = document.createElement("input");
+  input.type = type;
+  input.placeholder = hint;
+  input.autocomplete = autocomplete;
+  input.autocapitalize = "none";
+  input.spellcheck = false;
+  const label = document.createElement("label");
+  label.className = "cloud-field";
+  const text = document.createElement("span");
+  text.textContent = title;
+  label.append(text, input);
+  return { label, input };
+}

@@ -1,4 +1,5 @@
 import { showCanvas } from "./CanvasView";
+import { CloudBacking } from "./cloud/CloudBacking";
 import { Appearance } from "./chrome/Appearance";
 import { applyChromeColors } from "./chrome/ChromeColors";
 import { SettingsView } from "./chrome/SettingsView";
@@ -45,6 +46,7 @@ export async function startApp(
   const gallery = await Gallery.start(store, core, thumbnails);
   if (sample) await gallery.openDrawing(await store.add(sample, "Sample"));
 
+  const cloud = await CloudBacking.open(core, storage, (url, init) => fetch(url, init));
   const settings = new DrawingSettings(localStorage);
   const appearance = new Appearance(localStorage, matchMedia("(prefers-color-scheme: dark)"));
   const showChromeColors = () => applyChromeColors(document.documentElement, appearance.isDark);
@@ -80,7 +82,7 @@ export async function startApp(
         galleryView = new GalleryView(
           gallery,
           () => appearance.isDark,
-          new SettingsView(appearance),
+          new SettingsView(appearance, cloud),
         );
         root.replaceChildren(galleryView.element);
       }

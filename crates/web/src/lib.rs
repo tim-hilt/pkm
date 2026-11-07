@@ -5,6 +5,7 @@
 //! Wasm is single-threaded, so unlike in the bindings the editor needs no lock.
 
 use std::cell::RefCell;
+use std::io;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 
@@ -964,5 +965,255 @@ impl Geometry {
     #[wasm_bindgen(js_name = fileIdsAddress)]
     pub fn file_ids_address(&self) -> u32 {
         self.inner.file_ids().as_ptr() as u32
+    }
+}
+
+// ---- The WebDAV protocol (ADR-0016) ----
+
+use excalidraw_native_cloud::ConnectError;
+use excalidraw_native_cloud::webdav_protocol::{Exchange, HttpAnswer, HttpRequest, Turn, WebDav};
+
+/// A request for the client to send with `fetch`.
+#[wasm_bindgen]
+pub struct DavRequest(HttpRequest);
+
+#[wasm_bindgen]
+impl DavRequest {
+    /// `PROPFIND`, `GET`, `PUT`, `MKCOL`, `MOVE` or `DELETE`.
+    #[wasm_bindgen(getter)]
+    pub fn method(&self) -> String {
+        self.0.method.to_owned()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn url(&self) -> String {
+        self.0.url.clone()
+    }
+
+    /// Name, value, name, value, …
+    #[wasm_bindgen(getter)]
+    pub fn headers(&self) -> Vec<String> {
+        self.0
+            .headers
+            .iter()
+            .flat_map(|(name, value)| [(*name).to_owned(), value.clone()])
+            .collect()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn body(&self) -> Vec<u8> {
+        self.0.body.clone()
+    }
+}
+
+/// How an operation ended.
+#[wasm_bindgen]
+#[derive(Default)]
+pub struct DavOutcome {
+    error: Option<&'static str>,
+    message: String,
+    data: Option<Vec<u8>>,
+    names: Vec<String>,
+    markers: Vec<String>,
+}
+
+#[wasm_bindgen]
+impl DavOutcome {
+    /// Nothing if it worked; else one of `wrongCredentials`, `unreachable`,
+    /// `notHttps`, `notWebDav` (connecting), `accessLost`, `full`, `offline`
+    /// (the request could not be sent) or `failed`.
+    #[wasm_bindgen(getter)]
+    pub fn error(&self) -> Option<String> {
+        self.error.map(str::to_owned)
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn message(&self) -> String {
+        self.message.clone()
+    }
+
+    /// The content of a `get`; nothing if there is no such blob.
+    #[wasm_bindgen(getter)]
+    pub fn data(&self) -> Option<Vec<u8>> {
+        self.data.clone()
+    }
+
+    /// The names of the blobs a `list` found.
+    #[wasm_bindgen(getter)]
+    pub fn names(&self) -> Vec<String> {
+        self.names.clone()
+    }
+
+    /// Their markers, in the order of `names`.
+    #[wasm_bindgen(getter)]
+    pub fn markers(&self) -> Vec<String> {
+        self.markers.clone()
+    }
+}
+
+impl DavOutcome {
+    fn failure(error: &io::Error) -> Self {
+        use io::ErrorKind::*;
+        Self {
+            error: Some(match error.kind() {
+                PermissionDenied => "accessLost",
+                StorageFull => "full",
+                NotConnected => "offline",
+                _ => "failed",
+            }),
+            message: error.to_string(),
+            ..Self::default()
+        }
+    }
+
+    fn of<T>(result: io::Result<T>, success: impl FnOnce(T, &mut Self)) -> Self {
+        match result {
+            Ok(value) => {
+                let mut outcome = Self::default();
+                success(value, &mut outcome);
+                outcome
+            }
+            Err(error) => Self::failure(&error),
+        }
+    }
+
+    fn connect(result: Result<(), ConnectError>) -> Self {
+        match result {
+            Ok(()) => Self::default(),
+            Err(error) => Self {
+                error: Some(match error {
+                    ConnectError::WrongCredentials => "wrongCredentials",
+                    ConnectError::NotHttps => "notHttps",
+                    ConnectError::NotWebDav => "notWebDav",
+                    _ => "unreachable",
+                }),
+                message: error.to_string(),
+                ..Self::default()
+            },
+        }
+    }
+}
+
+/// One operation of the protocol, answered request by request.
+trait Operation {
+    fn start(&mut self) -> HttpRequest;
+    fn answer(&mut self, answer: HttpAnswer) -> Turn<DavOutcome>;
+    fn failed(&mut self) -> DavOutcome;
+}
+
+struct Mapped<E: Exchange> {
+    exchange: E,
+    outcome: fn(E::Output) -> DavOutcome,
+}
+
+impl<E: Exchange> Operation for Mapped<E> {
+    fn start(&mut self) -> HttpRequest {
+        self.exchange.start()
+    }
+
+    fn answer(&mut self, answer: HttpAnswer) -> Turn<DavOutcome> {
+        match self.exchange.answer(answer) {
+            Turn::Send(request) => Turn::Send(request),
+            Turn::Done(result) => Turn::Done((self.outcome)(result)),
+        }
+    }
+
+    fn failed(&mut self) -> DavOutcome {
+        let error = io::Error::new(io::ErrorKind::NotConnected, "the request was not sent");
+        (self.outcome)(self.exchange.failed(error))
+    }
+}
+
+/// One operation against the server: `start` gives the first request,
+/// `answer` the next one until it gives none, `failed` ends it when a request
+/// could not be sent, and `outcome` says how it ended.
+#[wasm_bindgen]
+pub struct DavExchange {
+    operation: Box<dyn Operation>,
+    outcome: Option<DavOutcome>,
+}
+
+#[wasm_bindgen]
+impl DavExchange {
+    pub fn start(&mut self) -> DavRequest {
+        DavRequest(self.operation.start())
+    }
+
+    /// The next request, or nothing when the operation is over.
+    pub fn answer(&mut self, status: u16, body: Vec<u8>) -> Option<DavRequest> {
+        match self.operation.answer(HttpAnswer { status, body }) {
+            Turn::Send(request) => Some(DavRequest(request)),
+            Turn::Done(outcome) => {
+                self.outcome = Some(outcome);
+                None
+            }
+        }
+    }
+
+    pub fn failed(&mut self) {
+        self.outcome = Some(self.operation.failed());
+    }
+
+    /// How the operation ended; call it once it is over.
+    pub fn outcome(&mut self) -> DavOutcome {
+        self.outcome.take().expect("the operation is over")
+    }
+}
+
+impl DavExchange {
+    fn new<E: Exchange + 'static>(exchange: E, outcome: fn(E::Output) -> DavOutcome) -> Self {
+        Self {
+            operation: Box::new(Mapped { exchange, outcome }),
+            outcome: None,
+        }
+    }
+}
+
+/// The requests of one WebDAV server.
+#[wasm_bindgen]
+pub struct WebDavProtocol(WebDav);
+
+#[wasm_bindgen]
+impl WebDavProtocol {
+    /// Throws `notHttps` for a URL that is not https.
+    #[wasm_bindgen(constructor)]
+    pub fn new(url: &str, username: &str, password: &str) -> Result<WebDavProtocol, JsError> {
+        WebDav::new(url, username, password)
+            .map(Self)
+            .map_err(|_| JsError::new("notHttps"))
+    }
+
+    /// Checks the server and makes its `ExcalidrawNative` folder.
+    pub fn connect(&self) -> DavExchange {
+        DavExchange::new(self.0.connect(), DavOutcome::connect)
+    }
+
+    pub fn list(&self) -> DavExchange {
+        DavExchange::new(self.0.list(), |result| {
+            DavOutcome::of(result, |blobs, outcome| {
+                (outcome.names, outcome.markers) =
+                    blobs.into_iter().map(|b| (b.name, b.marker)).unzip();
+            })
+        })
+    }
+
+    pub fn get(&self, name: &str) -> DavExchange {
+        DavExchange::new(self.0.get(name), |result| {
+            DavOutcome::of(result, |data, outcome| outcome.data = data)
+        })
+    }
+
+    pub fn delete(&self, name: &str) -> DavExchange {
+        DavExchange::new(self.0.delete(name), |result| {
+            DavOutcome::of(result, |(), _| {})
+        })
+    }
+
+    /// `temp` is a name no other upload uses; `incomingExists` says the
+    /// folder for uploads is known to be there.
+    pub fn put(&self, name: &str, temp: &str, data: Vec<u8>, incoming_exists: bool) -> DavExchange {
+        DavExchange::new(self.0.put(name, temp, data, incoming_exists), |result| {
+            DavOutcome::of(result, |(), _| {})
+        })
     }
 }

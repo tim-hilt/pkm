@@ -897,6 +897,54 @@
         padding: 0;
         border: 0;
       }
+      .settings-dialog fieldset + fieldset {
+        margin-top: 16px;
+      }
+      .cloud-fields {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .cloud-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 0.9rem;
+      }
+      .cloud-fields button {
+        min-height: 44px;
+        padding: 0 16px;
+        border: 0;
+        border-radius: 8px;
+        background: var(--control-fill);
+        color: var(--control-ink);
+        font: inherit;
+        cursor: pointer;
+      }
+      .cloud-fields button.primary {
+        background: var(--accent);
+        color: var(--accent-ink);
+      }
+      .cloud-fields button.danger {
+        color: #c92a2a;
+      }
+      .cloud-fields button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .cloud-connected {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        margin: 0;
+      }
+      .cloud-server {
+        overflow-wrap: anywhere;
+      }
+      .cloud-error {
+        margin: 0;
+        color: #c92a2a;
+      }
       .settings-dialog legend {
         padding: 0;
         margin-bottom: 8px;
