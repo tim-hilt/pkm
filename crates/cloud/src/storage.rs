@@ -5,11 +5,16 @@
 //! transactions, no server logic. Everything above it is in the Sync engine.
 
 use std::fmt;
+#[cfg(feature = "native")]
 use std::fs::{self, File};
 use std::io::{self, Read};
+#[cfg(feature = "native")]
 use std::path::{Path, PathBuf};
+#[cfg(feature = "native")]
 use std::sync::Arc;
+#[cfg(feature = "native")]
 use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
+#[cfg(feature = "native")]
 use std::time::UNIX_EPOCH;
 
 /// A blob in a storage.
@@ -81,6 +86,7 @@ pub trait Storage: Send + Sync {
     fn delete(&self, name: &str) -> io::Result<()>;
 }
 
+#[cfg(feature = "native")]
 /// Checks that `name` is a plain blob name, see `Storage`.
 pub(crate) fn check_name(name: &str) -> io::Result<()> {
     if !name.is_empty() && !name.contains('/') && !name.starts_with('.') {
@@ -93,6 +99,7 @@ pub(crate) fn check_name(name: &str) -> io::Result<()> {
     }
 }
 
+#[cfg(feature = "native")]
 /// A name no other call in this process, or an earlier one, has used for a
 /// scratch file. Starts with the process ID.
 pub(crate) fn unique_name() -> String {
@@ -100,6 +107,7 @@ pub(crate) fn unique_name() -> String {
     format!("{}-{}", std::process::id(), NEXT.fetch_add(1, Relaxed))
 }
 
+#[cfg(feature = "native")]
 /// Makes the bytes written to `file` reach the disk before any later write
 /// does, e.g. the rename that puts it in place: a crash then leaves the old
 /// file or the new one, never a torn one. Doesn't wait for the disk itself,
@@ -119,6 +127,7 @@ pub(crate) fn flush_ordered(file: &File) -> io::Result<()> {
     file.sync_data()
 }
 
+#[cfg(feature = "native")]
 /// Writes `bytes` to `path` so that it is whole with either its old or its new
 /// content whatever happens part-way: into a hidden sibling first, then renamed
 /// over `path`. A failure leaves no sibling.
@@ -136,13 +145,16 @@ pub(crate) fn write_file_atomically(path: &Path, bytes: &[u8]) -> io::Result<()>
     written
 }
 
+#[cfg(feature = "native")]
 /// Where blobs are written before they are renamed into place. Starts with a
 /// dot, so it is no valid name and never listed.
 const INCOMING: &str = ".incoming";
 
+#[cfg(feature = "native")]
 /// Asks the system to download a file that is in iCloud Drive only.
 type RequestDownload = Arc<dyn Fn(&Path) + Send + Sync>;
 
+#[cfg(feature = "native")]
 /// A storage in a directory of the file system.
 ///
 /// In iCloud Drive a file that is not on the Device is a hidden placeholder,
@@ -153,6 +165,7 @@ pub struct DirStorage {
     request_download: Option<RequestDownload>,
 }
 
+#[cfg(feature = "native")]
 impl fmt::Debug for DirStorage {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("DirStorage")
@@ -161,6 +174,7 @@ impl fmt::Debug for DirStorage {
     }
 }
 
+#[cfg(feature = "native")]
 impl DirStorage {
     /// The storage in directory `root`, created if missing. Leftovers of
     /// `put`s that never finished are deleted, except those of this process:
@@ -238,6 +252,7 @@ impl DirStorage {
     }
 }
 
+#[cfg(feature = "native")]
 impl Storage for DirStorage {
     fn put(&self, name: &str, data: &mut dyn Read) -> io::Result<()> {
         let path = self.path(name)?;
@@ -292,7 +307,7 @@ impl Storage for DirStorage {
 }
 
 /// The content of blob `name` in memory, for small blobs. None if missing.
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 pub(crate) fn get_bytes(storage: &dyn Storage, name: &str) -> io::Result<Option<Vec<u8>>> {
     storage
         .get(name)?
@@ -308,7 +323,7 @@ pub(crate) fn get_bytes(storage: &dyn Storage, name: &str) -> io::Result<Option<
 /// `storage_contract_tests!(make)`, where `make()` returns a new, empty
 /// `Storage` (and whatever must stay alive with it), or none to skip the
 /// tests, e.g. when the server they need isn't installed.
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 pub(crate) mod contract {
     use super::*;
     use std::time::Duration;
@@ -476,7 +491,7 @@ pub(crate) mod contract {
     pub(crate) use storage_contract_tests;
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::contract::{self, Scratch, storage_contract_tests};
     use super::*;

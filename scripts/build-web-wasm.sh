@@ -12,6 +12,9 @@ if [ "$(wasm-bindgen --version 2>/dev/null | awk '{print $2}')" != "$version" ];
 fi
 rustup target add wasm32-unknown-unknown >/dev/null
 
+# The cloud crate without its native code must keep building for the web (ADR-0016).
+cargo build --locked -q --profile web --target wasm32-unknown-unknown \
+    -p excalidraw-native-cloud --no-default-features
 cargo build --locked -q --profile web --target wasm32-unknown-unknown -p excalidraw-native-web
 rm -rf web/generated
 mkdir -p web/generated
