@@ -123,7 +123,15 @@ struct ActionPopoverContent: View {
     let controller: CanvasController
 
     var body: some View {
-        if let shown = controller.properties {
+        // A Selection without style groups (no `properties`) still has Layers and Actions.
+        if item == .actions {
+            VStack(alignment: .leading, spacing: 8) {
+                LayersGroup(controller: controller)
+                ActionsGroup(
+                    controller: controller, showsDuplicate: model.popoverHasDuplicate,
+                    showsDelete: model.popoverHasDelete)
+            }
+        } else if let shown = controller.properties {
             switch item {
             case .stroke:
                 ColorPopover(title: "Stroke", kind: .stroke, selected: shown.strokeColor) {
@@ -145,22 +153,7 @@ struct ActionPopoverContent: View {
                 .frame(width: 176, alignment: .leading)
             case .text:
                 TextGroup(controller: controller, shown: shown)
-            case .actions:
-                VStack(alignment: .leading, spacing: 8) {
-                    LayersGroup(controller: controller)
-                    ActionsGroup(
-                        controller: controller, showsDuplicate: model.popoverHasDuplicate,
-                        showsDelete: model.popoverHasDelete)
-                }
-            case .delete, .duplicate: EmptyView()
-            }
-        } else if item == .actions {
-            // A Selection without style groups still has Layers and Actions.
-            VStack(alignment: .leading, spacing: 8) {
-                LayersGroup(controller: controller)
-                ActionsGroup(
-                    controller: controller, showsDuplicate: model.popoverHasDuplicate,
-                    showsDelete: model.popoverHasDelete)
+            case .actions, .delete, .duplicate: EmptyView()
             }
         }
     }

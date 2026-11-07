@@ -4,7 +4,7 @@ import CoreGraphics
 enum ActionRowItem: Hashable {
     case stroke, background, properties, text, actions
     /// On the row itself only when it is wide enough, else inside `actions`.
-    case delete, duplicate
+    case duplicate, delete
 
     /// Whether the item opens a popover (the others act at once).
     var opensPopover: Bool { self != .delete && self != .duplicate }
@@ -36,8 +36,9 @@ struct ActionRowModel: Equatable {
         }
         if hasSelection {
             items.append(.actions)
-            if width >= deleteWidth { items.append(.delete) }
+            // excalidraw.com's order, Duplicate before Delete; Delete is the first to fit.
             if width >= duplicateWidth { items.append(.duplicate) }
+            if width >= deleteWidth { items.append(.delete) }
         }
         return items
     }

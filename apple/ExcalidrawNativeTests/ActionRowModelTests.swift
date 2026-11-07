@@ -77,8 +77,8 @@ import Testing
         controller.perform(.selectAll)
         #expect(items(width: 365).suffix(1) == [.actions])
         #expect(items(width: 374).suffix(2) == [.actions, .delete])
-        #expect(items(width: 412).suffix(3) == [.actions, .delete, .duplicate])
-        #expect(items(width: 450).suffix(3) == [.actions, .delete, .duplicate])
+        #expect(items(width: 412).suffix(3) == [.actions, .duplicate, .delete])
+        #expect(items(width: 450).suffix(3) == [.actions, .duplicate, .delete])
     }
 
     @Test func theActionsPopoverDropsWhatIsOnTheRow() {

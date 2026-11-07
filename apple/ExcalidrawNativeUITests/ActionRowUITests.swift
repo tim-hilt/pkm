@@ -26,6 +26,48 @@ import XCTest
         XCTAssertTrue(app.staticTexts["Shades"].waitForExistence(timeout: 5), "the colour picker is open")
     }
 
+    /// Draws a rectangle in the sample's empty lower part, which leaves it selected.
+    private func selectANewRectangle() {
+        app.buttons["Rectangle"].tap()
+        let window = app.windows.firstMatch
+        window.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.68)).press(
+            forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.76)))
+        XCTAssertTrue(app.buttons["Actions"].waitForExistence(timeout: 5), "the rectangle is selected")
+    }
+
+    func testWithAnElementSelectedTriggersSwitchInOneTapAndACanvasTouchKeepsTheSelection() {
+        selectANewRectangle()
+        app.buttons["Stroke"].tap()
+        XCTAssertTrue(app.staticTexts["Shades"].waitForExistence(timeout: 5))
+        app.buttons["Properties"].tap()
+        XCTAssertTrue(app.staticTexts["Opacity"].waitForExistence(timeout: 5))
+        gone(app.staticTexts["Shades"])
+
+        // An empty spot of the Canvas: without a popover, a tap there clears the Selection.
+        let empty = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.62))
+        empty.tap()
+        gone(app.staticTexts["Opacity"])
+        XCTAssertTrue(app.buttons["Actions"].exists, "the Element is still selected")
+        empty.tap()
+        gone(app.buttons["Actions"])
+    }
+
+    func testInLandscapeDeleteAndDuplicateSitOnTheRowAndLeaveTheActionsPopover() {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        Thread.sleep(forTimeInterval: 2)  // the rotation animation swallows a tap
+        selectANewRectangle()
+        let delete = app.buttons.matching(NSPredicate(format: "label == 'Delete'"))
+        let duplicate = app.buttons.matching(NSPredicate(format: "label == 'Duplicate'"))
+        XCTAssertEqual(delete.count, 1)
+        XCTAssertEqual(duplicate.count, 1)
+
+        app.buttons["Actions"].tap()
+        XCTAssertTrue(app.staticTexts["Layers"].waitForExistence(timeout: 5))
+        XCTAssertEqual(delete.count, 1, "Delete is on the row only")
+        XCTAssertEqual(duplicate.count, 1, "Duplicate is on the row only")
+    }
+
     func testTappingAnotherTriggerSwitchesPopoversInOneTap() {
         openStroke()
         app.buttons["Properties"].tap()

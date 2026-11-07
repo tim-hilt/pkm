@@ -25,8 +25,7 @@ struct PhonePopover<Content: View>: View {
             width: contentSize.width + 2 * Self.padding, height: contentSize.height + 2 * Self.padding)
         let placement = DrawingLayout.popoverPlacement(
             anchor: anchor, content: outer, container: container, barTop: barTop)
-        let height = min(outer.height, placement.maxHeight)
-        let width = min(outer.width, container.width - 2 * DrawingLayout.popoverEdgeMargin)
+        let frame = placement.frame
         ScrollView {
             content
                 .fixedSize()
@@ -34,7 +33,7 @@ struct PhonePopover<Content: View>: View {
                 .onGeometryChange(for: CGSize.self, of: { $0.size }) { contentSize = $0 - 2 * Self.padding }
         }
         .scrollBounceBehavior(.basedOnSize)
-        .frame(width: width, height: height)
+        .frame(width: frame.width, height: frame.height)
         .background(Chrome.island, in: RoundedRectangle(cornerRadius: 8))
         .shadow(color: .black.opacity(0.17), radius: 0.5)
         .shadow(color: .black.opacity(0.08), radius: 1.5)
@@ -43,7 +42,7 @@ struct PhonePopover<Content: View>: View {
             PointerTip()
                 .fill(Chrome.island)
                 .frame(width: Self.tip.width, height: Self.tip.height)
-                .offset(x: placement.pointerX - placement.origin.x - Self.tip.width / 2, y: Self.tip.height)
+                .offset(x: placement.pointerX - frame.minX - Self.tip.width / 2, y: Self.tip.height)
                 .accessibilityHidden(true)
         }
         .opacity(contentSize == .zero ? 0 : 1)
@@ -52,7 +51,7 @@ struct PhonePopover<Content: View>: View {
         .accessibilityAction(.escape, onClose)
         .accessibilityFocused($focused)
         .onAppear { focused = true }
-        .position(x: placement.origin.x + width / 2, y: placement.origin.y + height / 2)
+        .position(x: frame.midX, y: frame.midY)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .transition(.opacity)
     }

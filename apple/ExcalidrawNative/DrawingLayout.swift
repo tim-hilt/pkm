@@ -32,8 +32,8 @@ enum DrawingLayout: Equatable {
         return fits ? margin : propertiesTop
     }
     /// Excalidraw's `containerHeight − 166`: the desktop properties panel
-    /// scrolls beyond this, clear of the zoom controls.
-    /// The panel's room shrinks by however much higher than `propertiesTop` it sits.
+    /// scrolls beyond this, clear of the zoom controls. A panel sitting
+    /// higher than `propertiesTop` (at `top`) gets that much more room.
     static func propertiesMaxHeight(containerHeight: CGFloat, top: CGFloat = propertiesTop) -> CGFloat {
         max(0, containerHeight - 166 + (propertiesTop - top))
     }
@@ -49,8 +49,9 @@ extension DrawingLayout {
 
 /// Where a phone popover sits (ADR-0013).
 struct PopoverPlacement: Equatable {
-    /// The popover's top-left corner, in the container.
-    let origin: CGPoint
+    /// The popover's frame in the container: its content size, capped to the
+    /// container's width less the edge margins and to `maxHeight`.
+    let frame: CGRect
     /// The pointer tip's x in the container: always on the anchor's centre.
     let pointerX: CGFloat
     /// The tallest the popover may be; it scrolls beyond.
@@ -75,7 +76,8 @@ extension DrawingLayout {
         let width = min(content.width, widest)
         let x = min(max(anchor.midX - width / 2, popoverEdgeMargin), popoverEdgeMargin + widest - width)
         return PopoverPlacement(
-            origin: CGPoint(x: x, y: barTop - popoverGap - height), pointerX: anchor.midX, maxHeight: maxHeight)
+            frame: CGRect(x: x, y: barTop - popoverGap - height, width: width, height: height),
+            pointerX: anchor.midX, maxHeight: maxHeight)
     }
 }
 

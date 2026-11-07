@@ -8,8 +8,9 @@ struct DrawingView: View {
     let export: ExportedDrawing
     let onBack: () -> Void
     @State private var controller = CanvasController()
-    /// Measured so the desktop panel can tell whether it fits beside the toolbar.
-    @State private var toolbarWidth: CGFloat = 0
+    /// Measured so the desktop panel can tell whether it fits beside the
+    /// toolbar; until then as if it did not, so the panel never overlaps it.
+    @State private var toolbarWidth: CGFloat = .infinity
     /// The phone toolbar's Tool family picker, and the toolbar's top it sits above.
     @State private var family = FamilyPopoverState()
     @State private var toolbarTop: CGFloat = 0
@@ -167,9 +168,11 @@ struct DrawingView: View {
         }
     }
 
-    private static let chromeSpace = "chrome"
+    /// The phone chrome's coordinate space: popover anchors and bar tops are measured in it.
+    fileprivate static let chromeSpace = "chrome"
 
-    /// A Canvas touch only closes whichever popover is open (ADR-0013).
+    /// Closes whichever popover is open: on a Canvas touch, which goes no
+    /// further (ADR-0013), or on VoiceOver's escape gesture.
     private func closePopover() {
         family.open = nil
         _ = actionRow.canvasTouch()
@@ -354,7 +357,7 @@ private struct MobileToolBar: View {
             }
         }
         .onGeometryChange(
-            for: CGRect.self, of: { $0.frame(in: .named("chrome")) },
+            for: CGRect.self, of: { $0.frame(in: .named(DrawingView.chromeSpace)) },
             action: { family.anchors[index] = $0 })
     }
 

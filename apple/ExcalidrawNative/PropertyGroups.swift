@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// The groups of the Properties panel, each a view that can be placed on its
-/// own: given the controller and the panel state, it shows its option set
-/// under a title and sets the property through the controller. The caller
-/// decides whether a group applies (`shown.sections`, `controller.hasSelection`);
-/// the desktop panel stacks them, phone popovers pick the ones they need.
+// The groups of the Properties panel, each a view that can be placed on its
+// own: given the controller and the panel state, it shows its option set
+// under a title and sets the property through the controller. The caller
+// decides whether a group applies (`shown.sections`, `controller.hasSelection`);
+// the desktop panel stacks them, phone popovers pick the ones they need.
 
 /// A titled group: a caption above its content.
 struct PanelSection<Content: View>: View {

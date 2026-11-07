@@ -91,22 +91,29 @@ import Testing
     @Test func itIsCentredOnItsAnchorAndSitsTwelvePointsAboveTheBar() {
         let anchor = CGRect(x: 150, y: 760, width: 36, height: 36)
         let p = DrawingLayout.popoverPlacement(anchor: anchor, content: content, container: portrait, barTop: 750)
-        #expect(p.origin == CGPoint(x: 103, y: 750 - 12 - 52))
+        #expect(p.frame.origin == CGPoint(x: 103, y: 750 - 12 - 52))
         #expect(p.pointerX == 168)
     }
 
     @Test func itIsClampedEightPointsFromTheLeftEdgeWithTheTipStillOnTheAnchor() {
         let anchor = CGRect(x: 10, y: 760, width: 36, height: 36)
         let p = DrawingLayout.popoverPlacement(anchor: anchor, content: content, container: portrait, barTop: 750)
-        #expect(p.origin.x == 8)
+        #expect(p.frame.minX == 8)
         #expect(p.pointerX == 28)
     }
 
     @Test func itIsClampedEightPointsFromTheRightEdgeWithTheTipStillOnTheAnchor() {
         let anchor = CGRect(x: 350, y: 760, width: 36, height: 36)
         let p = DrawingLayout.popoverPlacement(anchor: anchor, content: content, container: portrait, barTop: 750)
-        #expect(p.origin.x == 255)
+        #expect(p.frame.minX == 255)
         #expect(p.pointerX == 368)
+    }
+
+    @Test func aPopoverWiderThanTheContainerKeepsEightPointsFromBothEdges() {
+        let anchor = CGRect(x: 150, y: 760, width: 36, height: 36)
+        let wide = CGSize(width: 500, height: 52)
+        let p = DrawingLayout.popoverPlacement(anchor: anchor, content: wide, container: portrait, barTop: 750)
+        #expect(p.frame.minX == 8 && p.frame.width == 377)
     }
 
     @Test func itsMaxHeightIsTheRoomAboveTheBarLessItsGapAndTheTopMargin() {
@@ -114,10 +121,10 @@ import Testing
         let tall = CGSize(width: 130, height: 2000)
         let up = DrawingLayout.popoverPlacement(anchor: anchor, content: tall, container: portrait, barTop: 750)
         #expect(up.maxHeight == 730)
-        #expect(up.origin.y == 8)
+        #expect(up.frame.minY == 8)
         let side = DrawingLayout.popoverPlacement(
             anchor: CGRect(x: 400, y: 340, width: 36, height: 36), content: tall, container: landscape, barTop: 330)
         #expect(side.maxHeight == 310)
-        #expect(side.origin.y == 8)
+        #expect(side.frame.minY == 8)
     }
 }
