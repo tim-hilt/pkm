@@ -6,6 +6,7 @@
     - Macbook Air M1; MacOS 27+
     - iPhone 15 Pro; iOS 27+
     - iPad Pro 4th Gen, 12.9in; iPadOS 26+
+- Web client for environments, where a native application can not be installed
 
 # Why?
 
@@ -18,7 +19,6 @@ Excalidraw is not optimally usable in the browser on a smartphone or tablet. The
     - Low memory usage
     - Minimal app size
 - Use test driven development (red, green, refactor) wherever applicable
-
 
 ## Agent skills
 
