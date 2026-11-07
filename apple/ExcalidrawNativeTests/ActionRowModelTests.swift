@@ -81,6 +81,16 @@ import Testing
         #expect(items(width: 450).suffix(3) == [.actions, .delete, .duplicate])
     }
 
+    @Test func theActionsPopoverDropsWhatIsOnTheRow() {
+        controller.perform(.selectAll)
+        for (width, duplicate, delete) in [
+            (365.0, true, true), (374, true, false), (412, false, false), (450, false, false),
+        ] {
+            let row = row(width: width)
+            #expect(row.popoverHasDuplicate == duplicate && row.popoverHasDelete == delete, "\(width)")
+        }
+    }
+
     @Test func tappingOpensSwitchesAndCloses() {
         controller.setTool(.rectangle)
         var row = row()

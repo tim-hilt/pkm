@@ -149,8 +149,8 @@ struct ActionPopoverContent: View {
                 VStack(alignment: .leading, spacing: 8) {
                     LayersGroup(controller: controller)
                     ActionsGroup(
-                        controller: controller, showsDuplicate: !model.items.contains(.duplicate),
-                        showsDelete: !model.items.contains(.delete))
+                        controller: controller, showsDuplicate: model.popoverHasDuplicate,
+                        showsDelete: model.popoverHasDelete)
                 }
             case .delete, .duplicate: EmptyView()
             }
@@ -159,8 +159,8 @@ struct ActionPopoverContent: View {
             VStack(alignment: .leading, spacing: 8) {
                 LayersGroup(controller: controller)
                 ActionsGroup(
-                    controller: controller, showsDuplicate: !model.items.contains(.duplicate),
-                    showsDelete: !model.items.contains(.delete))
+                    controller: controller, showsDuplicate: model.popoverHasDuplicate,
+                    showsDelete: model.popoverHasDelete)
             }
         }
     }

@@ -42,6 +42,10 @@ struct ActionRowModel: Equatable {
         return items
     }
 
+    /// Whether the `…` popover still offers Duplicate / Delete: only while they are not on the row.
+    var popoverHasDuplicate: Bool { !items.contains(.duplicate) }
+    var popoverHasDelete: Bool { !items.contains(.delete) }
+
     /// The row's inputs changed: a popover whose trigger is gone closes.
     mutating func update(sections: Sections?, hasSelection: Bool, width: CGFloat) {
         items = Self.items(sections: sections, hasSelection: hasSelection, width: width)
