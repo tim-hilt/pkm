@@ -6,6 +6,7 @@
     "dev": "bun ./index.html",
     "build": "bun build ./index.html --outdir dist --minify",
     "test": "vitest run",
+    "test:browser": "vitest run --config vitest.browser.config.ts",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint",
     "format": "oxfmt",
@@ -13,6 +14,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "@vitest/browser-playwright": "^5.1.0",
     "@webgpu/types": "^0.1.74",
     "oxfmt": "^0.77.0",
     "oxlint": "^1.92.0",

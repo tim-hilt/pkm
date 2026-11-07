@@ -11,7 +11,7 @@ SIM ?= $(SIM_IPHONE)
 CORE_XCFRAMEWORK := apple/Generated/ExcalidrawNativeCoreFFI.xcframework
 CORE_SOURCES := Cargo.toml Cargo.lock scripts/build-core-apple.sh $(shell find crates -type f)
 
-.PHONY: web-wasm web-install web-lint web-test web-fmt web-dev core-apple apple-project build ipa test test-ios test-ui record-references lint fmt check sim run clean golden-fixtures bench visual-parity visual-parity-app screenshot
+.PHONY: web-wasm web-install web-lint web-test web-test-browser web-record-references web-fmt web-dev core-apple apple-project build ipa test test-ios test-ui record-references lint fmt check sim run clean golden-fixtures bench visual-parity visual-parity-app screenshot
 
 # The web app (web/): the core as wasm in web/generated (rebuilt only when the
 # Rust sources change), Bun for packages and the dev server.
@@ -38,6 +38,17 @@ web-lint: web-install
 # Vitest on Node, against the real wasm.
 web-test: web-install web-wasm
 	cd web && bun run test
+
+# Renderer tests in Chromium with WebGPU (reference images, pixel probes); kept
+# out of `make check` as they need a GPU. Run `cd web && bunx playwright-core
+# install chromium` once. See docs/web-renderer-reference-images.md.
+web-test-browser: web-install web-wasm
+	cd web && bun run test:browser
+
+# Re-records the web renderer reference images that no longer match (and
+# creates missing ones); review the diff of web/references before committing.
+web-record-references: web-install web-wasm
+	cd web && RECORD_REFERENCES=1 bun run test:browser
 
 # Dev server: http://localhost:3000/?sample
 web-dev: web-install web-wasm

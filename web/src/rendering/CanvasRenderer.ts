@@ -1,13 +1,16 @@
+import { type FillMesh, fillMeshOfPart } from "./FillMesh";
 import {
   type GeometryBuffers,
   type GeometryPart,
   type GeometrySource,
+  GeometryFillRule,
   elementsInZOrder,
+  fillKind,
   holeOf,
   strokeKind,
 } from "./GeometryBuffers";
 import { strokeSegments } from "./StrokeFlattener";
-import { strokeShaders } from "./StrokeShaders";
+import { fillShaders, strokeShaders } from "./StrokeShaders";
 
 /** Where the Canvas looks at the Scene. */
 export interface Viewport {
@@ -40,7 +43,15 @@ export interface Viewport {
  * What is drawn for an Element is cached per Element handle and version (and
  * flattening level), so a changed Scene only rebuilds the Elements that changed.
  *
- * Fills, text, images and the overlay follow with their own tickets.
+ * Fills are stencil-then-cover: the first pass rasterises a triangle fan per
+ * subpath into the stencil buffer, where front- and back-facing triangles
+ * count up and down (non-zero rule) or flip the value (even-odd rule), so
+ * that it ends up as the winding number; the second pass paints a rectangle
+ * over the fill wherever the count is not zero and resets the stencil there.
+ * Every draw leaves the stencil buffer zero where it ends, which is how no
+ * stroke or fill sees what an earlier one did there.
+ *
+ * Text, images and the overlay follow with their own tickets.
  */
 export class CanvasRenderer {
   /** Samples per pixel of the colour and stencil a frame is drawn into. */
@@ -64,10 +75,15 @@ export class CanvasRenderer {
   private readonly frameGroup: GPUBindGroup;
   /** Stroke pipelines by stencil use: plain, interior, fringe, clear. */
   private readonly pipelines: Record<StencilUse, GPURenderPipeline>;
+  /** Fill pipelines: the stencil pass by winding rule, and the cover pass. */
+  private readonly fillPipelines: {
+    stencil: Record<FillRule, GPURenderPipeline>;
+    cover: GPURenderPipeline;
+  };
   private readonly uniformAlignment: number;
 
   /** Everything to draw, in z-order: the cached draws of all Elements. */
-  private draws: StrokeDraw[] = [];
+  private draws: Draw[] = [];
   private cache = new Map<number, CachedElement>();
   /** The `Geometry.generation` the cache belongs to. */
   private cacheGeneration: number | undefined;
@@ -80,7 +96,7 @@ export class CanvasRenderer {
 
   constructor(
     private readonly device: GPUDevice,
-    private readonly format: GPUTextureFormat,
+    readonly format: GPUTextureFormat,
   ) {
     this.uniformAlignment = device.limits.minUniformBufferOffsetAlignment;
     this.frameLayout = device.createBindGroupLayout({
@@ -111,21 +127,32 @@ export class CanvasRenderer {
       entries: [{ binding: 0, resource: { buffer: this.frameBuffer } }],
     });
 
-    const module = device.createShaderModule({ code: strokeShaders });
     const layout = device.createPipelineLayout({
       bindGroupLayouts: [this.frameLayout, this.strokeLayout],
     });
-    const makePipeline = (compare: GPUCompareFunction, passOp: GPUStencilOperation) => {
-      const stencil = { compare, passOp, failOp: "keep" as const };
-      return device.createRenderPipeline({
+    const sampleCount = CanvasRenderer.sampleCount;
+    const stencilFormat = CanvasRenderer.stencilFormat;
+    const makePipeline = (
+      module: GPUShaderModule,
+      entryPoints: { vertex: string; fragment: string },
+      topology: GPUPrimitiveTopology,
+      stencil: {
+        compare: GPUCompareFunction;
+        passOp: GPUStencilOperation;
+        backPassOp?: GPUStencilOperation;
+      },
+      writesColor = true,
+    ) =>
+      device.createRenderPipeline({
         layout,
-        vertex: { module, entryPoint: "stroke_vertex" },
+        vertex: { module, entryPoint: entryPoints.vertex },
         fragment: {
           module,
-          entryPoint: "stroke_fragment",
+          entryPoint: entryPoints.fragment,
           targets: [
             {
               format,
+              writeMask: writesColor ? GPUColorWrite.ALL : 0,
               // Premultiplied source-over.
               blend: {
                 color: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
@@ -134,20 +161,55 @@ export class CanvasRenderer {
             },
           ],
         },
-        primitive: { topology: "triangle-strip" },
-        multisample: { count: CanvasRenderer.sampleCount },
+        primitive: { topology },
+        multisample: { count: sampleCount },
         depthStencil: {
-          format: CanvasRenderer.stencilFormat,
-          stencilFront: stencil,
-          stencilBack: stencil,
+          format: stencilFormat,
+          stencilFront: { compare: stencil.compare, passOp: stencil.passOp, failOp: "keep" },
+          stencilBack: {
+            compare: stencil.compare,
+            passOp: stencil.backPassOp ?? stencil.passOp,
+            failOp: "keep",
+          },
         },
       });
-    };
+
+    const strokeModule = device.createShaderModule({ code: strokeShaders });
+    const stroke = { vertex: "stroke_vertex", fragment: "stroke_fragment" };
+    const strip = (compare: GPUCompareFunction, passOp: GPUStencilOperation) =>
+      makePipeline(strokeModule, stroke, "triangle-strip", { compare, passOp });
     this.pipelines = {
-      plain: makePipeline("always", "keep"),
-      interior: makePipeline("not-equal", "replace"),
-      fringe: makePipeline("not-equal", "keep"),
-      clear: makePipeline("always", "zero"),
+      plain: strip("always", "keep"),
+      interior: strip("not-equal", "replace"),
+      fringe: strip("not-equal", "keep"),
+      clear: strip("always", "zero"),
+    };
+
+    const fillModule = device.createShaderModule({ code: fillShaders });
+    const fill = { vertex: "fill_vertex", fragment: "fill_fragment" };
+    this.fillPipelines = {
+      stencil: {
+        // Triangles facing one way count up and the others down, so that the
+        // stencil value is the winding number (mod 256).
+        nonZero: makePipeline(
+          fillModule,
+          fill,
+          "triangle-list",
+          { compare: "always", passOp: "increment-wrap", backPassOp: "decrement-wrap" },
+          false,
+        ),
+        evenOdd: makePipeline(
+          fillModule,
+          fill,
+          "triangle-list",
+          { compare: "always", passOp: "invert" },
+          false,
+        ),
+      },
+      cover: makePipeline(fillModule, fill, "triangle-list", {
+        compare: "not-equal",
+        passOp: "zero",
+      }),
     };
   }
 
@@ -238,14 +300,16 @@ export class CanvasRenderer {
       },
     });
     pass.setBindGroup(0, this.frameGroup);
-    pass.setStencilReference(1);
-    for (const stroke of this.draws) {
-      if (stroke.isTranslucent) {
-        this.draw(pass, stroke, "interior", 0);
-        this.draw(pass, stroke, "fringe", 1);
-        this.draw(pass, stroke, "clear", 2);
+    for (const draw of this.draws) {
+      if (draw.kind === "fill") {
+        this.drawFill(pass, draw);
+      } else if (draw.isTranslucent) {
+        pass.setStencilReference(1);
+        this.draw(pass, draw, "interior", 0);
+        this.draw(pass, draw, "fringe", 1);
+        this.draw(pass, draw, "clear", 2);
       } else {
-        this.draw(pass, stroke, "plain", 0);
+        this.draw(pass, draw, "plain", 0);
       }
     }
     pass.end();
@@ -258,6 +322,19 @@ export class CanvasRenderer {
     pass.setPipeline(this.pipelines[use]);
     pass.setBindGroup(1, stroke.group, [slot * this.uniformAlignment]);
     pass.draw(4, stroke.segmentCount);
+  }
+
+  /**
+   * Draws `fill` with stencil-then-cover. The stencil is zero again where it
+   * ends, so fills never need the whole buffer cleared.
+   */
+  private drawFill(pass: GPURenderPassEncoder, fill: FillDraw) {
+    pass.setBindGroup(1, fill.group, [0]);
+    pass.setStencilReference(0);
+    pass.setPipeline(this.fillPipelines.stencil[fill.rule]);
+    pass.draw(fill.fanVertexCount);
+    pass.setPipeline(this.fillPipelines.cover);
+    pass.draw(6, 1, fill.fanVertexCount);
   }
 
   /**
@@ -303,13 +380,13 @@ export class CanvasRenderer {
     const tolerance = CanvasRenderer.flatteningTolerancePixels / 2 ** level;
 
     const kept = new Map<number, CachedElement>();
-    const all: StrokeDraw[] = [];
+    const all: Draw[] = [];
     geometry.withBuffers((buffers) => {
       for (const item of elementsInZOrder(buffers)) {
         let entry = this.cache.get(item.element);
         if (entry?.version !== item.version || entry.level !== level) {
           entry?.draws.forEach((draw) => draw.destroy());
-          const draws: StrokeDraw[] = [];
+          const draws: Draw[] = [];
           for (let index = item.start; index < item.end; index++) {
             const draw = this.makeDraw(buffers.parts.at(index), buffers, tolerance);
             if (draw) draws.push(draw);
@@ -338,9 +415,22 @@ export class CanvasRenderer {
     part: GeometryPart,
     buffers: GeometryBuffers,
     tolerance: number,
+  ): Draw | undefined {
+    switch (part.kind) {
+      case strokeKind:
+        return this.strokeDraw(part, buffers, tolerance);
+      case fillKind:
+        return this.fillDraw(part, buffers, tolerance);
+      default:
+        return undefined;
+    }
+  }
+
+  private strokeDraw(
+    part: GeometryPart,
+    buffers: GeometryBuffers,
+    tolerance: number,
   ): StrokeDraw | undefined {
-    // Fills come with their own ticket.
-    if (part.kind !== strokeKind) return undefined;
     const segments = strokeSegments(part, buffers, tolerance);
     if (segments.length === 0) return undefined;
 
@@ -376,6 +466,7 @@ export class CanvasRenderer {
       ],
     });
     return {
+      kind: "stroke",
       group,
       segmentCount: segments.length / 4,
       isTranslucent,
@@ -385,12 +476,76 @@ export class CanvasRenderer {
       },
     };
   }
+
+  private fillDraw(
+    part: GeometryPart,
+    buffers: GeometryBuffers,
+    tolerance: number,
+  ): FillDraw | undefined {
+    const rule = fillRuleOf(part);
+    const mesh = rule && fillMeshOfPart(part, buffers, tolerance);
+    if (!rule || !mesh) return undefined;
+    return this.uploadFill(
+      mesh,
+      partUniforms(premultipliedColor(part.color, part.opacity), 0, 0, holeOf(part)),
+      rule,
+    );
+  }
+
+  /** The mesh's vertices (fan, then cover) and `uniforms` on the GPU. */
+  private uploadFill(mesh: FillMesh, uniforms: Float32Array, rule: FillRule): FillDraw {
+    const vertices = new Float32Array(mesh.triangles.length + mesh.cover.length);
+    vertices.set(mesh.triangles);
+    vertices.set(mesh.cover, mesh.triangles.length);
+    const vertexBuffer = this.device.createBuffer({
+      size: vertices.byteLength,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    this.device.queue.writeBuffer(vertexBuffer, 0, vertices);
+    const uniformBuffer = this.device.createBuffer({
+      size: this.uniformAlignment,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    this.device.queue.writeBuffer(uniformBuffer, 0, uniforms);
+    const group = this.device.createBindGroup({
+      layout: this.strokeLayout,
+      entries: [
+        { binding: 0, resource: { buffer: vertexBuffer } },
+        { binding: 1, resource: { buffer: uniformBuffer, size: partUniformsSize } },
+      ],
+    });
+    return {
+      kind: "fill",
+      group,
+      fanVertexCount: mesh.triangles.length / 2,
+      rule,
+      destroy: () => {
+        vertexBuffer.destroy();
+        uniformBuffer.destroy();
+      },
+    };
+  }
+}
+
+type FillRule = "nonZero" | "evenOdd";
+
+/** The winding rule a part asks for; undefined for a rule this client does not know. */
+function fillRuleOf(part: GeometryPart): FillRule | undefined {
+  switch (part.fillRule) {
+    case GeometryFillRule.nonZero:
+      return "nonZero";
+    case GeometryFillRule.evenOdd:
+      return "evenOdd";
+    default:
+      return undefined;
+  }
 }
 
 type StencilUse = "plain" | "interior" | "fringe" | "clear";
 
 /** A stroked part's segments on the GPU plus how to draw them. */
 interface StrokeDraw {
+  kind: "stroke";
   group: GPUBindGroup;
   segmentCount: number;
   /** Whether the stroke needs the three-pass treatment. */
@@ -398,11 +553,23 @@ interface StrokeDraw {
   destroy(): void;
 }
 
+/** A filled part's triangles on the GPU plus how to draw them. */
+interface FillDraw {
+  kind: "fill";
+  /** Holds the fan triangles, then the cover rectangle's two triangles, and the part's uniforms. */
+  group: GPUBindGroup;
+  fanVertexCount: number;
+  rule: FillRule;
+  destroy(): void;
+}
+
+type Draw = StrokeDraw | FillDraw;
+
 /** The draws of one Element at the version and flattening level they were built for. */
 interface CachedElement {
   version: number;
   level: number;
-  draws: StrokeDraw[];
+  draws: Draw[];
 }
 
 /** Mirrors `FrameUniforms` in StrokeShaders.ts, padded to 32 bytes. */

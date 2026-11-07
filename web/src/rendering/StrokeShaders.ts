@@ -1,8 +1,12 @@
 /**
- * The stroke shader, a port of `StrokeShaders.metal` to WGSL with the same
- * stages. Keep the structs in sync with `CanvasRenderer.ts`.
+ * The shaders, a port of `StrokeShaders.metal` to WGSL with the same stages.
+ * Keep the structs in sync with `CanvasRenderer.ts`. Strokes first, then
+ * fills; each has a module of its own, as WGSL cannot bind two different
+ * things to one slot of a module. Images follow with their ticket.
  */
-export const strokeShaders = /* wgsl */ `
+
+/** What every shader module starts with. */
+const common = /* wgsl */ `
 struct FrameUniforms {
   // Scene point at the top-left corner of the view.
   origin: vec2f,
@@ -26,7 +30,6 @@ struct PartUniforms {
 }
 
 @group(0) @binding(0) var<uniform> frame: FrameUniforms;
-@group(1) @binding(0) var<storage, read> segments: array<vec4f>;
 @group(1) @binding(1) var<uniform> part: PartUniforms;
 
 // Whether the device pixel centre \`pixel\` is in the part's hole.
@@ -34,6 +37,11 @@ fn inHole(pixel: vec2f) -> bool {
   let scene = pixel / frame.scale + frame.origin;
   return all(scene > part.hole.xy) && all(scene < part.hole.zw);
 }
+
+`;
+
+export const strokeShaders = /* wgsl */ `${common}
+@group(1) @binding(0) var<storage, read> segments: array<vec4f>;
 
 struct StrokeVertexOut {
   @builtin(position) position: vec4f,
@@ -101,5 +109,34 @@ fn stroke_fragment(in: StrokeVertexOut) -> @location(0) vec4f {
     discard;
   }
   return part.color * coverage;
+}
+`;
+
+/**
+ * Fills (stencil-then-cover): the same two functions draw the fan triangles
+ * into the stencil buffer (colour writes off) and the cover rectangle that
+ * paints where the stencil says "inside". Vertices are Scene points.
+ */
+export const fillShaders = /* wgsl */ `${common}
+@group(1) @binding(0) var<storage, read> points: array<vec2f>;
+
+struct FillVertexOut {
+  @builtin(position) position: vec4f,
+}
+
+@vertex
+fn fill_vertex(@builtin(vertex_index) vertexId: u32) -> FillVertexOut {
+  let pixel = (points[vertexId] - frame.origin) * frame.scale;
+  var out: FillVertexOut;
+  out.position = vec4f(pixel.x / frame.viewSize.x * 2.0 - 1.0, 1.0 - pixel.y / frame.viewSize.y * 2.0, 0.0, 1.0);
+  return out;
+}
+
+@fragment
+fn fill_fragment(in: FillVertexOut) -> @location(0) vec4f {
+  if (inHole(in.position.xy)) {
+    discard;
+  }
+  return part.color;
 }
 `;
