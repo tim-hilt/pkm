@@ -105,6 +105,11 @@ export interface Viewport {
   zoom: number;
 }
 
+/** Which Context menu the core says a long-press opens; for an Element, what Group and Ungroup would do. */
+export type ContextMenuKind =
+  | { element: true; canGroup: boolean; canUngroup: boolean }
+  | { element: false };
+
 /** The text view to show over the Canvas while a text is edited, in Canvas points. */
 export interface TextEditor {
   /** The text as typed: what the text view starts with. */
@@ -521,6 +526,33 @@ export class Editor {
 
   duplicate(): void {
     this.inner.duplicate();
+  }
+
+  group(): void {
+    this.inner.group();
+  }
+
+  ungroup(): void {
+    this.inner.ungroup();
+  }
+
+  selectAll(): void {
+    this.inner.selectAll();
+  }
+
+  /**
+   * A finger or mouse held at the view point `(x, y)`: which Context menu to
+   * show (selecting what is pressed), `undefined` if the press means nothing
+   * (the Pencil, another Tool, text being edited).
+   */
+  longPress(x: number, y: number, kind: PointerKind): ContextMenuKind | undefined {
+    const menu = this.inner.longPress(x, y, kind);
+    if (!menu) return undefined;
+    const result: ContextMenuKind = menu.element
+      ? { element: true, canGroup: menu.canGroup, canUngroup: menu.canUngroup }
+      : { element: false };
+    menu.free();
+    return result;
   }
 
   deleteSelection(): void {

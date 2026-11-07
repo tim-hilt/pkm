@@ -630,6 +630,47 @@ impl Editor {
         self.inner.borrow_mut().move_in_z_order(how.into());
     }
 
+    /// Groups the Selection (see [`excalidraw_native_core::Editor::group`]).
+    pub fn group(&self) {
+        self.inner.borrow_mut().group();
+    }
+
+    /// Dissolves the groups in the Selection.
+    pub fn ungroup(&self) {
+        self.inner.borrow_mut().ungroup();
+    }
+
+    /// Selects every Element.
+    #[wasm_bindgen(js_name = selectAll)]
+    pub fn select_all(&self) {
+        self.inner
+            .borrow_mut()
+            .perform(excalidraw_native_core::Command::SelectAll);
+    }
+
+    /// A finger or mouse held at the view point `(x, y)`: the Context menu to
+    /// show, `undefined` if the press means nothing. See
+    /// [`excalidraw_native_core::Editor::long_press`].
+    #[wasm_bindgen(js_name = longPress)]
+    pub fn long_press(&self, x: f64, y: f64, kind: PointerKind) -> Option<ContextMenu> {
+        let menu = self.inner.borrow_mut().long_press(x, y, kind.into())?;
+        Some(match menu {
+            excalidraw_native_core::ContextMenu::Element {
+                can_group,
+                can_ungroup,
+            } => ContextMenu {
+                element: true,
+                can_group,
+                can_ungroup,
+            },
+            excalidraw_native_core::ContextMenu::Canvas => ContextMenu {
+                element: false,
+                can_group: false,
+                can_ungroup: false,
+            },
+        })
+    }
+
     /// Whether Pencil-only drawing is on; read it after every input, as the
     /// first Pencil input may turn it on.
     #[wasm_bindgen(js_name = pencilOnlyDrawing)]
@@ -642,6 +683,18 @@ impl Editor {
     pub fn set_pencil_only_drawing(&self, on: bool) {
         self.inner.borrow_mut().set_pencil_only_drawing(on);
     }
+}
+
+/// The Context menu to show; see [`excalidraw_native_core::ContextMenu`].
+#[wasm_bindgen]
+pub struct ContextMenu {
+    /// The Element menu (else the Canvas's).
+    #[wasm_bindgen(readonly)]
+    pub element: bool,
+    #[wasm_bindgen(readonly, js_name = canGroup)]
+    pub can_group: bool,
+    #[wasm_bindgen(readonly, js_name = canUngroup)]
+    pub can_ungroup: bool,
 }
 
 mirror_enum! {

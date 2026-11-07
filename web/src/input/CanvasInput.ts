@@ -3,6 +3,7 @@ import {
   type CoreScrollEvent,
   type CoreMagnifyEvent,
   PointerButton,
+  PointerKind,
   PointerPhase,
 } from "../core/Core";
 import {
@@ -12,6 +13,7 @@ import {
   pointerEvent,
   scrollEvent,
 } from "./InputMapping";
+import { HoldDetector } from "./HoldDetector";
 import { isApplePlatform, type KeyChord, shortcutOf } from "./KeyboardShortcuts";
 
 /** Where the Canvas sends what the user does to it. */
@@ -26,6 +28,8 @@ export interface InputSink {
   copy(): void;
   cut(): void;
   paste(): void;
+  /** A finger was held, or the mouse clicked with its secondary button, at the Canvas point `(x, y)`: the Context menu. */
+  contextMenu(x: number, y: number, kind: PointerKind): void;
   /** The mouse moved over the Canvas without a button down. */
   hover(x: number, y: number): void;
 }
@@ -48,6 +52,9 @@ export class CanvasInput {
   private readonly pressed = new Map<number, PointerButton>();
   private lastGestureScale = 1;
   private touches = 0;
+  private readonly hold = new HoldDetector((x, y) =>
+    this.sink.contextMenu(x, y, PointerKind.Finger),
+  );
   private readonly listeners = new AbortController();
 
   constructor(
@@ -67,7 +74,7 @@ export class CanvasInput {
     on("lostpointercapture", (e) => this.up(e, PointerPhase.Cancel));
     // Passive listeners cannot stop the page from zooming or scrolling.
     canvas.addEventListener("wheel", (e) => this.wheel(e), { passive: false, signal });
-    on("contextmenu", (e) => e.preventDefault());
+    on("contextmenu", (e) => this.contextMenu(e));
     on("dragstart", (e) => e.preventDefault());
     on("selectstart", (e) => e.preventDefault());
     // The browser would move the focus from the Text view to the page when the
@@ -86,6 +93,7 @@ export class CanvasInput {
 
   /** Stops listening, for when the Canvas goes away. */
   dispose(): void {
+    this.hold.cancel();
     this.listeners.abort();
   }
 
@@ -104,7 +112,11 @@ export class CanvasInput {
     e.preventDefault();
     const focused = document.activeElement;
     if (focused instanceof HTMLElement && !(focused instanceof HTMLTextAreaElement)) focused.blur();
-    if (e.pointerType === "touch") this.touches++;
+    if (e.pointerType === "touch") {
+      this.touches++;
+      const origin = this.origin();
+      this.hold.down(e.pointerId, e.clientX - origin.left, e.clientY - origin.top);
+    }
     const button = pointerButton(e.button);
     this.pressed.set(e.pointerId, button);
     // Moves and the end reach the Canvas even outside of it.
@@ -115,6 +127,8 @@ export class CanvasInput {
   private move(e: PointerEvent): void {
     const origin = this.origin();
     const button = this.pressed.get(e.pointerId);
+    if (e.pointerType === "touch")
+      this.hold.move(e.pointerId, e.clientX - origin.left, e.clientY - origin.top);
     if (button === undefined) {
       // Hovering: only the mouse's cursor cares, as on the Mac.
       if (e.pointerType === "mouse")
@@ -134,8 +148,23 @@ export class CanvasInput {
     // The capture is also lost after a pointerup, which has been handled.
     if (button === undefined) return;
     this.pressed.delete(e.pointerId);
-    if (e.pointerType === "touch") this.touches--;
+    if (e.pointerType === "touch") {
+      this.touches--;
+      this.hold.up(e.pointerId);
+    }
     this.sink.pointer(pointerEvent(e, phase, button, this.origin()));
+  }
+
+  /**
+   * The browser's own menu never shows. A right-click (or the context menu key)
+   * opens ours; a long touch has been taken by the hold already, and a pen's
+   * is the Pencil's, which has no menu.
+   */
+  private contextMenu(e: MouseEvent): void {
+    e.preventDefault();
+    if ((e as PointerEvent).pointerType === "pen" || this.touches > 0) return;
+    const origin = this.origin();
+    this.sink.contextMenu(e.clientX - origin.left, e.clientY - origin.top, PointerKind.Mouse);
   }
 
   private wheel(e: WheelEvent): void {

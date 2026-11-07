@@ -10,6 +10,8 @@ import { Toolbar } from "./chrome/Toolbar";
 import { UndoRedoControls } from "./chrome/UndoRedoControls";
 import { PropertiesPanel } from "./chrome/PropertiesPanel";
 import { PhoneChrome } from "./chrome/PhoneChrome";
+import { ContextMenu } from "./chrome/ContextMenu";
+import { type MenuEntry, openContextMenu } from "./chrome/ContextMenuModel";
 import { MainMenu } from "./chrome/MainMenu";
 import { TextEditorOverlay } from "./text/TextEditorOverlay";
 import { caretClearOf, keyboardCovering } from "./text/KeyboardAvoidance";
@@ -174,6 +176,20 @@ export function showCanvas(
     // the space bar, a drag).
     if (pointer) canvas.style.cursor = cssCursor(editor.cursor(pointer.x, pointer.y));
   };
+  const contextMenu = new ContextMenu();
+  /** The entries, each showing what it did to the editor. */
+  const wrapped = (entries: MenuEntry[]): MenuEntry[] =>
+    entries.map((entry) => ({
+      ...entry,
+      children: entry.children && wrapped(entry.children),
+      run:
+        entry.run &&
+        (() => {
+          const done = entry.run!();
+          didReachEditor();
+          return done;
+        }),
+    }));
   const send =
     <A extends unknown[]>(forward: (...args: A) => void) =>
     (...args: A) => {
@@ -196,6 +212,14 @@ export function showCanvas(
     copy: () => void clipboard.copy(),
     cut: () => void clipboard.cut(),
     paste: () => void clipboard.paste(pointer),
+    contextMenu: (x, y, kind) => {
+      // Selecting what is pressed is the core's: the chrome shows it.
+      const entries = openContextMenu(editor, clipboard, { x, y }, kind);
+      didReachEditor();
+      if (!entries) return;
+      const bounds = canvas.getBoundingClientRect();
+      contextMenu.show(wrapped(entries), bounds.left + x, bounds.top + y);
+    },
     hover: (x, y) => {
       pointer = { x, y };
       canvas.style.cursor = cssCursor(editor.cursor(x, y));
@@ -223,6 +247,7 @@ export function showCanvas(
     phone.element,
     mainMenu.element,
     bottomLeft,
+    contextMenu.element,
   );
   // The keyboard coming up or going shrinks or grows the visual viewport.
   const visual = window.visualViewport;
@@ -251,6 +276,7 @@ export function showCanvas(
     input.dispose();
     imageInput.dispose();
     mainMenu.dispose();
+    contextMenu.hide();
     visual?.removeEventListener("resize", keyboardChanged);
     textView.hide();
     resizing.disconnect();
