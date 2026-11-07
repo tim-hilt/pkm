@@ -430,17 +430,6 @@
         }
       }
     },
-    "Drawings": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Drawings"
-          }
-        }
-      }
-    },
     "Duplicate": {
       "extractionState": "manual",
       "localizations": {

@@ -55,14 +55,7 @@ struct GalleryView: View {
                 }
                 .padding()
             }
-            .navigationTitle("Drawings")
             .toolbar {
-                #if os(iOS)
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button("Settings", systemImage: "gearshape") { isShowingSettings = true }
-                            .accessibilityIdentifier("settings")
-                    }
-                #endif
                 ToolbarItem(placement: .status) {
                     if let text = gallery.syncText {
                         Text(text).font(.footnote).foregroundStyle(.secondary)
@@ -82,6 +75,12 @@ struct GalleryView: View {
                         .accessibilityIdentifier("sync-warning")
                     }
                 }
+                #if os(iOS)
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Settings", systemImage: "gearshape") { isShowingSettings = true }
+                            .accessibilityIdentifier("settings")
+                    }
+                #endif
                 #if os(macOS)
                     ToolbarItem {
                         Button("New Drawing", systemImage: "plus") { gallery.createDrawing() }
