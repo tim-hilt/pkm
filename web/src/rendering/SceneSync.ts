@@ -7,11 +7,15 @@ export interface SyncedEditor {
   viewport(): Viewport;
   canvasColor(): number;
   geometry(): Geometry;
+  overlayRevision(): number;
+  overlay(): Geometry;
 }
 
 /** What shows the Scene; `CanvasRenderer` satisfies it. */
 export interface SceneTarget {
   setGeometry(geometry: GeometrySource): void;
+  /** What is drawn over the Scene. */
+  setOverlay(overlay: GeometrySource): void;
   viewport: Viewport;
   paperColor: number;
 }
@@ -25,6 +29,8 @@ export interface SceneTarget {
 export class SceneSync {
   private shownRevision: number | undefined;
   private shown: Geometry | undefined;
+  private shownOverlayRevision: number | undefined;
+  private shownOverlay: Geometry | undefined;
 
   constructor(
     private readonly editor: SyncedEditor,
@@ -40,6 +46,7 @@ export class SceneSync {
     target.setGeometry(this.shown);
     target.paperColor = editor.canvasColor();
     old?.free();
+    this.syncOverlay();
     this.syncViewport();
   }
 
@@ -47,8 +54,22 @@ export class SceneSync {
   sync(): boolean {
     const changed = this.editor.revision() !== this.shownRevision;
     if (changed) this.showScene();
-    else this.syncViewport();
+    else {
+      this.syncOverlay();
+      this.syncViewport();
+    }
     return changed;
+  }
+
+  /** The overlay is made for a zoom and depends on the Selection: it has its own revision. */
+  private syncOverlay(): void {
+    const { editor, target } = this;
+    if (editor.overlayRevision() === this.shownOverlayRevision) return;
+    this.shownOverlayRevision = editor.overlayRevision();
+    const old = this.shownOverlay;
+    this.shownOverlay = editor.overlay();
+    target.setOverlay(this.shownOverlay);
+    old?.free();
   }
 
   private syncViewport(): void {

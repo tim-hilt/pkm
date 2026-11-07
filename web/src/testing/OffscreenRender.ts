@@ -32,7 +32,7 @@ export interface RenderHarness {
   render(
     geometry: GeometrySource,
     viewport?: Viewport,
-    options?: { pixelsPerPoint?: number; size?: number },
+    options?: { pixelsPerPoint?: number; size?: number; overlay?: GeometrySource },
   ): Promise<RenderedImage>;
   /** Renders one frame of whatever `renderer` has been given. */
   draw(
@@ -54,6 +54,7 @@ export async function makeRenderHarness(): Promise<RenderHarness> {
     async render(geometry, viewport = defaultViewport, options) {
       const renderer = harness.makeRenderer();
       renderer.setGeometry(geometry);
+      if (options?.overlay) renderer.setOverlay(options.overlay);
       renderer.viewport = viewport;
       return harness.draw(renderer, options);
     },

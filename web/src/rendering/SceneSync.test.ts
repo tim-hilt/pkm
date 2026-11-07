@@ -5,8 +5,15 @@ import { SceneSync, type SceneTarget, type SyncedEditor } from "./SceneSync";
 class FakeEditor implements SyncedEditor {
   revisionValue = 1;
   viewportValue: Viewport = { originX: 0, originY: 0, zoom: 1 };
+  overlayRevisionValue = 1;
   geometryCalls = 0;
+  overlayCalls = 0;
   freed = 0;
+  overlayRevision = () => this.overlayRevisionValue;
+  overlay() {
+    this.overlayCalls++;
+    return { free: () => this.freed++ } as unknown as Geometry;
+  }
   revision = () => this.revisionValue;
   viewport = () => this.viewportValue;
   canvasColor = () => 0xffffffff;
@@ -16,9 +23,13 @@ class FakeEditor implements SyncedEditor {
   }
 }
 
-const target = (): SceneTarget & { geometries: unknown[] } => {
+const target = (): SceneTarget & { geometries: unknown[]; overlays: unknown[] } => {
   const t = {
     geometries: [] as unknown[],
+    overlays: [] as unknown[],
+    setOverlay(o: unknown) {
+      t.overlays.push(o);
+    },
     viewport: { originX: 0, originY: 0, zoom: 1 },
     paperColor: 0,
     setGeometry(g: unknown) {
@@ -54,5 +65,24 @@ describe("SceneSync", () => {
     editor.revisionValue = 2;
     sync.sync();
     expect(editor.freed).toBe(1);
+  });
+
+  it("asks for the overlay again only when its revision moved, not for the Scene's", () => {
+    const editor = new FakeEditor();
+    const view = target();
+    const sync = new SceneSync(editor, view);
+    sync.showScene();
+    expect(editor.overlayCalls).toBe(1);
+
+    editor.revisionValue = 2;
+    sync.sync();
+    expect(editor.overlayCalls).toBe(1);
+
+    editor.overlayRevisionValue = 2;
+    sync.sync();
+    expect(editor.overlayCalls).toBe(2);
+    expect(view.overlays.length).toBe(2);
+    // The overlay it replaced is freed (the Scene's geometry was freed once before).
+    expect(editor.freed).toBe(2);
   });
 });

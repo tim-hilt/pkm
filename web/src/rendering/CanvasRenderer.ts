@@ -59,7 +59,8 @@ export interface Viewport {
  * (cached per glyph, see `Excalifont`) in one fill, so it stays sharp at any
  * zoom.
  *
- * Images and the overlay follow with their own tickets.
+ * The overlay (selection frames, handles) is drawn over the Scene in the same
+ * frame. Images follow with their own ticket.
  */
 export class CanvasRenderer {
   /** Samples per pixel of the colour and stencil a frame is drawn into. */
@@ -74,6 +75,12 @@ export class CanvasRenderer {
   private viewportValue: Viewport = { originX: 0, originY: 0, zoom: 1 };
   private paperColorValue = 0xffffffff;
   private geometry: GeometrySource | undefined;
+  /** What is drawn over the Scene, see `setOverlay`. */
+  private overlay: GeometrySource | undefined;
+  /** The draws of `overlay`, and the flattening level they were built for. */
+  private overlayDraws: Draw[] = [];
+  private overlayLevel: number | undefined;
+  private overlayIsStale = true;
   /** Frames rendered so far; stays constant while nothing changes. */
   framesRendered = 0;
 
@@ -264,6 +271,18 @@ export class CanvasRenderer {
   }
 
   /**
+   * Replaces what is drawn over the Scene (selection frames, in Scene
+   * coordinates like the geometry); the same object again is a no-op. Unlike
+   * the Scene it is not cached by Element: it is made for one zoom.
+   */
+  setOverlay(overlay: GeometrySource | undefined): void {
+    if (overlay === this.overlay) return;
+    this.overlay = overlay;
+    this.overlayIsStale = true;
+    this.onNeedsDisplay?.();
+  }
+
+  /**
    * Renders one frame into `target` (a single-sampled 2D texture in the
    * renderer's format with render-attachment usage, such as the canvas'
    * current texture), cleared to the Canvas background first.
@@ -274,7 +293,9 @@ export class CanvasRenderer {
     const { color, stencil } = this.targets(target.width, target.height);
     const { viewport } = this;
     const scale = viewport.zoom * pixelsPerPoint;
-    this.refreshDraws(flatteningLevel(scale));
+    const level = flatteningLevel(scale);
+    this.refreshDraws(level);
+    this.refreshOverlay(level);
 
     this.device.queue.writeBuffer(
       this.frameBuffer,
@@ -310,16 +331,19 @@ export class CanvasRenderer {
       },
     });
     pass.setBindGroup(0, this.frameGroup);
-    for (const draw of this.draws) {
-      if (draw.kind === "fill") {
-        this.drawFill(pass, draw);
-      } else if (draw.isTranslucent) {
-        pass.setStencilReference(1);
-        this.draw(pass, draw, "interior", 0);
-        this.draw(pass, draw, "fringe", 1);
-        this.draw(pass, draw, "clear", 2);
-      } else {
-        this.draw(pass, draw, "plain", 0);
+    // The Scene, then the overlay on top; no copy of the (large) draws.
+    for (const draws of [this.draws, this.overlayDraws]) {
+      for (const draw of draws) {
+        if (draw.kind === "fill") {
+          this.drawFill(pass, draw);
+        } else if (draw.isTranslucent) {
+          pass.setStencilReference(1);
+          this.draw(pass, draw, "interior", 0);
+          this.draw(pass, draw, "fringe", 1);
+          this.draw(pass, draw, "clear", 2);
+        } else {
+          this.draw(pass, draw, "plain", 0);
+        }
       }
     }
     pass.end();
@@ -370,6 +394,23 @@ export class CanvasRenderer {
       stencil: texture(CanvasRenderer.stencilFormat),
     };
     return this.frameTargets;
+  }
+
+  /** Brings `overlayDraws` up to date with the overlay and the flattening level. */
+  private refreshOverlay(level: number): void {
+    if (!(this.overlayIsStale || level !== this.overlayLevel)) return;
+    this.overlayIsStale = false;
+    this.overlayLevel = level;
+    const tolerance = CanvasRenderer.flatteningTolerancePixels / 2 ** level;
+    this.overlayDraws.forEach((draw) => draw.destroy());
+    const draws: Draw[] = [];
+    this.overlay?.withBuffers((buffers) => {
+      for (let index = 0; index < buffers.parts.length; index++) {
+        const draw = this.makeDraw(buffers.parts.at(index), buffers, tolerance);
+        if (draw) draws.push(draw);
+      }
+    });
+    this.overlayDraws = draws;
   }
 
   /**

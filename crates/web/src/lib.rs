@@ -241,6 +241,54 @@ impl Editor {
         self.inner.borrow_mut().set_tool(tool.into());
     }
 
+    /// Whether the Tool lock is on: the Tool then stays after drawing a shape.
+    #[wasm_bindgen(js_name = toolLock)]
+    pub fn tool_lock(&self) -> bool {
+        self.inner.borrow().tool_lock()
+    }
+
+    #[wasm_bindgen(js_name = setToolLock)]
+    pub fn set_tool_lock(&self, locked: bool) {
+        self.inner.borrow_mut().set_tool_lock(locked);
+    }
+
+    /// Whether there is something to undo; changes after any input or command.
+    #[wasm_bindgen(js_name = canUndo)]
+    pub fn can_undo(&self) -> bool {
+        self.inner.borrow().can_undo()
+    }
+
+    #[wasm_bindgen(js_name = canRedo)]
+    pub fn can_redo(&self) -> bool {
+        self.inner.borrow().can_redo()
+    }
+
+    /// Takes back the latest change to the Scene.
+    pub fn undo(&self) {
+        self.inner.borrow_mut().undo();
+    }
+
+    /// Does again what was last undone.
+    pub fn redo(&self) {
+        self.inner.borrow_mut().redo();
+    }
+
+    /// Differs from before whenever [`Editor::overlay`] may: read it after
+    /// forwarding input and ask for the overlay again if it moved.
+    #[wasm_bindgen(js_name = overlayRevision)]
+    pub fn overlay_revision(&self) -> f64 {
+        self.inner.borrow().overlay_revision() as f64
+    }
+
+    /// What to draw over the Scene (selection frames, handles, the box-select
+    /// rectangle, binding highlights), in Scene coordinates and for the
+    /// current zoom.
+    pub fn overlay(&self) -> Geometry {
+        Geometry {
+            inner: self.inner.borrow().overlay(),
+        }
+    }
+
     /// A step of a finger, Pencil or mouse; see
     /// [`excalidraw_native_core::Editor::pointer`]. `modifiers` is a bit set:
     /// shift 1, ctrl 2, alt 4, meta 8. The fields are the core's

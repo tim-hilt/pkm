@@ -3,6 +3,8 @@ import { SceneSync } from "./rendering/SceneSync";
 import { cssCursor } from "./rendering/CursorStyle";
 import { CanvasInput } from "./input/CanvasInput";
 import { ZoomControls } from "./chrome/ZoomControls";
+import { Toolbar } from "./chrome/Toolbar";
+import { UndoRedoControls } from "./chrome/UndoRedoControls";
 import type { Editor } from "./core/Core";
 import type { Excalifont } from "./text/Excalifont";
 
@@ -40,10 +42,17 @@ export function showCanvas(
 
   let pointer: { x: number; y: number } | undefined;
   const zoomControls = new ZoomControls(editor, () => didReachEditor());
+  const undoRedo = new UndoRedoControls(editor, () => didReachEditor());
+  const toolbar = new Toolbar(editor, () => didReachEditor());
+  const bottomLeft = document.createElement("div");
+  bottomLeft.className = "bottom-left";
+  bottomLeft.append(zoomControls.element, undoRedo.element);
   /** Shows whatever the editor did with an input or command. */
   const didReachEditor = () => {
     sync.sync();
     zoomControls.update();
+    undoRedo.update();
+    toolbar.update();
     // What a press would do may change with any input or command (a Tool,
     // the space bar, a drag).
     if (pointer) canvas.style.cursor = cssCursor(editor.cursor(pointer.x, pointer.y));
@@ -77,7 +86,7 @@ export function showCanvas(
     didReachEditor();
     renderer.onNeedsDisplay?.();
   };
-  root.replaceChildren(canvas, zoomControls.element);
+  root.replaceChildren(canvas, toolbar.element, bottomLeft);
   new ResizeObserver(resize).observe(canvas);
   resize();
 }

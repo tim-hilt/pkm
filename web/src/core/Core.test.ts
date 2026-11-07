@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
 import { dashOf, fillKind, stringOf, strokeKind, verbsOf } from "../rendering/GeometryBuffers";
 import { Excalifont } from "../text/Excalifont";
-import { type Core, loadCore } from "./Core";
+import { drag, press, step } from "../testing/Gestures";
+import { type Core, type Editor, PointerKind, PointerPhase, Tool, loadCore } from "./Core";
 
 const generated = new URL("../../generated/", import.meta.url);
 const sample = readFileSync(new URL("sample.excalidraw", generated));
@@ -123,6 +124,158 @@ describe("the core as wasm", () => {
       for (const line of lines) expect(font.lineWidth(line, 20)).toBeLessThanOrEqual(110);
     });
     geometry.free();
+    editor.free();
+  });
+});
+
+const noModifiers = { shift: false, ctrl: false, alt: false, meta: false };
+
+const partCount = (editor: Editor, geometryOf: "overlay" | "geometry") => {
+  const geometry = editor[geometryOf]();
+  const count = geometry.withBuffers((buffers) => buffers.parts.length);
+  geometry.free();
+  return count;
+};
+
+describe("tools, overlay and undo through the wasm editor", () => {
+  const box = drawing(
+    `{"id":"r","type":"rectangle","x":100,"y":100,"width":200,"height":100,"roughness":0}`,
+  );
+  const selected = () => {
+    const editor = core.makeEditor();
+    editor.load(box);
+    editor.setViewSize(600, 400);
+    editor.setViewport({ originX: 0, originY: 0, zoom: 1 });
+    editor.setTool(Tool.Selection);
+    drag(editor, [[100, 100]]);
+    return editor;
+  };
+
+  it("has an empty overlay until something is selected, then frames it with handles", () => {
+    const editor = core.makeEditor();
+    editor.load(box);
+    editor.setViewSize(600, 400);
+    expect(partCount(editor, "overlay")).toBe(0);
+    const before = editor.overlayRevision();
+
+    drag(editor, [[100, 100]]);
+    // One frame, and a filled and framed square on each of the 8 handles
+    // and the rotation handle.
+    expect(partCount(editor, "overlay")).toBe(1 + 9 * 2);
+    expect(editor.overlayRevision()).not.toBe(before);
+    editor.free();
+  });
+
+  it("draws the Box-select rectangle while dragging on empty Canvas", () => {
+    const editor = core.makeEditor();
+    editor.load(box);
+    editor.setViewSize(600, 400);
+    press(editor, [
+      [20, 20],
+      [150, 150],
+    ]);
+    // Its fill and its frame, and the frame of the Element it already touches.
+    expect(partCount(editor, "overlay")).toBeGreaterThanOrEqual(2);
+    editor.free();
+  });
+
+  it("undoes and redoes a drawn shape and tells when it can", () => {
+    const editor = core.makeEditor();
+    editor.setViewSize(600, 400);
+    expect(editor.canUndo()).toBe(false);
+    editor.setTool(Tool.Rectangle);
+    drag(editor, [
+      [50, 50],
+      [150, 120],
+    ]);
+    expect(editor.elementCount()).toBe(1);
+    expect(editor.canUndo()).toBe(true);
+    expect(editor.canRedo()).toBe(false);
+
+    editor.undo();
+    expect(editor.elementCount()).toBe(0);
+    expect(editor.canRedo()).toBe(true);
+    editor.redo();
+    expect(editor.elementCount()).toBe(1);
+    editor.free();
+  });
+
+  it("keeps the Tool after drawing while the Tool lock is on", () => {
+    const editor = core.makeEditor();
+    editor.setViewSize(600, 400);
+    editor.setTool(Tool.Ellipse);
+    drag(editor, [
+      [50, 50],
+      [150, 120],
+    ]);
+    expect(editor.tool()).toBe(Tool.Selection);
+
+    editor.setToolLock(true);
+    expect(editor.toolLock()).toBe(true);
+    editor.setTool(Tool.Ellipse);
+    drag(editor, [
+      [200, 50],
+      [300, 120],
+    ]);
+    expect(editor.tool()).toBe(Tool.Ellipse);
+    expect(editor.elementCount()).toBe(2);
+
+    editor.setToolLock(false);
+    expect(editor.tool()).toBe(Tool.Selection);
+    editor.free();
+  });
+
+  it("grows a Stroke while it is drawn", () => {
+    const editor = core.makeEditor();
+    editor.setViewSize(600, 400);
+    editor.setTool(Tool.Freedraw);
+    const down = (x: number, y: number, phase: PointerPhase) => editor.pointer(step(phase, [x, y]));
+    down(10, 10, PointerPhase.Down);
+    down(40, 30, PointerPhase.Move);
+    const first = editor.revision();
+    down(80, 20, PointerPhase.Move);
+    expect(editor.elementCount()).toBe(1);
+    expect(editor.revision()).not.toBe(first);
+    down(80, 20, PointerPhase.Up);
+    editor.free();
+  });
+
+  it("keeps a pen's pressure and simulates it for a mouse", () => {
+    const pressuresSaved = (kind: PointerKind) => {
+      const editor = core.makeEditor();
+      editor.setViewSize(600, 400);
+      editor.setTool(Tool.Freedraw);
+      drag(
+        editor,
+        [
+          [10, 10],
+          [40, 30],
+          [80, 20],
+          [120, 60],
+        ],
+        kind,
+        0.8,
+      );
+      const saved = JSON.parse(new TextDecoder().decode(editor.save()));
+      editor.free();
+      return saved.elements[0];
+    };
+    const pen = pressuresSaved(PointerKind.Pencil);
+    expect(pen.simulatePressure).toBe(false);
+    expect(pen.pressures.length).toBe(pen.points.length);
+    expect(pen.pressures.every((p: number) => Math.abs(p - 0.8) < 1e-6)).toBe(true);
+
+    const mouse = pressuresSaved(PointerKind.Mouse);
+    expect(mouse.simulatePressure).toBe(true);
+  });
+
+  it("makes the overlay again for a zoom but not for a pan", () => {
+    const editor = selected();
+    const revision = editor.overlayRevision();
+    editor.scroll({ x: 300, y: 200, dx: 30, dy: 10, modifiers: noModifiers });
+    expect(editor.overlayRevision()).toBe(revision);
+    editor.zoomIn();
+    expect(editor.overlayRevision()).not.toBe(revision);
     editor.free();
   });
 });

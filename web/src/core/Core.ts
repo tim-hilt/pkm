@@ -164,6 +164,42 @@ export class Editor {
     this.inner.setTool(tool);
   }
 
+  /** Whether the Tool stays after a shape is drawn. */
+  toolLock(): boolean {
+    return this.inner.toolLock();
+  }
+
+  setToolLock(locked: boolean): void {
+    this.inner.setToolLock(locked);
+  }
+
+  /** Whether there is something to undo; changes after any input or command. */
+  canUndo(): boolean {
+    return this.inner.canUndo();
+  }
+
+  canRedo(): boolean {
+    return this.inner.canRedo();
+  }
+
+  undo(): void {
+    this.inner.undo();
+  }
+
+  redo(): void {
+    this.inner.redo();
+  }
+
+  /** Differs from before whenever `overlay()` may: also on zoom, never on a pan. */
+  overlayRevision(): number {
+    return this.inner.overlayRevision();
+  }
+
+  /** What is drawn over the Scene, made for the current zoom. */
+  overlay(): Geometry {
+    return new Geometry(this.inner.overlay(), this.views);
+  }
+
   /** Forwards a step of a finger, pen or mouse. */
   pointer(e: CorePointerEvent): void {
     this.inner.pointer(

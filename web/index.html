@@ -35,28 +35,107 @@
       :root {
         --control-fill: #ececf4;
         --control-ink: #1b1b1f;
+        --island-fill: #ffffff;
+        --checked-fill: #e0dfff;
+        --checked-ink: #030064;
+        --divider: #f1f0ff;
         color-scheme: light dark;
       }
       @media (prefers-color-scheme: dark) {
         :root {
           --control-fill: #232329;
           --control-ink: #e3e3e8;
+          --island-fill: #232329;
+          --checked-fill: #403e6a;
+          --checked-ink: #e0dfff;
+          --divider: #46464f;
         }
       }
       #app {
         position: relative;
       }
-      /* Excalidraw's grey bottom-left button group; 16px margins as in
-         DrawingLayout. */
-      .zoom-controls {
+      /* Excalidraw's bottom-left controls; 16px margins as in DrawingLayout. */
+      .bottom-left {
         position: absolute;
         left: 16px;
         bottom: max(16px, env(safe-area-inset-bottom));
+        display: flex;
+        gap: 8px;
+      }
+      .zoom-controls,
+      .undo-redo-controls {
         display: flex;
         background: var(--control-fill);
         border-radius: 8px;
         user-select: none;
         -webkit-user-select: none;
+      }
+      /* The toolbar island, top centre. */
+      .toolbar {
+        position: absolute;
+        top: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px;
+        background: var(--island-fill);
+        border-radius: 8px;
+        box-shadow: 0 0 3px rgb(0 0 0 / 0.2);
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      .toolbar button {
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        border: 0;
+        border-radius: 8px;
+        background: none;
+        color: var(--control-ink);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        touch-action: manipulation;
+        position: relative;
+      }
+      .toolbar button::after {
+        content: "";
+        position: absolute;
+        inset: -4px;
+      }
+      .toolbar button.checked {
+        background: var(--checked-fill);
+        color: var(--checked-ink);
+      }
+      .toolbar-divider {
+        width: 1px;
+        height: 24px;
+        margin: 0 4px;
+        background: var(--divider);
+      }
+      button:focus-visible {
+        outline: 2px solid #6965db;
+        outline-offset: 1px;
+      }
+      .undo-redo-controls button {
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        border: 0;
+        background: none;
+        color: var(--control-ink);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+      .undo-redo-controls button:disabled {
+        opacity: 0.4;
+        cursor: default;
       }
       .zoom-controls button {
         width: 36px;
