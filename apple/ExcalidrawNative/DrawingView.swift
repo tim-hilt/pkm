@@ -248,7 +248,7 @@ extension View {
         }
 
         private func share(_ title: LocalizedStringKey, scope: ExportScope) -> some View {
-            let png = ExportedPNG(name: drawing.name, editor: drawing.editor, scope: scope, background: background)
+            let png = ExportedPNG(name: drawing.name, editor: drawing.editor, scope: scope)
             return ShareLink(item: png, preview: SharePreview(drawing.name)) { Label(title, systemImage: "photo") }
         }
     }

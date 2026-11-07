@@ -42,7 +42,12 @@ struct ExportedPNG: Transferable {
     let name: String
     let editor: Editor
     let scope: ExportScope
-    let background: Bool
+
+    /// Read when shared, not when the menu is built, so that toggling the
+    /// option leaves the menu's items (and so the open menu) unchanged.
+    private var background: Bool {
+        UserDefaults.standard.object(forKey: ExportPreferences.backgroundKey) as? Bool ?? true
+    }
 
     static var transferRepresentation: some TransferRepresentation {
         DataRepresentation(exportedContentType: .png) { png in
