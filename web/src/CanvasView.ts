@@ -5,6 +5,7 @@ import { CanvasInput } from "./input/CanvasInput";
 import { ZoomControls } from "./chrome/ZoomControls";
 import { Toolbar } from "./chrome/Toolbar";
 import { UndoRedoControls } from "./chrome/UndoRedoControls";
+import { PropertiesPanel } from "./chrome/PropertiesPanel";
 import { MainMenu } from "./chrome/MainMenu";
 import type { DrawingSettings } from "./chrome/DrawingSettings";
 import type { DrawingExport } from "./export/DrawingExport";
@@ -62,6 +63,12 @@ export function showCanvas(
   const zoomControls = new ZoomControls(editor, () => didReachEditor());
   const undoRedo = new UndoRedoControls(editor, () => didReachEditor());
   const toolbar = new Toolbar(editor, () => didReachEditor());
+  // Swatches are of the light Canvas until the Appearance setting brings Dark mode.
+  const properties = new PropertiesPanel(
+    editor,
+    () => didReachEditor(),
+    () => false,
+  );
   const mainMenu = new MainMenu({
     downloadDrawing: () => void handlers.export.downloadDrawing(),
     downloadPng: (scope) =>
@@ -91,6 +98,7 @@ export function showCanvas(
     zoomControls.update();
     undoRedo.update();
     toolbar.update();
+    properties.update();
     mainMenu.update();
     // What a press would do may change with any input or command (a Tool,
     // the space bar, a drag).
@@ -122,10 +130,18 @@ export function showCanvas(
     canvas.height = Math.max(1, Math.round(canvas.clientHeight * ratio));
     editor.setViewSize(canvas.clientWidth, canvas.clientHeight);
     renderer.paperColor = editor.canvasColor();
+    properties.place(canvas.clientWidth, canvas.clientHeight, toolbar.element.offsetWidth);
     didReachEditor();
     renderer.onNeedsDisplay?.();
   };
-  root.replaceChildren(canvas, back, toolbar.element, mainMenu.element, bottomLeft);
+  root.replaceChildren(
+    canvas,
+    back,
+    toolbar.element,
+    properties.element,
+    mainMenu.element,
+    bottomLeft,
+  );
   const resizing = new ResizeObserver(resize);
   resizing.observe(canvas);
   // The pixel ratio also changes on its own, when the window moves to a

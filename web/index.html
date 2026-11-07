@@ -152,11 +152,11 @@
         font-size: 0.9rem;
         font-variant-numeric: tabular-nums;
       }
-      /* The way back from a Drawing, top left. */
+      /* The way back from a Drawing, beside the main menu. */
       .back-to-gallery {
         position: absolute;
         top: 16px;
-        left: 16px;
+        right: 60px;
         height: 36px;
         padding: 0 12px;
         border: 0;
@@ -333,6 +333,170 @@
         box-shadow: 0 0 3px rgb(0 0 0 / 0.3);
         cursor: pointer;
         touch-action: manipulation;
+      }
+      /* The Properties panel, on the left (placed by DrawingLayout). */
+      .properties-panel {
+        position: absolute;
+        box-sizing: border-box;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        background: var(--island-fill);
+        color: var(--control-ink);
+        border-radius: 8px;
+        box-shadow:
+          0 0 0.5px rgb(0 0 0 / 0.17),
+          0 7px 7px rgb(0 0 0 / 0.05);
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      .properties-panel[hidden],
+      .panel-section[hidden],
+      .color-full[hidden],
+      .hex-invalid[hidden] {
+        display: none;
+      }
+      .panel-section {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .panel-caption {
+        font-size: 0.75rem;
+        opacity: 0.65;
+      }
+      .panel-ends {
+        display: flex;
+        justify-content: space-between;
+      }
+      .icon-row,
+      .color-row {
+        display: flex;
+        align-items: center;
+      }
+      .icon-row {
+        gap: 8px;
+      }
+      .icon-button {
+        position: relative;
+        width: 32px;
+        height: 32px;
+        padding: 0;
+        border: 0;
+        border-radius: 8px;
+        background: rgb(128 128 128 / 0.1);
+        color: inherit;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+      .icon-button::after {
+        content: "";
+        position: absolute;
+        inset: -6px;
+      }
+      .icon-button.selected {
+        background: var(--checked-fill);
+        color: var(--checked-ink);
+      }
+      .properties-panel input[type="range"] {
+        width: 100%;
+        margin: 0;
+      }
+      .color-picker {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .color-divider {
+        width: 1px;
+        height: 22px;
+        margin: 0 4px;
+        background: var(--divider);
+      }
+      .swatch,
+      .color-more {
+        flex: 1;
+        min-height: 36px;
+        min-width: 30px;
+        padding: 0;
+        border: 0;
+        background: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+      .swatch::before,
+      .color-more::before {
+        content: "";
+        box-sizing: border-box;
+        width: var(--size);
+        height: var(--size);
+        border-radius: calc(var(--size) * 0.2);
+        background: var(--swatch);
+        box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.1);
+      }
+      .swatch.transparent::before,
+      .color-more.transparent::before {
+        background:
+          conic-gradient(
+              rgb(128 128 128 / 0.35) 25%,
+              transparent 0 50%,
+              rgb(128 128 128 / 0.35) 0 75%,
+              transparent 0
+            )
+            0 0 / 66% 66%,
+          var(--swatch);
+      }
+      .swatch.selected::before,
+      .color-more.open::before {
+        outline: 2px solid #6965db;
+        outline-offset: 2px;
+      }
+      .color-more {
+        flex: none;
+        --size: 26px;
+      }
+      .color-full {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 10px;
+        border-radius: 8px;
+        background: var(--control-fill);
+      }
+      .hex-field {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        min-height: 36px;
+        padding: 0 8px;
+        border: 1px solid var(--divider);
+        border-radius: 8px;
+        background: var(--island-fill);
+      }
+      .hex-field input {
+        flex: 1;
+        min-width: 0;
+        border: 0;
+        outline: 0;
+        background: none;
+        color: inherit;
+        font: inherit;
+      }
+      .hex-invalid {
+        font-size: 0.75rem;
+        color: #e03131;
       }
       /* The main menu, top right. */
       .main-menu {

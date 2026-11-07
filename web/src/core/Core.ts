@@ -1,11 +1,20 @@
 import init, {
   Cursor,
+  Edges,
   Editor as WasmEditor,
   ExportScope,
+  FillPattern,
+  FontSize,
+  LineStyle,
   PointerButton,
   PointerKind,
   PointerPhase,
+  Sloppiness,
+  StrokeWidth,
+  TextAlign,
   Tool,
+  ZOrder,
+  darkModeColor,
   type InitInput,
   ViewportState,
 } from "../../generated/excalidraw_native_web.js";
@@ -17,7 +26,65 @@ import {
   readGeometry,
 } from "../rendering/GeometryBuffers";
 
-export { Cursor, ExportScope, PointerButton, PointerKind, PointerPhase, Tool };
+export {
+  Cursor,
+  Edges,
+  ExportScope,
+  FillPattern,
+  FontSize,
+  LineStyle,
+  PointerButton,
+  PointerKind,
+  PointerPhase,
+  Sloppiness,
+  StrokeWidth,
+  TextAlign,
+  Tool,
+  ZOrder,
+  darkModeColor,
+};
+
+/** The sections of the Properties panel that apply. */
+export interface Sections {
+  strokeColor: boolean;
+  backgroundColor: boolean;
+  fillStyle: boolean;
+  strokeWidth: boolean;
+  strokeStyle: boolean;
+  sloppiness: boolean;
+  edges: boolean;
+  opacity: boolean;
+  text: boolean;
+}
+
+/** What the Properties panel shows; `undefined` where the Selection's Elements differ. */
+export interface Properties {
+  strokeColor?: string;
+  backgroundColor?: string;
+  fillStyle?: FillPattern;
+  strokeWidth?: StrokeWidth;
+  strokeStyle?: LineStyle;
+  sloppiness?: Sloppiness;
+  edges?: Edges;
+  /** 0 to 100. */
+  opacity?: number;
+  fontSize?: FontSize;
+  textAlign?: TextAlign;
+  sections: Sections;
+}
+
+/** One property to set, on the Selection and as the style of the next Element. */
+export type Property =
+  | { strokeColor: string }
+  | { backgroundColor: string }
+  | { fillStyle: FillPattern }
+  | { strokeWidth: StrokeWidth }
+  | { strokeStyle: LineStyle }
+  | { sloppiness: Sloppiness }
+  | { edges: Edges }
+  | { opacity: number }
+  | { fontSize: FontSize }
+  | { textAlign: TextAlign };
 
 /** What a PNG export shows: the geometry of it and the rectangle of the Scene, in Scene units, that the image is of. Free the geometry when done. */
 export interface ImageExport {
@@ -284,6 +351,69 @@ export class Editor {
   /** The user's choice or the stored one; Pencil input no longer turns it on by itself after that. */
   setPencilOnlyDrawing(on: boolean): void {
     this.inner.setPencilOnlyDrawing(on);
+  }
+
+  /** Whether the chrome shows the Properties panel: a drawing Tool is armed, text is edited or something is selected. */
+  showsProperties(): boolean {
+    return this.inner.showsProperties();
+  }
+
+  /** What the Properties panel shows; read it after every input or command. */
+  properties(): Properties {
+    const shown = this.inner.properties();
+    const sections = shown.sections;
+    const result: Properties = {
+      strokeColor: shown.strokeColor,
+      backgroundColor: shown.backgroundColor,
+      fillStyle: shown.fillStyle,
+      strokeWidth: shown.strokeWidth,
+      strokeStyle: shown.strokeStyle,
+      sloppiness: shown.sloppiness,
+      edges: shown.edges,
+      opacity: shown.opacity,
+      fontSize: shown.fontSize,
+      textAlign: shown.textAlign,
+      sections: {
+        strokeColor: sections.strokeColor,
+        backgroundColor: sections.backgroundColor,
+        fillStyle: sections.fillStyle,
+        strokeWidth: sections.strokeWidth,
+        strokeStyle: sections.strokeStyle,
+        sloppiness: sections.sloppiness,
+        edges: sections.edges,
+        opacity: sections.opacity,
+        text: sections.text,
+      },
+    };
+    sections.free();
+    shown.free();
+    return result;
+  }
+
+  /** Sets a property on the Selection (one undo step) and as the style of the next Element. */
+  setProperty(property: Property): void {
+    if ("strokeColor" in property) this.inner.setStrokeColor(property.strokeColor);
+    else if ("backgroundColor" in property) this.inner.setBackgroundColor(property.backgroundColor);
+    else if ("fillStyle" in property) this.inner.setFillStyle(property.fillStyle);
+    else if ("strokeWidth" in property) this.inner.setStrokeWidth(property.strokeWidth);
+    else if ("strokeStyle" in property) this.inner.setStrokeStyle(property.strokeStyle);
+    else if ("sloppiness" in property) this.inner.setSloppiness(property.sloppiness);
+    else if ("edges" in property) this.inner.setEdges(property.edges);
+    else if ("opacity" in property) this.inner.setOpacity(property.opacity);
+    else if ("fontSize" in property) this.inner.setFontSize(property.fontSize);
+    else this.inner.setTextAlign(property.textAlign);
+  }
+
+  duplicate(): void {
+    this.inner.duplicate();
+  }
+
+  deleteSelection(): void {
+    this.inner.deleteSelection();
+  }
+
+  moveInZOrder(how: ZOrder): void {
+    this.inner.moveInZOrder(how);
   }
 
   free(): void {

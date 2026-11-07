@@ -42,20 +42,23 @@ impl excalidraw_native_core::TextMeasurer for Measurer {
 /// UniFFI's remote enums do for the bindings.
 macro_rules! mirror_enum {
     ($(#[$meta:meta])* $name:ident { $($variant:ident),* $(,)? }) => {
+        mirror_enum!($(#[$meta])* $name in excalidraw_native_core::$name { $($variant),* });
+    };
+    ($(#[$meta:meta])* $name:ident in $core:path { $($variant:ident),* $(,)? }) => {
         $(#[$meta])*
         #[wasm_bindgen]
         #[derive(Clone, Copy)]
         pub enum $name { $($variant),* }
 
-        impl From<$name> for excalidraw_native_core::$name {
+        impl From<$name> for $core {
             fn from(value: $name) -> Self {
                 match value { $($name::$variant => Self::$variant),* }
             }
         }
 
-        impl From<excalidraw_native_core::$name> for $name {
-            fn from(value: excalidraw_native_core::$name) -> Self {
-                match value { $(excalidraw_native_core::$name::$variant => Self::$variant),* }
+        impl From<$core> for $name {
+            fn from(value: $core) -> Self {
+                match value { $(<$core>::$variant => Self::$variant),* }
             }
         }
     };
@@ -85,6 +88,28 @@ mirror_enum!(
         Arrow, Crosshair, Text, Move, Grab, Grabbing, Pointer, Eraser,
         ResizeNorthSouth, ResizeEastWest, ResizeNorthWestSouthEast, ResizeNorthEastSouthWest,
     }
+);
+
+// The options of the properties panel.
+mirror_enum!(FillPattern in excalidraw_native_core::scene::FillPattern { Hachure, CrossHatch, Zigzag, Solid });
+mirror_enum!(LineStyle in excalidraw_native_core::scene::LineStyle { Solid, Dashed, Dotted });
+mirror_enum!(StrokeWidth { Thin, Medium, Bold });
+mirror_enum!(Sloppiness {
+    Architect,
+    Artist,
+    Cartoonist
+});
+mirror_enum!(Edges { Sharp, Round });
+mirror_enum!(FontSize {
+    Small,
+    Medium,
+    Large,
+    ExtraLarge
+});
+mirror_enum!(TextAlign in excalidraw_native_core::TextAlign { Left, Center, Right });
+mirror_enum!(
+    /// Where a layer command moves the Selection in the z-order.
+    ZOrder { Forward, Backward, ToFront, ToBack }
 );
 
 /// Modifier keys as a bit set: shift 1, ctrl 2, alt 4, meta 8.
@@ -384,6 +409,110 @@ impl Editor {
         })
     }
 
+    /// What the properties panel shows; see
+    /// [`excalidraw_native_core::Editor::properties`]. Read it after every
+    /// input or command.
+    pub fn properties(&self) -> Properties {
+        let shown = self.inner.borrow().properties();
+        let s = shown.sections;
+        Properties {
+            stroke_color: shown.stroke_color,
+            background_color: shown.background_color,
+            fill_style: shown.fill_style.map(Into::into),
+            stroke_width: shown.stroke_width.map(Into::into),
+            stroke_style: shown.stroke_style.map(Into::into),
+            sloppiness: shown.sloppiness.map(Into::into),
+            edges: shown.edges.map(Into::into),
+            opacity: shown.opacity,
+            font_size: shown.font_size.map(Into::into),
+            text_align: shown.text_align.map(Into::into),
+            sections: Sections {
+                stroke_color: s.stroke_color,
+                background_color: s.background_color,
+                fill_style: s.fill_style,
+                stroke_width: s.stroke_width,
+                stroke_style: s.stroke_style,
+                sloppiness: s.sloppiness,
+                edges: s.edges,
+                opacity: s.opacity,
+                text: s.text,
+            },
+        }
+    }
+
+    /// Whether the chrome shows the properties panel.
+    #[wasm_bindgen(js_name = showsProperties)]
+    pub fn shows_properties(&self) -> bool {
+        self.inner.borrow().shows_properties()
+    }
+
+    /// Sets a property on the Selection and as the style of the next Element.
+    #[wasm_bindgen(js_name = setStrokeColor)]
+    pub fn set_stroke_color(&self, color: String) {
+        self.set_property(excalidraw_native_core::Property::StrokeColor(color));
+    }
+
+    #[wasm_bindgen(js_name = setBackgroundColor)]
+    pub fn set_background_color(&self, color: String) {
+        self.set_property(excalidraw_native_core::Property::BackgroundColor(color));
+    }
+
+    #[wasm_bindgen(js_name = setFillStyle)]
+    pub fn set_fill_style(&self, value: FillPattern) {
+        self.set_property(excalidraw_native_core::Property::FillStyle(value.into()));
+    }
+
+    #[wasm_bindgen(js_name = setStrokeWidth)]
+    pub fn set_stroke_width(&self, value: StrokeWidth) {
+        self.set_property(excalidraw_native_core::Property::StrokeWidth(value.into()));
+    }
+
+    #[wasm_bindgen(js_name = setStrokeStyle)]
+    pub fn set_stroke_style(&self, value: LineStyle) {
+        self.set_property(excalidraw_native_core::Property::StrokeStyle(value.into()));
+    }
+
+    #[wasm_bindgen(js_name = setSloppiness)]
+    pub fn set_sloppiness(&self, value: Sloppiness) {
+        self.set_property(excalidraw_native_core::Property::Sloppiness(value.into()));
+    }
+
+    #[wasm_bindgen(js_name = setEdges)]
+    pub fn set_edges(&self, value: Edges) {
+        self.set_property(excalidraw_native_core::Property::Edges(value.into()));
+    }
+
+    /// `0` to `100`.
+    #[wasm_bindgen(js_name = setOpacity)]
+    pub fn set_opacity(&self, value: f64) {
+        self.set_property(excalidraw_native_core::Property::Opacity(value));
+    }
+
+    #[wasm_bindgen(js_name = setFontSize)]
+    pub fn set_font_size(&self, value: FontSize) {
+        self.set_property(excalidraw_native_core::Property::FontSize(value.into()));
+    }
+
+    #[wasm_bindgen(js_name = setTextAlign)]
+    pub fn set_text_align(&self, value: TextAlign) {
+        self.set_property(excalidraw_native_core::Property::TextAlign(value.into()));
+    }
+
+    /// Duplicates the Selection.
+    pub fn duplicate(&self) {
+        self.inner.borrow_mut().duplicate();
+    }
+
+    #[wasm_bindgen(js_name = deleteSelection)]
+    pub fn delete_selection(&self) {
+        self.inner.borrow_mut().delete_selection();
+    }
+
+    #[wasm_bindgen(js_name = moveInZOrder)]
+    pub fn move_in_z_order(&self, how: ZOrder) {
+        self.inner.borrow_mut().move_in_z_order(how.into());
+    }
+
     /// Whether Pencil-only drawing is on; read it after every input, as the
     /// first Pencil input may turn it on.
     #[wasm_bindgen(js_name = pencilOnlyDrawing)]
@@ -426,6 +555,64 @@ impl Export {
     pub fn take_geometry(&mut self) -> Option<Geometry> {
         self.geometry.take()
     }
+}
+
+impl Editor {
+    fn set_property(&self, property: excalidraw_native_core::Property) {
+        self.inner.borrow_mut().set_property(property);
+    }
+}
+
+/// What the properties panel shows: `undefined` where the Selection's
+/// Elements differ. See [`excalidraw_native_core::Properties`].
+#[wasm_bindgen(getter_with_clone)]
+pub struct Properties {
+    #[wasm_bindgen(js_name = strokeColor)]
+    pub stroke_color: Option<String>,
+    #[wasm_bindgen(js_name = backgroundColor)]
+    pub background_color: Option<String>,
+    #[wasm_bindgen(js_name = fillStyle)]
+    pub fill_style: Option<FillPattern>,
+    #[wasm_bindgen(js_name = strokeWidth)]
+    pub stroke_width: Option<StrokeWidth>,
+    #[wasm_bindgen(js_name = strokeStyle)]
+    pub stroke_style: Option<LineStyle>,
+    pub sloppiness: Option<Sloppiness>,
+    pub edges: Option<Edges>,
+    /// `0` to `100`.
+    pub opacity: Option<f64>,
+    #[wasm_bindgen(js_name = fontSize)]
+    pub font_size: Option<FontSize>,
+    #[wasm_bindgen(js_name = textAlign)]
+    pub text_align: Option<TextAlign>,
+    /// Which sections the panel shows.
+    pub sections: Sections,
+}
+
+/// The sections of the panel that apply.
+#[wasm_bindgen]
+#[derive(Clone, Copy)]
+pub struct Sections {
+    #[wasm_bindgen(js_name = strokeColor)]
+    pub stroke_color: bool,
+    #[wasm_bindgen(js_name = backgroundColor)]
+    pub background_color: bool,
+    #[wasm_bindgen(js_name = fillStyle)]
+    pub fill_style: bool,
+    #[wasm_bindgen(js_name = strokeWidth)]
+    pub stroke_width: bool,
+    #[wasm_bindgen(js_name = strokeStyle)]
+    pub stroke_style: bool,
+    pub sloppiness: bool,
+    pub edges: bool,
+    pub opacity: bool,
+    pub text: bool,
+}
+
+/// How Excalidraw shows a CSS colour in its dark theme, for swatches.
+#[wasm_bindgen(js_name = darkModeColor)]
+pub fn dark_mode_color(css: &str) -> String {
+    excalidraw_native_core::dark_mode_color(css)
 }
 
 impl Default for Editor {
