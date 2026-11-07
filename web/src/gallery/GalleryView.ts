@@ -1,5 +1,6 @@
 import type { Entry } from "./DrawingStore";
 import type { Gallery } from "./Gallery";
+import type { SettingsView } from "../chrome/SettingsView";
 
 let nextDialog = 0;
 
@@ -25,6 +26,7 @@ function button(className: string, label: string, onClick: () => void): HTMLButt
 
 const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
 const importGlyph = `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M5 14v5h14v-5"/></svg>`;
+const gearGlyph = `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>`;
 const moreGlyph = `<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`;
 
 /** One Drawing's card: its thumbnail, name and date, and its menu. */
@@ -99,6 +101,11 @@ class Card {
     this.date.dateTime = new Date(entry.modified).toISOString();
     this.more.setAttribute("aria-label", `Actions for ${entry.name}`);
     if (changed) this.loadThumbnail();
+  }
+
+  /** Asks for the thumbnail again, as the appearance it is made for changed. */
+  reloadThumbnail(): void {
+    this.loadThumbnail();
   }
 
   /** Cards outside the screen drop their picture: the store still has it for when they come back. */
@@ -202,10 +209,11 @@ export class GalleryView {
   private readonly failureDialog = make("dialog", "gallery-dialog");
   private readonly failureText = make("p", "");
 
-  /** `isDark` tells which appearance the thumbnails are made for. */
+  /** `isDark` tells which appearance the thumbnails are made for; the gear opens `settings`, if there are any. */
   constructor(
     private readonly gallery: Gallery,
     private readonly isDark: () => boolean = () => false,
+    settings?: SettingsView,
   ) {
     const heading = make("h1", "gallery-title", ["Drawings"]);
     const create = button("gallery-new", "", () => void gallery.createDrawing());
@@ -246,6 +254,13 @@ export class GalleryView {
     this.grid.setAttribute("aria-label", "Drawings");
     this.empty.setAttribute("role", "status");
     this.element.append(heading, this.grid, this.empty, open, create, picker);
+    if (settings) {
+      const gear = button("gallery-settings", "", () => settings.show());
+      gear.innerHTML = gearGlyph;
+      gear.setAttribute("aria-label", "Settings");
+      gear.title = "Settings";
+      this.element.append(gear, settings.element);
+    }
     this.buildDialogs();
 
     this.observer = new IntersectionObserver((records) => {
@@ -286,6 +301,11 @@ export class GalleryView {
       this.failureText.textContent = this.gallery.failure;
       if (!this.failureDialog.open) this.failureDialog.showModal();
     } else if (this.failureDialog.open) this.failureDialog.close();
+  }
+
+  /** The appearance the thumbnails are made for changed: they are shown again, the old ones staying until the new are ready. */
+  appearanceChanged(): void {
+    for (const card of this.cards.values()) card.reloadThumbnail();
   }
 
   dispose(): void {

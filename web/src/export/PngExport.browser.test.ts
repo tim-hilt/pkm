@@ -60,6 +60,16 @@ describe("PNG export", () => {
     expect(alpha(image, 2, 2)).toBe(255);
   });
 
+  it("is the same in Dark mode as in light, as Dark mode is display only", async () => {
+    const light = (await render(twoRectangles(), ExportScope.Scene, true))!;
+    const editor = twoRectangles();
+    editor.setDarkMode(true);
+    const dark = (await render(editor, ExportScope.Scene, true))!;
+
+    expect([dark.width, dark.height]).toEqual([light.width, light.height]);
+    expect(dark.rgba).toEqual(light.rgba);
+  });
+
   it("rounds the pixel size as Excalidraw rounds it", async () => {
     const editor = harness.core.makeEditor();
     editor.load(

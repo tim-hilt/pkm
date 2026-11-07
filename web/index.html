@@ -32,16 +32,8 @@
         -webkit-tap-highlight-color: transparent;
         overscroll-behavior: none;
       }
-      /* The chrome's colours (Swift's `Chrome`), light like the Canvas until the
-         Appearance setting brings Dark mode to both. */
-      :root {
-        --control-fill: #ececf4;
-        --control-ink: #1b1b1f;
-        --island-fill: #ffffff;
-        --checked-fill: #e0dfff;
-        --checked-ink: #030064;
-        --divider: #f1f0ff;
-      }
+      /* The chrome's colours (Swift's `Chrome`) are custom properties set on
+         the root by ChromeColors, for Light or Dark mode. */
       #app {
         position: relative;
       }
@@ -124,7 +116,7 @@
         background: var(--divider);
       }
       button:focus-visible {
-        outline: 2px solid #6965db;
+        outline: 2px solid var(--accent);
         outline-offset: 1px;
       }
       .undo-redo-controls button {
@@ -275,7 +267,7 @@
       .gallery-more svg {
         padding: 4px;
         border-radius: 12px;
-        background: rgb(255 255 255 / 0.85);
+        background: color-mix(in srgb, var(--island-fill) 85%, transparent);
       }
       .gallery-menu {
         position: absolute;
@@ -319,8 +311,8 @@
         padding: 0;
         border: 0;
         border-radius: 28px;
-        background: #6965db;
-        color: #fff;
+        background: var(--accent);
+        color: var(--accent-ink);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -329,7 +321,7 @@
         touch-action: manipulation;
       }
       .gallery.dropping {
-        outline: 3px dashed #6965db;
+        outline: 3px dashed var(--accent);
         outline-offset: -8px;
       }
       .gallery-import {
@@ -470,7 +462,7 @@
       }
       .row-swatch.checked {
         background: var(--swatch);
-        outline: 2px solid #6965db;
+        outline: 2px solid var(--accent);
         outline-offset: 1px;
       }
       .row-swatch.transparent {
@@ -655,7 +647,7 @@
       }
       .swatch.selected::before,
       .color-more.open::before {
-        outline: 2px solid #6965db;
+        outline: 2px solid var(--accent);
         outline-offset: 2px;
       }
       .color-more {
@@ -668,7 +660,7 @@
         gap: 8px;
         padding: 10px;
         border-radius: 8px;
-        background: var(--control-fill);
+        background: var(--picker-panel);
       }
       .hex-field {
         display: flex;
@@ -676,9 +668,9 @@
         gap: 2px;
         min-height: 36px;
         padding: 0 8px;
-        border: 1px solid var(--divider);
+        border: 1px solid var(--input-border);
         border-radius: 8px;
-        background: var(--island-fill);
+        background: var(--input-fill);
       }
       .hex-field input {
         flex: 1;
@@ -852,6 +844,10 @@
         width: 100%;
         box-sizing: border-box;
         padding: 8px;
+        border: 1px solid var(--input-border);
+        border-radius: 6px;
+        background: var(--input-fill);
+        color: inherit;
         font: inherit;
       }
       .gallery-dialog-buttons {
@@ -871,11 +867,70 @@
         cursor: pointer;
       }
       .gallery-dialog-buttons .primary {
-        background: #6965db;
-        color: #fff;
+        background: var(--accent);
+        color: var(--accent-ink);
       }
       .gallery-dialog-buttons .primary.danger {
         background: #c92a2a;
+      }
+      /* The gear of the Gallery, and the Settings it opens. */
+      .gallery-settings {
+        position: absolute;
+        top: 16px;
+        right: 16px;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        border: 0;
+        border-radius: 22px;
+        background: none;
+        color: var(--control-ink);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+      .settings-dialog fieldset {
+        margin: 0;
+        padding: 0;
+        border: 0;
+      }
+      .settings-dialog legend {
+        padding: 0;
+        margin-bottom: 8px;
+        font-weight: 600;
+      }
+      .appearance-choices {
+        display: flex;
+        gap: 4px;
+        padding: 4px;
+        border-radius: 8px;
+        background: var(--control-fill);
+      }
+      .appearance-choices label {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        padding: 0 12px;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .appearance-choices label:has(input:checked) {
+        background: var(--checked-fill);
+        color: var(--checked-ink);
+      }
+      .appearance-choices label:has(input:focus-visible) {
+        outline: 2px solid var(--accent);
+      }
+      .appearance-choices input {
+        width: auto;
+        padding: 0;
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
       }
       .unsupported {
         max-width: 32rem;

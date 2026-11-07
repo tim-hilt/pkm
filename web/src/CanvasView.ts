@@ -15,6 +15,7 @@ import { type MenuEntry, openContextMenu } from "./chrome/ContextMenuModel";
 import { MainMenu } from "./chrome/MainMenu";
 import { TextEditorOverlay } from "./text/TextEditorOverlay";
 import { caretClearOf, keyboardCovering } from "./text/KeyboardAvoidance";
+import type { Appearance } from "./chrome/Appearance";
 import type { DrawingSettings } from "./chrome/DrawingSettings";
 import type { DrawingExport } from "./export/DrawingExport";
 import type { Editor } from "./core/Core";
@@ -29,6 +30,8 @@ export interface CanvasHandlers {
   /** What the main menu downloads. */
   export: DrawingExport;
   settings: DrawingSettings;
+  /** Whether the Canvas and chrome are dark, and when that changes. */
+  appearance: Appearance;
 }
 
 /**
@@ -52,6 +55,9 @@ export function showCanvas(
 
   const renderer = new CanvasRenderer(device, format, font);
   renderer.files = editor;
+  const isDark = () => handlers.appearance.isDark;
+  editor.setDarkMode(isDark());
+  renderer.isDark = isDark();
   // On demand: one frame per request, however many changes asked for it.
   let scheduled = false;
   let gone = false;
@@ -94,18 +100,8 @@ export function showCanvas(
   });
   const insertFromPicker = () => void pickImages(images);
   const toolbar = new Toolbar(editor, () => didReachEditor(), insertFromPicker);
-  // Swatches are of the light Canvas until the Appearance setting brings Dark mode.
-  const properties = new PropertiesPanel(
-    editor,
-    () => didReachEditor(),
-    () => false,
-  );
-  const phone = new PhoneChrome(
-    editor,
-    () => didReachEditor(),
-    () => false,
-    insertFromPicker,
-  );
+  const properties = new PropertiesPanel(editor, () => didReachEditor(), isDark);
+  const phone = new PhoneChrome(editor, () => didReachEditor(), isDark, insertFromPicker);
   // The properties' chrome leaves the focus in the Text view, as the native
   // app's does: a property picked while typing styles the text being edited,
   // which stays open (the core's rule), where the Text view's blur would
@@ -255,6 +251,15 @@ export function showCanvas(
     if (syncTextView()) didReachEditor();
   };
   visual?.addEventListener("resize", keyboardChanged);
+  // Dark mode is display only: the Scene, Selection, Text view and history stay
+  // as they are; what is shown is made again in the new colours.
+  const stopFollowingAppearance = handlers.appearance.subscribe(() => {
+    editor.setDarkMode(isDark());
+    renderer.isDark = isDark();
+    sync.showScene();
+    didReachEditor();
+    renderer.onNeedsDisplay?.();
+  });
   const resizing = new ResizeObserver(resize);
   resizing.observe(canvas);
   // The pixel ratio also changes on its own, when the window moves to a
@@ -273,6 +278,7 @@ export function showCanvas(
   resize();
 
   return () => {
+    stopFollowingAppearance();
     input.dispose();
     imageInput.dispose();
     mainMenu.dispose();

@@ -1,4 +1,7 @@
 import { showCanvas } from "./CanvasView";
+import { Appearance } from "./chrome/Appearance";
+import { applyChromeColors } from "./chrome/ChromeColors";
+import { SettingsView } from "./chrome/SettingsView";
 import { DrawingSettings } from "./chrome/DrawingSettings";
 import { DrawingExport, downloadInBrowser } from "./export/DrawingExport";
 import { exportPng } from "./export/PngExport";
@@ -43,6 +46,9 @@ export async function startApp(
   if (sample) await gallery.openDrawing(await store.add(sample, "Sample"));
 
   const settings = new DrawingSettings(localStorage);
+  const appearance = new Appearance(localStorage, matchMedia("(prefers-color-scheme: dark)"));
+  const showChromeColors = () => applyChromeColors(document.documentElement, appearance.isDark);
+  showChromeColors();
 
   let canvas: { drawing: OpenDrawing; stop: () => void } | undefined;
   let galleryView: GalleryView | undefined;
@@ -62,6 +68,7 @@ export async function startApp(
           edited: () => drawing.editorDidChange(),
           back: () => void gallery.close(),
           settings,
+          appearance,
           export: new DrawingExport(drawing, {
             save: downloadInBrowser,
             png: (scope, background) => exportPng(device, font, drawing.editor, scope, background),
@@ -69,14 +76,22 @@ export async function startApp(
         }),
       };
     } else {
-      // Thumbnails are of the light Canvas until the Appearance setting brings Dark mode.
       if (!galleryView) {
-        galleryView = new GalleryView(gallery, () => false);
+        galleryView = new GalleryView(
+          gallery,
+          () => appearance.isDark,
+          new SettingsView(appearance),
+        );
         root.replaceChildren(galleryView.element);
       }
       galleryView.update();
     }
   };
+  // The Gallery's thumbnails are of the Canvas in the appearance shown.
+  appearance.subscribe(() => {
+    showChromeColors();
+    galleryView?.appearanceChanged();
+  });
   gallery.onChange = show;
   show();
 
