@@ -145,10 +145,24 @@ final class OpenDrawing {
 
     /// Leaves the Drawing: a text being edited is committed as typed (its text
     /// view would end the editing only once the Drawing is gone), and
-    /// everything is saved.
+    /// everything is saved. An empty Scene is not worth a file: it is not
+    /// saved, and a file that exists is removed, also if the Drawing was
+    /// emptied just now. Nothing is written after that.
     func close() {
         editor.commitText()
-        saveNow()
+        pendingSave?.cancel()
+        pendingSave = nil
+        // Brings in what changed outside first, so that a Scene that is only
+        // empty here is not taken for an empty Drawing.
+        guard syncWithFile() != .deleted else { return }
+        if editor.elementCount() == 0 {
+            try? store.delete(name)
+            savedStamp = nil
+            isDeleted = true
+            onSaved?()
+        } else {
+            saveNow()
+        }
     }
 
     /// Saves unsaved changes and the viewport now and drops the delayed save.

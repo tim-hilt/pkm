@@ -133,6 +133,42 @@ import Testing
         #expect(saved.save() == drawing.editor.save())
     }
 
+    // MARK: Empty Drawings
+
+    @Test func leavingAnEmptyNewDrawingRemovesItsFile() throws {
+        let drawing = try openNewDrawing()
+
+        drawing.close()
+
+        #expect(try store.list().isEmpty)
+    }
+
+    @Test func leavingADrawingEmptiedByTheUserRemovesItsFile() async throws {
+        let drawing = try openNewDrawing()
+        drawRectangle(in: drawing)
+        drawing.saveNow()
+        #expect(try savedElementCount(drawing) == 1)
+        drawing.editor.deleteSelection()
+        #expect(drawing.editor.elementCount() == 0)
+        drawing.editorDidChange()
+
+        drawing.close()
+        // Neither the delayed save nor leaving the view brings it back.
+        drawing.saveNow()
+        try await wait(Self.delay * 4)
+
+        #expect(try store.list().isEmpty)
+    }
+
+    @Test func leavingADrawingWithElementsKeepsItsFile() throws {
+        let drawing = try openNewDrawing()
+        drawRectangle(in: drawing)
+
+        drawing.close()
+
+        #expect(try savedElementCount(drawing) == 1)
+    }
+
     @Test func theDelayedSaveDoesNotRepeatAfterASaveAtOnce() async throws {
         let drawing = try openNewDrawing()
         drawRectangle(in: drawing)

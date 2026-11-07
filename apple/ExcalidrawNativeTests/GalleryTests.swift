@@ -85,6 +85,16 @@ import Testing
         #expect(saved.elementCount() == 1)
     }
 
+    @Test func goingBackFromAnEmptyDrawingRemovesItFromTheGallery() {
+        let gallery = Gallery(store: store)
+        gallery.createDrawing()
+
+        gallery.close()
+
+        #expect(gallery.open == nil)
+        #expect(gallery.drawings.isEmpty)
+    }
+
     @Test func openingAListedDrawingShowsIt() throws {
         try store.save(Data(contentsOf: SampleDrawing.url), as: "sample")
         let gallery = Gallery(store: store)
