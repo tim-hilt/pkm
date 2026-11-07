@@ -52,7 +52,6 @@ struct CanvasCommands: Commands {
     #if os(macOS)
         @FocusedValue(\.drawingExporter) private var exporter
         @FocusedValue(\.backToGallery) private var backToGallery
-        @AppStorage(ExportPreferences.backgroundKey) private var exportBackground = true
     #endif
 
     var body: some Commands {
@@ -73,12 +72,11 @@ struct CanvasCommands: Commands {
                 Button("Export…") { exporter?.exportDrawing() }
                     .disabled(exporter == nil)
                 Menu("Export PNG") {
-                    Toggle("Background", isOn: $exportBackground)
                     Button("Export Scene as PNG…") {
-                        exporter?.exportPNG(scope: .scene, background: exportBackground)
+                        exporter?.exportPNG(scope: .scene)
                     }
                     Button("Export Selection as PNG…") {
-                        exporter?.exportPNG(scope: .selection, background: exportBackground)
+                        exporter?.exportPNG(scope: .selection)
                     }
                     .disabled(controller?.hasSelection != true)
                 }

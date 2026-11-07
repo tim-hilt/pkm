@@ -216,7 +216,6 @@ extension View {
         let drawing: OpenDrawing
         let export: ExportedDrawing
         let controller: CanvasController
-        @AppStorage(ExportPreferences.backgroundKey) private var background = true
 
         var body: some View {
             Menu {
@@ -224,12 +223,12 @@ extension View {
                     Label("Share", systemImage: "square.and.arrow.up")
                 }
                 .accessibilityIdentifier("export-drawing")
-                Section("Export PNG") {
-                    Toggle("Background", isOn: $background)
-                        .menuActionDismissBehavior(.disabled)
+                Menu {
                     share("Export Scene as PNG", scope: .scene)
                     share("Export Selection as PNG", scope: .selection)
                         .disabled(!controller.hasSelection)
+                } label: {
+                    Label("Export PNG", systemImage: "photo")
                 }
                 if offersPencilOnlyDrawing {
                     Section("Settings") {
@@ -246,7 +245,7 @@ extension View {
         }
 
         private func share(_ title: LocalizedStringKey, scope: ExportScope) -> some View {
-            let png = ExportedPNG(name: drawing.name, editor: drawing.editor, scope: scope, background: background)
+            let png = ExportedPNG(name: drawing.name, editor: drawing.editor, scope: scope)
             return ShareLink(item: png, preview: SharePreview(drawing.name)) { Label(title, systemImage: "photo") }
         }
     }

@@ -1,11 +1,5 @@
 import SwiftUI
 
-/// Where the Export PNG options are remembered: one setting for the main menu
-/// on iPhone and iPad and the menu bar on a Mac.
-enum ExportPreferences {
-    static let backgroundKey = "exportPNGBackground"
-}
-
 #if os(macOS)
     import AppKit
     import UniformTypeIdentifiers
@@ -25,8 +19,8 @@ enum ExportPreferences {
             save(data, as: "\(drawing.name).excalidraw", type: .excalidraw)
         }
 
-        @MainActor func exportPNG(scope: ExportScope, background: Bool) {
-            guard let data = PNGExport.pngData(drawing.editor, scope: scope, background: background) else { return }
+        @MainActor func exportPNG(scope: ExportScope) {
+            guard let data = PNGExport.pngData(drawing.editor, scope: scope, background: true) else { return }
             save(data, as: "\(drawing.name).png", type: .png)
         }
 

@@ -49,21 +49,4 @@ import XCTest
         XCTAssertTrue(bar.buttons["main-menu"].exists, "the menu is in the bar")
         XCTAssertLessThan(bar.buttons["back-to-gallery"].frame.midX, bar.buttons["main-menu"].frame.midX)
     }
-
-    /// Toggling Background leaves the menu open with its new check mark, to
-    /// export right after; a submenu would close, as SwiftUI rebuilds the menu.
-    func testTogglingTheExportBackgroundKeepsTheMenuOpen() {
-        app.buttons["new-drawing"].tap()
-        let menu = app.navigationBars.firstMatch.buttons["main-menu"]
-        XCTAssertTrue(menu.waitForExistence(timeout: 10))
-        menu.tap()
-        let background = app.buttons["Background"].firstMatch
-        XCTAssertTrue(background.waitForExistence(timeout: 5))
-        let wasOn = background.isSelected
-
-        background.tap()
-
-        XCTAssertTrue(app.buttons["Export Scene as PNG"].firstMatch.waitForExistence(timeout: 2), "the menu is open")
-        XCTAssertNotEqual(app.buttons["Background"].firstMatch.isSelected, wasOn, "the check mark follows")
-    }
 }

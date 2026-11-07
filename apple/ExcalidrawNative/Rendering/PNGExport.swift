@@ -42,12 +42,11 @@ struct ExportedPNG: Transferable {
     let name: String
     let editor: Editor
     let scope: ExportScope
-    let background: Bool
 
     static var transferRepresentation: some TransferRepresentation {
         DataRepresentation(exportedContentType: .png) { png in
             let data = await MainActor.run {
-                PNGExport.pngData(png.editor, scope: png.scope, background: png.background)
+                PNGExport.pngData(png.editor, scope: png.scope, background: true)
             }
             guard let data else { throw CocoaError(.fileWriteUnknown) }
             return data
