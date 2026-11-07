@@ -37,6 +37,66 @@ impl excalidraw_native_core::TextMeasurer for Measurer {
     }
 }
 
+/// Mirrors of the core's input and Tool enums: `wasm-bindgen` exports its own
+/// C-like enums, so each core enum has one here with the same variants, as
+/// UniFFI's remote enums do for the bindings.
+macro_rules! mirror_enum {
+    ($(#[$meta:meta])* $name:ident { $($variant:ident),* $(,)? }) => {
+        $(#[$meta])*
+        #[wasm_bindgen]
+        #[derive(Clone, Copy)]
+        pub enum $name { $($variant),* }
+
+        impl From<$name> for excalidraw_native_core::$name {
+            fn from(value: $name) -> Self {
+                match value { $($name::$variant => Self::$variant),* }
+            }
+        }
+
+        impl From<excalidraw_native_core::$name> for $name {
+            fn from(value: excalidraw_native_core::$name) -> Self {
+                match value { $(excalidraw_native_core::$name::$variant => Self::$variant),* }
+            }
+        }
+    };
+}
+
+mirror_enum!(
+    /// What produced a pointer.
+    PointerKind { Finger, Pencil, Mouse }
+);
+mirror_enum!(
+    /// Which button of a mouse is down.
+    PointerButton { Primary, Secondary, Middle }
+);
+mirror_enum!(PointerPhase {
+    Down,
+    Move,
+    Up,
+    Cancel
+});
+mirror_enum!(
+    /// The active Tool.
+    Tool { Selection, Hand, Rectangle, Diamond, Ellipse, Line, Arrow, Freedraw, Eraser, Text }
+);
+mirror_enum!(
+    /// The mouse cursor the core wants over the Canvas.
+    Cursor {
+        Arrow, Crosshair, Text, Move, Grab, Grabbing, Pointer, Eraser,
+        ResizeNorthSouth, ResizeEastWest, ResizeNorthWestSouthEast, ResizeNorthEastSouthWest,
+    }
+);
+
+/// Modifier keys as a bit set: shift 1, ctrl 2, alt 4, meta 8.
+fn modifiers(bits: u8) -> excalidraw_native_core::input::Modifiers {
+    excalidraw_native_core::input::Modifiers {
+        shift: bits & 1 != 0,
+        ctrl: bits & 2 != 0,
+        alt: bits & 4 != 0,
+        meta: bits & 8 != 0,
+    }
+}
+
 /// What the Canvas shows; see [`excalidraw_native_core::Viewport`].
 #[wasm_bindgen]
 #[derive(Clone, Copy)]
@@ -139,6 +199,115 @@ impl Editor {
     #[wasm_bindgen(js_name = canvasColor)]
     pub fn canvas_color(&self) -> u32 {
         self.inner.borrow().canvas_color()
+    }
+
+    /// Differs from before whenever the Scene changed; read it after
+    /// forwarding input and ask for [`Editor::geometry`] again if it moved.
+    pub fn revision(&self) -> f64 {
+        self.inner.borrow().revision() as f64
+    }
+
+    /// One zoom step in around the middle of the view.
+    #[wasm_bindgen(js_name = zoomIn)]
+    pub fn zoom_in(&self) {
+        self.inner.borrow_mut().zoom_in();
+    }
+
+    /// One zoom step out around the middle of the view.
+    #[wasm_bindgen(js_name = zoomOut)]
+    pub fn zoom_out(&self) {
+        self.inner.borrow_mut().zoom_out();
+    }
+
+    /// Back to 100 % around the middle of the view.
+    #[wasm_bindgen(js_name = resetZoom)]
+    pub fn reset_zoom(&self) {
+        self.inner.borrow_mut().reset_zoom();
+    }
+
+    /// Frames all shown Elements.
+    #[wasm_bindgen(js_name = zoomToFit)]
+    pub fn zoom_to_fit(&self) {
+        self.inner.borrow_mut().zoom_to_fit();
+    }
+
+    /// The active Tool.
+    pub fn tool(&self) -> Tool {
+        self.inner.borrow().tool().into()
+    }
+
+    #[wasm_bindgen(js_name = setTool)]
+    pub fn set_tool(&self, tool: Tool) {
+        self.inner.borrow_mut().set_tool(tool.into());
+    }
+
+    /// A step of a finger, Pencil or mouse; see
+    /// [`excalidraw_native_core::Editor::pointer`]. `modifiers` is a bit set:
+    /// shift 1, ctrl 2, alt 4, meta 8. The fields are the core's
+    /// `PointerEvent`, flat, so that no object is made per event.
+    #[wasm_bindgen]
+    #[allow(clippy::too_many_arguments)]
+    pub fn pointer(
+        &self,
+        id: u32,
+        phase: PointerPhase,
+        x: f64,
+        y: f64,
+        kind: PointerKind,
+        button: PointerButton,
+        pressure: f32,
+        timestamp: f64,
+        modifier_bits: u8,
+    ) {
+        self.inner
+            .borrow_mut()
+            .pointer(excalidraw_native_core::input::PointerEvent {
+                id: id.into(),
+                phase: phase.into(),
+                x,
+                y,
+                kind: kind.into(),
+                button: button.into(),
+                pressure,
+                timestamp,
+                modifiers: modifiers(modifier_bits),
+            });
+    }
+
+    /// A scroll wheel or trackpad scroll; `dx`, `dy` are how far the content
+    /// should move, in view points. `modifiers` as in [`Editor::pointer`].
+    pub fn scroll(&self, x: f64, y: f64, dx: f64, dy: f64, modifier_bits: u8) {
+        self.inner
+            .borrow_mut()
+            .scroll(excalidraw_native_core::input::ScrollEvent {
+                x,
+                y,
+                dx,
+                dy,
+                modifiers: modifiers(modifier_bits),
+            });
+    }
+
+    /// A trackpad pinch: the relative change of zoom since the last event.
+    pub fn magnify(&self, x: f64, y: f64, magnification: f64) {
+        self.inner
+            .borrow_mut()
+            .magnify(excalidraw_native_core::input::MagnifyEvent {
+                x,
+                y,
+                magnification,
+            });
+    }
+
+    /// The space bar went down (`true`) or up.
+    #[wasm_bindgen(js_name = setPanKey)]
+    pub fn set_pan_key(&self, held: bool) {
+        self.inner.borrow_mut().set_pan_key(held);
+    }
+
+    /// The mouse cursor at the view point `(x, y)`.
+    pub fn cursor(&self, x: f64, y: f64) -> Cursor {
+        self.inner.borrow().cursor(x, y).into()
     }
 
     /// The paths to draw for the Scene.
