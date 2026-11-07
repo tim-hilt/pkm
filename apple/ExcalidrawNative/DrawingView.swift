@@ -123,7 +123,10 @@ struct DrawingView: View {
 
     /// excalidraw.com's phone layout (docs/layout-reference §4): everything
     /// in the bottom bar within thumb reach; no zoom buttons (pinch),
-    /// properties in popovers.
+    /// properties in popovers. The chrome sits in the keyboard's safe area
+    /// (only the Canvas ignores it), so the bar rises above the keyboard with
+    /// the popover anchored to it, whose maximum height is the room left above
+    /// the bar (`DrawingLayout.popoverPlacement`).
     private func mobileChrome(in size: CGSize) -> some View {
         let width = DrawingLayout.bottomBarWidth(containerWidth: size.width)
         let inputs = ActionRowInputs(

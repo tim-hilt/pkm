@@ -45,6 +45,43 @@ import XCTest
         XCTAssertTrue(app.buttons["Rectangle"].isSelected, "the Tool is unchanged")
     }
 
+    func testTheHexFieldStaysAboveTheKeyboardAndThePopoverStaysOpenWhenItCloses() throws {
+        openStroke()
+        let hex = app.textFields["Hex code"]
+        let before = app.buttons["Rectangle"].frame.minY
+        hex.tap()
+        let keyboard = app.keyboards.firstMatch
+        try XCTSkipUnless(keyboard.waitForExistence(timeout: 5), "a hardware keyboard shows none")
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "hex-keyboard"
+        shot.lifetime = .keepAlways
+        add(shot)
+        XCTAssertLessThanOrEqual(hex.frame.maxY, keyboard.frame.minY, "the field is visible")
+        XCTAssertLessThanOrEqual(app.buttons["Rectangle"].frame.maxY, keyboard.frame.minY, "the bar moved up")
+
+        hex.typeText("\n")
+        gone(keyboard)
+        XCTAssertTrue(app.staticTexts["Shades"].exists, "the popover is still open")
+        XCTAssertEqual(app.buttons["Rectangle"].frame.minY, before, accuracy: 1, "the layout is back")
+    }
+
+    func testInLandscapeTheHexFieldIsReachableAboveTheKeyboard() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        Thread.sleep(forTimeInterval: 2)  // the rotation animation swallows a tap
+        openStroke()
+        let hex = app.textFields["Hex code"]
+        hex.tap()
+        let keyboard = app.keyboards.firstMatch
+        try XCTSkipUnless(keyboard.waitForExistence(timeout: 5), "a hardware keyboard shows none")
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "hex-keyboard-landscape"
+        shot.lifetime = .keepAlways
+        add(shot)
+        XCTAssertTrue(hex.isHittable, "the popover scrolled the field into view")
+        XCTAssertLessThanOrEqual(hex.frame.maxY, keyboard.frame.minY)
+    }
+
     // VoiceOver's escape gesture has no XCUITest API (a hardware Escape key does not reach
     // the popover in the simulator); `PhonePopover` wires it with `.accessibilityAction(.escape)`.
 }
