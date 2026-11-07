@@ -1,11 +1,11 @@
-import { type Core, type Geometry } from "../core/Core";
+import { type Core, type Editor, type Geometry } from "../core/Core";
 import { type GeometrySource } from "../rendering/GeometryBuffers";
 import { type Point, fillPart } from "../rendering/HandBuiltGeometry";
 import { handBuiltGeometry } from "../rendering/HandBuiltGeometry";
 
 /**
  * Scenes for renderer tests, made the way the app makes its own: by loading a
- * Drawing into the core's `Editor`. A port of the Swift `TestScenes` (images follow with their ticket).
+ * Drawing into the core's `Editor`. A port of the Swift `TestScenes`.
  */
 export class TestScenes {
   constructor(private readonly core: Core) {}
@@ -19,6 +19,51 @@ export class TestScenes {
     const editor = this.core.makeEditor();
     editor.load(bytes);
     return editor.geometry();
+  }
+
+  /**
+   * A Drawing with the image `files` (by id, as PNG bytes) and `elements`,
+   * loaded into an editor, which is also what the renderer reads the files
+   * from. Free the geometry when done.
+   */
+  withImages(
+    files: Record<string, Uint8Array>,
+    elements: string[],
+  ): { editor: Editor; geometry: Geometry } {
+    const editor = this.core.makeEditor();
+    const members = Object.entries(files).map(
+      ([id, bytes]) =>
+        `"${id}":{"mimeType":"image/png","id":"${id}","dataURL":"data:image/png;base64,${base64(bytes)}","created":1}`,
+    );
+    editor.load(
+      new TextEncoder().encode(
+        `{"type":"excalidraw","version":2,"elements":[${elements.join(",")}],"files":{${members.join(",")}}}`,
+      ),
+    );
+    return { editor, geometry: editor.geometry() };
+  }
+
+  /**
+   * Images plain, mirrored, turned, cropped, translucent and rounded, and the
+   * placeholders for a missing file, a failed one and a broken one.
+   */
+  images(files: Record<string, Uint8Array>): { editor: Editor; geometry: Geometry } {
+    const crop = `{"x":10,"y":10,"width":20,"height":20,"naturalWidth":40,"naturalHeight":40}`;
+    return this.withImages(files, [
+      image("plain", 20, 20, [120, 120]),
+      image("mirrored", 160, 20, [120, 120], { scale: "[-1,1]" }),
+      image("turned", 300, 30, [100, 100], { extra: `,"angle":0.3` }),
+      image("cropped", 20, 160, [120, 120], { crop }),
+      image("faded", 160, 160, [120, 120], { extra: `,"opacity":50` }),
+      image("rounded", 300, 160, [100, 120], { extra: `,"roundness":{"type":3}` }),
+      image("missing", 20, 300, [120, 80], { file: "gone" }),
+      image("failed", 160, 300, [120, 80], { file: "gone", extra: `,"status":"error"` }),
+      image("broken", 300, 300, [100, 80], {
+        file: "junk",
+        scale: "[-1,1]",
+        extra: `,"angle":-0.4`,
+      }),
+    ]);
   }
 
   /**
@@ -217,6 +262,25 @@ export function pentagram(centre: number, radius: number): Point[] {
     const angle = Math.fround((i * 4 * Math.PI) / 5 - Math.PI / 2);
     return [centre + radius * Math.cos(angle), centre + radius * Math.sin(angle)];
   });
+}
+
+/** An image Element showing file `file` in the box at (x, y) of `size`; `scale` and `crop` are JSON, `extra` more members. */
+export function image(
+  id: string,
+  x: number,
+  y: number,
+  size: [number, number],
+  { file = "q", scale = "[1,1]", crop = "null", extra = "" } = {},
+): string {
+  return `{"id":"${id}","type":"image","x":${x},"y":${y},"width":${size[0]},"height":${size[1]},"fileId":"${file}","status":"saved","scale":${scale},"crop":${crop}${extra}}`;
+}
+
+function base64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
 }
 
 const range = (count: number) => Array.from({ length: count }, (_, i) => i);

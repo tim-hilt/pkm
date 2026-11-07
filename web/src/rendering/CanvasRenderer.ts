@@ -1,11 +1,14 @@
 import { type FillMesh, fillMeshOfPart, fillMeshOfPath } from "./FillMesh";
 import {
   type GeometryBuffers,
+  type GeometryImage,
   type GeometryPart,
   type GeometrySource,
   type GeometryTextLine,
   GeometryFillRule,
+  GeometryImageStatus,
   elementsInZOrder,
+  fileIdOf,
   fillKind,
   holeOf,
   stringOf,
@@ -13,8 +16,11 @@ import {
 } from "./GeometryBuffers";
 import { type Excalifont } from "../text/Excalifont";
 import { textLineOutline } from "../text/TextLineOutline";
+import { type ImageFileSource, ImageTextures } from "./ImageTextures";
+import { placeholderFills, scenePoint } from "./ImagePlaceholder";
 import { strokeSegments } from "./StrokeFlattener";
-import { fillShaders, strokeShaders } from "./StrokeShaders";
+import { fillShaders, imageShaders, strokeShaders } from "./StrokeShaders";
+import { TextureUpload } from "./TextureUpload";
 
 /** Where the Canvas looks at the Scene. */
 export interface Viewport {
@@ -59,8 +65,15 @@ export interface Viewport {
  * (cached per glyph, see `Excalifont`) in one fill, so it stays sharp at any
  * zoom.
  *
+ * Images are textured quads (see `ImageTextures`): the core describes an image
+ * by file id, box, crop and scale, the renderer decodes the file with the
+ * browser once per file id and samples the texture, mirrored, turned and
+ * cropped as asked, with a full mipmap chain. While there are no pixels
+ * (loading, missing, not an image) an Excalidraw-style placeholder is filled
+ * instead; when they arrive the Elements that show the file are redrawn.
+ *
  * The overlay (selection frames, handles) is drawn over the Scene in the same
- * frame. Images follow with their own ticket.
+ * frame.
  */
 export class CanvasRenderer {
   /** Samples per pixel of the colour and stencil a frame is drawn into. */
@@ -95,7 +108,14 @@ export class CanvasRenderer {
     stencil: Record<FillRule, GPURenderPipeline>;
     cover: GPURenderPipeline;
   };
+  private readonly imagePipeline: GPURenderPipeline;
+  private readonly imageLayout: GPUBindGroupLayout;
+  private readonly imageSampler: GPUSampler;
   private readonly uniformAlignment: number;
+  /** The decoded image files, one texture each. */
+  readonly textures: ImageTextures;
+  private filesValue: ImageFileSource | undefined;
+  private isDarkValue = false;
 
   /** Everything to draw, in z-order: the cached draws of all Elements. */
   private draws: Draw[] = [];
@@ -147,6 +167,20 @@ export class CanvasRenderer {
     const layout = device.createPipelineLayout({
       bindGroupLayouts: [this.frameLayout, this.strokeLayout],
     });
+    this.imageLayout = device.createBindGroupLayout({
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+          buffer: { type: "uniform" },
+        },
+        { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: {} },
+        { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
+      ],
+    });
+    const imageLayout = device.createPipelineLayout({
+      bindGroupLayouts: [this.frameLayout, this.imageLayout],
+    });
     const sampleCount = CanvasRenderer.sampleCount;
     const stencilFormat = CanvasRenderer.stencilFormat;
     const makePipeline = (
@@ -159,9 +193,10 @@ export class CanvasRenderer {
         backPassOp?: GPUStencilOperation;
       },
       writesColor = true,
+      pipelineLayout = layout,
     ) =>
       device.createRenderPipeline({
-        layout,
+        layout: pipelineLayout,
         vertex: { module, entryPoint: entryPoints.vertex },
         fragment: {
           module,
@@ -228,6 +263,78 @@ export class CanvasRenderer {
         passOp: "zero",
       }),
     };
+
+    const imageModule = device.createShaderModule({ code: imageShaders });
+    this.imagePipeline = makePipeline(
+      imageModule,
+      { vertex: "image_vertex", fragment: "image_fragment" },
+      "triangle-strip",
+      { compare: "always", passOp: "keep" },
+      true,
+      imageLayout,
+    );
+    this.imageSampler = device.createSampler({
+      minFilter: "linear",
+      magFilter: "linear",
+      mipmapFilter: "linear",
+    });
+    this.textures = new ImageTextures(new TextureUpload(device).load);
+    this.textures.onChange = (id) => this.imageFileChanged(id);
+  }
+
+  /** Where image files come from. File ids mean nothing outside their source, so another source starts with no textures. */
+  get files(): ImageFileSource | undefined {
+    return this.filesValue;
+  }
+
+  set files(files: ImageFileSource | undefined) {
+    if (files === this.filesValue) return;
+    this.filesValue = files;
+    this.textures.keepOnly(new Set());
+    // Cached draws hold the old source's textures and placeholders.
+    this.destroyCache();
+    this.drawsAreStale = true;
+    this.onNeedsDisplay?.();
+  }
+
+  /** Whether the Canvas is dark: image placeholders have their dark colours there. */
+  get isDark(): boolean {
+    return this.isDarkValue;
+  }
+
+  set isDark(dark: boolean) {
+    if (dark === this.isDarkValue) return;
+    this.isDarkValue = dark;
+    this.destroyCache();
+    this.drawsAreStale = true;
+    this.onNeedsDisplay?.();
+  }
+
+  /**
+   * Resolves once the image files of the geometry are decoded, so that the
+   * next frame shows them and not placeholders. For frames that are taken
+   * once: thumbnails and exports. The Canvas draws what it has and redraws
+   * when more arrives.
+   */
+  async imagesLoaded(): Promise<void> {
+    this.geometry?.withBuffers((buffers) => {
+      for (let index = 0; index < buffers.images.length; index++) {
+        const id = fileIdOf(buffers, buffers.images.at(index));
+        if (id) this.textures.texture(id, this.filesValue);
+      }
+    });
+    await this.textures.settled();
+  }
+
+  /** A file's texture arrived (or turned out to be no picture): the Elements showing it are drawn again. */
+  private imageFileChanged(id: string): void {
+    for (const [element, entry] of this.cache) {
+      if (entry.file !== id) continue;
+      entry.draws.forEach((draw) => draw.destroy());
+      this.cache.delete(element);
+    }
+    this.drawsAreStale = true;
+    this.onNeedsDisplay?.();
   }
 
   get viewport(): Viewport {
@@ -336,6 +443,10 @@ export class CanvasRenderer {
       for (const draw of draws) {
         if (draw.kind === "fill") {
           this.drawFill(pass, draw);
+        } else if (draw.kind === "image") {
+          pass.setPipeline(this.imagePipeline);
+          pass.setBindGroup(1, draw.group);
+          pass.draw(4);
         } else if (draw.isTranslucent) {
           pass.setStencilReference(1);
           this.draw(pass, draw, "interior", 0);
@@ -427,25 +538,35 @@ export class CanvasRenderer {
       // A Drawing was loaded: handles mean other Elements now.
       this.destroyCache();
       this.cacheGeneration = geometry.generation();
+      // The Drawing may have the files that were missing.
+      this.textures.forgetFailures();
     }
     const tolerance = CanvasRenderer.flatteningTolerancePixels / 2 ** level;
 
     const kept = new Map<number, CachedElement>();
     const all: Draw[] = [];
+    const referencedFiles = new Set<string>();
     geometry.withBuffers((buffers) => {
       for (const item of elementsInZOrder(buffers)) {
+        const image = item.content === "images" ? buffers.images.at(item.start) : undefined;
+        const file = image && fileIdOf(buffers, image);
+        if (file) referencedFiles.add(file);
         let entry = this.cache.get(item.element);
         if (entry?.version !== item.version || entry.level !== level) {
           entry?.draws.forEach((draw) => draw.destroy());
           const draws: Draw[] = [];
-          for (let index = item.start; index < item.end; index++) {
-            const draw =
-              item.content === "parts"
-                ? this.makeDraw(buffers.parts.at(index), buffers, tolerance)
-                : this.textDraw(buffers.textLines.at(index), buffers, tolerance);
-            if (draw) draws.push(draw);
+          if (image) {
+            draws.push(...this.imageDraws(image, file ?? "", tolerance));
+          } else {
+            for (let index = item.start; index < item.end; index++) {
+              const draw =
+                item.content === "parts"
+                  ? this.makeDraw(buffers.parts.at(index), buffers, tolerance)
+                  : this.textDraw(buffers.textLines.at(index), buffers, tolerance);
+              if (draw) draws.push(draw);
+            }
           }
-          entry = { version: item.version, level, draws };
+          entry = { version: item.version, level, draws, file: file || undefined };
           this.elementsBuilt++;
         }
         kept.set(item.element, entry);
@@ -458,6 +579,8 @@ export class CanvasRenderer {
     }
     this.cache = kept;
     this.draws = all;
+    // Files no image shows any more give up their textures.
+    this.textures.keepOnly(referencedFiles);
   }
 
   /** Releases the GPU memory the renderer holds; it draws nothing afterwards. */
@@ -541,6 +664,71 @@ export class CanvasRenderer {
         uniforms.destroy();
       },
     };
+  }
+
+  /** The draws of an image: its picture, or a placeholder while there are no pixels for its file. */
+  private imageDraws(image: GeometryImage, id: string, tolerance: number): Draw[] {
+    const texture = id ? this.textures.texture(id, this.filesValue) : undefined;
+    if (texture) return [this.uploadImage(image, texture)];
+    const failed = image.status === GeometryImageStatus.error || this.textures.isUndecodable(id);
+    const draws: Draw[] = [];
+    for (const fill of placeholderFills(image.width, image.height, failed, this.isDarkValue)) {
+      // The placeholder is made in the box's frame; the image's turn and
+      // mirroring take it to the Scene.
+      const coords = fill.path.coords.slice();
+      for (let index = 0; index < coords.length; index += 2) {
+        [coords[index], coords[index + 1]] = scenePoint(image, coords[index], coords[index + 1]);
+      }
+      const mesh = fillMeshOfPath(fill.path.verbs, coords, tolerance);
+      if (!mesh) continue;
+      draws.push(
+        this.uploadFill(
+          mesh,
+          partUniforms(premultipliedColor(fill.color, image.opacity), 0, 0, [0, 0, 0, 0]),
+          "nonZero",
+        ),
+      );
+    }
+    return draws;
+  }
+
+  /** A textured quad for `image` showing `texture`. */
+  private uploadImage(image: GeometryImage, texture: GPUTexture): ImageDraw {
+    const uniforms = this.device.createBuffer({
+      size: imageUniformsSize,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    this.device.queue.writeBuffer(
+      uniforms,
+      0,
+      new Float32Array([
+        image.x,
+        image.y,
+        image.width,
+        image.height,
+        image.u0,
+        image.v0,
+        image.u1,
+        image.v1,
+        image.scaleX,
+        image.scaleY,
+        image.angle,
+        image.opacity,
+        image.cornerRadius,
+        0,
+        0,
+        0,
+      ]),
+    );
+    const group = this.device.createBindGroup({
+      layout: this.imageLayout,
+      entries: [
+        { binding: 0, resource: { buffer: uniforms } },
+        { binding: 1, resource: texture.createView() },
+        { binding: 2, resource: this.imageSampler },
+      ],
+    });
+    return { kind: "image", group, destroy: () => uniforms.destroy() };
   }
 
   /** A line of text as one fill of its glyphs' outlines, by the non-zero rule. */
@@ -646,19 +834,30 @@ interface FillDraw {
   destroy(): void;
 }
 
-type Draw = StrokeDraw | FillDraw;
+/** An image's quad: its uniforms and texture. The texture belongs to `ImageTextures`. */
+interface ImageDraw {
+  kind: "image";
+  group: GPUBindGroup;
+  destroy(): void;
+}
+
+type Draw = StrokeDraw | FillDraw | ImageDraw;
 
 /** The draws of one Element at the version and flattening level they were built for. */
 interface CachedElement {
   version: number;
   level: number;
   draws: Draw[];
+  /** The id of the image file the draws show, for an image. */
+  file?: string;
 }
 
 /** Mirrors `FrameUniforms` in StrokeShaders.ts, padded to 32 bytes. */
 const frameUniformsSize = 32;
 /** Mirrors `PartUniforms` in StrokeShaders.ts. */
 const partUniformsSize = 48;
+/** Mirrors `ImageUniforms` in StrokeShaders.ts, padded to 64 bytes. */
+const imageUniformsSize = 64;
 
 function partUniforms(
   color: readonly number[],

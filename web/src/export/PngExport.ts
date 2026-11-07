@@ -36,6 +36,7 @@ export async function renderExport(
   if (!exported) return undefined;
   const renderer = new CanvasRenderer(device, offscreenFormat, font);
   try {
+    renderer.files = editor;
     renderer.paperColor = background ? paper : nothing;
     renderer.setGeometry(exported.geometry);
     renderer.viewport = { originX: exported.x, originY: exported.y, zoom: 1 };

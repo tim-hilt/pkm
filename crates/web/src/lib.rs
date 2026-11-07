@@ -443,6 +443,33 @@ impl Editor {
         self.inner.borrow().selection().to_vec()
     }
 
+    /// Puts pasted images in the middle of the view; see
+    /// [`excalidraw_native_core::Editor::insert_images`].
+    #[wasm_bindgen(js_name = insertImages)]
+    pub fn insert_images(&self, images: Vec<ImageFile>) {
+        self.inner
+            .borrow_mut()
+            .insert_images(images.into_iter().map(Into::into).collect());
+    }
+
+    /// Puts dropped images around the point `(x, y)` of the view; see
+    /// [`excalidraw_native_core::Editor::insert_images_at`].
+    #[wasm_bindgen(js_name = insertImagesAt)]
+    pub fn insert_images_at(&self, images: Vec<ImageFile>, x: f64, y: f64) {
+        self.inner.borrow_mut().insert_images_at(
+            images.into_iter().map(Into::into).collect(),
+            x,
+            y,
+        );
+    }
+
+    /// The bytes of the image file `id` as stored in the Drawing, for the
+    /// client to decode; `undefined` if the Drawing has no such file.
+    #[wasm_bindgen(js_name = fileBytes)]
+    pub fn file_bytes(&self, id: &str) -> Option<Vec<u8>> {
+        self.inner.borrow().file_bytes(id)
+    }
+
     /// What a PNG export shows; `undefined` if there is nothing to export.
     pub fn export(&self, scope: ExportScope) -> Option<Export> {
         let export = self.inner.borrow().export(scope.into())?;
@@ -608,6 +635,50 @@ impl Export {
 impl Editor {
     fn set_property(&self, property: excalidraw_native_core::Property) {
         self.inner.borrow_mut().set_property(property);
+    }
+}
+
+/// An image to paste or drop; see [`excalidraw_native_core::ImageFile`].
+#[wasm_bindgen(getter_with_clone)]
+pub struct ImageFile {
+    #[wasm_bindgen(js_name = fileId)]
+    pub file_id: String,
+    #[wasm_bindgen(js_name = mimeType)]
+    pub mime_type: String,
+    pub bytes: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[wasm_bindgen]
+impl ImageFile {
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        file_id: String,
+        mime_type: String,
+        bytes: Vec<u8>,
+        width: u32,
+        height: u32,
+    ) -> Self {
+        Self {
+            file_id,
+            mime_type,
+            bytes,
+            width,
+            height,
+        }
+    }
+}
+
+impl From<ImageFile> for excalidraw_native_core::ImageFile {
+    fn from(file: ImageFile) -> Self {
+        Self {
+            file_id: file.file_id,
+            mime_type: file.mime_type,
+            bytes: file.bytes,
+            width: file.width,
+            height: file.height,
+        }
     }
 }
 

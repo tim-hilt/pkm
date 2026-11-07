@@ -57,5 +57,5 @@ the run produces no churn. Afterwards:
 2. Run `make web-test-browser` to confirm everything passes without recording.
 3. Commit the PNGs together with the code change that caused them.
 
-A normal run never writes a reference; a missing one is a failure. Text and
-image scenes of the Swift references come with the tickets that draw them.
+A normal run never writes a reference; a missing one is a failure. The image
+references (`images*`) are in `ImageRendering.browser.test.ts`.

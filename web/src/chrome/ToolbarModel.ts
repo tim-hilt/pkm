@@ -22,6 +22,12 @@ const freedraw = `<path d="M4 20l1-4L16.5 4.5a2 2 0 0 1 3 3L8 19z M14.5 6.5l3 3"
 const text = `<path d="M6 7V5h12v2M12 5v14m-3 0h6"/>`;
 const eraser = `<path d="M9 19l-4.5-4.5a1.5 1.5 0 0 1 0-2L13 4a1.5 1.5 0 0 1 2 0l4.5 4.5a1.5 1.5 0 0 1 0 2L11 19zM8 11l6 6M9 19h10"/>`;
 
+/** The button that opens the file picker to insert images. It is no Tool: the images land on the Canvas and the Tool returns to selection. */
+export const insertImageItem = {
+  name: "Insert image",
+  glyph: `<rect x="4.5" y="5.5" width="15" height="13" rx="1.5"/><circle cx="9" cy="10" r="1.3"/><path d="M5 17l4.5-4.5 3 3 2-2L19 17"/>`,
+};
+
 /** Excalidraw's toolbar island, in its order (after the Tool lock). */
 export const toolItems: readonly ToolItem[] = [
   { tool: Tool.Hand, name: "Hand", glyph: hand },

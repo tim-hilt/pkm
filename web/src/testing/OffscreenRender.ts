@@ -1,6 +1,7 @@
 import { type Core, loadCore } from "../core/Core";
 import { CanvasRenderer, type Viewport } from "../rendering/CanvasRenderer";
 import { type GeometrySource } from "../rendering/GeometryBuffers";
+import { type ImageFileSource } from "../rendering/ImageTextures";
 import { offscreenFormat, renderOffscreen } from "../rendering/OffscreenFrame";
 import { type RenderedImage } from "../rendering/RenderedImage";
 import { Excalifont } from "../text/Excalifont";
@@ -33,7 +34,13 @@ export interface RenderHarness {
   render(
     geometry: GeometrySource,
     viewport?: Viewport,
-    options?: { pixelsPerPoint?: number; size?: number; overlay?: GeometrySource },
+    options?: {
+      pixelsPerPoint?: number;
+      size?: number;
+      overlay?: GeometrySource;
+      /** Where the images' files come from. */
+      files?: ImageFileSource;
+    },
   ): Promise<RenderedImage>;
   /** Renders one frame of whatever `renderer` has been given. */
   draw(
@@ -55,6 +62,7 @@ export async function makeRenderHarness(): Promise<RenderHarness> {
     makeRenderer: () => new CanvasRenderer(device, offscreenFormat, font),
     async render(geometry, viewport = defaultViewport, options) {
       const renderer = harness.makeRenderer();
+      renderer.files = options?.files;
       renderer.setGeometry(geometry);
       if (options?.overlay) renderer.setOverlay(options.overlay);
       renderer.viewport = viewport;

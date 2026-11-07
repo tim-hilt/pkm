@@ -32,6 +32,8 @@ export class PhoneChrome {
     private readonly editor: Editor,
     private readonly onChange: () => void,
     isDark: () => boolean = () => false,
+    /** Asks the user for images to insert. */
+    insertImages: () => void = () => {},
   ) {
     this.element.className = "phone-chrome";
     this.bar.className = "bottom-bar";
@@ -58,6 +60,7 @@ export class PhoneChrome {
         this.close();
         this.onChange();
       },
+      insertImages,
     });
     this.popover = new PhonePopover(this.element, () => {
       this.close();

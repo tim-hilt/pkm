@@ -2,7 +2,7 @@
  * The shaders, a port of `StrokeShaders.metal` to WGSL with the same stages.
  * Keep the structs in sync with `CanvasRenderer.ts`. Strokes first, then
  * fills; each has a module of its own, as WGSL cannot bind two different
- * things to one slot of a module. Images follow with their ticket.
+ * things to one slot of a module. Images have theirs too.
  */
 
 /** What every shader module starts with. */
@@ -138,5 +138,78 @@ fn fill_fragment(in: FillVertexOut) -> @location(0) vec4f {
     discard;
   }
   return part.color;
+}
+`;
+
+/**
+ * Images: one textured quad over the image's box. The box is mirrored and
+ * turned about its centre like Excalidraw does (`scale`, then `angle`), and
+ * the picture is the part of the texture from `uv.xy` to `uv.zw`. Keep
+ * `ImageUniforms` in sync with `CanvasRenderer.ts`.
+ */
+export const imageShaders = /* wgsl */ `
+struct FrameUniforms {
+  origin: vec2f,
+  viewSize: vec2f,
+  scale: f32,
+}
+
+struct ImageUniforms {
+  // Top-left corner and size of the box in Scene units.
+  box: vec4f,
+  // Left, top, right, bottom of the shown part of the texture, 0...1.
+  uv: vec4f,
+  // 1 or -1 per axis.
+  mirror: vec2f,
+  // Clockwise rotation in radians.
+  angle: f32,
+  opacity: f32,
+  // Radius of the box's rounded corners in Scene units; 0 for sharp ones.
+  cornerRadius: f32,
+}
+
+@group(0) @binding(0) var<uniform> frame: FrameUniforms;
+@group(1) @binding(0) var<uniform> image: ImageUniforms;
+@group(1) @binding(1) var picture: texture_2d<f32>;
+@group(1) @binding(2) var pictureSampler: sampler;
+
+struct ImageVertexOut {
+  @builtin(position) position: vec4f,
+  @location(0) uv: vec2f,
+  // Position in the box relative to its centre, before mirroring and turning.
+  @location(1) local: vec2f,
+}
+
+@vertex
+fn image_vertex(@builtin(vertex_index) vertexId: u32) -> ImageVertexOut {
+  // Triangle strip corners: (0,0), (0,1), (1,0), (1,1).
+  let corner = vec2f(f32(vertexId / 2u), f32(vertexId % 2u));
+  let size = image.box.zw;
+  let local = (corner - 0.5) * size;
+  let offset = local * image.mirror;
+  let s = sin(image.angle);
+  let c = cos(image.angle);
+  let scene = image.box.xy + size * 0.5 + vec2f(offset.x * c - offset.y * s, offset.x * s + offset.y * c);
+  let pixel = (scene - frame.origin) * frame.scale;
+
+  var out: ImageVertexOut;
+  out.position = vec4f(pixel.x / frame.viewSize.x * 2.0 - 1.0, 1.0 - pixel.y / frame.viewSize.y * 2.0, 0.0, 1.0);
+  out.uv = mix(image.uv.xy, image.uv.zw, corner);
+  out.local = local;
+  return out;
+}
+
+@fragment
+fn image_fragment(in: ImageVertexOut) -> @location(0) vec4f {
+  // The texture holds premultiplied colours.
+  var color = textureSample(picture, pictureSampler, in.uv) * image.opacity;
+  if (image.cornerRadius > 0.0) {
+    // Signed distance to the rounded box, turned into coverage over one
+    // device pixel like the strokes' edges.
+    let q = abs(in.local) - (image.box.zw * 0.5 - image.cornerRadius);
+    let distance = length(max(q, vec2f(0.0))) + min(max(q.x, q.y), 0.0) - image.cornerRadius;
+    color = color * clamp(0.5 - distance * frame.scale, 0.0, 1.0);
+  }
+  return color;
 }
 `;

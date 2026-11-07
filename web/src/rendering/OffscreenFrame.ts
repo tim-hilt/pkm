@@ -24,6 +24,8 @@ export async function renderOffscreen(
   if (renderer.format !== offscreenFormat) {
     throw new Error(`offscreen frames need a renderer for ${offscreenFormat}`);
   }
+  // Frames are taken once: show the pictures, not their placeholders.
+  await renderer.imagesLoaded();
   const target = device.createTexture({
     size: [width, height],
     format: offscreenFormat,

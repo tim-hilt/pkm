@@ -1,6 +1,5 @@
 // TS view of the core's geometry output (ADR-0007), a port of the Swift
-// client's `GeometryBuffers.swift`. Parts and text lines so far; images follow
-// with the ticket that draws them. The format is documented in the core's
+// client's `GeometryBuffers.swift`: parts, text lines and images. The format is documented in the core's
 // `geometry` module; this file mirrors it.
 
 /** Mirror of the core's `Part` record, read straight out of wasm memory. */
@@ -65,6 +64,71 @@ export interface GeometryTextLine {
   /** Range of the line's UTF-8 bytes in `GeometryBuffers.text`. */
   textStart: number;
   textLength: number;
+}
+
+/**
+ * Mirror of the core's `Image` record: one image to draw, read straight out
+ * of wasm memory. The box is `width` x `height` with its top-left corner at
+ * `(x, y)`; draw it turned by `angle` about its centre, then mirrored about
+ * its centre by `scaleX`/`scaleY` (each 1 or -1), with the part `(u0, v0)` to
+ * `(u1, v1)` of the file's pixels (as fractions of its size) filling the box.
+ */
+export interface GeometryImage {
+  /** Core-assigned Element handle; with `version` the cache key. */
+  element: number;
+  version: number;
+  /** Number of parts before this image in z-order. */
+  partIndex: number;
+  /** Range of the file id's UTF-8 bytes in `GeometryBuffers.fileIds`; empty for an image without a file. */
+  fileIdStart: number;
+  fileIdLength: number;
+  /** A `GeometryImageStatus` number. */
+  status: number;
+  /** Element opacity, 0...1. */
+  opacity: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Clockwise rotation in radians about the box's centre. */
+  angle: number;
+  scaleX: number;
+  scaleY: number;
+  u0: number;
+  v0: number;
+  u1: number;
+  v1: number;
+  /** Radius of the box's rounded corners in Scene units; 0 for sharp ones. */
+  cornerRadius: number;
+}
+
+/** How far an image's file is known to have got, as in the core's `ImageStatus`. */
+export const GeometryImageStatus = { pending: 0, saved: 1, error: 2 } as const;
+
+/** An image with the given fields and the rest of a plain, unturned 100 x 100 image at the origin. */
+export function makeImage(fields: Partial<GeometryImage>): GeometryImage {
+  return {
+    element: 0,
+    version: 1,
+    partIndex: 0,
+    fileIdStart: 0,
+    fileIdLength: 0,
+    status: GeometryImageStatus.saved,
+    opacity: 1,
+    x: 0,
+    y: 0,
+    width: 100,
+    height: 100,
+    angle: 0,
+    scaleX: 1,
+    scaleY: 1,
+    u0: 0,
+    v0: 0,
+    u1: 1,
+    v1: 1,
+    cornerRadius: 0,
+    ...fields,
+  };
 }
 
 /** Where a line of text sits relative to its anchor, as in the core's `TextAlign`. */
@@ -149,6 +213,10 @@ export interface GeometryBuffers {
   textLines: Records<GeometryTextLine>;
   /** The characters of all lines, as UTF-8. */
   text: Uint8Array;
+  /** Images, interleaved with `parts` and `textLines` in z-order by `partIndex`. */
+  images: Records<GeometryImage>;
+  /** The file ids of all images, as UTF-8. */
+  fileIds: Uint8Array;
 }
 
 const utf8 = new TextDecoder();
@@ -156,6 +224,13 @@ const utf8 = new TextDecoder();
 /** The characters of `line`. */
 export function stringOf(buffers: GeometryBuffers, line: GeometryTextLine): string {
   return utf8.decode(buffers.text.subarray(line.textStart, line.textStart + line.textLength));
+}
+
+/** The id of the file `image` shows; empty if it has none. */
+export function fileIdOf(buffers: GeometryBuffers, image: GeometryImage): string {
+  return utf8.decode(
+    buffers.fileIds.subarray(image.fileIdStart, image.fileIdStart + image.fileIdLength),
+  );
 }
 
 /** The verbs of `part`. */
@@ -188,6 +263,7 @@ export interface GeometrySource {
 /** Sizes in bytes of the core's records; `readGeometry` checks them against the core's. */
 export const partStride = 64;
 export const textLineStride = 52;
+export const imageStride = 76;
 
 /** What `readGeometry` needs of the wasm `Geometry` object. */
 export interface WasmGeometry {
@@ -203,10 +279,16 @@ export interface WasmGeometry {
   textLinesAddress(): number;
   textByteCount(): number;
   textAddress(): number;
+  imageCount(): number;
+  imageStride(): number;
+  imagesAddress(): number;
+  fileIdByteCount(): number;
+  fileIdsAddress(): number;
 }
 
 const partFields = partStride / 4;
 const textLineFields = textLineStride / 4;
+const imageFields = imageStride / 4;
 
 /**
  * Views onto wasm memory. A view is only good until memory grows, which
@@ -256,6 +338,9 @@ export function readGeometry<R>(
   }
   if (geometry.textLineStride() !== textLineStride) {
     throw new Error("GeometryTextLine no longer mirrors the core's TextLine record");
+  }
+  if (geometry.imageStride() !== imageStride) {
+    throw new Error("GeometryImage no longer mirrors the core's Image record");
   }
   const { words, floats, bytes } = memory;
   const partsStart = geometry.partsAddress() / 4;
@@ -307,37 +392,83 @@ export function readGeometry<R>(
       };
     },
   };
+  const imagesStart = geometry.imagesAddress() / 4;
+  const images: Records<GeometryImage> = {
+    length: geometry.imageCount(),
+    at(index) {
+      const o = imagesStart + index * imageFields;
+      return {
+        element: words[o],
+        version: words[o + 1],
+        partIndex: words[o + 2],
+        fileIdStart: words[o + 3],
+        fileIdLength: words[o + 4],
+        status: words[o + 5],
+        opacity: floats[o + 6],
+        x: floats[o + 7],
+        y: floats[o + 8],
+        width: floats[o + 9],
+        height: floats[o + 10],
+        angle: floats[o + 11],
+        scaleX: floats[o + 12],
+        scaleY: floats[o + 13],
+        u0: floats[o + 14],
+        v0: floats[o + 15],
+        u1: floats[o + 16],
+        v1: floats[o + 17],
+        cornerRadius: floats[o + 18],
+      };
+    },
+  };
   const textStart = geometry.textAddress();
+  const fileIdsStart = geometry.fileIdsAddress();
   return body({
     parts,
     verbs: bytes.subarray(verbsStart, verbsStart + geometry.verbCount()),
     coords: floats.subarray(coordsStart, coordsStart + geometry.coordCount()),
     textLines,
     text: bytes.subarray(textStart, textStart + geometry.textByteCount()),
+    images,
+    fileIds: bytes.subarray(fileIdsStart, fileIdsStart + geometry.fileIdByteCount()),
   });
 }
 
 /**
  * What one Element contributes to the geometry. An Element is drawn by a run
- * of parts or by a run of lines of text, never a mix.
+ * of parts, by a run of lines of text or by one image, never a mix.
  */
 export interface ElementGeometry {
   element: number;
   version: number;
-  /** Indices from `start` up to but excluding `end`, into `GeometryBuffers.parts` or `.textLines`. */
-  content: "parts" | "textLines";
+  /** Indices from `start` up to but excluding `end`, into `GeometryBuffers.parts`, `.textLines` or `.images`. */
+  content: "parts" | "textLines" | "images";
   start: number;
   end: number;
 }
 
 /** Every Element's share of the buffers, in z-order (bottom first). */
 export function* elementsInZOrder(buffers: GeometryBuffers): Generator<ElementGeometry> {
-  const { parts, textLines } = buffers;
+  const { parts, textLines, images } = buffers;
   let part = 0;
   let line = 0;
+  let image = 0;
   while (true) {
-    // Lines come before the part their `partIndex` names.
-    if (line < textLines.length && textLines.at(line).partIndex <= part) {
+    // Lines and images come before the part their `partIndex` names. Those
+    // due at the same part belong to Elements without parts between them; the
+    // lower handle is lower in z-order.
+    const lineDue = line < textLines.length && textLines.at(line).partIndex <= part;
+    const imageDue = image < images.length && images.at(image).partIndex <= part;
+    if (imageDue && (!lineDue || images.at(image).element < textLines.at(line).element)) {
+      const current = images.at(image);
+      yield {
+        element: current.element,
+        version: current.version,
+        content: "images",
+        start: image,
+        end: image + 1,
+      };
+      image++;
+    } else if (lineDue) {
       const first = textLines.at(line);
       let end = line + 1;
       while (end < textLines.length && textLines.at(end).element === first.element) end++;

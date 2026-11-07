@@ -1,10 +1,12 @@
 import {
   type GeometryBuffers,
   type GeometryPart,
+  type GeometryImage,
   type GeometryTextLine,
   type GeometrySource,
   GeometryFillRule,
   fillKind,
+  makeImage,
   makePart,
   recordsOf,
   strokeKind,
@@ -28,6 +30,11 @@ export function handBuiltBuffers(...parts: HandBuiltPart[]): GeometryBuffers {
   return handBuiltBuffersWithText(parts, []);
 }
 
+/** A hand-built image: its record's fields and the id of its file (empty for none). */
+export interface HandBuiltImage extends Partial<GeometryImage> {
+  fileId?: string;
+}
+
 /** A line of hand-built text: its record's fields (the rest zero) and its characters. */
 export interface HandBuiltTextLine extends Partial<GeometryTextLine> {
   characters: string;
@@ -37,7 +44,20 @@ export interface HandBuiltTextLine extends Partial<GeometryTextLine> {
 export function handBuiltBuffersWithText(
   parts: HandBuiltPart[],
   lines: HandBuiltTextLine[],
+  imageList: HandBuiltImage[] = [],
 ): GeometryBuffers {
+  const fileIds: number[] = [];
+  const images: GeometryImage[] = imageList.map(({ fileId = "", ...fields }, index) => {
+    const bytes = new TextEncoder().encode(fileId);
+    const record = makeImage({
+      element: 200 + index,
+      ...fields,
+      fileIdStart: fileIds.length,
+      fileIdLength: bytes.length,
+    });
+    fileIds.push(...bytes);
+    return record;
+  });
   const text: number[] = [];
   const textLines: GeometryTextLine[] = lines.map(({ characters, ...fields }, index) => {
     const bytes = new TextEncoder().encode(characters);
@@ -80,6 +100,8 @@ export function handBuiltBuffersWithText(
     coords: Float32Array.from(coords),
     textLines: recordsOf(textLines),
     text: Uint8Array.from(text),
+    images: recordsOf(images),
+    fileIds: Uint8Array.from(fileIds),
   };
 }
 

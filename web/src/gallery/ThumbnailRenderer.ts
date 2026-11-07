@@ -41,6 +41,8 @@ export class ThumbnailRenderer implements ThumbnailPainter {
     ));
     const editor = (this.editor ??= this.core.makeEditor());
     editor.setDarkMode(dark);
+    renderer.files = editor;
+    renderer.isDark = dark;
     try {
       editor.load(drawing);
     } catch {

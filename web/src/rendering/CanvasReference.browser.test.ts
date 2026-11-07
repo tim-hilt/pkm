@@ -7,7 +7,7 @@ import sampleUrl from "../../generated/sample.excalidraw?url";
  * Seam 2: what the Canvas draws, compared with stored reference images, a
  * port of the Swift `CanvasReferenceTests` (see
  * docs/web-renderer-reference-images.md for how to re-record them). Text and
- * images follow with their tickets.
+ * images have test files of their own.
  */
 
 let harness: RenderHarness;

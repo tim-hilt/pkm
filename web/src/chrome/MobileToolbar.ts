@@ -1,5 +1,12 @@
 import type { Editor, Tool } from "../core/Core";
-import { lockGlyph, mobileToolSlots, shownTool, toolItems, toolLockLabel } from "./ToolbarModel";
+import {
+  insertImageItem,
+  lockGlyph,
+  mobileToolSlots,
+  shownTool,
+  toolItems,
+  toolLockLabel,
+} from "./ToolbarModel";
 
 const svg = (glyph: string) =>
   `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${glyph}</svg>`;
@@ -27,6 +34,8 @@ export class MobileToolbar {
       openFamily(slot: number): void;
       /** Any other tap, which leaves open pickers behind. */
       changed(): void;
+      /** The Insert image button was tapped. */
+      insertImages(): void;
     },
   ) {
     this.element.className = "mobile-toolbar";
@@ -46,7 +55,12 @@ export class MobileToolbar {
       editor.setToolLock(!editor.toolLock());
       this.handlers.changed();
     });
-    this.element.replaceChildren(...this.slots, this.lock);
+    const insertImages = this.button(insertImageItem.name, () => {
+      this.handlers.insertImages();
+      this.handlers.changed();
+    });
+    insertImages.innerHTML = svg(insertImageItem.glyph);
+    this.element.replaceChildren(...this.slots, this.lock, insertImages);
     this.update();
   }
 

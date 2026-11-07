@@ -5,6 +5,7 @@ import init, {
   ExportScope,
   FillPattern,
   FontSize,
+  ImageFile as WasmImageFile,
   LineStyle,
   PointerButton,
   PointerKind,
@@ -137,6 +138,16 @@ export interface Modifiers {
   alt: boolean;
   /** Command on Apple platforms, the Windows key elsewhere. */
   meta: boolean;
+}
+
+/** An image as the core stores it (ADR-0003): the bytes of the file as they are to be saved, and the size of the picture they show. */
+export interface ImageFile {
+  /** What the file is called in the Drawing; the same for the same content. */
+  fileId: string;
+  mimeType: string;
+  bytes: Uint8Array;
+  width: number;
+  height: number;
 }
 
 /** One step in the life of a pointer; the core's `PointerEvent` (ADR-0006). */
@@ -357,6 +368,20 @@ export class Editor {
   /** The ids of the selected Elements. */
   selection(): string[] {
     return this.inner.selection();
+  }
+
+  /** Puts `images` in the middle of the view, or around `at` (view points) where they were dropped; one undo step, and they become the Selection. */
+  insertImages(images: ImageFile[], at?: { x: number; y: number }): void {
+    const files = images.map(
+      (i) => new WasmImageFile(i.fileId, i.mimeType, i.bytes, i.width, i.height),
+    );
+    if (at) this.inner.insertImagesAt(files, at.x, at.y);
+    else this.inner.insertImages(files);
+  }
+
+  /** The bytes of the image file `id` as stored in the Drawing; `undefined` if there is none. */
+  fileBytes(id: string): Uint8Array | undefined {
+    return this.inner.fileBytes(id);
   }
 
   /** What to rasterise for a PNG of `scope`; `undefined` if there is nothing to export. */

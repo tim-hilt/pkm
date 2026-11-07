@@ -1,5 +1,5 @@
 import type { Editor } from "../core/Core";
-import { focusTarget, lockGlyph, toolItems, toolLockLabel } from "./ToolbarModel";
+import { focusTarget, insertImageItem, lockGlyph, toolItems, toolLockLabel } from "./ToolbarModel";
 
 const svg = (glyph: string) =>
   `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${glyph}</svg>`;
@@ -14,12 +14,15 @@ export class Toolbar {
   readonly element = document.createElement("div");
   private readonly lock: HTMLButtonElement;
   private readonly tools: HTMLButtonElement[];
+  private readonly insertImage: HTMLButtonElement;
   private shownLock: boolean | undefined;
   private shownTool: number | undefined;
 
   constructor(
     private readonly editor: Editor,
     private readonly onChange: () => void,
+    /** Asks the user for images to insert. */
+    insertImages: () => void = () => {},
   ) {
     this.element.className = "toolbar";
     this.element.setAttribute("role", "toolbar");
@@ -34,7 +37,9 @@ export class Toolbar {
     const divider = document.createElement("div");
     divider.className = "toolbar-divider";
     divider.setAttribute("role", "separator");
-    this.element.replaceChildren(this.lock, divider, ...this.tools);
+    this.insertImage = this.button(insertImageItem.name, insertImages);
+    this.insertImage.innerHTML = svg(insertImageItem.glyph);
+    this.element.replaceChildren(this.lock, divider, ...this.tools, this.insertImage);
     this.element.addEventListener("keydown", (event) => this.moveFocus(event));
     this.update();
   }
@@ -60,7 +65,7 @@ export class Toolbar {
   }
 
   private moveFocus(event: KeyboardEvent): void {
-    const buttons = [this.lock, ...this.tools];
+    const buttons = [this.lock, ...this.tools, this.insertImage];
     const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
     const target = current < 0 ? undefined : focusTarget(event.key, current, buttons.length);
     if (target === undefined) return;

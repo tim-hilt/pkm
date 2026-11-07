@@ -2,6 +2,8 @@ import { CanvasRenderer } from "./rendering/CanvasRenderer";
 import { SceneSync } from "./rendering/SceneSync";
 import { cssCursor } from "./rendering/CursorStyle";
 import { CanvasInput } from "./input/CanvasInput";
+import { ImageInput, pickImages } from "./images/ImageInput";
+import { insertImages } from "./images/ImageInsertion";
 import { ZoomControls } from "./chrome/ZoomControls";
 import { Toolbar } from "./chrome/Toolbar";
 import { UndoRedoControls } from "./chrome/UndoRedoControls";
@@ -46,6 +48,7 @@ export function showCanvas(
   context.configure({ device, format, alphaMode: "opaque" });
 
   const renderer = new CanvasRenderer(device, format, font);
+  renderer.files = editor;
   // On demand: one frame per request, however many changes asked for it.
   let scheduled = false;
   let gone = false;
@@ -75,7 +78,15 @@ export function showCanvas(
   let pointer: { x: number; y: number } | undefined;
   const zoomControls = new ZoomControls(editor, () => didReachEditor());
   const undoRedo = new UndoRedoControls(editor, () => didReachEditor());
-  const toolbar = new Toolbar(editor, () => didReachEditor());
+  /** Images from the file picker, a drop or a paste; they are prepared off the main thread's critical path and inserted once ready. */
+  const images = {
+    images: (sources: Uint8Array[], at?: { x: number; y: number }) =>
+      void insertImages(editor, sources, at).then((inserted) => {
+        if (inserted && !gone) didReachEditor();
+      }),
+  };
+  const insertFromPicker = () => void pickImages(images);
+  const toolbar = new Toolbar(editor, () => didReachEditor(), insertFromPicker);
   // Swatches are of the light Canvas until the Appearance setting brings Dark mode.
   const properties = new PropertiesPanel(
     editor,
@@ -86,6 +97,7 @@ export function showCanvas(
     editor,
     () => didReachEditor(),
     () => false,
+    insertFromPicker,
   );
   // The properties' chrome leaves the focus in the Text view, as the native
   // app's does: a property picked while typing styles the text being edited,
@@ -178,6 +190,8 @@ export function showCanvas(
     },
   });
 
+  const imageInput = new ImageInput(canvas, images);
+
   const resize = () => {
     const ratio = window.devicePixelRatio;
     canvas.width = Math.max(1, Math.round(canvas.clientWidth * ratio));
@@ -223,6 +237,7 @@ export function showCanvas(
 
   return () => {
     input.dispose();
+    imageInput.dispose();
     mainMenu.dispose();
     visual?.removeEventListener("resize", keyboardChanged);
     textView.hide();
