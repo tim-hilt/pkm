@@ -1,3 +1,4 @@
+import { GeometryVerb } from "../rendering/GeometryBuffers";
 import { type GlyphOutline, TrueTypeFont } from "./TrueTypeFont";
 
 export type { GlyphOutline };
@@ -24,7 +25,7 @@ export interface LineLayout {
  * zoom (ADR-0008).
  *
  * Every font family of a Drawing is drawn in Excalifont; a character the font
- * lacks shows as its missing-glyph box (proper fallback fonts come later).
+ * lacks shows as a box (proper fallback fonts come later).
  */
 export class Excalifont implements TextMeasurer {
   /**
@@ -37,15 +38,11 @@ export class Excalifont implements TextMeasurer {
   /** Design units per font unit. */
   private readonly scale: number;
   private readonly glyphs = new Map<number, GlyphOutline>();
-  /** The glyph drawn for a character the font lacks. */
-  private readonly missingGlyph: number;
 
   /** Throws if `bytes` is not a font this app can read. */
   constructor(bytes: Uint8Array) {
     this.font = new TrueTypeFont(bytes);
     this.scale = Excalifont.designSize / this.font.unitsPerEm;
-    // Excalifont's .notdef (glyph 0) is blank; its box is the glyph after it.
-    this.missingGlyph = this.font.outline(0).verbs.length > 0 ? 0 : 1;
   }
 
   /** Number of distinct glyph outlines made so far; a glyph is made once, however often and wherever it is drawn. */
@@ -73,8 +70,7 @@ export class Excalifont implements TextMeasurer {
     let x = 0;
     let previous: number | undefined;
     for (const character of text) {
-      const found = this.font.glyphIndex(character.codePointAt(0)!);
-      const glyph = found === 0 ? this.missingGlyph : found;
+      const glyph = this.font.glyphIndex(character.codePointAt(0)!);
       if (previous !== undefined) x += this.font.kerning(previous, glyph) * this.scale;
       positions.push({ glyph, x });
       x += this.font.advance(glyph) * this.scale;
@@ -86,10 +82,36 @@ export class Excalifont implements TextMeasurer {
   private outline(glyph: number): GlyphOutline {
     let outline = this.glyphs.get(glyph);
     if (!outline) {
-      const raw = this.font.outline(glyph);
+      let raw = this.font.outline(glyph);
+      if (glyph === missingGlyph && raw.verbs.length === 0) raw = this.missingGlyphBox();
       outline = { verbs: raw.verbs, coords: raw.coords.map((value) => value * this.scale) };
       this.glyphs.set(glyph, outline);
     }
     return outline;
   }
+
+  /**
+   * A hollow box in font units, 0.7 em tall and inset in the missing
+   * glyph's advance: Excalifont's own missing glyph is blank. The inner
+   * rectangle runs the other way round, so the nonzero rule leaves it empty.
+   */
+  private missingGlyphBox(): GlyphOutline {
+    const em = this.font.unitsPerEm;
+    const advance = this.font.advance(missingGlyph);
+    const [left, right, top, bottom] = [0.1 * advance, 0.9 * advance, -0.7 * em, 0];
+    const inset = 0.06 * em;
+    const { move, line } = GeometryVerb;
+    return {
+      verbs: [move, line, line, line, move, line, line, line],
+      // y points down: the box stands on the baseline.
+      coords: [
+        ...[left, top, right, top, right, bottom, left, bottom],
+        ...[left + inset, top + inset, left + inset, bottom - inset],
+        ...[right - inset, bottom - inset, right - inset, top + inset],
+      ],
+    };
+  }
 }
+
+/** The glyph a font maps every character it lacks to (`.notdef`). */
+const missingGlyph = 0;

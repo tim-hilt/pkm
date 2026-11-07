@@ -44,7 +44,7 @@ export class TrueTypeFont {
     this.kernLookups = this.tables.has("GPOS") ? this.readKernLookups() : [];
   }
 
-  /** The glyph for `codePoint`; 0, the font's missing-glyph box, if it has none. */
+  /** The glyph for `codePoint`; 0, the font's missing glyph (`.notdef`), if it has none. */
   glyphIndex(codePoint: number): number {
     const { view } = this;
     const { start, end, delta, rangeOffset, rangeOffsetsAt } = this.segments;

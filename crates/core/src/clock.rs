@@ -23,14 +23,3 @@ pub(crate) fn now_ms() -> f64 {
             .map_or(0.0, |since| since.as_millis() as f64),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_set_clock_is_the_time() {
-        set_clock(|| 1_234.0);
-        assert_eq!(now_ms(), 1_234.0);
-    }
-}

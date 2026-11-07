@@ -77,7 +77,11 @@ export class CanvasInput {
   private down(e: PointerEvent): void {
     // A pointer is down once: a second mouse button joins its press.
     if (this.pressed.has(e.pointerId)) return;
+    // Keeps the browser from selecting, dragging or focusing; but the chrome
+    // loses focus as on any press elsewhere, or a toolbar button clicked last
+    // would keep the space bar from panning.
     e.preventDefault();
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     if (e.pointerType === "touch") this.touches++;
     const button = pointerButton(e.button);
     this.pressed.set(e.pointerId, button);

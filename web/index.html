@@ -32,6 +32,8 @@
         -webkit-tap-highlight-color: transparent;
         overscroll-behavior: none;
       }
+      /* The chrome's colours (Swift's `Chrome`), light like the Canvas until the
+         Appearance setting brings Dark mode to both. */
       :root {
         --control-fill: #ececf4;
         --control-ink: #1b1b1f;
@@ -39,17 +41,6 @@
         --checked-fill: #e0dfff;
         --checked-ink: #030064;
         --divider: #f1f0ff;
-        color-scheme: light dark;
-      }
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --control-fill: #232329;
-          --control-ink: #e3e3e8;
-          --island-fill: #232329;
-          --checked-fill: #403e6a;
-          --checked-ink: #e0dfff;
-          --divider: #46464f;
-        }
       }
       #app {
         position: relative;

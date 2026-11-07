@@ -78,12 +78,19 @@ describe("outlines", () => {
     expect(fresh.cachedGlyphCount).toBe(2);
   });
 
-  it("show a character the font lacks as its missing-glyph box", () => {
+  it("show a character the font lacks as a hollow box, as wide as the missing glyph's advance", () => {
     const layout = font.layout("日");
 
     expect(layout.glyphs.length).toBe(1);
-    expect(layout.glyphs[0].outline).toEqual(font.layout("\u{10FFFF}").glyphs[0].outline);
-    expect(layout.width).toBeGreaterThan(0);
+    const { outline } = layout.glyphs[0];
+    expect(outline).toEqual(font.layout("\u{10FFFF}").glyphs[0].outline);
+    // Excalifont's own .notdef is blank (advance 866), and the glyph after
+    // it is a letter (U+0462), not a box: an outer and an inner rectangle.
+    expect(outline.verbs).toEqual([0, 1, 1, 1, 0, 1, 1, 1]);
+    expect(Math.min(...xs(outline.coords))).toBeGreaterThan(0);
+    expect(Math.max(...xs(outline.coords))).toBeLessThan(866);
+    expect(Math.max(...ys(outline.coords)), "stands on the baseline").toBe(0);
+    expect(layout.width).toBe(866);
   });
 
   it("have every verb the operands it needs", () => {

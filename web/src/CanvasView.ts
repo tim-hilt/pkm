@@ -88,5 +88,17 @@ export function showCanvas(
   };
   root.replaceChildren(canvas, toolbar.element, bottomLeft);
   new ResizeObserver(resize).observe(canvas);
+  // The pixel ratio also changes on its own, when the window moves to a
+  // screen of another scale; the canvas keeps its size then.
+  const watchPixelRatio = () =>
+    matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener(
+      "change",
+      () => {
+        resize();
+        watchPixelRatio();
+      },
+      { once: true },
+    );
+  watchPixelRatio();
   resize();
 }

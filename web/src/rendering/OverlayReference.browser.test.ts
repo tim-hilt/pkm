@@ -37,8 +37,8 @@ function editorWith(...elements: string[]): Editor {
   return editor;
 }
 
-async function expectOverlay(editor: Editor, name: string) {
-  const scene = editor.geometry();
+/** Draws `editor`'s overlay over `scene` (by default its Scene now). */
+async function expectOverlay(editor: Editor, name: string, scene = editor.geometry()) {
   const overlay = editor.overlay();
   const image = await harness.render(scene, editor.viewport(), { overlay });
   scene.free();
@@ -89,12 +89,15 @@ describe("Overlay reference images", () => {
 
   it("highlights the shape an arrow end would bind to", async () => {
     const editor = editorWith(box("a", 200, 140));
+    // The arrow being drawn is hand-drawn from a random seed, so only the
+    // shape under it is drawn with the highlight.
+    const scene = editor.geometry();
     editor.setTool(Tool.Arrow);
     press(editor, [
       [40, 180],
       [230, 180],
     ]);
-    await expectOverlay(editor, "overlay-binding-highlight");
+    await expectOverlay(editor, "overlay-binding-highlight", scene);
   });
 
   it("draws the overlay at a zoom with as thin a frame", async () => {
