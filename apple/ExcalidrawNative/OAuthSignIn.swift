@@ -54,7 +54,10 @@ private final class SignInPresenter: NSObject, ASWebAuthenticationPresentationCo
             NSApplication.shared.keyWindow ?? NSApplication.shared.windows.first ?? ASPresentationAnchor()
         #else
             let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-            return scenes.flatMap(\.windows).first(where: \.isKeyWindow) ?? ASPresentationAnchor()
+            if let window = scenes.flatMap(\.windows).first(where: \.isKeyWindow) { return window }
+            // Sign-in is started from the UI, so a window scene always exists.
+            guard let scene = scenes.first else { preconditionFailure("no window scene to present sign-in over") }
+            return ASPresentationAnchor(windowScene: scene)
         #endif
     }
 }

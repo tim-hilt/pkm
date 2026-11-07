@@ -169,7 +169,7 @@ struct DrawingView: View {
     }
 
     /// The phone chrome's coordinate space: popover anchors and bar tops are measured in it.
-    fileprivate static let chromeSpace = "chrome"
+    fileprivate nonisolated static let chromeSpace = "chrome"
 
     /// Closes whichever popover is open: on a Canvas touch, which goes no
     /// further (ADR-0013), or on VoiceOver's escape gesture.
