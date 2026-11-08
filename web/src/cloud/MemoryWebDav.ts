@@ -92,6 +92,11 @@ export class MemoryWebDav {
     return found;
   }
 
+  /** Puts a file in the folder `inside` as another Device would have. */
+  put(inside: string, name: string, bytes: Uint8Array): void {
+    this.store(inside ? `${inside}/${name}` : name, bytes);
+  }
+
   /** Whether the folder `inside` exists. */
   hasFolder(inside: string): boolean {
     return this.folders.has(inside);

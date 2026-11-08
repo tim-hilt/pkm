@@ -330,3 +330,232 @@ describe("Disconnect", () => {
     expect(text(cloudFile("A"))).toBe("two");
   });
 });
+
+/** A Drawing with full control of the Elements, `files` and `appState`. */
+const full = (elements: string[], files = "{}", appState = "{}") =>
+  bytes(
+    `{"type":"excalidraw","version":2,"elements":[${elements.join(",")}],"appState":${appState},"files":${files}}`,
+  );
+const erased = (id: string, version: number, index: string) =>
+  element(id, version, index, 0).replace('"isDeleted":false', '"isDeleted":true');
+const parsed = (data: Uint8Array | undefined) => JSON.parse(text(data));
+
+/** Two Devices that edited apart from the same Drawing "S", both offline, then back online. */
+async function editedApart(
+  a: Uint8Array,
+  b: Uint8Array,
+  base = drawing(element("a", 1, "a0", 0), element("b", 1, "a1", 0)),
+) {
+  const browser = await device();
+  const tablet = await device();
+  await browser.store.save(base, "S");
+  await settle();
+  await sync(tablet);
+  browser.cloud.setOnline(false);
+  tablet.cloud.setOnline(false);
+  await browser.store.save(a, "S");
+  await tablet.store.save(b, "S");
+  await settle();
+  tablet.cloud.setOnline(true);
+  await advance(0);
+  browser.cloud.setOnline(true);
+  await advance(0);
+  await sync(tablet, browser);
+  return { browser, tablet };
+}
+
+describe("merges", () => {
+  it("merges erases", async () => {
+    const { browser, tablet } = await editedApart(
+      drawing(element("a", 1, "a0", 0), erased("b", 2, "a1")),
+      drawing(element("a", 3, "a0", 5), element("b", 1, "a1", 0)),
+    );
+    for (const data of [
+      cloudFile("S"),
+      await browser.store.open("S"),
+      await tablet.store.open("S"),
+    ])
+      expect(elementsOf(data)).toEqual(["a@3", "b@2"]);
+    expect(parsed(cloudFile("S")).elements[1].isDeleted).toBe(true);
+  });
+
+  it("merges images and keeps appState", async () => {
+    const { browser, tablet } = await editedApart(
+      full(
+        [element("a", 1, "a0", 0)],
+        '{"f1":{"id":"f1","dataURL":"data:x"}}',
+        '{"viewBackgroundColor":"#111111"}',
+      ),
+      full(
+        [element("a", 1, "a0", 0)],
+        '{"f2":{"id":"f2","dataURL":"data:y"}}',
+        '{"viewBackgroundColor":"#222222"}',
+      ),
+      full([element("a", 1, "a0", 0)]),
+    );
+    for (const data of [
+      cloudFile("S"),
+      await browser.store.open("S"),
+      await tablet.store.open("S"),
+    ]) {
+      const merged = parsed(data);
+      expect(Object.keys(merged.files).sort()).toEqual(["f1", "f2"]);
+      expect(merged.appState.viewBackgroundColor).toMatch(/^#[12]{6}$/);
+    }
+    expect(text(await browser.store.open("S"))).toBe(text(await tablet.store.open("S")));
+  });
+
+  it("merges three Devices", async () => {
+    const browser = await device();
+    const tablet = await device();
+    const phone = await device();
+    await browser.store.save(drawing(element("a", 1, "a0", 0)), "S");
+    await settle();
+    await sync(tablet, phone);
+    for (const d of [browser, tablet, phone]) d.cloud.setOnline(false);
+    await browser.store.save(drawing(element("a", 1, "a0", 0), element("b", 1, "a1", 0)), "S");
+    await tablet.store.save(drawing(element("a", 1, "a0", 0), element("c", 1, "a2", 0)), "S");
+    await phone.store.save(drawing(element("a", 4, "a0", 9)), "S");
+    await settle();
+    for (const d of [browser, tablet, phone]) {
+      d.cloud.setOnline(true);
+      await advance(0);
+    }
+    await sync(browser, tablet, phone, browser, tablet);
+    for (const d of [browser, tablet, phone])
+      expect(elementsOf(await d.store.open("S")).sort()).toEqual(["a@4", "b@1", "c@1"]);
+  });
+});
+
+describe("first Connect", () => {
+  it("merges same-named Drawings that share Elements", async () => {
+    const other = await device();
+    await other.store.save(drawing(element("a", 1, "a0", 0), element("b", 1, "a1", 0)), "S");
+    await settle();
+    const browser = await device(false);
+    await browser.store.save(drawing(element("a", 1, "a0", 0), element("c", 1, "a2", 0)), "S");
+    await browser.cloud.connect(url, "user", "secret");
+    await settle();
+    expect(await names(browser)).toEqual(["S"]);
+    expect(elementsOf(await browser.store.open("S")).sort()).toEqual(["a@1", "b@1", "c@1"]);
+    expect(elementsOf(cloudFile("S")).sort()).toEqual(["a@1", "b@1", "c@1"]);
+  });
+
+  it("merges same-named empty Drawings", async () => {
+    const other = await device();
+    await other.store.save(drawing(), "S");
+    await settle();
+    const browser = await device(false);
+    await browser.store.save(drawing(), "S");
+    await browser.cloud.connect(url, "user", "secret");
+    await settle();
+    expect(await names(browser)).toEqual(["S"]);
+    expect([...server.contents("ExcalidrawNative").keys()]).toEqual(["S.excalidraw"]);
+  });
+
+  it("keeps unrelated same-named Drawings, renaming the browser's", async () => {
+    const other = await device();
+    await other.store.save(drawing(element("x", 1, "a0", 0)), "Sketch");
+    await settle();
+    const browser = await device(false);
+    await browser.store.save(drawing(element("y", 1, "a0", 0)), "Sketch");
+    await browser.cloud.connect(url, "user", "secret");
+    await settle();
+    expect(await names(browser)).toEqual(["Sketch", "Sketch 2"]);
+    expect(elementsOf(await browser.store.open("Sketch"))).toEqual(["x@1"]);
+    expect(elementsOf(await browser.store.open("Sketch 2"))).toEqual(["y@1"]);
+    expect([...server.contents("ExcalidrawNative").keys()].sort()).toEqual([
+      "Sketch 2.excalidraw",
+      "Sketch.excalidraw",
+    ]);
+    await sync(other);
+    expect(await names(other)).toEqual(["Sketch", "Sketch 2"]);
+  });
+
+  it("brings every server Drawing to a new browser", async () => {
+    const other = await device();
+    await other.store.save(bytes("a"), "A");
+    await other.store.save(bytes("b"), "B");
+    await settle();
+    const browser = await device();
+    await settle();
+    expect(await names(browser)).toEqual(["A", "B"]);
+  });
+});
+
+describe("edit against delete", () => {
+  it("an edit wins over a delete, either way round", async () => {
+    const browser = await device();
+    const tablet = await device();
+    await browser.store.save(drawing(element("a", 1, "a0", 0)), "S");
+    await browser.store.save(drawing(element("a", 1, "a0", 0)), "T");
+    await settle();
+    await sync(tablet);
+    browser.cloud.setOnline(false);
+    tablet.cloud.setOnline(false);
+    await browser.store.delete("S");
+    await tablet.store.save(drawing(element("a", 2, "a0", 5)), "S");
+    await tablet.store.delete("T");
+    await browser.store.save(drawing(element("a", 2, "a0", 5)), "T");
+    await settle();
+    tablet.cloud.setOnline(true);
+    await advance(0);
+    browser.cloud.setOnline(true);
+    await advance(0);
+    await sync(tablet, browser, tablet);
+    for (const d of [browser, tablet]) {
+      expect(await names(d)).toEqual(["S", "T"]);
+      expect(elementsOf(await d.store.open("S"))).toEqual(["a@2"]);
+      expect(elementsOf(await d.store.open("T"))).toEqual(["a@2"]);
+    }
+  });
+});
+
+describe("healing", () => {
+  it("repairs a write lost to another Device's overwrite", async () => {
+    const browser = await device();
+    const tablet = await device();
+    await browser.store.save(drawing(element("a", 1, "a0", 0)), "S");
+    await settle();
+    await sync(tablet);
+    await browser.store.save(drawing(element("a", 1, "a0", 0), element("b", 1, "a1", 0)), "S");
+    await settle();
+    // Another Device's overwrite lands on the server without the browser's change.
+    await tablet.store.save(drawing(element("a", 1, "a0", 0), element("c", 1, "a2", 0)), "S");
+    await settle();
+    await sync(browser, tablet, browser, tablet);
+    for (const d of [browser, tablet])
+      expect(elementsOf(await d.store.open("S")).sort()).toEqual(["a@1", "b@1", "c@1"]);
+    expect(elementsOf(cloudFile("S")).sort()).toEqual(["a@1", "b@1", "c@1"]);
+  });
+});
+
+describe("unreadable Drawings", () => {
+  it("are left alone on both sides when the cloud's file can't be read", async () => {
+    const { browser } = await editedApart(
+      drawing(element("a", 2, "a0", 5), element("b", 1, "a1", 0)),
+      drawing(element("a", 1, "a0", 0), element("b", 1, "a1", 0)),
+    );
+    server.put("ExcalidrawNative", "S.excalidraw", bytes("{broken"));
+    await browser.store.save(drawing(element("a", 3, "a0", 6), element("b", 1, "a1", 0)), "S");
+    const local = await browser.store.open("S");
+    await settle();
+    await sync(browser, browser);
+    expect(await browser.store.open("S")).toEqual(local);
+    expect(text(cloudFile("S"))).toBe("{broken");
+  });
+
+  it("are left alone when the local file can't be read", async () => {
+    const browser = await device();
+    const tablet = await device();
+    await browser.store.save(drawing(element("a", 1, "a0", 0)), "S");
+    await settle();
+    await sync(tablet);
+    const good = cloudFile("S");
+    await tablet.store.save(bytes("{broken"), "S");
+    await settle();
+    await sync(tablet, browser);
+    expect(text(await tablet.store.open("S"))).toBe("{broken");
+    expect(cloudFile("S")).toEqual(good);
+  });
+});
