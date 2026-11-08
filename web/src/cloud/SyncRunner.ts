@@ -8,6 +8,9 @@ import type {
 import type { SyncState } from "./SyncState";
 import { type Fetch, runExchange } from "./WebDavSender";
 
+/** What Cloud Backing is doing, for the user. */
+export type SyncStatus = "upToDate" | "syncing" | "offline" | "accessLost" | "full";
+
 /** How a Sync step ended. */
 export interface StepResult {
   /** The names of the Drawings whose local file the step wrote or deleted; a rename as the old and the new. */
@@ -16,6 +19,8 @@ export interface StepResult {
   error?: string;
   accessLost: boolean;
   storageFull: boolean;
+  /** What the user is told: `upToDate`, `offline`, `accessLost` or `full`. */
+  status: SyncStatus;
 }
 
 /** What a step needs to answer its requests. */
@@ -29,6 +34,8 @@ export interface StepContext {
   incoming: { known: boolean };
   /** Ask before every request: a step whose connection was dropped stops. */
   cancelled: () => boolean;
+  /** Told how far the transfers are, once their number is known. */
+  onProgress?: (done: number, total: number) => void;
 }
 
 /**
@@ -51,6 +58,7 @@ export async function runSyncStep(context: StepContext): Promise<StepResult | un
       } finally {
         current.free();
       }
+      reportProgress(run, context);
     }
     const outcome = run.outcome();
     const result: StepResult = {
@@ -58,12 +66,21 @@ export async function runSyncStep(context: StepContext): Promise<StepResult | un
       error: outcome.error,
       accessLost: outcome.accessLost,
       storageFull: outcome.storageFull,
+      status: outcome.status as SyncStatus,
     };
     outcome.free();
     return result;
   } finally {
     run.free();
   }
+}
+
+function reportProgress(run: SyncRun, { onProgress }: StepContext): void {
+  if (!onProgress) return;
+  const progress = run.progress();
+  if (!progress) return;
+  onProgress(progress.done, progress.total);
+  progress.free();
 }
 
 /** Answers `request`; returns the step's next one. */

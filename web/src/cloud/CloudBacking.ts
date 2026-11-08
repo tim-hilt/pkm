@@ -2,8 +2,8 @@ import type { SyncSchedule } from "../../generated/excalidraw_native_web.js";
 import type { Core } from "../core/Core";
 import type { DrawingStore } from "../gallery/DrawingStore";
 import type { FileStorage } from "../storage/FileStorage";
-import { runSyncStep } from "./SyncRunner";
-import { SyncState } from "./SyncState";
+import { type SyncStatus, runSyncStep } from "./SyncRunner";
+import { SyncState as SyncStorage } from "./SyncState";
 import { type TabMessage, type Tabs, browserTabs } from "./Tabs";
 import { type Fetch, runExchange } from "./WebDavSender";
 
@@ -38,6 +38,34 @@ export interface Connection {
   server: string;
 }
 
+/** What Cloud Backing is doing, as Settings and the Gallery show it. */
+export interface SyncState {
+  /** Undefined until the first step is through. */
+  status?: SyncStatus;
+  /** Drawings done of all Drawings a running step transfers. */
+  progress?: { done: number; total: number };
+  /** When a step last went through, in milliseconds since the epoch. */
+  lastSync?: number;
+}
+
+/** What Settings says of `state`, as the native app does; `provider` names who is full. */
+export function statusText({ status, progress }: SyncState, provider: string): string {
+  switch (status) {
+    case undefined:
+      return "Not synced yet";
+    case "upToDate":
+      return "Up to date";
+    case "syncing":
+      return progress ? `Syncing ${progress.done} of ${progress.total} Drawings` : "Syncing";
+    case "offline":
+      return "Offline";
+    case "accessLost":
+      return "Access lost";
+    case "full":
+      return `${provider} is full`;
+  }
+}
+
 /** What is kept in the site's storage: all of it needed to resume. */
 interface Credentials {
   url: string;
@@ -66,7 +94,9 @@ export class CloudBacking {
   private current: Credentials | undefined;
   private readonly listeners = new Set<(connection: Connection | undefined) => void>();
   private readonly syncedListeners = new Set<(names: string[]) => void>();
-  private readonly state: SyncState;
+  private readonly state: SyncStorage;
+  private status: SyncState = {};
+  private readonly statusListeners = new Set<(state: SyncState) => void>();
   private visible = true;
   private online = true;
   /** Present while Connected. */
@@ -83,7 +113,7 @@ export class CloudBacking {
     private readonly drawings: DrawingStore,
     private readonly tabs: Tabs,
   ) {
-    this.state = new SyncState(storage);
+    this.state = new SyncStorage(storage);
     tabs.listen((message) => void this.heard(message));
   }
 
@@ -111,6 +141,22 @@ export class CloudBacking {
     return this.current && { provider: "WebDAV", server: this.current.url };
   }
 
+  /** What Sync is doing; empty until the first step is through, and while Disconnected. */
+  get syncState(): SyncState {
+    return this.status;
+  }
+
+  /** Whether Sync is blocked until the user acts, which the Gallery shows with a warning: access lost or the server full. */
+  get hasProblem(): boolean {
+    return this.status.status === "accessLost" || this.status.status === "full";
+  }
+
+  /** Calls `listener` whenever the status, the progress or the time of the last Sync changes. Returns a function that stops it. */
+  onSyncChange(listener: (state: SyncState) => void): () => void {
+    this.statusListeners.add(listener);
+    return () => this.statusListeners.delete(listener);
+  }
+
   /** Calls `listener` whenever the connection changes. Returns a function that stops it. */
   onConnectionChange(listener: (connection: Connection | undefined) => void): () => void {
     this.listeners.add(listener);
@@ -132,6 +178,7 @@ export class CloudBacking {
     protocol.free();
     if (result.error) throw new ConnectFailed(result.error as ConnectReason);
     await this.stopLoop();
+    this.setStatus({});
     this.current = { url: url.trim().replace(/\/+$/, ""), username, password };
     await this.storage.write(
       credentialsFile,
@@ -142,6 +189,34 @@ export class CloudBacking {
     this.tabs.post({ kind: "connected" });
   }
 
+  /**
+   * Connects again with a new password after access was lost: checks it, keeps
+   * it and resumes Sync where it stopped. Throws `ConnectFailed` and changes
+   * nothing if the check fails.
+   */
+  async reconnect(password: string): Promise<void> {
+    const credentials = this.current;
+    if (!credentials) return;
+    let protocol;
+    try {
+      protocol = this.core.webDav(credentials.url, credentials.username, password);
+    } catch {
+      throw new ConnectFailed("notHttps");
+    }
+    const result = await runExchange(protocol.connect(), this.send);
+    protocol.free();
+    if (result.error) throw new ConnectFailed(result.error as ConnectReason);
+    // The step under way (if any) was started with the old password; it is over before the new one is kept.
+    this.current = { ...credentials, password };
+    await this.storage.write(
+      credentialsFile,
+      new TextEncoder().encode(JSON.stringify(this.current)),
+    );
+    this.schedule?.reconnected(Date.now());
+    this.arm();
+    this.tabs.post({ kind: "connected" });
+  }
+
   /** Stops Syncing, and forgets the connection, its credentials and the Sync state. Every Drawing stays. */
   async disconnect(): Promise<void> {
     this.current = undefined;
@@ -149,6 +224,7 @@ export class CloudBacking {
     // Under the lock: no step of another tab writes Sync state after it is gone.
     await this.tabs.exclusive(() => this.storage.remove("Cloud"));
     this.incoming.known = false;
+    this.setStatus({});
     this.changed();
     this.tabs.post({ kind: "disconnected" });
   }
@@ -171,6 +247,8 @@ export class CloudBacking {
   setOnline(online: boolean): void {
     this.online = online;
     this.schedule?.setOnline(online, Date.now());
+    if (!online && this.schedule && !this.hasProblem && this.status.status !== undefined)
+      this.setStatus({ ...this.status, status: "offline", progress: undefined });
     this.arm();
   }
 
@@ -190,6 +268,7 @@ export class CloudBacking {
     await this.stopLoop();
     this.current = saved;
     this.incoming.known = false;
+    this.setStatus({});
     if (saved) this.startLoop();
     this.changed();
   }
@@ -246,20 +325,41 @@ export class CloudBacking {
         state: this.state,
         incoming: this.incoming,
         cancelled: () => this.schedule !== schedule,
+        onProgress: (done, total) => {
+          if (this.schedule === schedule && total > 0)
+            this.setStatus({ ...this.status, status: "syncing", progress: { done, total } });
+        },
       });
     } catch {
       // Whatever broke is no reason to stop Syncing: the step counts as failed.
-      result = { changed: [], error: "failed", accessLost: false, storageFull: false };
+      result = {
+        changed: [],
+        error: "failed",
+        accessLost: false,
+        storageFull: false,
+        status: "offline" as const,
+      };
     } finally {
       protocol.free();
     }
     if (!result || this.schedule !== schedule) return;
     schedule.stepEnded(Date.now(), result.error === undefined);
     if (result.accessLost) schedule.accessLost();
+    const wentThrough = result.status === "upToDate" || result.status === "full";
+    this.setStatus({
+      status: result.status,
+      progress: undefined,
+      lastSync: wentThrough ? Date.now() : this.status.lastSync,
+    });
     if (result.changed.length > 0) {
       for (const listener of this.syncedListeners) listener(result.changed);
       this.tabs.post({ kind: "changed", names: result.changed });
     }
+  }
+
+  private setStatus(state: SyncState): void {
+    this.status = state;
+    for (const listener of this.statusListeners) listener(state);
   }
 
   private changed(): void {

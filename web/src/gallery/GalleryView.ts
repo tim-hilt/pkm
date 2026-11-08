@@ -1,5 +1,6 @@
 import type { Entry } from "./DrawingStore";
 import type { Gallery } from "./Gallery";
+import { type CloudBacking, statusText } from "../cloud/CloudBacking";
 import type { SettingsView } from "../chrome/SettingsView";
 
 let nextDialog = 0;
@@ -209,11 +210,16 @@ export class GalleryView {
   private readonly failureDialog = make("dialog", "gallery-dialog");
   private readonly failureText = make("p", "");
 
-  /** `isDark` tells which appearance the thumbnails are made for; the gear opens `settings`, if there are any. */
+  private readonly syncText = make("p", "gallery-sync");
+  private readonly syncWarning = make("span", "gallery-sync-warning");
+  private stopSyncListening: (() => void) | undefined;
+
+  /** `isDark` tells which appearance the thumbnails are made for; the gear opens `settings`, if there are any; `cloud` tells what Sync is doing, shown as "Syncing N of M Drawings" and a warning icon. */
   constructor(
     private readonly gallery: Gallery,
     private readonly isDark: () => boolean = () => false,
     settings?: SettingsView,
+    private readonly cloud?: Pick<CloudBacking, "syncState" | "hasProblem" | "onSyncChange">,
   ) {
     const heading = make("h1", "gallery-title", ["Drawings"]);
     const create = button("gallery-new", "", () => void gallery.createDrawing());
@@ -260,6 +266,14 @@ export class GalleryView {
       gear.setAttribute("aria-label", "Settings");
       gear.title = "Settings";
       this.element.append(gear, settings.element);
+    }
+    if (cloud) {
+      this.syncText.setAttribute("role", "status");
+      this.syncWarning.textContent = "⚠";
+      this.syncWarning.setAttribute("role", "img");
+      this.element.append(this.syncText, this.syncWarning);
+      this.stopSyncListening = cloud.onSyncChange(() => this.showSync());
+      this.showSync();
     }
     this.buildDialogs();
 
@@ -308,7 +322,19 @@ export class GalleryView {
     for (const card of this.cards.values()) card.reloadThumbnail();
   }
 
+  /** "Syncing 3 of 40 Drawings" while Drawings transfer, a warning while Sync is blocked. */
+  private showSync(): void {
+    const state = this.cloud!.syncState;
+    const text = state.status === "syncing" && state.progress ? statusText(state, "") : "";
+    this.syncText.textContent = text;
+    this.syncText.hidden = text === "";
+    this.syncWarning.hidden = !this.cloud!.hasProblem;
+    this.syncWarning.setAttribute("aria-label", statusText(state, "The server"));
+    this.syncWarning.title = statusText(state, "The server");
+  }
+
   dispose(): void {
+    this.stopSyncListening?.();
     this.observer.disconnect();
     for (const card of this.cards.values()) card.dispose();
     this.cards.clear();

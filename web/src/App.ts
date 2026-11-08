@@ -97,6 +97,7 @@ export async function startApp(
           gallery,
           () => appearance.isDark,
           new SettingsView(appearance, cloud),
+          cloud,
         );
         root.replaceChildren(galleryView.element);
       }

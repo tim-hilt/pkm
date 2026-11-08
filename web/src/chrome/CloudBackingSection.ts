@@ -1,4 +1,9 @@
-import { type CloudBacking, ConnectFailed, connectMessage } from "../cloud/CloudBacking";
+import {
+  type CloudBacking,
+  ConnectFailed,
+  connectMessage,
+  statusText,
+} from "../cloud/CloudBacking";
 
 /**
  * The Cloud Backing section of the Settings: while Disconnected the WebDAV
@@ -16,15 +21,38 @@ export class CloudBackingSection {
     legend.textContent = "Cloud Backing";
     this.element.append(legend, this.content);
     cloud.onConnectionChange(() => this.render());
+    // Only the status text changes with Sync; the form being typed in is left alone.
+    cloud.onSyncChange(() => this.showStatus());
     this.render();
   }
 
-  private render(error?: string): void {
-    const connection = this.cloud.connection;
-    this.content.replaceChildren(connection ? this.connected(connection.server) : this.form(error));
+  private readonly status = document.createElement("p");
+
+  private showStatus(): void {
+    const sync = this.cloud.syncState;
+    let text = statusText(sync, "WebDAV");
+    if (sync.lastSync !== undefined)
+      text += ` · Last Sync ${new Date(sync.lastSync).toLocaleTimeString()}`;
+    this.status.hidden = !this.cloud.connection;
+    this.status.className = "cloud-status" + (this.cloud.hasProblem ? " problem" : "");
+    this.status.textContent = text;
+    // Access lost needs the password again, which only shows with the Reconnect form.
+    const lost = this.cloud.syncState.status === "accessLost";
+    if (lost !== this.reconnecting) this.render();
   }
 
-  private connected(server: string): HTMLElement {
+  private reconnecting = false;
+
+  private render(error?: string): void {
+    const connection = this.cloud.connection;
+    this.reconnecting = connection !== undefined && this.cloud.syncState.status === "accessLost";
+    this.content.replaceChildren(
+      connection ? this.connected(connection.server, error) : this.form(error),
+    );
+    this.showStatus();
+  }
+
+  private connected(server: string, error?: string): HTMLElement {
     const box = document.createElement("div");
     box.className = "cloud-fields";
     const row = document.createElement("p");
@@ -38,8 +66,41 @@ export class CloudBackingSection {
     const disconnect = button("Disconnect", "danger");
     disconnect.classList.add("cloud-disconnect");
     disconnect.addEventListener("click", () => void this.cloud.disconnect());
-    box.append(row, disconnect);
+    box.append(row, this.status);
+    if (this.reconnecting) box.append(this.reconnectForm(error));
+    box.append(disconnect);
     return box;
+  }
+
+  /** Access lost: the password again, and Sync resumes where it stopped. */
+  private reconnectForm(error?: string): HTMLElement {
+    const form = document.createElement("form");
+    form.className = "cloud-fields";
+    const password = field("Password", "password", "", "current-password");
+    const message = document.createElement("p");
+    message.className = "cloud-error";
+    message.setAttribute("role", "alert");
+    message.textContent = error ?? "";
+    message.hidden = !error;
+    const reconnect = button("Reconnect", "primary");
+    reconnect.type = "submit";
+    const update = () => (reconnect.disabled = password.input.value === "");
+    password.input.addEventListener("input", update);
+    update();
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      reconnect.disabled = true;
+      try {
+        await this.cloud.reconnect(password.input.value);
+      } catch (failure) {
+        if (!(failure instanceof ConnectFailed)) throw failure;
+        message.textContent = connectMessage(failure.reason);
+        message.hidden = false;
+        update();
+      }
+    });
+    form.append(password.label, message, reconnect);
+    return form;
   }
 
   private form(error?: string): HTMLElement {
