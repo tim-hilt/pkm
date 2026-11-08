@@ -54,12 +54,13 @@ single address.
   curl -si -X OPTIONS https://dav.example.com/ \
     -H 'Origin: https://draw.example.org' \
     -H 'Access-Control-Request-Method: PROPFIND' \
-    -H 'Access-Control-Request-Headers: authorization,depth'
+    -H 'Access-Control-Request-Headers: authorization,content-type,depth'
   ```
 
   The answer must be `200` with `Access-Control-Allow-Origin:
-  https://draw.example.org` and `PROPFIND`, `MOVE` and `Authorization` allowed.
-  Without that header the browser refuses every request.
+  https://draw.example.org`, the methods `PROPFIND`, `MKCOL` and `MOVE`, and
+  the headers `Authorization`, `Content-Type`, `Depth`, `Destination` and
+  `Overwrite` allowed. Without that the browser refuses the app's requests.
 - **Servers that can't be used**: a server that can't allow an origin, such as a
   stock Nextcloud, works in the native apps but not in the web app.
 - **Local development**: run a second rclone, on its own folder and tunnel
@@ -89,7 +90,8 @@ platforms refuse certificates valid for more than 825 days, or without the
   Check the path of the URL.
 - **Server not reachable, or its certificate is not trusted**: wrong host, no
   network, or a certificate the Device does not trust.
-- **Web app: server not reachable**: besides the causes above, the server may
-  not allow the web app's origin (CORS). The browser hides the reason, so it
-  looks like an unreachable server. Check the preflight as described under
+- **Server not reachable, its certificate is not trusted, or the server doesn't
+  allow this site (CORS)**: the web app's wording of the previous failure. The
+  browser hides which it is, so a server without `--allow-origin` for the web
+  app's address looks unreachable; check the preflight as described under
   "The web app".
