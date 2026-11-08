@@ -232,6 +232,18 @@ impl Editor {
         self.inner.borrow_mut().set_editing_text(text);
     }
 
+    /// Takes in `bytes`, the Drawing as Sync rewrote its file, without
+    /// reloading and without an undo step; see
+    /// [`excalidraw_native_core::Editor::merge_synced`]. Throws if `bytes`
+    /// are not a Drawing; nothing changes then.
+    #[wasm_bindgen(js_name = mergeSynced)]
+    pub fn merge_synced(&self, bytes: &[u8]) -> Result<(), JsError> {
+        self.inner
+            .borrow_mut()
+            .merge_synced(bytes)
+            .map_err(|error| JsError::new(&error.to_string()))
+    }
+
     /// Ends the editing of the text and keeps it.
     #[wasm_bindgen(js_name = commitText)]
     pub fn commit_text(&self) {
@@ -853,6 +865,13 @@ pub struct Sections {
 }
 
 /// How Excalidraw shows a CSS colour in its dark theme, for swatches.
+/// Whether two Drawings' files are the same Drawing (they share Elements, or
+/// are both empty); see [`excalidraw_native_core::are_same_drawing`].
+#[wasm_bindgen(js_name = areSameDrawing)]
+pub fn are_same_drawing(a: &[u8], b: &[u8]) -> bool {
+    matches!(excalidraw_native_core::are_same_drawing(a, b), Ok(true))
+}
+
 #[wasm_bindgen(js_name = darkModeColor)]
 pub fn dark_mode_color(css: &str) -> String {
     excalidraw_native_core::dark_mode_color(css)

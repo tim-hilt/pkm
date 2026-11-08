@@ -16,6 +16,7 @@ import init, {
   Tool,
   ZOrder,
   darkModeColor,
+  areSameDrawing,
   type InitInput,
   ViewportState,
   SyncRun,
@@ -197,6 +198,8 @@ const modifierBits = ({ shift, ctrl, alt, meta }: Modifiers) =>
 export interface Core {
   memory: WebAssembly.Memory;
   makeEditor(): Editor;
+  /** Whether the two Drawing files are the same Drawing: they share Elements, or both are empty. */
+  areSameDrawing(a: Uint8Array, b: Uint8Array): boolean;
   /** The WebDAV protocol for a server; throws if the URL is not https. Free it when done. */
   webDav(url: string, username: string, password: string): WebDavProtocol;
   /** A Sync step starting at `nowMs` (milliseconds since the epoch). Free it when done. */
@@ -222,6 +225,7 @@ export async function loadCore(
       if (measurer) editor.setTextMeasurer(measurer);
       return new Editor(editor, views);
     },
+    areSameDrawing: (a, b) => areSameDrawing(a, b),
     webDav: (url, username, password) => new WebDavProtocol(url, username, password),
     syncRun: (nowMs) => new SyncRun(nowMs),
     syncSchedule: (now) => new SyncSchedule(now),
@@ -246,6 +250,16 @@ export class Editor {
   /** The Scene as `.excalidraw` file content. */
   save(): Uint8Array {
     return this.inner.save();
+  }
+
+  /**
+   * Takes in `bytes`, the Drawing as Sync rewrote its file, by merging them
+   * Element by Element into the Scene: no undo step, and Selection, Text view
+   * and viewport stay; an Element being dragged, drawn or edited keeps its
+   * local version. Throws, changing nothing, if `bytes` are not a Drawing.
+   */
+  mergeSynced(bytes: Uint8Array): void {
+    this.inner.mergeSynced(bytes);
   }
 
   elementCount(): number {

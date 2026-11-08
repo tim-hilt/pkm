@@ -210,6 +210,36 @@ describe("tools, overlay and undo through the wasm editor", () => {
     editor.free();
   });
 
+  it("merges Synced bytes: the remote Element appears and no undo step is added", () => {
+    const local = core.makeEditor();
+    local.setViewSize(600, 400);
+    local.setTool(Tool.Rectangle);
+    drag(local, [
+      [50, 50],
+      [150, 120],
+    ]);
+    const remote = core.makeEditor();
+    remote.setViewSize(600, 400);
+    remote.load(local.save());
+    remote.setTool(Tool.Ellipse);
+    drag(remote, [
+      [200, 200],
+      [300, 280],
+    ]);
+    expect(remote.elementCount()).toBe(2);
+
+    local.mergeSynced(remote.save());
+    expect(local.elementCount()).toBe(2);
+
+    // Undo takes back the user's rectangle, not the arrival of the ellipse.
+    local.undo();
+    expect(local.elementCount()).toBe(1);
+    expect(local.canUndo()).toBe(false);
+    expect(() => local.mergeSynced(new TextEncoder().encode("nope"))).toThrow();
+    local.free();
+    remote.free();
+  });
+
   it("keeps the Tool after drawing while the Tool lock is on", () => {
     const editor = core.makeEditor();
     editor.setViewSize(600, 400);

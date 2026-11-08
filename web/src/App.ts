@@ -51,7 +51,10 @@ export async function startApp(
   cloud.setVisible(document.visibilityState === "visible");
   cloud.setOnline(navigator.onLine);
   store.onLocalChange = () => cloud.localChange();
-  cloud.onSynced(() => void gallery.reload());
+  cloud.onSynced((names) => {
+    // The open Drawing takes what Sync did to it before the Gallery lists again.
+    void (gallery.open?.syncDidChange(names) ?? Promise.resolve()).then(() => gallery.reload());
+  });
   document.addEventListener("visibilitychange", () =>
     cloud.setVisible(document.visibilityState === "visible"),
   );
@@ -74,9 +77,8 @@ export async function startApp(
     if (drawing) {
       galleryView?.dispose();
       galleryView = undefined;
-      canvas ??= {
-        drawing,
-        stop: showCanvas(root, device, drawing.editor, font, {
+      if (!canvas) {
+        const shown = showCanvas(root, device, drawing.editor, font, {
           edited: () => drawing.editorDidChange(),
           back: () => void gallery.close(),
           settings,
@@ -85,8 +87,10 @@ export async function startApp(
             save: downloadInBrowser,
             png: (scope, background) => exportPng(device, font, drawing.editor, scope, background),
           }),
-        }),
-      };
+        });
+        drawing.onMerged = shown.refresh;
+        canvas = { drawing, stop: shown.stop };
+      }
     } else {
       if (!galleryView) {
         galleryView = new GalleryView(

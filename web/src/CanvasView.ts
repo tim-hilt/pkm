@@ -39,7 +39,8 @@ export interface CanvasHandlers {
  * Scene on the canvas and forwards the input on it to the editor, as the Swift
  * `CanvasMetalView` does: after every input or command the Scene (if its
  * revision moved), the viewport, the cursor and the chrome are shown again.
- * Returns what stops it all, for when the Drawing is left.
+ * Returns what stops it all, for when the Drawing is left, and `refresh`, to
+ * show the Scene again after something besides input changed it (Sync).
  */
 export function showCanvas(
   root: HTMLElement,
@@ -47,7 +48,7 @@ export function showCanvas(
   editor: Editor,
   font: Excalifont,
   handlers: CanvasHandlers,
-): () => void {
+): { stop: () => void; refresh: () => void } {
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("webgpu")!;
   const format = navigator.gpu.getPreferredCanvasFormat();
@@ -276,7 +277,7 @@ export function showCanvas(
   watchPixelRatio();
   resize();
 
-  return () => {
+  const stop = () => {
     stopFollowingAppearance();
     input.dispose();
     imageInput.dispose();
@@ -293,4 +294,5 @@ export function showCanvas(
     context.unconfigure();
     root.replaceChildren();
   };
+  return { stop, refresh: didReachEditor };
 }

@@ -278,3 +278,148 @@ describe("the viewport", () => {
     expect(saved).not.toContain("scrollX");
   });
 });
+
+describe("Synced changes", () => {
+  /** What another Device made of `name`'s Drawing: one more rectangle. */
+  const withRemoteRectangle = async (name: string) => {
+    const other = core.makeEditor();
+    other.load(await store.open(name));
+    other.setTool(Tool.Rectangle);
+    drag(other, [
+      [200, 200],
+      [260, 240],
+    ]);
+    const bytes = other.save();
+    other.free();
+    return bytes;
+  };
+
+  /** Sync rewriting `file` as it does: only if it still holds what it read. */
+  const syncWrites = async (name: string, bytes: Uint8Array) =>
+    store.writeIfHolding(`${name}.excalidraw`, bytes, await store.open(name));
+
+  it("shows a change from another Device without an undo step, and undo still undoes the user's own", async () => {
+    const drawing = await openNew();
+    drawRectangle(drawing);
+    await drawing.saveNow();
+    const remote = await withRemoteRectangle(drawing.name);
+    expect(await syncWrites(drawing.name, remote)).toBe(true);
+
+    await drawing.syncDidChange([drawing.name]);
+    expect(drawing.editor.elementCount()).toBe(2);
+
+    drawing.editor.undo();
+    expect(drawing.editor.elementCount()).toBe(1);
+    expect(drawing.editor.canUndo()).toBe(false);
+  });
+
+  it("takes the change without saving it again when nothing of the user's was unsaved", async () => {
+    const drawing = await openNew();
+    drawRectangle(drawing);
+    await drawing.saveNow();
+    const remote = await withRemoteRectangle(drawing.name);
+    await syncWrites(drawing.name, remote);
+    await drawing.syncDidChange([drawing.name]);
+    const before = (await store.list())[0].modified;
+
+    await wait(delay * 3);
+    expect((await store.list())[0].modified).toBe(before);
+    expect(await savedElementCount(drawing.name)).toBe(2);
+  });
+
+  it("merges the change into what the user did not save yet, and the next save writes both", async () => {
+    const drawing = await openNew();
+    drawRectangle(drawing);
+    await drawing.saveNow();
+    const remote = await withRemoteRectangle(drawing.name);
+    await syncWrites(drawing.name, remote);
+    drawing.editor.setTool(Tool.Rectangle);
+    drag(drawing.editor, [
+      [300, 300],
+      [360, 340],
+    ]);
+    drawing.editorDidChange();
+
+    await drawing.syncDidChange([drawing.name]);
+    expect(drawing.editor.elementCount()).toBe(3);
+    await wait(delay);
+    expect(await savedElementCount(drawing.name)).toBe(3);
+  });
+
+  it("keeps the viewport", async () => {
+    const drawing = await openNew();
+    drawing.editor.setViewport({ originX: 40, originY: 30, zoom: 2 });
+    drawRectangle(drawing);
+    await drawing.saveNow();
+    await syncWrites(drawing.name, await withRemoteRectangle(drawing.name));
+    await drawing.syncDidChange([drawing.name]);
+    expect(drawing.editor.viewport()).toEqual({ originX: 40, originY: 30, zoom: 2 });
+  });
+
+  it("leaves a file that is not a Drawing alone", async () => {
+    const drawing = await openNew();
+    drawRectangle(drawing);
+    await drawing.saveNow();
+    await syncWrites(drawing.name, new TextEncoder().encode("nope"));
+    await drawing.syncDidChange([drawing.name]);
+    expect(drawing.editor.elementCount()).toBe(1);
+  });
+
+  it("follows a rename by Sync and goes on saving under the new name", async () => {
+    const drawing = await openNew();
+    drawRectangle(drawing);
+    await drawing.saveNow();
+    const old = drawing.name;
+    const bytes = await store.open(old);
+    expect(await store.renameIfHolding(`${old}.excalidraw`, "Renamed.excalidraw", bytes)).toBe(
+      true,
+    );
+
+    await drawing.syncDidChange([old, "Renamed"]);
+    expect(drawing.name).toBe("Renamed");
+
+    drawRectangle(drawing, 200);
+    await drawing.saveNow();
+    expect(await savedElementCount("Renamed")).toBe(2);
+    expect((await store.list()).map((e) => e.name)).toEqual(["Renamed"]);
+  });
+
+  it("follows a rename and takes the changes that came with it", async () => {
+    const drawing = await openNew();
+    drawRectangle(drawing);
+    await drawing.saveNow();
+    const old = drawing.name;
+    const remote = await withRemoteRectangle(old);
+    await store.renameIfHolding(`${old}.excalidraw`, "Renamed.excalidraw", await store.open(old));
+    await syncWrites("Renamed", remote);
+
+    await drawing.syncDidChange([old, "Renamed"]);
+    expect(drawing.name).toBe("Renamed");
+    expect(drawing.editor.elementCount()).toBe(2);
+  });
+
+  it("stays open when Sync deletes it, and its next save writes it again", async () => {
+    const drawing = await openNew();
+    drawRectangle(drawing);
+    await drawing.saveNow();
+    const name = drawing.name;
+    expect(await store.deleteIfHolding(`${name}.excalidraw`, await store.open(name))).toBe(true);
+
+    await drawing.syncDidChange([name]);
+    expect(drawing.name).toBe(name);
+    expect(drawing.editor.elementCount()).toBe(1);
+    expect(await store.list()).toEqual([]);
+
+    drawRectangle(drawing, 200);
+    await wait(delay);
+    expect(await savedElementCount(name)).toBe(2);
+  });
+
+  it("does nothing after the Drawing was left", async () => {
+    const drawing = await openNew();
+    drawRectangle(drawing);
+    await drawing.close();
+    await drawing.syncDidChange([drawing.name]);
+    expect(await savedElementCount(drawing.name)).toBe(1);
+  });
+});
