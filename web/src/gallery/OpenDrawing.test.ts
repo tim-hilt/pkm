@@ -137,7 +137,7 @@ describe("autosave", () => {
   it("keeps the changes unsaved when a save fails, and tries again", async () => {
     const drawing = await openNew();
     drawRectangle(drawing);
-    const save = vi.spyOn(store, "save").mockRejectedValueOnce(new Error("disk full"));
+    const save = vi.spyOn(store, "update").mockRejectedValueOnce(new Error("disk full"));
     await drawing.saveNow();
     expect(await savedElementCount(drawing.name)).toBe(0);
     save.mockRestore();
@@ -344,6 +344,30 @@ describe("Synced changes", () => {
     expect(drawing.editor.elementCount()).toBe(3);
     await wait(delay);
     expect(await savedElementCount(drawing.name)).toBe(3);
+  });
+
+  it("a save before the Drawing heard of a Sync write keeps what Sync wrote", async () => {
+    const drawing = await openNew();
+    drawRectangle(drawing);
+    await drawing.saveNow();
+    await syncWrites(drawing.name, await withRemoteRectangle(drawing.name));
+    drawRectangle(drawing, 300);
+
+    await drawing.saveNow();
+    expect(drawing.editor.elementCount()).toBe(3);
+    expect(await savedElementCount(drawing.name)).toBe(3);
+  });
+
+  it("leaving an emptied Drawing keeps what Sync wrote into it", async () => {
+    const drawing = await openNew();
+    drawRectangle(drawing);
+    await drawing.saveNow();
+    await syncWrites(drawing.name, await withRemoteRectangle(drawing.name));
+    drawing.editor.undo();
+    drawing.editorDidChange();
+
+    await drawing.close();
+    expect(await savedElementCount(drawing.name)).toBe(1);
   });
 
   it("keeps the viewport", async () => {

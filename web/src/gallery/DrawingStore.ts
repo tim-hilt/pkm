@@ -120,6 +120,33 @@ export class DrawingStore {
   }
 
   /**
+   * Brings the Drawing's file to what `next` makes of the bytes it holds at
+   * this moment (`undefined`: there is no file): writes them, or removes the
+   * Drawing and its caches if `next` gives `undefined`; nothing if the file
+   * holds that already. No other write comes in between, so a Sync write is
+   * either seen by `next` or finds the file changed.
+   */
+  update(
+    name: string,
+    next: (current: Uint8Array | undefined) => Uint8Array | undefined,
+  ): Promise<void> {
+    return this.exclusively(async () => {
+      const current = await this.storage.read(path(name));
+      const contents = next(current);
+      if (contents === undefined) {
+        if (current === undefined) return;
+        await this.storage.remove(path(name));
+        await this.storage.remove(cacheFolder(name));
+      } else if (current !== undefined && sameBytes(current, contents)) {
+        return;
+      } else {
+        await this.write(contents, name);
+      }
+      this.onLocalChange?.();
+    });
+  }
+
+  /**
    * Gives the Drawing another name and returns it (the given one without
    * surrounding whitespace). Throws `NameTaken` rather than replace another
    * Drawing; the same name is fine.
@@ -328,7 +355,7 @@ const encode = (text: string) => new TextEncoder().encode(text);
 const isDrawingFile = (file: string) =>
   file.endsWith(fileExtension) && isValid(file.slice(0, -fileExtension.length));
 const nameOf = (file: string) => file.slice(0, -fileExtension.length);
-const sameBytes = (a: Uint8Array, b: Uint8Array) =>
+export const sameBytes = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((byte, i) => byte === b[i]);
 
 const isValid = (name: string) => name !== "" && !name.includes("/") && !name.startsWith(".");

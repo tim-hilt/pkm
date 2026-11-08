@@ -134,9 +134,8 @@ async function answer(
       return run.answerBytes(result.data);
     }
     case "upload": {
-      const temp = `${crypto.randomUUID()}`;
       const result = await runExchange(
-        protocol.put(file, temp, request.bytes, incoming.known),
+        protocol.put(file, crypto.randomUUID(), request.bytes, incoming.known),
         send,
       );
       incoming.known = !result.error;

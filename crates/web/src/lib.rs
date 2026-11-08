@@ -864,7 +864,6 @@ pub struct Sections {
     pub text: bool,
 }
 
-/// How Excalidraw shows a CSS colour in its dark theme, for swatches.
 /// Whether two Drawings' files are the same Drawing (they share Elements, or
 /// are both empty); see [`excalidraw_native_core::are_same_drawing`].
 #[wasm_bindgen(js_name = areSameDrawing)]
@@ -872,6 +871,7 @@ pub fn are_same_drawing(a: &[u8], b: &[u8]) -> bool {
     matches!(excalidraw_native_core::are_same_drawing(a, b), Ok(true))
 }
 
+/// How Excalidraw shows a CSS colour in its dark theme, for swatches.
 #[wasm_bindgen(js_name = darkModeColor)]
 pub fn dark_mode_color(css: &str) -> String {
     excalidraw_native_core::dark_mode_color(css)

@@ -8,12 +8,16 @@ import {
 /**
  * The Cloud Backing section of the Settings: while Disconnected the WebDAV
  * form (Server URL, Username, Password, Connect) with the failure of the last
- * try; while Connected the provider with its server and Disconnect. WebDAV is
- * the only Cloud Provider of the web app, so there is no picker.
+ * try; while Connected the provider with its server, the status with the time
+ * of the last Sync, the Reconnect form while access is lost, and Disconnect.
+ * WebDAV is the only Cloud Provider of the web app, so there is no picker.
  */
 export class CloudBackingSection {
   readonly element = document.createElement("fieldset");
   private readonly content = document.createElement("div");
+  private readonly status = document.createElement("p");
+  /** Whether the Reconnect form is shown. */
+  private reconnecting = false;
 
   constructor(private readonly cloud: CloudBacking) {
     this.element.className = "cloud-backing";
@@ -26,26 +30,25 @@ export class CloudBackingSection {
     this.render();
   }
 
-  private readonly status = document.createElement("p");
-
   private showStatus(): void {
-    const sync = this.cloud.syncState;
+    const sync = this.cloud.syncReport;
     let text = statusText(sync, "WebDAV");
     if (sync.lastSync !== undefined)
       text += ` · Last Sync ${new Date(sync.lastSync).toLocaleTimeString()}`;
     this.status.hidden = !this.cloud.connection;
     this.status.className = "cloud-status" + (this.cloud.hasProblem ? " problem" : "");
     this.status.textContent = text;
-    // Access lost needs the password again, which only shows with the Reconnect form.
-    const lost = this.cloud.syncState.status === "accessLost";
-    if (lost !== this.reconnecting) this.render();
+    if (this.accessLost !== this.reconnecting) this.render();
   }
 
-  private reconnecting = false;
+  /** Access lost needs the password again, which only the Reconnect form asks for. */
+  private get accessLost(): boolean {
+    return this.cloud.connection !== undefined && this.cloud.syncReport.status === "accessLost";
+  }
 
   private render(error?: string): void {
     const connection = this.cloud.connection;
-    this.reconnecting = connection !== undefined && this.cloud.syncState.status === "accessLost";
+    this.reconnecting = this.accessLost;
     this.content.replaceChildren(
       connection ? this.connected(connection.server, error) : this.form(error),
     );

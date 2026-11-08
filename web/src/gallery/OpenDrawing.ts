@@ -1,5 +1,5 @@
 import type { Core, Editor, Viewport } from "../core/Core";
-import type { DrawingStore } from "./DrawingStore";
+import { type DrawingStore, sameBytes } from "./DrawingStore";
 
 export interface OpenDrawingOptions {
   /** How long after the last change the Drawing is saved; milliseconds. */
@@ -15,17 +15,18 @@ const sameViewport = (a: Viewport, b: Viewport) =>
  * A Drawing opened from the `DrawingStore` into an `Editor`, kept saved: a
  * change is saved `autosaveDelay` after the last one, and `saveNow` saves at
  * once (leaving the Drawing, the page going to the background). A port of the
- * Swift `OpenDrawing`, without following the file outside the app: nothing
- * else changes the Drawings of the web app.
+ * Swift `OpenDrawing`.
  *
  * It opens at the viewport it was left at, which `saveNow` keeps in the
  * store's cache (not in the file, so panning and zooming never change the
  * Drawing); one that was never left opens at the default viewport.
  *
- * Sync changes the Drawing's file behind its back (`syncDidChange`): the
- * bytes are merged into the Editor instead of reopening, a rename is followed
- * and a delete is ignored, so that the next save writes the Drawing again
- * (the user's edit wins over a delete).
+ * Sync (of this tab or another) changes the Drawing's file behind its back.
+ * Whatever it wrote is merged into the Editor instead of reopening, live when
+ * told (`syncDidChange`) and in any case before every save, so that neither
+ * the user's unsaved edits nor Sync's changes are lost; a rename is followed;
+ * a delete leaves the Drawing open, and its next save writes it again (the
+ * user's edit wins over a delete).
  *
  * Writes run one after the other, so that a save never overtakes the one
  * before it or the removal of an emptied Drawing.
@@ -38,6 +39,8 @@ export class OpenDrawing {
   private readonly delay: number;
   /** The `Editor.revision` of what the file holds. */
   private savedRevision: number;
+  /** The file's bytes as last read or written here; a file holding anything else was changed by Sync. */
+  private fileBytes: Uint8Array;
   /** The viewport the cache holds, or the default if it holds none. */
   private savedViewport: Viewport;
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -64,17 +67,19 @@ export class OpenDrawing {
       editor.free();
       throw error;
     }
-    return new OpenDrawing(name, store, core, editor, options);
+    return new OpenDrawing(name, bytes, store, core, editor, options);
   }
 
   private constructor(
     name: string,
+    bytes: Uint8Array,
     private readonly store: DrawingStore,
     private readonly core: Core,
     editor: Editor,
     { autosaveDelay = 1000 }: OpenDrawingOptions,
   ) {
     this.currentName = name;
+    this.fileBytes = bytes;
     this.editor = editor;
     this.delay = autosaveDelay;
     this.savedRevision = editor.revision();
@@ -96,7 +101,7 @@ export class OpenDrawing {
   /** Saves unsaved changes and the viewport now and drops the delayed save. */
   saveNow(): Promise<void> {
     this.stopTimer();
-    return this.closed ? this.writes : this.enqueue(this.saveViewport(), this.saveScene());
+    return this.closed ? this.writes : this.enqueue(this.saveViewport(), () => this.saveScene());
   }
 
   /**
@@ -121,16 +126,23 @@ export class OpenDrawing {
       this.currentName = renamed.name;
       bytes = renamed.bytes;
     }
+    this.takeIn(bytes);
+  }
+
+  /** Merges `current`, what the file holds now, into the Editor if Sync changed it since it was last read or written here. */
+  private takeIn(current: Uint8Array | undefined): void {
+    if (!current || sameBytes(current, this.fileBytes)) return;
     const wasSaved = !this.hasUnsavedChanges;
     try {
-      this.editor.mergeSynced(bytes);
+      this.editor.mergeSynced(current);
     } catch {
       return; // Not a Drawing: left alone, our next save replaces it.
     }
+    this.fileBytes = current;
     // With nothing of ours unsaved the Scene now is what the file holds;
     // otherwise the next save writes the merged Scene.
     if (wasSaved) this.savedRevision = this.editor.revision();
-    this.onMerged?.();
+    if (!this.closed) this.onMerged?.();
   }
 
   private async renamedTo(
@@ -155,18 +167,15 @@ export class OpenDrawing {
   /**
    * Leaves the Drawing and saves everything: a text being edited is committed
    * as typed (its Text view is gone with the Canvas, before it could end the
-   * editing). An empty Scene is not worth a file: it is not saved, and a file
-   * that exists is removed, also if the Drawing was emptied just now. Nothing
-   * is written after that.
+   * editing). An empty Scene (with what Sync wrote taken in) is not worth a
+   * file: it is not saved, and a file that exists is removed, also if the
+   * Drawing was emptied just now. Nothing is written after that.
    */
   close(): Promise<void> {
     if (this.closed) return this.writes;
     this.editor.commitText();
     this.stopTimer();
-    const writes =
-      this.editor.elementCount() > 0
-        ? this.enqueue(this.saveViewport(), this.saveScene())
-        : this.enqueue(() => this.store.delete(this.name).catch(() => {}));
+    const writes = this.enqueue(this.saveViewport(), () => this.saveScene());
     this.closed = true;
     return writes;
   }
@@ -192,17 +201,30 @@ export class OpenDrawing {
     };
   }
 
-  /** A failed save keeps the changes unsaved: the next change or the next `saveNow` tries again. */
-  private saveScene(): () => Promise<void> {
-    if (!this.hasUnsavedChanges) return async () => {};
-    const revision = this.editor.revision();
-    const bytes = this.editor.save();
-    return async () => {
-      try {
-        await this.store.save(bytes, this.name);
-        this.savedRevision = revision;
-      } catch {}
-    };
+  /**
+   * Writes the Scene, with what Sync wrote into the file taken in first. Once
+   * the Drawing is left, an empty Scene removes the file instead. A failed
+   * save keeps the changes unsaved: the next change or the next `saveNow`
+   * tries again.
+   */
+  private async saveScene(): Promise<void> {
+    let written: { bytes: Uint8Array | undefined; revision: number } | undefined;
+    try {
+      await this.store.update(this.name, (current) => {
+        this.takeIn(current);
+        if (this.closed && this.editor.elementCount() === 0) {
+          written = { bytes: undefined, revision: this.editor.revision() };
+        } else if (this.hasUnsavedChanges) {
+          written = { bytes: this.editor.save(), revision: this.editor.revision() };
+        }
+        return written ? written.bytes : current;
+      });
+    } catch {
+      return;
+    }
+    if (!written) return;
+    this.savedRevision = written.revision;
+    if (written.bytes) this.fileBytes = written.bytes;
   }
 
   /** Runs `steps` after the writes asked for before. */

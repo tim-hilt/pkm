@@ -47,15 +47,15 @@ async function device() {
 describe("status", () => {
   it("is not synced yet before the first step, then up to date with the time", async () => {
     const { cloud } = await device();
-    expect(cloud.syncState.status).toBeUndefined();
+    expect(cloud.syncReport.status).toBeUndefined();
     await cloud.connect(url, "user", "secret");
     await advance(0);
-    expect(cloud.syncState).toEqual({
+    expect(cloud.syncReport).toEqual({
       status: "upToDate",
       progress: undefined,
       lastSync: Date.now(),
     });
-    expect(statusText(cloud.syncState, "WebDAV")).toBe("Up to date");
+    expect(statusText(cloud.syncReport, "WebDAV")).toBe("Up to date");
   });
 
   it("is worded as in the native app", () => {
@@ -78,8 +78,8 @@ describe("status", () => {
     await advance(0);
     expect(progress).toContain("0 of 3");
     expect(progress.at(-1)).toBe("3 of 3");
-    expect(cloud.syncState.progress).toBeUndefined();
-    expect(cloud.syncState.status).toBe("upToDate");
+    expect(cloud.syncReport.progress).toBeUndefined();
+    expect(cloud.syncReport.status).toBe("upToDate");
   });
 });
 
@@ -91,7 +91,7 @@ describe("access lost", () => {
     server.rejectCredentials = true;
     await store.add(drawing("A"), "Sketch");
     await advance(5_000);
-    expect(cloud.syncState.status).toBe("accessLost");
+    expect(cloud.syncReport.status).toBe("accessLost");
     expect(cloud.hasProblem).toBe(true);
     const before = server.requests.length;
     await advance(120_000);
@@ -99,10 +99,10 @@ describe("access lost", () => {
 
     server.rejectCredentials = false;
     await expect(cloud.reconnect("wrong")).rejects.toBeInstanceOf(ConnectFailed);
-    expect(cloud.syncState.status).toBe("accessLost");
+    expect(cloud.syncReport.status).toBe("accessLost");
     await cloud.reconnect("secret");
     await advance(0);
-    expect(cloud.syncState.status).toBe("upToDate");
+    expect(cloud.syncReport.status).toBe("upToDate");
     expect(cloud.hasProblem).toBe(false);
     expect(server.contents("ExcalidrawNative").has("Sketch.excalidraw")).toBe(true);
   });
@@ -117,14 +117,14 @@ describe("full", () => {
     server.put("ExcalidrawNative", "Remote.excalidraw", drawing("R"));
     await store.add(drawing("A"), "Local");
     await advance(5_000);
-    expect(cloud.syncState.status).toBe("full");
+    expect(cloud.syncReport.status).toBe("full");
     expect(cloud.hasProblem).toBe(true);
     expect((await store.list()).map((e) => e.name).sort()).toEqual(["Local", "Remote"]);
     expect(server.contents("ExcalidrawNative").has("Local.excalidraw")).toBe(false);
 
     server.full = false;
     await advance(10_000);
-    expect(cloud.syncState.status).toBe("upToDate");
+    expect(cloud.syncReport.status).toBe("upToDate");
     expect(server.contents("ExcalidrawNative").has("Local.excalidraw")).toBe(true);
   });
 });
@@ -152,13 +152,13 @@ describe("offline", () => {
     await advance(40_000);
     await advance(60_000);
     const failing = tries;
-    expect(other.syncState.status).toBe("offline");
+    expect(other.syncReport.status).toBe("offline");
     // Polling every 10 s would have tried 13 times in 130 s; back-off tries far fewer.
     expect(failing).toBeLessThanOrEqual(5);
     server.offline = false;
     other.setOnline(false);
     other.setOnline(true);
     await advance(0);
-    expect(other.syncState.status).toBe("upToDate");
+    expect(other.syncReport.status).toBe("upToDate");
   });
 });

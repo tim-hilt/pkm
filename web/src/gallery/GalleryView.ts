@@ -219,7 +219,7 @@ export class GalleryView {
     private readonly gallery: Gallery,
     private readonly isDark: () => boolean = () => false,
     settings?: SettingsView,
-    private readonly cloud?: Pick<CloudBacking, "syncState" | "hasProblem" | "onSyncChange">,
+    private readonly cloud?: Pick<CloudBacking, "syncReport" | "hasProblem" | "onSyncChange">,
   ) {
     const heading = make("h1", "gallery-title", ["Drawings"]);
     const create = button("gallery-new", "", () => void gallery.createDrawing());
@@ -271,7 +271,8 @@ export class GalleryView {
       this.syncText.setAttribute("role", "status");
       this.syncWarning.textContent = "⚠";
       this.syncWarning.setAttribute("role", "img");
-      this.element.append(this.syncText, this.syncWarning);
+      heading.after(this.syncText);
+      this.element.append(this.syncWarning);
       this.stopSyncListening = cloud.onSyncChange(() => this.showSync());
       this.showSync();
     }
@@ -324,7 +325,7 @@ export class GalleryView {
 
   /** "Syncing 3 of 40 Drawings" while Drawings transfer, a warning while Sync is blocked. */
   private showSync(): void {
-    const state = this.cloud!.syncState;
+    const state = this.cloud!.syncReport;
     const text = state.status === "syncing" && state.progress ? statusText(state, "") : "";
     this.syncText.textContent = text;
     this.syncText.hidden = text === "";
