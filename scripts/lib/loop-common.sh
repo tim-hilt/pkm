@@ -111,18 +111,34 @@ status_stop() {
 trap '[[ -n $spinner_pid ]] && kill "$spinner_pid" 2>/dev/null' EXIT
 
 # Usage: gate_on_tests <what-just-ran>
-# The pre-commit hook skips the Apple tests, so the loops run them after every session
-# and stop on a failure.
+# The pre-commit hook skips the Apple tests, so the loops run them after every session.
+# On a failure an agent gets the output, fixes and commits, and the tests run again,
+# until they pass or $max_fix_attempts fixes have not helped (then the loop stops).
+max_fix_attempts=${MAX_FIX_ATTEMPTS:-10}
 gate_on_tests() {
-  local output
-  status_set "Testing after $1"
-  if ! output=$(make test 2>&1); then
+  local output attempt=0 failing
+  while :; do
+    status_set "Testing after $1"
+    output=$(make test 2>&1) && { status_stop; return 0; }
     status_stop
-    log_section "make test failed after $1" "$output"
-    printf 'make test failed after %s; stopping (see %s)\n\n%s\n' "$1" "$log_file" "$(tail -n 40 <<<"$output")" >&2
-    exit 1
-  fi
-  status_stop
+    log_section "make test failed after $1 (fix attempts so far: $attempt)" "$output"
+    if ((attempt >= max_fix_attempts)); then
+      printf 'make test still failing after %s fix attempts for %s; stopping (see %s)\n\n%s\n' \
+        "$attempt" "$1" "$log_file" "$(tail -n 40 <<<"$output")" >&2
+      exit 1
+    fi
+    attempt=$((attempt + 1))
+    # Drop the known display-link noise, keep the tail where the failure is reported.
+    failing=$(grep -v 'CVDisplayLinkCreateWithCGDisplays' <<<"$output" | tail -n 150)
+    run_pi "Fixing tests after $1 (attempt $attempt)" claude-sonnet-5-5 medium \
+      "fix-$name-$(basename "$1" .md)-$attempt" \
+      "/skill:diagnosing-bugs \`make test\` failed after $1. Find the root cause and fix it; do not weaken or delete tests to make them pass. Full output is in /tmp/excalidraw-native-test.log; the tail follows:
+
+$failing
+
+Run \`make test\` yourself to check the fix, then commit using the commit-message 'Fix tests after $1'."
+    log_section "Fix attempt $attempt after $1 took $status_elapsed" "$pi_output"
+  done
 }
 
 # --- Claude subscription quota -------------------------------------------------
