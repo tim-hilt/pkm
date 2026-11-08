@@ -7,6 +7,7 @@ import {
   PointerPhase,
 } from "../core/Core";
 import {
+  lostCapturePhase,
   magnifyEvent,
   magnifyOfGesture,
   pointerButton,
@@ -67,7 +68,8 @@ export class CanvasInput {
     on("pointermove", (e) => this.move(e));
     on("pointerup", (e) => this.up(e, PointerPhase.Up));
     on("pointercancel", (e) => this.up(e, PointerPhase.Cancel));
-    on("lostpointercapture", (e) => this.up(e, PointerPhase.Cancel));
+    // Usually after the pointerup, which has ended the press already.
+    on("lostpointercapture", (e) => this.up(e, lostCapturePhase(e.buttons)));
     // Passive listeners cannot stop the page from zooming or scrolling.
     canvas.addEventListener("wheel", (e) => this.wheel(e), { passive: false, signal });
     on("contextmenu", (e) => this.contextMenu(e));
@@ -141,7 +143,8 @@ export class CanvasInput {
 
   private up(e: PointerEvent, phase: PointerPhase): void {
     const button = this.pressed.get(e.pointerId);
-    // The capture is also lost after a pointerup, which has been handled.
+    // The capture is also lost after a pointerup, which has been handled;
+    // and a pointerup after a lost capture that was the release.
     if (button === undefined) return;
     this.pressed.delete(e.pointerId);
     if (e.pointerType === "touch") {

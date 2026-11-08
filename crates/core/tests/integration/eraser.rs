@@ -19,9 +19,12 @@ const FILLED: &str = r##"{"id":"filled","type":"rectangle","x":300,"y":100,"widt
     "height":50,"strokeWidth":2,"backgroundColor":"#ffc9c9","roundness":null,
     "version":3,"versionNonce":7}"##;
 
+/// An editor with the eraser Tool and the Tool lock on, so that the Tool
+/// stays for the several erases some tests make.
 fn erasing(elements: &[&str]) -> Editor {
     let mut editor = editor_with(elements);
     editor.set_tool(Tool::Eraser);
+    editor.set_tool_lock(true);
     editor
 }
 
@@ -199,7 +202,22 @@ fn a_cancelled_erase_deletes_nothing_and_shows_the_elements_again() {
 // --- Tool and history -------------------------------------------------------------
 
 #[test]
-fn the_tool_stays_active_after_erasing() {
+fn the_tool_returns_to_selection_after_erasing() {
+    let mut editor = editor_with(&[HOLLOW]);
+    editor.set_tool(Tool::Eraser);
+
+    replay(
+        &mut editor,
+        "0.0 down 1 mouse 150 80
+         0.1 move 1 mouse 150 170
+         0.2 up 1 mouse 150 170",
+    );
+
+    assert_eq!(editor.tool(), Tool::Selection);
+}
+
+#[test]
+fn the_tool_stays_active_after_erasing_while_the_tool_lock_is_on() {
     let mut editor = erasing(&[HOLLOW]);
 
     replay(
@@ -210,7 +228,6 @@ fn the_tool_stays_active_after_erasing() {
     );
 
     assert_eq!(editor.tool(), Tool::Eraser);
-    assert!(!editor.tool_lock());
 }
 
 #[test]

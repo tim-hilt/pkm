@@ -46,11 +46,11 @@ Single-context: one root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md
 
 The web app lives in `web/` (Bun for packages, bundling and the dev server; Vitest; oxlint and oxfmt; no UI framework) and runs the core as wasm from `crates/web` (ADR-0014). `make web-wasm` builds the wasm into `web/generated` (cargo with the `web` profile, then `wasm-bindgen` at the version in `Cargo.lock`, installed on demand); `make check` runs `oxfmt --check`, `oxlint`, `tsc`, the wasm build and `vitest run` (Node, against the real wasm) first.
 
-- `make web-dev` serves http://localhost:3000; add `?sample` to open the sample Drawing in temporary storage.
-- `make screenshot DEVICE=web [OUT=path] [WIDTH=] [HEIGHT=]` serves `?sample` and captures a PNG with Playwright's Chromium (WebGPU on). Run `cd web && bunx playwright-core install chromium` once.
+- `make web-dev` serves http://localhost:3000.
+- `make screenshot DEVICE=web [OUT=path] [WIDTH=] [HEIGHT=]` serves the Gallery and captures a PNG with Playwright's Chromium (WebGPU on). Run `cd web && bunx playwright-core install chromium` once.
 - `make web-test-browser` runs the renderer tests in Chromium with WebGPU (reference images in `web/references`, pixel probes), outside `make check`; `make web-record-references` re-records the references. See `docs/web-renderer-reference-images.md`.
 - `make web-fmt` formats the web app (`make fmt` does too).
-- Validate the running app with the Chrome DevTools MCP: start `make web-dev`, open `http://localhost:3000/?sample` (WebGPU needs a secure context; `localhost` is one), resize the page to phone and desktop widths, take screenshots and read the console for errors.
+- Validate the running app with the Chrome DevTools MCP: start `make web-dev`, open `http://localhost:3000/` (WebGPU needs a secure context; `localhost` is one), resize the page to phone and desktop widths, take screenshots and read the console for errors.
 
 ## Installing on a device
 

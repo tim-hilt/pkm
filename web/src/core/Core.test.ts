@@ -265,6 +265,29 @@ describe("tools, overlay and undo through the wasm editor", () => {
     editor.free();
   });
 
+  it("returns to selection after a Stroke or an erase unless the Tool lock is on", () => {
+    const editor = core.makeEditor();
+    editor.setViewSize(600, 400);
+    for (const tool of [Tool.Freedraw, Tool.Eraser]) {
+      editor.setTool(tool);
+      drag(editor, [
+        [10, 10],
+        [80, 60],
+      ]);
+      expect(editor.tool()).toBe(Tool.Selection);
+
+      editor.setToolLock(true);
+      editor.setTool(tool);
+      drag(editor, [
+        [10, 10],
+        [80, 60],
+      ]);
+      expect(editor.tool()).toBe(tool);
+      editor.setToolLock(false);
+    }
+    editor.free();
+  });
+
   it("grows a Stroke while it is drawn", () => {
     const editor = core.makeEditor();
     editor.setViewSize(600, 400);

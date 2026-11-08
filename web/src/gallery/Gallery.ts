@@ -3,20 +3,6 @@ import { DrawingStore, type Entry, InvalidName, NameTaken } from "./DrawingStore
 import { OpenDrawing, type OpenDrawingOptions } from "./OpenDrawing";
 import type { Thumbnails } from "./Thumbnails";
 
-/** A file the user brought, read into memory. */
-export interface ImportedFile {
-  /** The file's name, with its extension. */
-  name: string;
-  bytes: Uint8Array;
-}
-
-const drawingExtension = /\.excalidraw$/i;
-
-/** The name a Drawing from `file` gets: the file's, without the extension. */
-export function importedName(file: string): string {
-  return file.replace(drawingExtension, "").trim() || "Imported";
-}
-
 /**
  * The Gallery: the Drawings of a `DrawingStore` and which of them is open.
  * Opening one shows it in the Canvas; going back saves it and lists it again.
@@ -57,38 +43,6 @@ export class Gallery {
   async reload(): Promise<void> {
     this.drawings = await this.store.list().catch(() => []);
     this.onChange();
-  }
-
-  /**
-   * Adds the Drawings in `files`, each under the file's name without
-   * `.excalidraw` (made distinct if taken). A file that is no Drawing is not
-   * added; the user is told which, after the others are.
-   */
-  async importDrawings(files: ImportedFile[]): Promise<void> {
-    this.failure = undefined;
-    const failed: string[] = [];
-    for (const { name, bytes } of files) {
-      try {
-        this.checkReadable(bytes);
-        await this.store.add(bytes, importedName(name));
-      } catch {
-        failed.push(name);
-      }
-    }
-    if (failed.length > 0) {
-      this.failure = `Could not import ${failed.map((name) => `“${name}”`).join(", ")}: not a readable Excalidraw file.`;
-    }
-    await this.reload();
-  }
-
-  /** Throws if `bytes` is no Drawing. */
-  private checkReadable(bytes: Uint8Array): void {
-    const editor = this.core.makeEditor();
-    try {
-      editor.load(bytes);
-    } finally {
-      editor.free();
-    }
   }
 
   /** Makes a new empty Drawing and opens it. */

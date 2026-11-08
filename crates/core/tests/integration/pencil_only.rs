@@ -111,6 +111,7 @@ fn a_finger_never_draws_a_shape_but_a_pencil_does() {
 fn a_finger_never_draws_a_stroke_but_a_pencil_does() {
     let mut editor = after_first_pencil();
     editor.set_tool(Tool::Freedraw);
+    editor.set_tool_lock(true);
 
     drag(&mut editor, "finger", (300.0, 300.0), (400.0, 360.0));
     assert_eq!(saved_elements(&editor).len(), 1);

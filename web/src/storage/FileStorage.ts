@@ -8,8 +8,7 @@ export interface FileInfo {
 /**
  * The little the Drawing store needs of a file system: folders of files, named
  * by `/`-separated paths. Implemented on the Origin Private File System
- * (`OpfsStorage`) and in memory (`MemoryStorage`, for tests and temporary
- * storage). Paths are never empty and never leave the root.
+ * (`OpfsStorage`) and in memory (`MemoryStorage`, for tests). Paths are never empty and never leave the root.
  */
 export interface FileStorage {
   /** The files directly in `folder`; none if there is no such folder. */

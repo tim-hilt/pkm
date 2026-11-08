@@ -5,7 +5,7 @@ import Testing
 
 /// Erasing through the Canvas: pointer input reaches the core, what is about
 /// to be erased reaches the renderer faded while the pointer is down, and the
-/// Tool stays active afterwards. Which Elements an erase touches is tested in
+/// Tool returns to selection afterwards unless the Tool lock is on. Which Elements an erase touches is tested in
 /// the core.
 @MainActor @Suite struct EraserToolTests {
     private static let drawing = """
@@ -48,7 +48,7 @@ import Testing
         #expect(setup.editor.elementCount() == 1)
     }
 
-    @Test func releasingDeletesAndTheToolStays() throws {
+    @Test func releasingDeletesAndTheToolReturnsToSelection() throws {
         let setup = try makeSetup()
 
         setup.canvas.send(mouse(.down, 150, 80))
@@ -56,6 +56,17 @@ import Testing
         setup.canvas.send(mouse(.up, 150, 170))
 
         #expect(setup.editor.elementCount() == 0)
+        #expect(setup.controller.tool == .selection)
+    }
+
+    @Test func theToolLockKeepsTheToolAfterErasing() throws {
+        let setup = try makeSetup()
+        setup.controller.setToolLock(true)
+
+        setup.canvas.send(mouse(.down, 150, 80))
+        setup.canvas.send(mouse(.move, 150, 170))
+        setup.canvas.send(mouse(.up, 150, 170))
+
         #expect(setup.controller.tool == .eraser)
     }
 }

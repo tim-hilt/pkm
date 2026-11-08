@@ -5,6 +5,7 @@ import type { Core } from "../core/Core";
 import {
   type PointerData,
   type WheelData,
+  lostCapturePhase,
   magnifyOfGesture,
   pointerButton,
   pointerEvent,
@@ -95,6 +96,18 @@ describe("pointer events", () => {
       origin,
     );
     expect(event.modifiers).toEqual({ shift: true, ctrl: false, alt: false, meta: true });
+  });
+});
+
+describe("lost pointer capture", () => {
+  // A quick release can lose the capture before its pointerup arrives: a
+  // fast drag would be dropped instead of drawn.
+  it("is the release when no button is down any more", () => {
+    expect(lostCapturePhase(0)).toBe(PointerPhase.Up);
+  });
+
+  it("cancels while a button is still down", () => {
+    expect(lostCapturePhase(1)).toBe(PointerPhase.Cancel);
   });
 });
 

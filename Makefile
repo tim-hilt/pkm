@@ -50,7 +50,7 @@ web-test-browser: web-install web-wasm
 web-record-references: web-install web-wasm
 	cd web && RECORD_REFERENCES=1 bun run test:browser
 
-# Dev server: http://localhost:3000/?sample
+# Dev server: http://localhost:3000
 web-dev: web-install web-wasm
 	cd web && bun run dev
 

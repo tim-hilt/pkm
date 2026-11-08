@@ -41,7 +41,7 @@ import Testing
         #expect((setup.renderer.geometry as? Geometry)?.partCount() ?? 0 > 0)
     }
 
-    @Test func theToolStaysAfterAStroke() throws {
+    @Test func theToolReturnsToSelectionAfterAStroke() throws {
         let setup = try makeSetup()
 
         setup.canvas.send(pencil(.down, 0, 0, pressure: 0.2))
@@ -49,6 +49,17 @@ import Testing
         setup.canvas.send(pencil(.up, 60, 0, pressure: 0.3))
 
         #expect(setup.editor.elementCount() == 1)
+        #expect(setup.controller.tool == .selection)
+    }
+
+    @Test func theToolLockKeepsTheToolAfterAStroke() throws {
+        let setup = try makeSetup()
+        setup.controller.setToolLock(true)
+
+        setup.canvas.send(pencil(.down, 0, 0, pressure: 0.2))
+        setup.canvas.send(pencil(.move, 30, 10, pressure: 0.4))
+        setup.canvas.send(pencil(.up, 60, 0, pressure: 0.3))
+
         #expect(setup.controller.tool == .freedraw)
     }
 }

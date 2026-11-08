@@ -4,7 +4,7 @@
 import { chromium } from "playwright-core";
 
 const out = process.argv[2] ?? "/tmp/wt-web.png";
-const path = process.argv[3] ?? "/?sample";
+const path = process.argv[3] ?? "/";
 const port = process.env.PORT ?? "3000";
 const width = Number(process.env.WIDTH ?? 1280);
 const height = Number(process.env.HEIGHT ?? 800);

@@ -17,15 +17,6 @@ import type { FileStorage } from "./storage/FileStorage";
 import { requestPersistenceOnFirstCall } from "./storage/PersistentStorage";
 import type { Excalifont } from "./text/Excalifont";
 
-export interface AppOptions {
-  /** Where the Drawings are kept. */
-  storage: FileStorage;
-  /** Whether the storage is the browser's own, which the first save asks to keep (not so for temporary storage). */
-  persistent: boolean;
-  /** A Drawing to put in the storage and open at the start. */
-  sample?: Uint8Array;
-}
-
 /**
  * The app: the Gallery, from which a Drawing is opened into the Canvas, and
  * back. Drawings are kept saved as they change (autosave), and when the page
@@ -36,15 +27,11 @@ export async function startApp(
   device: GPUDevice,
   core: Core,
   font: Excalifont,
-  { storage, persistent, sample }: AppOptions,
+  storage: FileStorage,
 ): Promise<void> {
-  const store = new DrawingStore(
-    storage,
-    persistent ? requestPersistenceOnFirstCall(navigator.storage) : undefined,
-  );
+  const store = new DrawingStore(storage, requestPersistenceOnFirstCall(navigator.storage));
   const thumbnails = new Thumbnails(store, new ThumbnailRenderer(device, core, font));
   const gallery = await Gallery.start(store, core, thumbnails);
-  if (sample) await gallery.openDrawing(await store.add(sample, "Sample"));
 
   // Cloud Backing Syncs while the tab is shown and online; the Gallery lists again what a step changed.
   const cloud = await CloudBacking.open(core, storage, (url, init) => fetch(url, init), store);

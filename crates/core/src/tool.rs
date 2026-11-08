@@ -22,10 +22,11 @@ pub enum Tool {
     /// The same, with an arrowhead at the end.
     Arrow,
     /// Dragging draws a freehand stroke, see [`crate::draw_freedraw`]. The
-    /// Tool stays after each stroke.
+    /// Tool returns to selection after each stroke, unless the Tool lock is on.
     Freedraw,
     /// Dragging previews the Elements the pointer passes over and deletes
-    /// them on release, see [`crate::erase`]. The Tool stays after each erase.
+    /// them on release, see [`crate::erase`]. The Tool returns to selection
+    /// after each erase, unless the Tool lock is on.
     Eraser,
     /// Tapping opens the text editor at the tap, or on the text that is
     /// there; see [`crate::text_editing`].

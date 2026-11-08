@@ -1,8 +1,7 @@
 import type { FileInfo, FileStorage } from "./FileStorage";
 
 /**
- * A `FileStorage` in memory: for tests and for the temporary storage of
- * `?sample`. Modification times never repeat or go back, so that "newest first"
+ * A `FileStorage` in memory: for tests. Modification times never repeat or go back, so that "newest first"
  * is decided even when writes come within a millisecond.
  */
 export class MemoryStorage implements FileStorage {

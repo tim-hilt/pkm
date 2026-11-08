@@ -26,8 +26,7 @@ function button(className: string, label: string, onClick: () => void): HTMLButt
 }
 
 const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
-const importGlyph = `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M5 14v5h14v-5"/></svg>`;
-const gearGlyph = `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>`;
+const gearGlyph = `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>`;
 const moreGlyph = `<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`;
 
 /** One Drawing's card: its thumbnail, name and date, and its menu. */
@@ -221,45 +220,14 @@ export class GalleryView {
     settings?: SettingsView,
     private readonly cloud?: Pick<CloudBacking, "syncReport" | "hasProblem" | "onSyncChange">,
   ) {
-    const heading = make("h1", "gallery-title", ["Drawings"]);
     const create = button("gallery-new", "", () => void gallery.createDrawing());
     create.innerHTML = plusGlyph;
     create.setAttribute("aria-label", "New Drawing");
     create.title = "New Drawing";
 
-    // Opening files: a picker, and dropping them anywhere on the Gallery.
-    const picker = document.createElement("input");
-    picker.type = "file";
-    picker.accept = ".excalidraw";
-    picker.multiple = true;
-    picker.hidden = true;
-    picker.addEventListener("change", () => {
-      void this.importFiles([...(picker.files ?? [])]);
-      picker.value = "";
-    });
-    const open = button("gallery-import", "", () => picker.click());
-    open.innerHTML = importGlyph;
-    open.setAttribute("aria-label", "Open .excalidraw files");
-    open.title = "Open .excalidraw files";
-    this.element.addEventListener("dragover", (event) => {
-      if (!event.dataTransfer?.types.includes("Files")) return;
-      event.preventDefault();
-      this.element.classList.add("dropping");
-    });
-    this.element.addEventListener("dragleave", (event) => {
-      if (!this.element.contains(event.relatedTarget as Node | null)) {
-        this.element.classList.remove("dropping");
-      }
-    });
-    this.element.addEventListener("drop", (event) => {
-      event.preventDefault();
-      this.element.classList.remove("dropping");
-      void this.importFiles([...(event.dataTransfer?.files ?? [])]);
-    });
-
     this.grid.setAttribute("aria-label", "Drawings");
     this.empty.setAttribute("role", "status");
-    this.element.append(heading, this.grid, this.empty, open, create, picker);
+    this.element.append(this.grid, this.empty, create);
     if (settings) {
       const gear = button("gallery-settings", "", () => settings.show());
       gear.innerHTML = gearGlyph;
@@ -271,7 +239,7 @@ export class GalleryView {
       this.syncText.setAttribute("role", "status");
       this.syncWarning.textContent = "⚠";
       this.syncWarning.setAttribute("role", "img");
-      heading.after(this.syncText);
+      this.element.prepend(this.syncText);
       this.element.append(this.syncWarning);
       this.stopSyncListening = cloud.onSyncChange(() => this.showSync());
       this.showSync();
@@ -339,16 +307,6 @@ export class GalleryView {
     this.observer.disconnect();
     for (const card of this.cards.values()) card.dispose();
     this.cards.clear();
-  }
-
-  private async importFiles(files: File[]): Promise<void> {
-    const read = await Promise.all(
-      files.map(async (file) => ({
-        name: file.name,
-        bytes: new Uint8Array(await file.arrayBuffer()),
-      })),
-    );
-    await this.gallery.importDrawings(read);
   }
 
   private readonly cardActions = {

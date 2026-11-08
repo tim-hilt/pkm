@@ -154,6 +154,7 @@ fn a_stroke_has_the_members_and_order_of_excalidraws_own() {
 #[test]
 fn every_stroke_gets_its_own_seed_and_id() {
     let mut editor = editor_with(Tool::Freedraw);
+    editor.set_tool_lock(true);
 
     flat_stroke(&mut editor, (0, Mouse), &[(0.0, 0.0), (10.0, 10.0)]);
     flat_stroke(&mut editor, (0, Mouse), &[(0.0, 0.0), (10.0, 10.0)]);
@@ -319,8 +320,19 @@ fn the_pencil_is_smoothed_less_than_the_mouse() {
 // --- The Tool --------------------------------------------------------------
 
 #[test]
-fn the_tool_stays_active_after_each_stroke() {
+fn the_tool_returns_to_selection_after_a_stroke() {
     let mut editor = editor_with(Tool::Freedraw);
+
+    flat_stroke(&mut editor, (0, Mouse), &[(0.0, 0.0), (10.0, 10.0)]);
+
+    assert_eq!(editor.tool(), Tool::Selection);
+    assert_eq!(editor.element_count(), 1);
+}
+
+#[test]
+fn the_tool_stays_after_each_stroke_while_the_tool_lock_is_on() {
+    let mut editor = editor_with(Tool::Freedraw);
+    editor.set_tool_lock(true);
 
     flat_stroke(&mut editor, (0, Mouse), &[(0.0, 0.0), (10.0, 10.0)]);
     assert_eq!(editor.tool(), Tool::Freedraw);
@@ -329,18 +341,6 @@ fn the_tool_stays_active_after_each_stroke() {
     assert_eq!(editor.tool(), Tool::Freedraw);
     assert_eq!(saved_elements(&editor).len(), 2);
     assert_eq!(editor.element_count(), 2);
-}
-
-#[test]
-fn the_tool_stays_with_the_tool_lock_off_and_on() {
-    for locked in [false, true] {
-        let mut editor = editor_with(Tool::Freedraw);
-        editor.set_tool_lock(locked);
-
-        flat_stroke(&mut editor, (0, Mouse), &[(0.0, 0.0), (10.0, 10.0)]);
-
-        assert_eq!(editor.tool(), Tool::Freedraw, "lock {locked}");
-    }
 }
 
 #[test]
@@ -513,6 +513,7 @@ fn loading_a_drawing_mid_stroke_drops_the_stroke() {
 #[test]
 fn a_stroke_is_one_step_of_undo_and_redo() {
     let mut editor = editor_with(Tool::Freedraw);
+    editor.set_tool_lock(true);
     flat_stroke(
         &mut editor,
         (0, Mouse),
@@ -543,6 +544,7 @@ fn a_stroke_is_one_step_of_undo_and_redo() {
 #[test]
 fn undo_does_nothing_while_a_stroke_is_being_drawn() {
     let mut editor = editor_with(Tool::Freedraw);
+    editor.set_tool_lock(true);
     flat_stroke(&mut editor, (0, Mouse), &[(0.0, 0.0), (5.0, 5.0)]);
     send(&mut editor, (0, Mouse), Down, (50.0, 0.0), 0.5);
     send(&mut editor, (0, Mouse), Move, (55.0, 5.0), 0.5);

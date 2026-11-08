@@ -157,8 +157,8 @@ impl Editor {
     }
 
     /// Follows the pointer with the stroke being drawn, or starts one (see
-    /// [`crate::draw_freedraw`]). The Tool stays after the stroke whatever the
-    /// Tool lock says.
+    /// [`crate::draw_freedraw`]). The Tool returns to selection after the
+    /// stroke unless the Tool lock is on.
     pub(super) fn draw_stroke(&mut self, event: PointerEvent) {
         // Two fingers navigate, and end the stroke being drawn, whichever
         // pointer draws it (also the Pencil): a short one is dropped as the
@@ -201,6 +201,9 @@ impl Editor {
                 if let Some(stroke) = self.stroke.take() {
                     let step = stroke.lift(&mut self.scene, &mut self.entropy, event, at);
                     self.history.record(step, &self.scene, &self.selection);
+                    if !self.tool_lock {
+                        self.assign_tool(Tool::Selection);
+                    }
                     self.changed();
                 }
             }
@@ -210,8 +213,8 @@ impl Editor {
     }
 
     /// Follows the pointer with the erase, or starts one (see
-    /// [`crate::erase`]). The Tool stays after the erase whatever the Tool
-    /// lock says.
+    /// [`crate::erase`]). The Tool returns to selection after the erase unless
+    /// the Tool lock is on.
     pub(super) fn erase(&mut self, event: PointerEvent) {
         // Two fingers navigate, and an erase one of them began is called off:
         // nothing is deleted by a finger that was only landing.
@@ -242,6 +245,9 @@ impl Editor {
                     let remaining = history::without_gone(self.selection.clone(), &self.scene);
                     self.show_selection(remaining);
                     self.history.record(step, &self.scene, &self.selection);
+                    if !self.tool_lock {
+                        self.assign_tool(Tool::Selection);
+                    }
                     self.changed();
                 }
             }

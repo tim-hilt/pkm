@@ -5,7 +5,7 @@ import {
   type Modifiers,
   PointerButton,
   PointerKind,
-  type PointerPhase,
+  PointerPhase,
 } from "../core/Core";
 
 // Translations from browser input to the core's. Units and coordinate systems
@@ -77,6 +77,17 @@ export function pointerButton(button: number): PointerButton {
     default:
       return PointerButton.Primary;
   }
+}
+
+/**
+ * What a pointer's lost capture ends its press with, from `PointerEvent.buttons`.
+ * A quick release can lose the capture before the pointerup arrives (and
+ * the pointerup may then miss the Canvas): with no button down any more
+ * that is the release. Lost while still pressed (the browser or the OS took
+ * the pointer), the press is cancelled.
+ */
+export function lostCapturePhase(buttons: number): PointerPhase {
+  return buttons === 0 ? PointerPhase.Up : PointerPhase.Cancel;
 }
 
 export function pointerEvent(
