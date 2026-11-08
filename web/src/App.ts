@@ -46,7 +46,17 @@ export async function startApp(
   const gallery = await Gallery.start(store, core, thumbnails);
   if (sample) await gallery.openDrawing(await store.add(sample, "Sample"));
 
-  const cloud = await CloudBacking.open(core, storage, (url, init) => fetch(url, init));
+  // Cloud Backing Syncs while the tab is shown and online; the Gallery lists again what a step changed.
+  const cloud = await CloudBacking.open(core, storage, (url, init) => fetch(url, init), store);
+  cloud.setVisible(document.visibilityState === "visible");
+  cloud.setOnline(navigator.onLine);
+  store.onLocalChange = () => cloud.localChange();
+  cloud.onSynced(() => void gallery.reload());
+  document.addEventListener("visibilitychange", () =>
+    cloud.setVisible(document.visibilityState === "visible"),
+  );
+  addEventListener("online", () => cloud.setOnline(true));
+  addEventListener("offline", () => cloud.setOnline(false));
   const settings = new DrawingSettings(localStorage);
   const appearance = new Appearance(localStorage, matchMedia("(prefers-color-scheme: dark)"));
   const showChromeColors = () => applyChromeColors(document.documentElement, appearance.isDark);

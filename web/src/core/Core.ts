@@ -18,6 +18,8 @@ import init, {
   darkModeColor,
   type InitInput,
   ViewportState,
+  SyncRun,
+  SyncSchedule,
   WebDavProtocol,
 } from "../../generated/excalidraw_native_web.js";
 import { type TextMeasurer } from "../text/Excalifont";
@@ -197,6 +199,10 @@ export interface Core {
   makeEditor(): Editor;
   /** The WebDAV protocol for a server; throws if the URL is not https. Free it when done. */
   webDav(url: string, username: string, password: string): WebDavProtocol;
+  /** A Sync step starting at `nowMs` (milliseconds since the epoch). Free it when done. */
+  syncRun(nowMs: number): SyncRun;
+  /** When Sync steps run, in front with a step due at `now` (milliseconds on any clock). Free it when done. */
+  syncSchedule(now: number): SyncSchedule;
 }
 
 /**
@@ -217,6 +223,8 @@ export async function loadCore(
       return new Editor(editor, views);
     },
     webDav: (url, username, password) => new WebDavProtocol(url, username, password),
+    syncRun: (nowMs) => new SyncRun(nowMs),
+    syncSchedule: (now) => new SyncSchedule(now),
   };
 }
 

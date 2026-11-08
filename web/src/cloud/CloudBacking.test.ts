@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { type Core, loadCore } from "../core/Core";
+import { DrawingStore } from "../gallery/DrawingStore";
 import { MemoryStorage } from "../storage/MemoryStorage";
 import { CloudBacking, ConnectFailed, connectMessage } from "./CloudBacking";
 import { MemoryWebDav } from "./MemoryWebDav";
@@ -19,7 +20,7 @@ beforeEach(() => {
   storage = new MemoryStorage();
 });
 
-const open = () => CloudBacking.open(core, storage, server.fetch);
+const open = () => CloudBacking.open(core, storage, server.fetch, new DrawingStore(storage));
 
 const failure = async (promise: Promise<unknown>) => {
   const error = await promise.then(

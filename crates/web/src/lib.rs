@@ -1217,3 +1217,366 @@ impl WebDavProtocol {
         })
     }
 }
+
+// ---- The Sync step and its schedule (ADR-0016) ----
+
+use excalidraw_native_cloud::step::{LocalFile, Marks, Synced};
+use excalidraw_native_cloud::{
+    Blob, Next, Request, Response, Schedule, Status, StepOutcome, SyncStep, Timing,
+};
+use std::time::Duration;
+
+/// What a Sync step asks the client to do; `kind` says which request it is
+/// and the other fields are the ones it uses (the others stay empty).
+///
+/// Kinds: `listCloud`, `listLocal`, `readLocal` (file), `readMarks` (file),
+/// `readSynced` (file), `listSynced`, `writeSynced` (file, bytes, marker),
+/// `writeStamp` (file, stamp), `forgetSynced` (file), `download` (file),
+/// `upload` (file, bytes), `deleteCloud` (file), `writeLocal` (file, bytes,
+/// expected: none means only if absent), `renameLocal` (file, to, expected)
+/// and `deleteLocal` (file, expected). Names are file names.
+#[wasm_bindgen(getter_with_clone)]
+pub struct SyncRequest {
+    pub kind: String,
+    pub file: String,
+    pub to: String,
+    pub bytes: Vec<u8>,
+    pub expected: Option<Vec<u8>>,
+    pub marker: String,
+    pub stamp: String,
+}
+
+impl SyncRequest {
+    fn of(kind: &str) -> Self {
+        Self {
+            kind: kind.to_owned(),
+            file: String::new(),
+            to: String::new(),
+            bytes: Vec::new(),
+            expected: None,
+            marker: String::new(),
+            stamp: String::new(),
+        }
+    }
+
+    fn from(request: Request) -> Self {
+        match request {
+            Request::ListCloud => Self::of("listCloud"),
+            Request::ListLocal => Self::of("listLocal"),
+            Request::ListSynced => Self::of("listSynced"),
+            Request::ReadLocal { file } => Self {
+                file,
+                ..Self::of("readLocal")
+            },
+            Request::ReadMarks { file } => Self {
+                file,
+                ..Self::of("readMarks")
+            },
+            Request::ReadSynced { file } => Self {
+                file,
+                ..Self::of("readSynced")
+            },
+            Request::WriteSynced {
+                file,
+                bytes,
+                marker,
+            } => Self {
+                file,
+                bytes,
+                marker,
+                ..Self::of("writeSynced")
+            },
+            Request::WriteStamp { file, stamp } => Self {
+                file,
+                stamp,
+                ..Self::of("writeStamp")
+            },
+            Request::ForgetSynced { file } => Self {
+                file,
+                ..Self::of("forgetSynced")
+            },
+            Request::Download { file } => Self {
+                file,
+                ..Self::of("download")
+            },
+            Request::Upload { file, bytes } => Self {
+                file,
+                bytes,
+                ..Self::of("upload")
+            },
+            Request::DeleteCloud { file } => Self {
+                file,
+                ..Self::of("deleteCloud")
+            },
+            Request::WriteLocal {
+                file,
+                bytes,
+                expected,
+            } => Self {
+                file,
+                bytes,
+                expected,
+                ..Self::of("writeLocal")
+            },
+            Request::RenameLocal { from, to, expected } => Self {
+                file: from,
+                to,
+                expected: Some(expected),
+                ..Self::of("renameLocal")
+            },
+            Request::DeleteLocal { file, expected } => Self {
+                file,
+                expected: Some(expected),
+                ..Self::of("deleteLocal")
+            },
+        }
+    }
+}
+
+/// How far a step is through the Drawings it transfers.
+#[wasm_bindgen]
+pub struct SyncProgress {
+    #[wasm_bindgen(readonly)]
+    pub done: u32,
+    #[wasm_bindgen(readonly)]
+    pub total: u32,
+}
+
+/// How a step ended.
+#[wasm_bindgen(getter_with_clone)]
+pub struct SyncOutcome {
+    /// The Drawings whose local file the step wrote or deleted (a rename as
+    /// the old and the new name), as file names.
+    pub changed: Vec<String>,
+    /// The first thing that went wrong, if anything did.
+    pub error: Option<String>,
+    #[wasm_bindgen(js_name = accessLost)]
+    pub access_lost: bool,
+    #[wasm_bindgen(js_name = storageFull)]
+    pub storage_full: bool,
+    /// What the user is told: `upToDate`, `offline`, `accessLost` or `full`.
+    pub status: String,
+}
+
+fn status_name(status: Status) -> &'static str {
+    match status {
+        Status::UpToDate => "upToDate",
+        Status::Syncing => "syncing",
+        Status::Offline => "offline",
+        Status::AccessLost => "accessLost",
+        Status::Full => "full",
+    }
+}
+
+/// One Sync step: `start` gives its first request, each `answer…` hands back
+/// the result of the last one and gives the next, until there is none and
+/// `outcome` says what the step did. A failed request is told with `fail`.
+#[wasm_bindgen]
+pub struct SyncRun {
+    step: SyncStep,
+    outcome: Option<StepOutcome>,
+}
+
+#[wasm_bindgen]
+impl SyncRun {
+    /// `nowMs`: milliseconds since the epoch.
+    #[wasm_bindgen(constructor)]
+    pub fn new(now_ms: f64) -> SyncRun {
+        SyncRun {
+            step: SyncStep::new(now_ms as u64),
+            outcome: None,
+        }
+    }
+
+    pub fn start(&mut self) -> Option<SyncRequest> {
+        self.advance(None)
+    }
+
+    /// The Drawings of the cloud folder: names and markers in the same order.
+    #[wasm_bindgen(js_name = answerCloud)]
+    pub fn answer_cloud(
+        &mut self,
+        names: Vec<String>,
+        markers: Vec<String>,
+    ) -> Option<SyncRequest> {
+        let blobs = names
+            .into_iter()
+            .zip(markers)
+            .map(|(name, marker)| Blob { name, marker })
+            .collect();
+        self.advance(Some(Ok(Response::Cloud(blobs))))
+    }
+
+    /// The local Drawings: file names, stamps and modification times (ms) in
+    /// the same order.
+    #[wasm_bindgen(js_name = answerLocal)]
+    pub fn answer_local(
+        &mut self,
+        files: Vec<String>,
+        stamps: Vec<String>,
+        mtimes: Vec<f64>,
+    ) -> Option<SyncRequest> {
+        let local = files
+            .into_iter()
+            .zip(stamps)
+            .zip(mtimes)
+            .map(|((file, stamp), mtime)| LocalFile {
+                file,
+                stamp,
+                mtime_ms: mtime as u64,
+            })
+            .collect();
+        self.advance(Some(Ok(Response::Local(local))))
+    }
+
+    #[wasm_bindgen(js_name = answerNames)]
+    pub fn answer_names(&mut self, names: Vec<String>) -> Option<SyncRequest> {
+        self.advance(Some(Ok(Response::Names(names))))
+    }
+
+    /// For reads and downloads: none if there is nothing.
+    #[wasm_bindgen(js_name = answerBytes)]
+    pub fn answer_bytes(&mut self, bytes: Option<Vec<u8>>) -> Option<SyncRequest> {
+        self.advance(Some(Ok(Response::Bytes(bytes))))
+    }
+
+    #[wasm_bindgen(js_name = answerMarks)]
+    pub fn answer_marks(
+        &mut self,
+        marker: Option<String>,
+        stamp: Option<String>,
+    ) -> Option<SyncRequest> {
+        self.advance(Some(Ok(Response::Marks(Marks { marker, stamp }))))
+    }
+
+    /// The remembered bytes with their marker; none unless both are there.
+    #[wasm_bindgen(js_name = answerSynced)]
+    pub fn answer_synced(
+        &mut self,
+        bytes: Option<Vec<u8>>,
+        marker: Option<String>,
+    ) -> Option<SyncRequest> {
+        let synced = bytes
+            .zip(marker)
+            .map(|(bytes, marker)| Synced { bytes, marker });
+        self.advance(Some(Ok(Response::Synced(synced))))
+    }
+
+    /// Whether a guarded write, rename or delete took place.
+    #[wasm_bindgen(js_name = answerHappened)]
+    pub fn answer_happened(&mut self, happened: bool) -> Option<SyncRequest> {
+        self.advance(Some(Ok(Response::Happened(happened))))
+    }
+
+    #[wasm_bindgen(js_name = answerDone)]
+    pub fn answer_done(&mut self) -> Option<SyncRequest> {
+        self.advance(Some(Ok(Response::Done)))
+    }
+
+    /// The request failed: `accessLost` (rejected credentials), `full` (no
+    /// space) or anything else, which reads as being offline.
+    pub fn fail(&mut self, reason: &str, message: &str) -> Option<SyncRequest> {
+        let kind = match reason {
+            "accessLost" => io::ErrorKind::PermissionDenied,
+            "full" => io::ErrorKind::StorageFull,
+            _ => io::ErrorKind::NotConnected,
+        };
+        self.advance(Some(Err(io::Error::new(kind, message.to_owned()))))
+    }
+
+    /// How far the transfers are, once their number is known.
+    pub fn progress(&self) -> Option<SyncProgress> {
+        self.step.progress().map(|p| SyncProgress {
+            done: p.done,
+            total: p.total,
+        })
+    }
+
+    /// How the step ended; call it once there is no next request.
+    pub fn outcome(&mut self) -> SyncOutcome {
+        let outcome = self.outcome.take().expect("the step is over");
+        SyncOutcome {
+            status: status_name(Status::after(&outcome)).to_owned(),
+            changed: outcome.changed,
+            error: outcome.error.map(|e| e.to_string()),
+            access_lost: outcome.access_lost,
+            storage_full: outcome.storage_full,
+        }
+    }
+}
+
+impl SyncRun {
+    fn advance(&mut self, reply: Option<io::Result<Response>>) -> Option<SyncRequest> {
+        match self.step.resume(reply) {
+            Next::Request(request) => Some(SyncRequest::from(request)),
+            Next::Done(outcome) => {
+                self.outcome = Some(outcome);
+                None
+            }
+        }
+    }
+}
+
+/// When Sync steps run (default timing: a step 3 s after the last change, a
+/// poll every 10 s while in front). Times are milliseconds on any clock the
+/// client keeps to.
+#[wasm_bindgen]
+pub struct SyncSchedule(Schedule);
+
+#[wasm_bindgen]
+impl SyncSchedule {
+    /// In front, with a step due at once.
+    #[wasm_bindgen(constructor)]
+    pub fn new(now: f64) -> SyncSchedule {
+        SyncSchedule(Schedule::new(Timing::default(), ms(now)))
+    }
+
+    #[wasm_bindgen(js_name = cameToFront)]
+    pub fn came_to_front(&mut self, now: f64) {
+        self.0.came_to_front(ms(now));
+    }
+
+    #[wasm_bindgen(js_name = wentToBackground)]
+    pub fn went_to_background(&mut self) {
+        self.0.went_to_background();
+    }
+
+    #[wasm_bindgen(js_name = localChange)]
+    pub fn local_change(&mut self, now: f64) {
+        self.0.local_change(ms(now));
+    }
+
+    #[wasm_bindgen(js_name = setOnline)]
+    pub fn set_online(&mut self, online: bool, now: f64) {
+        self.0.set_online(online, ms(now));
+    }
+
+    #[wasm_bindgen(js_name = accessLost)]
+    pub fn access_lost(&mut self) {
+        self.0.access_lost();
+    }
+
+    pub fn reconnected(&mut self, now: f64) {
+        self.0.reconnected(ms(now));
+    }
+
+    /// Milliseconds until the next step; none if there won't be one.
+    pub fn wait(&self, now: f64) -> Option<f64> {
+        self.0.wait(ms(now)).map(|d| d.as_millis() as f64)
+    }
+
+    /// Whether a step runs now; if so the schedule counts it as running.
+    #[wasm_bindgen(js_name = takeDue)]
+    pub fn take_due(&mut self, now: f64) -> bool {
+        self.0.take_due(ms(now))
+    }
+
+    #[wasm_bindgen(js_name = stepEnded)]
+    pub fn step_ended(&mut self, now: f64, succeeded: bool) {
+        self.0.step_ended(ms(now), succeeded);
+    }
+}
+
+fn ms(millis: f64) -> Duration {
+    Duration::from_millis(millis.max(0.0) as u64)
+}

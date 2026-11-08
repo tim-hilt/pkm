@@ -1,5 +1,9 @@
+import type { SyncSchedule } from "../../generated/excalidraw_native_web.js";
 import type { Core } from "../core/Core";
+import type { DrawingStore } from "../gallery/DrawingStore";
 import type { FileStorage } from "../storage/FileStorage";
+import { runSyncStep } from "./SyncRunner";
+import { SyncState } from "./SyncState";
 import { type Fetch, runExchange } from "./WebDavSender";
 
 /** Why connecting failed. */
@@ -47,27 +51,48 @@ const credentialsFile = "Cloud/connection.json";
 /**
  * Cloud Backing of the web app, with WebDAV as the only Cloud Provider: Connect
  * and Disconnect, the connection kept in the site's storage and restored on
- * the next visit. `fetch` is a dependency, so tests replace the network.
+ * the next visit, and, while Connected, the Sync loop. The loop runs the core's
+ * schedule with timers and Sync steps against the Drawing store, the Sync
+ * state and `fetch`; it is told what happens around it (`localChange`,
+ * `setVisible`, `setOnline`) and tells what a step changed (`onSynced`).
+ * `fetch` is a dependency, so tests replace the network.
  */
 export class CloudBacking {
   private current: Credentials | undefined;
   private readonly listeners = new Set<(connection: Connection | undefined) => void>();
+  private readonly syncedListeners = new Set<(names: string[]) => void>();
+  private readonly state: SyncState;
+  private visible = true;
+  private online = true;
+  /** Present while Connected. */
+  private schedule: SyncSchedule | undefined;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  /** The step under way. */
+  private step: Promise<void> | undefined;
+  private readonly incoming = { known: false };
 
   private constructor(
-    private readonly core: Pick<Core, "webDav">,
+    private readonly core: Core,
     private readonly storage: FileStorage,
     private readonly send: Fetch,
-  ) {}
+    private readonly drawings: DrawingStore,
+  ) {
+    this.state = new SyncState(storage);
+  }
 
-  /** The module, Connected if the storage holds a connection. */
+  /** The module, Connected (and Syncing) if the storage holds a connection. */
   static async open(
-    core: Pick<Core, "webDav">,
+    core: Core,
     storage: FileStorage,
     send: Fetch,
+    drawings: DrawingStore,
   ): Promise<CloudBacking> {
-    const cloud = new CloudBacking(core, storage, send);
+    const cloud = new CloudBacking(core, storage, send, drawings);
     const saved = await storage.read(credentialsFile);
-    if (saved) cloud.current = JSON.parse(new TextDecoder().decode(saved));
+    if (saved) {
+      cloud.current = JSON.parse(new TextDecoder().decode(saved));
+      cloud.startLoop();
+    }
     return cloud;
   }
 
@@ -96,19 +121,112 @@ export class CloudBacking {
     const result = await runExchange(protocol.connect(), this.send);
     protocol.free();
     if (result.error) throw new ConnectFailed(result.error as ConnectReason);
+    await this.stopLoop();
     this.current = { url: url.trim().replace(/\/+$/, ""), username, password };
     await this.storage.write(
       credentialsFile,
       new TextEncoder().encode(JSON.stringify(this.current)),
     );
+    this.startLoop();
     this.changed();
   }
 
-  /** Forgets the connection and its credentials. Every Drawing stays. */
+  /** Stops Syncing, and forgets the connection, its credentials and the Sync state. Every Drawing stays. */
   async disconnect(): Promise<void> {
     this.current = undefined;
+    await this.stopLoop();
     await this.storage.remove("Cloud");
+    this.incoming.known = false;
     this.changed();
+  }
+
+  /** A Drawing was created, edited, renamed, duplicated, imported or deleted here: Sync follows after a moment. */
+  localChange(): void {
+    this.schedule?.localChange(Date.now());
+    this.arm();
+  }
+
+  /** The tab was shown or hidden. Nothing Syncs while hidden; shown again, a step runs at once. */
+  setVisible(visible: boolean): void {
+    this.visible = visible;
+    if (visible) this.schedule?.cameToFront(Date.now());
+    else this.schedule?.wentToBackground();
+    this.arm();
+  }
+
+  /** The browser went online or offline. Nothing Syncs while offline; back online, a step runs at once. */
+  setOnline(online: boolean): void {
+    this.online = online;
+    this.schedule?.setOnline(online, Date.now());
+    this.arm();
+  }
+
+  /** Calls `listener` with the names of the Drawings a step changed here (a rename as the old name and the new). Returns a function that stops it. */
+  onSynced(listener: (names: string[]) => void): () => void {
+    this.syncedListeners.add(listener);
+    return () => this.syncedListeners.delete(listener);
+  }
+
+  private startLoop(): void {
+    const now = Date.now();
+    this.schedule = this.core.syncSchedule(now);
+    if (!this.visible) this.schedule.wentToBackground();
+    if (!this.online) this.schedule.setOnline(false, now);
+    this.arm();
+  }
+
+  /** Stops the loop and waits for the step under way to give up: it makes no write after this. */
+  private async stopLoop(): Promise<void> {
+    clearTimeout(this.timer);
+    this.schedule?.free();
+    this.schedule = undefined;
+    await this.step;
+  }
+
+  /** Sets the timer for the next step; none while one is running (it sets it when it ends). */
+  private arm(): void {
+    clearTimeout(this.timer);
+    if (!this.schedule || this.step) return;
+    const wait = this.schedule.wait(Date.now());
+    if (wait !== undefined) this.timer = setTimeout(() => this.tick(), wait);
+  }
+
+  private tick(): void {
+    if (!this.schedule?.takeDue(Date.now())) return this.arm();
+    this.step = this.runStep().finally(() => {
+      this.step = undefined;
+      this.arm();
+    });
+  }
+
+  private async runStep(): Promise<void> {
+    const schedule = this.schedule;
+    const credentials = this.current;
+    if (!schedule || !credentials) return;
+    const protocol = this.core.webDav(credentials.url, credentials.username, credentials.password);
+    let result;
+    try {
+      result = await runSyncStep({
+        core: this.core,
+        protocol,
+        send: this.send,
+        drawings: this.drawings,
+        state: this.state,
+        incoming: this.incoming,
+        cancelled: () => this.schedule !== schedule,
+      });
+    } catch {
+      // Whatever broke is no reason to stop Syncing: the step counts as failed.
+      result = { changed: [], error: "failed", accessLost: false, storageFull: false };
+    } finally {
+      protocol.free();
+    }
+    if (!result || this.schedule !== schedule) return;
+    schedule.stepEnded(Date.now(), result.error === undefined);
+    if (result.accessLost) schedule.accessLost();
+    if (result.changed.length > 0) {
+      for (const listener of this.syncedListeners) listener(result.changed);
+    }
   }
 
   private changed(): void {

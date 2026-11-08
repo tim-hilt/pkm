@@ -14,9 +14,10 @@ export class MemoryStorage implements FileStorage {
   async files(folder: string): Promise<FileInfo[]> {
     const prefix = `${folder}/`;
     const found: FileInfo[] = [];
-    for (const [path, { modified }] of this.contents) {
+    for (const [path, { modified, bytes }] of this.contents) {
       const name = path.slice(prefix.length);
-      if (path.startsWith(prefix) && !name.includes("/")) found.push({ name, modified });
+      if (path.startsWith(prefix) && !name.includes("/"))
+        found.push({ name, modified, size: bytes.length });
     }
     return found;
   }

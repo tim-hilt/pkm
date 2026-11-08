@@ -1,7 +1,8 @@
-/** A file as listed: its name and when it was last written, in milliseconds. */
+/** A file as listed: its name, when it was last written (milliseconds) and its size in bytes. */
 export interface FileInfo {
   name: string;
   modified: number;
+  size: number;
 }
 
 /**

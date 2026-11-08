@@ -20,7 +20,7 @@ export class OpfsStorage implements FileStorage {
     for await (const handle of directory.values()) {
       if (handle.kind === "file") {
         const file = await (handle as FileSystemFileHandle).getFile();
-        found.push({ name: handle.name, modified: file.lastModified });
+        found.push({ name: handle.name, modified: file.lastModified, size: file.size });
       }
     }
     return found;
