@@ -4,6 +4,7 @@ import type { DrawingStore } from "../gallery/DrawingStore";
 import type { FileStorage } from "../storage/FileStorage";
 import { runSyncStep } from "./SyncRunner";
 import { SyncState } from "./SyncState";
+import { type TabMessage, type Tabs, browserTabs } from "./Tabs";
 import { type Fetch, runExchange } from "./WebDavSender";
 
 /** Why connecting failed. */
@@ -56,6 +57,10 @@ const credentialsFile = "Cloud/connection.json";
  * state and `fetch`; it is told what happens around it (`localChange`,
  * `setVisible`, `setOnline`) and tells what a step changed (`onSynced`).
  * `fetch` is a dependency, so tests replace the network.
+ *
+ * Several tabs of one browser share the storage: a step runs only while its
+ * tab holds the Sync lock, and a tab that changed Drawings, Connected or
+ * Disconnected tells the others, which follow (`Tabs`).
  */
 export class CloudBacking {
   private current: Credentials | undefined;
@@ -76,8 +81,10 @@ export class CloudBacking {
     private readonly storage: FileStorage,
     private readonly send: Fetch,
     private readonly drawings: DrawingStore,
+    private readonly tabs: Tabs,
   ) {
     this.state = new SyncState(storage);
+    tabs.listen((message) => void this.heard(message));
   }
 
   /** The module, Connected (and Syncing) if the storage holds a connection. */
@@ -86,14 +93,17 @@ export class CloudBacking {
     storage: FileStorage,
     send: Fetch,
     drawings: DrawingStore,
+    tabs: Tabs = browserTabs(),
   ): Promise<CloudBacking> {
-    const cloud = new CloudBacking(core, storage, send, drawings);
-    const saved = await storage.read(credentialsFile);
-    if (saved) {
-      cloud.current = JSON.parse(new TextDecoder().decode(saved));
-      cloud.startLoop();
-    }
+    const cloud = new CloudBacking(core, storage, send, drawings, tabs);
+    cloud.current = await cloud.saved();
+    if (cloud.current) cloud.startLoop();
     return cloud;
+  }
+
+  private async saved(): Promise<Credentials | undefined> {
+    const data = await this.storage.read(credentialsFile);
+    return data && JSON.parse(new TextDecoder().decode(data));
   }
 
   /** Where the Drawings go; none while Disconnected. */
@@ -129,15 +139,18 @@ export class CloudBacking {
     );
     this.startLoop();
     this.changed();
+    this.tabs.post({ kind: "connected" });
   }
 
   /** Stops Syncing, and forgets the connection, its credentials and the Sync state. Every Drawing stays. */
   async disconnect(): Promise<void> {
     this.current = undefined;
     await this.stopLoop();
-    await this.storage.remove("Cloud");
+    // Under the lock: no step of another tab writes Sync state after it is gone.
+    await this.tabs.exclusive(() => this.storage.remove("Cloud"));
     this.incoming.known = false;
     this.changed();
+    this.tabs.post({ kind: "disconnected" });
   }
 
   /** A Drawing was created, edited, renamed, duplicated, imported or deleted here: Sync follows after a moment. */
@@ -167,6 +180,20 @@ export class CloudBacking {
     return () => this.syncedListeners.delete(listener);
   }
 
+  /** Follows what another tab did: the storage already holds the new connection (or none). */
+  private async heard(message: TabMessage): Promise<void> {
+    if (message.kind === "changed") {
+      for (const listener of this.syncedListeners) listener(message.names);
+      return;
+    }
+    const saved = message.kind === "connected" ? await this.saved() : undefined;
+    await this.stopLoop();
+    this.current = saved;
+    this.incoming.known = false;
+    if (saved) this.startLoop();
+    this.changed();
+  }
+
   private startLoop(): void {
     const now = Date.now();
     this.schedule = this.core.syncSchedule(now);
@@ -193,16 +220,21 @@ export class CloudBacking {
 
   private tick(): void {
     if (!this.schedule?.takeDue(Date.now())) return this.arm();
-    this.step = this.runStep().finally(() => {
-      this.step = undefined;
-      this.arm();
-    });
+    this.step = this.tabs
+      .exclusive(() => this.runStep())
+      .finally(() => {
+        this.step = undefined;
+        this.arm();
+      });
   }
 
   private async runStep(): Promise<void> {
     const schedule = this.schedule;
     const credentials = this.current;
     if (!schedule || !credentials) return;
+    // Another tab may have Disconnected or Connected elsewhere while this one waited for the lock.
+    const saved = await this.saved();
+    if (!saved || saved.url !== credentials.url || saved.password !== credentials.password) return;
     const protocol = this.core.webDav(credentials.url, credentials.username, credentials.password);
     let result;
     try {
@@ -226,6 +258,7 @@ export class CloudBacking {
     if (result.accessLost) schedule.accessLost();
     if (result.changed.length > 0) {
       for (const listener of this.syncedListeners) listener(result.changed);
+      this.tabs.post({ kind: "changed", names: result.changed });
     }
   }
 
