@@ -11,6 +11,6 @@ Cloud Backing in the web app (WebDAV only) reuses `crates/cloud` instead of port
 ## Consequences
 
 - The native Sync engine is rewritten on top of the step machine; its existing integration tests and the rclone tests guard that its behaviour stays the same.
-- The wasm grows by the Sync engine and quick-xml; the size is measured when the web app's Cloud Backing lands.
+- The wasm grows by the Sync engine and quick-xml; the production build's `.wasm` went from 523,823 bytes to 683,484 bytes (+159,661, +30 %), measured with `make web-wasm` and `bun run build` before and after the feature.
 - The web app talks to the WebDAV server straight from the browser, so the server must allow the web app's origin (CORS), e.g. `rclone serve webdav --allow-origin https://<web app host>`. A server that doesn't (stock Nextcloud) can't be used from the web app, and a refused request looks to the app like an unreachable server.
 - The web app has no keychain: WebDAV credentials are kept in the site's storage, beside the Drawings.

@@ -29,6 +29,50 @@ The app only talks https, so your password never travels in plain text.
 
 The Drawings then live in `/srv/webdav/ExcalidrawNative/`.
 
+## The web app
+
+The web app talks to the server straight from the browser, so the server has to
+allow the web app's origin (CORS). Add `--allow-origin` with the address the web
+app is served from, e.g.
+
+```sh
+rclone serve webdav /srv/webdav --addr 127.0.0.1:8080 --user me --pass 'a long password' \
+  --allow-origin https://draw.example.org
+```
+
+Then enter the same `https://dav.example.com`, username and password in the web
+app's Settings as in the native apps. Native apps ignore the flag, so one
+rclone serves all of them. A server takes one origin: serve the web app from a
+single address.
+
+- **Check the flag**: the installed rclone must know it; `rclone serve webdav
+  --help | grep allow-origin` prints a line (older releases lack it, update
+  rclone).
+- **Check the preflight through the tunnel**:
+
+  ```sh
+  curl -si -X OPTIONS https://dav.example.com/ \
+    -H 'Origin: https://draw.example.org' \
+    -H 'Access-Control-Request-Method: PROPFIND' \
+    -H 'Access-Control-Request-Headers: authorization,depth'
+  ```
+
+  The answer must be `200` with `Access-Control-Allow-Origin:
+  https://draw.example.org` and `PROPFIND`, `MOVE` and `Authorization` allowed.
+  Without that header the browser refuses every request.
+- **Servers that can't be used**: a server that can't allow an origin, such as a
+  stock Nextcloud, works in the native apps but not in the web app.
+- **Local development**: run a second rclone, on its own folder and tunnel
+  hostname (the app only talks https), allowing the dev server's origin:
+
+  ```sh
+  rclone serve webdav /tmp/webdav-dev --addr 127.0.0.1:8081 --user me --pass dev \
+    --allow-origin http://localhost:3000
+  ```
+
+  Point a hostname such as `dav-dev.example.com` at `http://127.0.0.1:8081`,
+  and use it in the web app at `http://localhost:3000` (`make web-dev`).
+
 ## A certificate of your own
 
 A server with a certificate from your own CA works once the Device trusts that
@@ -45,3 +89,7 @@ platforms refuse certificates valid for more than 825 days, or without the
   Check the path of the URL.
 - **Server not reachable, or its certificate is not trusted**: wrong host, no
   network, or a certificate the Device does not trust.
+- **Web app: server not reachable**: besides the causes above, the server may
+  not allow the web app's origin (CORS). The browser hides the reason, so it
+  looks like an unreachable server. Check the preflight as described under
+  "The web app".
