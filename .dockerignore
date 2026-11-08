@@ -1,0 +1,12 @@
+*
+!Cargo.toml
+!Cargo.lock
+!crates
+!scripts/build-web-wasm.sh
+!apple/ExcalidrawNative/Resources/sample.excalidraw
+!apple/ExcalidrawNative/Resources/Fonts/Excalifont-Regular.ttf
+!web
+web/node_modules
+web/dist
+web/generated
+web/references
