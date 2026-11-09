@@ -294,10 +294,12 @@ fn a_double_tap_on_the_empty_inside_of_a_hollow_shape_edits_too() {
 }
 
 #[test]
-fn a_double_tap_on_empty_canvas_does_not_open_the_editor() {
+fn a_double_tap_beside_the_shape_makes_a_free_text_not_a_label() {
     let mut editor = scene_of("rectangle");
     double_tap(&mut editor, (600.0, 600.0));
-    assert!(editor.text_editor().is_none());
+    editor.set_editing_text("Hi");
+    editor.commit_text();
+    assert_eq!(label(&editor).get("containerId"), Some(&Value::Null));
 }
 
 #[test]

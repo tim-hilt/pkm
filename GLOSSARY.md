@@ -65,7 +65,7 @@ What the eraser Tool does from pointer down to pointer up: the Elements the poin
 _Avoid_: Delete (that is the command for the Selection), rub out
 
 **Text view**:
-The native text view shown over the Canvas while a text is created or edited (like Excalidraw's textarea), at the position, size, zoom and style the core reports, so that the system keyboard, autocorrect, dictation and Scribble work. A tap with the text Tool opens it on empty Canvas (or on the text there), a double-tap on a text opens it on that text; committing keeps the text as one undo step, empty text is not kept, and a tap elsewhere commits.
+The native text view shown over the Canvas while a text is created or edited (like Excalidraw's textarea), at the position, size, zoom and style the core reports, so that the system keyboard, autocorrect, dictation and Scribble work. A tap with the text Tool opens it on empty Canvas (or on the text there), a double-tap (double-click) with the selection Tool on empty Canvas or on a freedraw stroke or line (other than a line selected alone) makes a new text there, as on excalidraw.com, a double-tap on a text opens it on that text; committing keeps the text as one undo step, empty text is not kept, and a tap elsewhere commits.
 _Avoid_: Text editor (that is the core's description of the view), textarea, input field
 
 **Label**:

@@ -114,24 +114,19 @@ impl Editor {
     /// Opens the text view on what a double-tap hit, unless the double-tap
     /// goes into a group instead: on a text of its own, or on the label of a
     /// shape (made if it has none; the inside of a hollow shape counts as the
-    /// shape). Returns whether it did.
+    /// shape). On anything else, a double-tap makes a new text at the tap, as
+    /// a double-click does on excalidraw.com: on empty Canvas and on a
+    /// freedraw stroke, or a line that is not the only Element selected
+    /// (Excalidraw edits the points of that one instead, which the point
+    /// handles here already do). An image takes no text (Excalidraw crops
+    /// it). Returns whether it did.
     pub(super) fn edit_text_tapped(&mut self, tap: Tap) -> bool {
+        let at = self.navigation.viewport().scene_at(tap.x, tap.y);
         let hit = self.hit(tap.x, tap.y, tap.kind);
-        let target = match hit {
-            Some(id) => Some(id),
-            None => {
-                let at = self.navigation.viewport().scene_at(tap.x, tap.y);
-                self.label_container_at(at)
-            }
+        let Some(id) = hit.clone().or_else(|| self.label_container_at(at)) else {
+            self.begin_text(None, at);
+            return self.text.is_some();
         };
-        let Some(id) = target else {
-            return false;
-        };
-        let editable = self.is_free_text(&id)
-            || self
-                .scene
-                .element_by_id(&id)
-                .is_some_and(|e| text::takes_label(e.kind()));
         let goes_into_group = group::entered(
             &self.scene,
             &self.selection,
@@ -139,13 +134,28 @@ impl Editor {
             self.editing_group.as_deref(),
         )
         .is_some();
-        if !editable || goes_into_group {
+        if goes_into_group {
             return false;
         }
         if self.is_free_text(&id) {
             self.begin_existing_text(&id);
-        } else {
+            return self.text.is_some();
+        }
+        let Some(kind) = self.scene.element_by_id(&id).map(|e| e.kind()) else {
+            return false;
+        };
+        if text::takes_label(kind) {
             self.begin_label(&id);
+        } else if kind == ElementType::Image
+            || (kind == ElementType::Line && self.selection.ids() == [id.as_str()])
+        {
+            return false;
+        } else {
+            // A line or stroke with a shape under the tap: that shape's label.
+            match self.label_container_at(at) {
+                Some(container) => self.begin_label(&container),
+                None => self.begin_text(None, at),
+            }
         }
         self.text.is_some()
     }

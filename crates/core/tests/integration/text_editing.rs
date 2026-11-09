@@ -296,6 +296,88 @@ fn a_double_tap_on_text_opens_the_editor_on_it() {
 }
 
 #[test]
+fn a_double_tap_on_empty_canvas_opens_the_editor_at_the_tap() {
+    let mut editor = empty();
+
+    double_tap(&mut editor, (100.0, 200.0));
+
+    let shown = open(&editor);
+    assert_eq!(shown.text, "");
+    assert_eq!((shown.x, shown.y), (100.0, 187.5));
+    assert_eq!(editor.tool(), Tool::Selection);
+
+    editor.set_editing_text("Hello");
+    editor.commit_text();
+    assert_eq!(string(&only_text(&editor), "text"), "Hello");
+    assert_eq!(editor.selection().len(), 1);
+}
+
+#[test]
+fn a_double_click_with_a_mouse_on_empty_canvas_makes_a_text() {
+    let mut editor = empty();
+    tap(&mut editor, "mouse", (100.0, 200.0), 10.0);
+    tap(&mut editor, "mouse", (100.0, 200.0), 10.1);
+    assert!(editor.text_editor().is_some());
+}
+
+#[test]
+fn a_single_tap_on_empty_canvas_makes_no_text() {
+    let mut editor = empty();
+    tap(&mut editor, "finger", (100.0, 200.0), 10.0);
+    assert!(editor.text_editor().is_none());
+}
+
+#[test]
+fn a_double_tap_on_empty_canvas_makes_one_text_not_two() {
+    let mut editor = empty();
+    double_tap(&mut editor, (100.0, 200.0));
+    editor.set_editing_text("A");
+    editor.commit_text();
+    // A third tap soon after starts a new double-tap; it makes nothing alone.
+    tap(&mut editor, "finger", (400.0, 400.0), 10.4);
+    assert!(editor.text_editor().is_none());
+    assert_eq!(texts(&editor).len(), 1);
+}
+
+const LINE: &str = r#"{"id":"l","type":"line","x":100,"y":300,"width":100,"height":0,
+    "points":[[0,0],[100,0]],"strokeWidth":2,"version":3,"versionNonce":7}"#;
+
+const STROKE: &str = r#"{"id":"f","type":"freedraw","x":100,"y":300,"width":100,"height":0,
+    "points":[[0,0],[50,0],[100,0]],"pressures":[],"simulatePressure":true,
+    "strokeWidth":2,"version":3,"versionNonce":7}"#;
+
+#[test]
+fn a_double_tap_on_a_stroke_makes_a_text_at_the_tap() {
+    let mut editor = measured(editor_with(&[STROKE]));
+
+    double_tap(&mut editor, (150.0, 300.0));
+
+    let shown = open(&editor);
+    assert_eq!((shown.x, shown.y), (150.0, 287.5));
+    editor.set_editing_text("Hi");
+    editor.commit_text();
+    assert_eq!(string(&only_text(&editor), "text"), "Hi");
+}
+
+#[test]
+fn a_double_tap_on_the_only_selected_line_makes_no_text() {
+    // Excalidraw edits the points of that line instead.
+    let mut editor = measured(editor_with(&[LINE]));
+    double_tap(&mut editor, (150.0, 300.0));
+    assert!(editor.text_editor().is_none());
+}
+
+#[test]
+fn a_double_tap_on_an_image_makes_no_text() {
+    // Excalidraw crops it instead.
+    let image = r#"{"id":"i","type":"image","x":100,"y":300,"width":100,"height":50,
+        "fileId":"f1","status":"saved","scale":[1,1],"version":3,"versionNonce":7}"#;
+    let mut editor = measured(editor_with(&[image]));
+    double_tap(&mut editor, (150.0, 325.0));
+    assert!(editor.text_editor().is_none());
+}
+
+#[test]
 fn a_single_tap_on_text_only_selects_it() {
     let mut editor = with_hello();
     tap(&mut editor, "finger", (120.0, 60.0), 10.0);
