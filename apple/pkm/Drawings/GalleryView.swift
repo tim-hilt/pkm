@@ -1,8 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The Gallery as a grid of Drawings, last modified first, with a button to
-/// create a new one. A card shows the Drawing's thumbnail, which is made when
+/// The Drawings Context's first screen: a grid of Drawings, last modified
+/// first, with a button to create a new one. A card shows the Drawing's thumbnail, which is made when
 /// the card comes into view (the grid is lazy) and again after the Drawing
 /// changed, with the name and date below it.
 /// A card's menu (also its context menu) renames, duplicates, exports (via the
@@ -15,7 +15,7 @@ struct GalleryView: View {
     @State private var newName = ""
     @State private var deleting: DrawingStore.Entry?
     #if os(iOS)
-        @State private var isShowingSettings = Gallery.opensSettingsAtLaunch
+        @Environment(AppNavigation.self) private var navigation
     #else
         @Environment(\.openSettings) private var openSettings
     #endif
@@ -66,7 +66,7 @@ struct GalleryView: View {
                     if gallery.showsSyncWarning {
                         Button("Cloud Backing needs attention", systemImage: "exclamationmark.triangle.fill") {
                             #if os(iOS)
-                                isShowingSettings = true
+                                navigation.isShowingSettings = true
                             #else
                                 openSettings()
                             #endif
@@ -76,10 +76,7 @@ struct GalleryView: View {
                     }
                 }
                 #if os(iOS)
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Settings", systemImage: "gearshape") { isShowingSettings = true }
-                            .accessibilityIdentifier("settings")
-                    }
+                    ToolbarItem(placement: .topBarTrailing) { SettingsButton() }
                 #endif
                 #if os(macOS)
                     ToolbarItem {
@@ -105,9 +102,6 @@ struct GalleryView: View {
                     .accessibilityLabel("New Drawing")
                     .accessibilityIdentifier("new-drawing")
                 }
-            #endif
-            #if os(iOS)
-                .sheet(isPresented: $isShowingSettings) { SettingsSheet() }
             #endif
             .overlay {
                 if gallery.drawings.isEmpty {

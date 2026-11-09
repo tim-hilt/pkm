@@ -1,8 +1,10 @@
 import SwiftUI
 
-/// The single window: the Gallery, or the open Drawing in the Canvas.
+/// The single window: the five Contexts as tabs (a sidebar on a Mac, and on an
+/// iPad when expanded), or, while a Drawing is open, the Canvas alone.
 struct ContentView: View {
     @State private var gallery = Gallery.forLaunch()
+    @Environment(AppNavigation.self) private var navigation
     @Environment(CloudBackingModel.self) private var cloud
     @Environment(\.scenePhase) private var scenePhase
     #if os(macOS)
@@ -10,6 +12,7 @@ struct ContentView: View {
     #endif
 
     var body: some View {
+        @Bindable var navigation = navigation
         Group {
             if let drawing = gallery.open {
                 DrawingView(
@@ -19,16 +22,37 @@ struct ContentView: View {
                 // A fresh view per Drawing: its geometry is requested once.
                 .id(drawing.name)
             } else {
-                GalleryView(gallery: gallery)
+                TabView(selection: $navigation.selected) {
+                    ForEach(AppContext.allCases) { context in
+                        Tab(value: context) {
+                            if context == .drawings {
+                                GalleryView(gallery: gallery)
+                            } else {
+                                ComingSoonView(context: context)
+                            }
+                        } label: {
+                            Label {
+                                Text(context.title)
+                            } icon: {
+                                Image(systemName: context.symbol)
+                            }
+                        }
+                    }
+                }
+                .tabViewStyle(.sidebarAdaptable)
             }
         }
+        #if os(iOS)
+            .sheet(isPresented: $navigation.isShowingSettings) { SettingsSheet() }
+        #endif
         .task { attachCloudBacking() }
+        .onChange(of: gallery.open != nil, initial: true) { navigation.isItemOpen = gallery.open != nil }
         .onChange(of: cloud.connection != nil, initial: true) { gallery.isCloudBacked = cloud.connection != nil }
         .onChange(of: cloud.progress, initial: true) { gallery.syncProgress = cloud.progress }
         .onChange(of: cloud.status, initial: true) { gallery.syncStatus = cloud.status }
         .onChange(of: scenePhase) { cloud.appBecame(inFront: scenePhase == .active) }
         #if os(macOS)
-            .task { if Gallery.opensSettingsAtLaunch { openSettings() } }
+            .task { if AppNavigation.opensSettingsAtLaunch { openSettings() } }
         #endif
     }
 }
@@ -45,46 +69,26 @@ extension ContentView {
     }
 }
 
-extension DrawingStore {
-    /// The app's Documents folder, which Files and Finder show, with the
-    /// caches in Caches. UI tests ask for empty temporary folders instead.
-    static var appDrawings: DrawingStore {
-        appDrawings(temporary: ProcessInfo.processInfo.arguments.contains("-UITestingTemporaryStore"))
-    }
-
-    static func appDrawings(temporary: Bool) -> DrawingStore {
-        if temporary {
-            let root = FileManager.default.temporaryDirectory
-                .appending(path: "pkmUITests-\(UUID().uuidString)", directoryHint: .isDirectory)
-            let directory = root.appending(path: "Documents", directoryHint: .isDirectory)
-            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            return DrawingStore(directory: directory, cacheDirectory: root.appending(path: "Caches"))
-        }
-        return DrawingStore(
-            directory: .documentsDirectory,
-            cacheDirectory: .cachesDirectory.appending(path: "Drawings", directoryHint: .isDirectory))
-    }
-}
-
-extension Gallery {
+extension AppNavigation {
     /// `-UITestingOpenSettings` (used by `make screenshot SCREEN=settings`)
     /// shows Settings over an empty temporary Gallery.
     static var opensSettingsAtLaunch: Bool {
         ProcessInfo.processInfo.arguments.contains("-UITestingOpenSettings")
     }
 
-    /// The Gallery for this launch. `-UITestingOpenSampleDrawing` (used by
-    /// `make screenshot`) starts in an empty temporary store with the sample
-    /// Drawing already open, so agents can see the Canvas without tapping.
+    /// The navigation for this launch. The `-UITesting…` launch arguments
+    /// (temporary stores, `make screenshot`) start on Drawings and leave the
+    /// Device's last AppContext alone.
     @MainActor
-    static func forLaunch() -> Gallery {
-        let arguments = ProcessInfo.processInfo.arguments
-        if opensSettingsAtLaunch { return Gallery(store: .appDrawings(temporary: true)) }
-        guard arguments.contains("-UITestingOpenSampleDrawing") else { return Gallery(store: .appDrawings) }
-        let store = DrawingStore.appDrawings(temporary: true)
-        let name = try? store.add(Data(contentsOf: SampleDrawing.url), named: "sample")
-        let gallery = Gallery(store: store)
-        if let name { gallery.openDrawing(named: name) }
-        return gallery
+    static func forLaunch() -> AppNavigation {
+        guard ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("-UITesting") }) else {
+            return AppNavigation()
+        }
+        let navigation = AppNavigation(remembering: nil)
+        if opensSettingsAtLaunch || ProcessInfo.processInfo.arguments.contains("-UITestingOpenSampleDrawing") {
+            navigation.selected = .drawings
+        }
+        navigation.isShowingSettings = opensSettingsAtLaunch
+        return navigation
     }
 }

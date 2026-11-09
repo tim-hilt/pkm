@@ -28,7 +28,7 @@ the file's `hhea` table.
 
 ## Where it is used
 
-- `Excalifont` (`Rendering/Excalifont.swift`) implements the core's
+- `Excalifont` (`Drawings/Rendering/Excalifont.swift`) implements the core's
   `TextMeasurer` with CoreText and turns lines of text into glyph outlines,
   cached per glyph (ADR-0008).
 - `Editor.withExcalifont()` creates an editor that measures with it.

@@ -7,6 +7,7 @@ struct PkmApp: App {
     #endif
 
     @State private var cloud = CloudBackingModel()
+    @State private var navigation = AppNavigation.forLaunch()
 
     var body: some Scene {
         // One window (spec: Gallery → Canvas → back). A second window would
@@ -15,16 +16,17 @@ struct PkmApp: App {
         // iPadOS get one window as the app does not declare multiple scenes.
         #if os(macOS)
             Window(Text(verbatim: "pkm"), id: "main") {
-                ContentView().firstLaunchWindowSize().environment(cloud).appliesAppearance()
+                ContentView().firstLaunchWindowSize().environment(cloud).environment(navigation).appliesAppearance()
             }
             .commands {
+                GoCommands(navigation: navigation)
                 CanvasCommands()
                 AppearanceCommands()
             }
             // ⌘, opens it.
             Settings { SettingsView().environment(cloud) }
         #else
-            WindowGroup { ContentView().environment(cloud).appliesAppearance() }
+            WindowGroup { ContentView().environment(cloud).environment(navigation).appliesAppearance() }
                 .commands { CanvasCommands() }
         #endif
     }

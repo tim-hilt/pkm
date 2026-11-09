@@ -12,7 +12,26 @@ import XCTest
         app.launch()
     }
 
+    /// The app opens on Tasks; Drawings is a tab, or a sidebar row on an iPad
+    /// and a Mac.
+    private func openDrawings() {
+        let tab = app.tabBars.buttons["Drawings"]
+        let row = app.buttons["Drawings"]
+        if tab.waitForExistence(timeout: 10) { tab.tap() } else if row.waitForExistence(timeout: 10) { row.tap() }
+    }
+
+    /// An empty Drawing is not kept when left, so these tests draw something.
+    private func drawARectangle() {
+        let rectangle = app.buttons["Rectangle"]
+        XCTAssertTrue(rectangle.waitForExistence(timeout: 10))
+        rectangle.tap()
+        let window = app.windows.firstMatch
+        window.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).press(
+            forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.6)))
+    }
+
     func testCreatingADrawingOpensTheCanvasAndBackReturnsToTheGalleryWithIt() {
+        openDrawings()
         let newDrawing = app.buttons["new-drawing"]
         XCTAssertTrue(newDrawing.waitForExistence(timeout: 10))
 
@@ -21,7 +40,9 @@ import XCTest
         let back = app.buttons["back-to-gallery"]
         XCTAssertTrue(back.waitForExistence(timeout: 10), "the Canvas is shown")
         XCTAssertFalse(newDrawing.exists, "the Gallery is gone")
+        XCTAssertFalse(app.tabBars.firstMatch.exists, "the tab bar is hidden")
 
+        drawARectangle()
         back.tap()
 
         XCTAssertTrue(newDrawing.waitForExistence(timeout: 10), "back in the Gallery")
@@ -30,7 +51,9 @@ import XCTest
     }
 
     func testAListedDrawingOpensAgain() {
+        openDrawings()
         app.buttons["new-drawing"].tap()
+        drawARectangle()
         app.buttons["back-to-gallery"].tap()
         let drawing = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'drawing-Untitled '")).firstMatch
         XCTAssertTrue(drawing.waitForExistence(timeout: 10))
@@ -40,8 +63,22 @@ import XCTest
         XCTAssertTrue(app.buttons["back-to-gallery"].waitForExistence(timeout: 10))
     }
 
+    func testEveryContextsRootHasTheSettingsGearOnPhonesAndPads() throws {
+        let tabs = app.tabBars.firstMatch
+        try XCTSkipUnless(tabs.waitForExistence(timeout: 10), "a Mac has a sidebar and ⌘,")
+        for name in ["Tasks", "Notes", "Drawings", "Bookmarks", "Books"] {
+            tabs.buttons[name].tap()
+            XCTAssertTrue(app.navigationBars.buttons["settings"].waitForExistence(timeout: 5), name)
+        }
+    }
+
+    func testAPlaceholderSaysComingSoon() throws {
+        XCTAssertTrue(app.staticTexts["Coming soon"].waitForExistence(timeout: 10))
+    }
+
     /// The Gallery and menu buttons are the system's navigation bar buttons.
     func testTheCanvasHasNativeBackAndMenuButtonsInTheNavigationBar() {
+        openDrawings()
         app.buttons["new-drawing"].tap()
 
         let bar = app.navigationBars.firstMatch

@@ -34,6 +34,17 @@
         }
       }
     },
+    "Appearance": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Appearance"
+          }
+        }
+      }
+    },
     "Architect": {
       "extractionState": "manual",
       "localizations": {
@@ -133,6 +144,28 @@
         }
       }
     },
+    "Bookmarks": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bookmarks"
+          }
+        }
+      }
+    },
+    "Books": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Books"
+          }
+        }
+      }
+    },
     "Bring Forward": {
       "extractionState": "manual",
       "localizations": {
@@ -177,17 +210,6 @@
         }
       }
     },
-    "Can’t be read": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Can’t be read"
-          }
-        }
-      }
-    },
     "Canvas": {
       "extractionState": "manual",
       "localizations": {
@@ -195,6 +217,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Canvas"
+          }
+        }
+      }
+    },
+    "Can’t be read": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Can’t be read"
           }
         }
       }
@@ -250,6 +283,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Colour %@"
+          }
+        }
+      }
+    },
+    "Coming soon": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Coming soon"
           }
         }
       }
@@ -364,6 +408,17 @@
         }
       }
     },
+    "Dark": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dark"
+          }
+        }
+      }
+    },
     "Dashed": {
       "extractionState": "manual",
       "localizations": {
@@ -430,6 +485,17 @@
         }
       }
     },
+    "Drawings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Drawings"
+          }
+        }
+      }
+    },
     "Duplicate": {
       "extractionState": "manual",
       "localizations": {
@@ -474,17 +540,6 @@
         }
       }
     },
-    "Share": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Share"
-          }
-        }
-      }
-    },
     "Export": {
       "extractionState": "manual",
       "localizations": {
@@ -492,39 +547,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Export"
-          }
-        }
-      }
-    },
-    "Export…": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Export…"
-          }
-        }
-      }
-    },
-    "Export Scene as PNG…": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Export Scene as PNG…"
-          }
-        }
-      }
-    },
-    "Export Selection as PNG…": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Export Selection as PNG…"
           }
         }
       }
@@ -551,6 +573,17 @@
         }
       }
     },
+    "Export Scene as PNG…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export Scene as PNG…"
+          }
+        }
+      }
+    },
     "Export Selection as PNG": {
       "extractionState": "manual",
       "localizations": {
@@ -558,6 +591,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Export Selection as PNG"
+          }
+        }
+      }
+    },
+    "Export Selection as PNG…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export Selection as PNG…"
+          }
+        }
+      }
+    },
+    "Export…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export…"
           }
         }
       }
@@ -595,6 +650,28 @@
         }
       }
     },
+    "Finish Line": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finish Line"
+          }
+        }
+      }
+    },
+    "Finish Line or Edit Text": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finish Line or Edit Text"
+          }
+        }
+      }
+    },
     "Font size": {
       "extractionState": "manual",
       "localizations": {
@@ -613,6 +690,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Gallery"
+          }
+        }
+      }
+    },
+    "Go": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Go"
           }
         }
       }
@@ -767,6 +855,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Left"
+          }
+        }
+      }
+    },
+    "Light": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Light"
           }
         }
       }
@@ -936,6 +1035,17 @@
         }
       }
     },
+    "Notes": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notes"
+          }
+        }
+      }
+    },
     "Opacity": {
       "extractionState": "manual",
       "localizations": {
@@ -954,6 +1064,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Orange"
+          }
+        }
+      }
+    },
+    "Paste": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paste"
           }
         }
       }
@@ -1090,17 +1211,6 @@
         }
       }
     },
-    "Paste": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Paste"
-          }
-        }
-      }
-    },
     "S": {
       "extractionState": "manual",
       "localizations": {
@@ -1174,6 +1284,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Shades"
+          }
+        }
+      }
+    },
+    "Share": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Share"
           }
         }
       }
@@ -1255,6 +1376,17 @@
         }
       }
     },
+    "System": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System"
+          }
+        }
+      }
+    },
     "Tap + to start sketching.": {
       "extractionState": "manual",
       "localizations": {
@@ -1262,6 +1394,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tap + to start sketching."
+          }
+        }
+      }
+    },
+    "Tasks": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tasks"
           }
         }
       }
@@ -1493,72 +1636,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "“%@” already exists. Choose another name."
-          }
-        }
-      }
-    },
-    "Finish Line": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Finish Line"
-          }
-        }
-      }
-    },
-    "Finish Line or Edit Text": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Finish Line or Edit Text"
-          }
-        }
-      }
-    },
-    "Appearance": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Appearance"
-          }
-        }
-      }
-    },
-    "System": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "System"
-          }
-        }
-      }
-    },
-    "Light": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Light"
-          }
-        }
-      }
-    },
-    "Dark": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dark"
           }
         }
       }
