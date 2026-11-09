@@ -1,11 +1,12 @@
 import { type Context, contexts, type Navigation } from "../navigation/Navigation";
-import type { SettingsView } from "../chrome/SettingsView";
+import type { SettingsView } from "../settings/SettingsView";
 
 const icon = (paths: string) =>
   `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
 
 /** What each Context is called and looks like; hand-written, in the spirit of the SF Symbols the Apple app uses. */
-const presentation: Record<Context, { title: string; icon: string; placeholder: string }> = {
+/** `placeholder` fills the pane of a Context the web app has no functionality for. */
+const presentation: Record<Context, { title: string; icon: string; placeholder?: string }> = {
   tasks: {
     title: "Tasks",
     icon: icon(
@@ -21,7 +22,6 @@ const presentation: Record<Context, { title: string; icon: string; placeholder: 
   drawings: {
     title: "Drawings",
     icon: icon('<path d="M3 17c3-9 5-12 7-10s-4 11-1 11 4-6 6-6 1 4 3 4 2-2 3-3"/>'),
-    placeholder: "",
   },
   bookmarks: {
     title: "Bookmarks",
@@ -81,7 +81,7 @@ export class Shell {
       const pane = document.createElement("section");
       pane.className = "shell-pane";
       pane.setAttribute("aria-label", title);
-      if (placeholder) pane.append(this.placeholder(context));
+      if (placeholder) pane.append(this.placeholder(title, icon, placeholder));
       this.panes.set(context, pane);
       content.append(pane);
     }
@@ -118,12 +118,11 @@ export class Shell {
     this.element.classList.toggle("focused", focused);
   }
 
-  private placeholder(context: Context): HTMLElement {
-    const { title, icon, placeholder } = presentation[context];
+  private placeholder(title: string, icon: string, text: string): HTMLElement {
     const element = document.createElement("div");
     element.className = "shell-placeholder";
     element.setAttribute("role", "status");
-    element.innerHTML = `${icon}<strong>${title}</strong><span>${placeholder}</span>`;
+    element.innerHTML = `${icon}<strong>${title}</strong><span>${text}</span>`;
     return element;
   }
 }

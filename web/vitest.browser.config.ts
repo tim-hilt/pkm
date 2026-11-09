@@ -1,6 +1,6 @@
 import { playwright } from "@vitest/browser-playwright";
 import { defineConfig } from "vitest/config";
-import { referenceCommands } from "./src/testing/referenceCommands.ts";
+import { referenceCommands } from "./src/drawings/testing/referenceCommands.ts";
 
 // Renderer tests in Chromium with WebGPU (`make web-test-browser`), outside
 // `make check`: they need a GPU. They render offscreen with the production

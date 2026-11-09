@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 static CLOCK: OnceLock<fn() -> f64> = OnceLock::new();
 
 /// Makes `clock` the source of time: milliseconds since 1970. Only the first
-/// call has an effect. Call it before the first an editor is made, on
+/// call has an effect. Call it before anything reads the time, on
 /// targets that have no system time.
 pub fn set_clock(clock: fn() -> f64) {
     let _ = CLOCK.set(clock);

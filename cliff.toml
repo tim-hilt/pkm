@@ -4,19 +4,21 @@
 [git]
 conventional_commits = true
 filter_unconventional = true
+# Only the four prefixes count; any other "type:" commit is left out.
+filter_commits = true
 tag_pattern = "v[0-9].*"
 sort_commits = "oldest"
 commit_parsers = [
-  { message = "^feature", group = "Features" },
-  { message = "^fix", group = "Fixes" },
-  { message = "^chore", group = "Chores" },
+  { message = "^feature(\\(.*\\))?!?:", group = "Features" },
+  { message = "^fix(\\(.*\\))?!?:", group = "Fixes" },
+  { message = "^chore(\\(.*\\))?!?:", group = "Chores" },
 ]
 
 [bump]
 initial_tag = "v0.1.0"
-# "feature" is not Conventional Commits' "feat", so name it: features bump
-# minor, fixes and chores patch; "!" bumps major (minor before 1.0).
-custom_minor_increment_regex = "^feature(\\(.*\\))?:"
+# Matched against the commit type. "feature" is not Conventional Commits'
+# "feat", so name it: features bump minor, fixes and chores patch, "!" major.
+custom_minor_increment_regex = "^feature$"
 
 [changelog]
 header = "# Changelog\n"

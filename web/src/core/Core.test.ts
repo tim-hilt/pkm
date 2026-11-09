@@ -1,8 +1,14 @@
 import { readFileSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
-import { dashOf, fillKind, stringOf, strokeKind, verbsOf } from "../rendering/GeometryBuffers";
-import { Excalifont } from "../text/Excalifont";
-import { drag, press, step, tap } from "../testing/Gestures";
+import {
+  dashOf,
+  fillKind,
+  stringOf,
+  strokeKind,
+  verbsOf,
+} from "../drawings/rendering/GeometryBuffers";
+import { Excalifont } from "../drawings/text/Excalifont";
+import { drag, press, step, tap } from "../drawings/testing/Gestures";
 import {
   type Core,
   type Editor,

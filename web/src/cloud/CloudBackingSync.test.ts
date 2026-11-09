@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Core, loadCore } from "../core/Core";
-import { DrawingStore } from "../gallery/DrawingStore";
+import { DrawingStore } from "../drawings/gallery/DrawingStore";
 import { MemoryStorage } from "../storage/MemoryStorage";
 import { CloudBacking } from "./CloudBacking";
 import { MemoryWebDav } from "./MemoryWebDav";

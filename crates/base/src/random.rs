@@ -3,7 +3,7 @@
 //!
 //! Nothing here needs to be unpredictable, only different from one Element
 //! and one editor to the next, so a small generator seeded from the system
-//! does; the core has no dependencies to take one from (ADR-0009).
+//! does; `pkm-base` has no dependencies to take one from (ADR-0009).
 
 use crate::clock::now_ms;
 use std::collections::hash_map::RandomState;

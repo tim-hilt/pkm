@@ -28,7 +28,7 @@ extension Gallery {
     @MainActor
     static func forLaunch() -> Gallery {
         let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains("-UITestingOpenSettings") { return Gallery(store: .appDrawings(temporary: true)) }
+        if AppNavigation.opensSettingsAtLaunch { return Gallery(store: .appDrawings(temporary: true)) }
         guard arguments.contains("-UITestingOpenSampleDrawing") else { return Gallery(store: .appDrawings) }
         let store = DrawingStore.appDrawings(temporary: true)
         let name = try? store.add(Data(contentsOf: SampleDrawing.url), named: "sample")

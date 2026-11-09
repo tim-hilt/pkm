@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { layoutFor } from "../chrome/DrawingLayout";
+import { layoutFor } from "../drawings/chrome/DrawingLayout";
 import { phoneQuery } from "./ShellLayout";
 
 describe("the phone's media query", () => {

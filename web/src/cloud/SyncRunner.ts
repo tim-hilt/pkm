@@ -1,5 +1,5 @@
 import type { Core } from "../core/Core";
-import type { DrawingStore } from "../gallery/DrawingStore";
+import type { DrawingStore } from "../drawings/gallery/DrawingStore";
 import type { SyncRequest, SyncRun, WebDavProtocol } from "../../generated/pkm_web.js";
 import type { SyncState } from "./SyncState";
 import { type Fetch, runExchange } from "./WebDavSender";

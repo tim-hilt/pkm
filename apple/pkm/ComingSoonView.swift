@@ -7,11 +7,7 @@ struct ComingSoonView: View {
     var body: some View {
         NavigationStack {
             ContentUnavailableView {
-                Label {
-                    Text(context.title)
-                } icon: {
-                    Image(systemName: context.symbol)
-                }
+                context.label
             } description: {
                 Text("Coming soon")
             }

@@ -5,7 +5,7 @@ import index from "../index.html";
 const server = Bun.serve({
   port: process.env.PORT ?? 3000,
   development: true,
-  // Development has no service worker; a 404, not the app, answers its registration.
-  routes: { "/sw.js": new Response("", { status: 404 }), "/*": index },
+  // Development registers no service worker (registerServiceWorker).
+  routes: { "/*": index },
 });
 console.log(`pkm web on ${server.url}`);

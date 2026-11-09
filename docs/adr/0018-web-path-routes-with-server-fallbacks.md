@@ -4,7 +4,7 @@ The web app routes by path (`/drawings`), not by hash (`/#/drawings`), so that i
 
 A path has no file behind it, so every layer that answers a request falls back to `index.html`:
 
-- **BusyBox `httpd`** (the Docker image): `E404:/index.html` in `httpd.conf`. A first-visit deep link renders the app, though with status 404.
+- **BusyBox `httpd`** (the Docker image): `E404:index.html` in `httpd.conf` (relative to the site's root; an absolute path would name a file outside it). A first-visit deep link renders the app, though with status 404.
 - **The service worker**: a navigation is answered by the network, and by the cached `index.html` when the network fails or answers with an error.
 - **The dev server** (`web/scripts/dev.ts`): a `Bun.serve` that answers every path with `index.html`.
 

@@ -23,13 +23,13 @@ import init, {
   SyncSchedule,
   WebDavProtocol,
 } from "../../generated/pkm_web.js";
-import { type TextMeasurer } from "../text/Excalifont";
+import { type TextMeasurer } from "../drawings/text/Excalifont";
 import {
   type GeometryBuffers,
   type GeometrySource,
   MemoryViews,
   readGeometry,
-} from "../rendering/GeometryBuffers";
+} from "../drawings/rendering/GeometryBuffers";
 
 export {
   Cursor,

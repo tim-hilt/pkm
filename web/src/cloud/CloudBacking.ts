@@ -1,6 +1,6 @@
 import type { SyncSchedule } from "../../generated/pkm_web.js";
 import type { Core } from "../core/Core";
-import type { DrawingStore } from "../gallery/DrawingStore";
+import type { DrawingStore } from "../drawings/gallery/DrawingStore";
 import type { FileStorage } from "../storage/FileStorage";
 import { type SyncStatus, runSyncStep } from "./SyncRunner";
 import { SyncState } from "./SyncState";

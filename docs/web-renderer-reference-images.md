@@ -23,7 +23,7 @@ await expectMatchesReference(image, "my-scene");     // compares with references
 
 `render` uses the production `CanvasRenderer` including 4x MSAA via
 `renderOffscreen`; `pixelsPerPoint` simulates the screen scale (use 2 with a
-larger `size`). The scenes in `src/testing/TestScenes.ts` are ports of the
+larger `size`). The scenes in `src/drawings/testing/TestScenes.ts` are ports of the
 Swift `TestScenes`, with the same names and seeds; so the references can be
 compared by eye with `apple/pkmTests/References`.
 
@@ -31,7 +31,7 @@ compared by eye with `apple/pkmTests/References`.
 
 As in Swift: a pixel counts as different when any channel differs by more
 than 8/255, and a render matches while at most 0.02 % of its pixels differ
-(`standardTolerance` in `src/testing/ImageComparison.ts`). Pass a stricter
+(`standardTolerance` in `src/drawings/testing/ImageComparison.ts`). Pass a stricter
 `ImageTolerance` to `expectMatchesReference` for a specific test.
 
 ## When a test fails

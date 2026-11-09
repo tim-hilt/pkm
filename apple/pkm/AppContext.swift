@@ -27,6 +27,15 @@ enum AppContext: String, CaseIterable, Identifiable {
         }
     }
 
+    /// The name beside the symbol, as in the tab bar, the sidebar and the placeholder.
+    var label: some View {
+        Label {
+            Text(title)
+        } icon: {
+            Image(systemName: symbol)
+        }
+    }
+
     /// The digit that, with ⌘, switches to the Context: 1 for the first.
     var shortcutDigit: Int { Self.allCases.firstIndex(of: self)! + 1 }
 }

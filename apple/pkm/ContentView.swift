@@ -31,11 +31,7 @@ struct ContentView: View {
                                 ComingSoonView(context: context)
                             }
                         } label: {
-                            Label {
-                                Text(context.title)
-                            } icon: {
-                                Image(systemName: context.symbol)
-                            }
+                            context.label
                         }
                     }
                 }

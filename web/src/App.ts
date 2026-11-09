@@ -1,29 +1,29 @@
-import { showCanvas } from "./CanvasView";
+import { showCanvas } from "./drawings/CanvasView";
 import { CloudBacking } from "./cloud/CloudBacking";
-import { Appearance } from "./chrome/Appearance";
-import { applyChromeColors } from "./chrome/ChromeColors";
-import { SettingsView } from "./chrome/SettingsView";
-import { DrawingSettings } from "./chrome/DrawingSettings";
-import { DrawingExport, downloadInBrowser } from "./export/DrawingExport";
-import { exportPng } from "./export/PngExport";
+import { Appearance } from "./settings/Appearance";
+import { applyChromeColors } from "./drawings/chrome/ChromeColors";
+import { SettingsView } from "./settings/SettingsView";
+import { DrawingSettings } from "./drawings/chrome/DrawingSettings";
+import { DrawingExport, downloadInBrowser } from "./drawings/export/DrawingExport";
+import { exportPng } from "./drawings/export/PngExport";
 import type { Core } from "./core/Core";
-import { DrawingStore } from "./gallery/DrawingStore";
-import { Gallery } from "./gallery/Gallery";
-import { GalleryView } from "./gallery/GalleryView";
-import type { OpenDrawing } from "./gallery/OpenDrawing";
-import { ThumbnailRenderer } from "./gallery/ThumbnailRenderer";
-import { Thumbnails } from "./gallery/Thumbnails";
+import { DrawingStore } from "./drawings/gallery/DrawingStore";
+import { Gallery } from "./drawings/gallery/Gallery";
+import { GalleryView } from "./drawings/gallery/GalleryView";
+import type { OpenDrawing } from "./drawings/gallery/OpenDrawing";
+import { ThumbnailRenderer } from "./drawings/gallery/ThumbnailRenderer";
+import { Thumbnails } from "./drawings/gallery/Thumbnails";
 import type { FileStorage } from "./storage/FileStorage";
 import { requestPersistenceOnFirstCall } from "./storage/PersistentStorage";
-import type { Excalifont } from "./text/Excalifont";
+import type { Excalifont } from "./drawings/text/Excalifont";
 import { browserHistory } from "./navigation/browserHistory";
 import { Navigation } from "./navigation/Navigation";
 import { Shell } from "./shell/Shell";
 
 /**
  * The app: the shell with its five Contexts; in Drawings the Gallery, from
- * which a Drawing is opened into the Canvas, and back. Drawings are kept saved as they change (autosave), and when the page
- * goes to the background.
+ * which a Drawing is opened into the Canvas, and back. Drawings are kept
+ * saved as they change (autosave), and when the page goes to the background.
  */
 export async function startApp(
   root: HTMLElement,
