@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun ./index.html",
+    "dev": "bun scripts/dev.ts",
     "build": "bun scripts/build.ts",
     "test": "vitest run",
     "test:browser": "vitest run --config vitest.browser.config.ts",

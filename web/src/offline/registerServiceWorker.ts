@@ -1,5 +1,5 @@
-/** Registers the offline worker; the app works without it (development has none). */
+/** Registers the offline worker; the app works without it. Only the production build has one (development serves no `sw.js`). */
 export function registerServiceWorker(): void {
-  if (!("serviceWorker" in navigator)) return;
-  navigator.serviceWorker.register("./sw.js").catch(() => {});
+  if (process.env.NODE_ENV !== "production" || !("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
 }

@@ -14,6 +14,10 @@ const app = await Bun.build({
   entrypoints: [join(root, "index.html")],
   outdir: dist,
   minify: true,
+  // Absolute URLs: the app is served at nested paths too (`/drawings`).
+  publicPath: "/",
+  // registerServiceWorker registers only in production.
+  define: { "process.env.NODE_ENV": '"production"' },
 });
 if (!app.success) throw new AggregateError(app.logs, "bundling the app failed");
 await cp(join(root, "static"), dist, { recursive: true });
@@ -37,9 +41,9 @@ const version = digest.digest("hex").slice(0, 16);
 // and rewrite these files, the manifest names them as they are.
 const indexPath = join(dist, "index.html");
 const pwaHead = [
-  '<link rel="manifest" href="./manifest.webmanifest">',
-  '<link rel="icon" href="./icon.svg" type="image/svg+xml">',
-  '<link rel="apple-touch-icon" href="./apple-touch-icon.png">',
+  '<link rel="manifest" href="/manifest.webmanifest">',
+  '<link rel="icon" href="/icon.svg" type="image/svg+xml">',
+  '<link rel="apple-touch-icon" href="/apple-touch-icon.png">',
   '<meta name="theme-color" content="#ffffff">',
   buildMarker(version),
 ].join("");

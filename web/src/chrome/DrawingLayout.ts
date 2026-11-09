@@ -36,9 +36,6 @@ export function propertiesMaxHeight(
   return Math.max(0, containerHeight - 166 + (propertiesTopBelowToolbar - top));
 }
 
-/** The phone layout as a CSS media query, the same rule as `layoutFor` (the chrome of the other layout is hidden by it, so that the layout follows resizing and rotation without script). */
-export const phoneQuery = "(max-width: 599px), (max-height: 499px) and (max-width: 999px)";
-
 /** The phone bottom bar (Action row over the toolbar): Excalidraw's `min(100% − 28, 450)`, centred. */
 export function bottomBarWidth(containerWidth: number): number {
   return Math.max(0, Math.min(containerWidth - 28, 450));

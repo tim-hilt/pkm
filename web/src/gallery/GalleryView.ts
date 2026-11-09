@@ -1,7 +1,6 @@
 import type { Entry } from "./DrawingStore";
 import type { Gallery } from "./Gallery";
 import { type CloudBacking, statusText } from "../cloud/CloudBacking";
-import type { SettingsView } from "../chrome/SettingsView";
 
 let nextDialog = 0;
 
@@ -26,7 +25,6 @@ function button(className: string, label: string, onClick: () => void): HTMLButt
 }
 
 const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
-const gearGlyph = `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>`;
 const moreGlyph = `<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`;
 
 /** One Drawing's card: its thumbnail, name and date, and its menu. */
@@ -213,11 +211,10 @@ export class GalleryView {
   private readonly syncWarning = make("span", "gallery-sync-warning");
   private stopSyncListening: (() => void) | undefined;
 
-  /** `isDark` tells which appearance the thumbnails are made for; the gear opens `settings`, if there are any; `cloud` tells what Sync is doing, shown as "Syncing N of M Drawings" and a warning icon. */
+  /** `isDark` tells which appearance the thumbnails are made for; `cloud` tells what Sync is doing, shown as "Syncing N of M Drawings" and a warning icon. */
   constructor(
     private readonly gallery: Gallery,
     private readonly isDark: () => boolean = () => false,
-    settings?: SettingsView,
     private readonly cloud?: Pick<CloudBacking, "syncReport" | "hasProblem" | "onSyncChange">,
   ) {
     const create = button("gallery-new", "", () => void gallery.createDrawing());
@@ -228,13 +225,6 @@ export class GalleryView {
     this.grid.setAttribute("aria-label", "Drawings");
     this.empty.setAttribute("role", "status");
     this.element.append(this.grid, this.empty, create);
-    if (settings) {
-      const gear = button("gallery-settings", "", () => settings.show());
-      gear.innerHTML = gearGlyph;
-      gear.setAttribute("aria-label", "Settings");
-      gear.title = "Settings";
-      this.element.append(gear, settings.element);
-    }
     if (cloud) {
       this.syncText.setAttribute("role", "status");
       this.syncWarning.textContent = "⚠";

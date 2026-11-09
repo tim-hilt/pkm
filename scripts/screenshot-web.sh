@@ -9,7 +9,7 @@ cd "$(dirname "$0")/../web"
 OUT=${OUT:-/tmp/wt-web.png}
 # Bun's dev server listens on $PORT.
 export PORT=${PORT:-3917}
-bun ./index.html >/tmp/wt-web-server.log 2>&1 &
+bun scripts/dev.ts >/tmp/wt-web-server.log 2>&1 &
 server=$!
 trap 'kill $server 2>/dev/null || true' EXIT
 for _ in $(seq 50); do

@@ -16,10 +16,13 @@ import { Thumbnails } from "./gallery/Thumbnails";
 import type { FileStorage } from "./storage/FileStorage";
 import { requestPersistenceOnFirstCall } from "./storage/PersistentStorage";
 import type { Excalifont } from "./text/Excalifont";
+import { browserHistory } from "./navigation/browserHistory";
+import { Navigation } from "./navigation/Navigation";
+import { Shell } from "./shell/Shell";
 
 /**
- * The app: the Gallery, from which a Drawing is opened into the Canvas, and
- * back. Drawings are kept saved as they change (autosave), and when the page
+ * The app: the shell with its five Contexts; in Drawings the Gallery, from
+ * which a Drawing is opened into the Canvas, and back. Drawings are kept saved as they change (autosave), and when the page
  * goes to the background.
  */
 export async function startApp(
@@ -52,6 +55,11 @@ export async function startApp(
   const showChromeColors = () => applyChromeColors(document.documentElement, appearance.isDark);
   showChromeColors();
 
+  const navigation = new Navigation(browserHistory(window), localStorage);
+  const shell = new Shell(navigation, new SettingsView(appearance, cloud));
+  root.replaceChildren(shell.element);
+  const pane = shell.pane("drawings");
+
   let canvas: { drawing: OpenDrawing; stop: () => void } | undefined;
   let galleryView: GalleryView | undefined;
 
@@ -61,11 +69,12 @@ export async function startApp(
       canvas.stop();
       canvas = undefined;
     }
+    shell.setFocused(drawing !== undefined);
     if (drawing) {
       galleryView?.dispose();
       galleryView = undefined;
       if (!canvas) {
-        const shown = showCanvas(root, device, drawing.editor, font, {
+        const shown = showCanvas(pane, device, drawing.editor, font, {
           edited: () => drawing.editorDidChange(),
           back: () => void gallery.close(),
           settings,
@@ -80,13 +89,8 @@ export async function startApp(
       }
     } else {
       if (!galleryView) {
-        galleryView = new GalleryView(
-          gallery,
-          () => appearance.isDark,
-          new SettingsView(appearance, cloud),
-          cloud,
-        );
-        root.replaceChildren(galleryView.element);
+        galleryView = new GalleryView(gallery, () => appearance.isDark, cloud);
+        pane.replaceChildren(galleryView.element);
       }
       galleryView.update();
     }
@@ -97,6 +101,11 @@ export async function startApp(
     galleryView?.appearanceChanged();
   });
   gallery.onChange = show;
+  // Leaving Drawings leaves the open Drawing (saved), as focused work ends there.
+  navigation.onChange = () => {
+    shell.update();
+    if (navigation.selected !== "drawings") void gallery.close();
+  };
   show();
 
   // The page may be gone before the delay of an autosave is over.

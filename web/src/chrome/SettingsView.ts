@@ -3,7 +3,7 @@ import type { CloudBacking } from "../cloud/CloudBacking";
 import { type Appearance, appearanceChoices, appearanceTitle } from "./Appearance";
 
 /**
- * The Settings, opened from the Gallery's gear: the Appearance (System, Light,
+ * The Settings, opened from the shell's gear: the Appearance (System, Light,
  * Dark), below the Cloud Backing (WebDAV). A dialog, as the native app's
  * sheet; a port of the Swift `SettingsView`.
  */

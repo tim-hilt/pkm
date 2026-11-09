@@ -4,7 +4,7 @@
 import { chromium } from "playwright-core";
 
 const out = process.argv[2] ?? "/tmp/wt-web.png";
-const path = process.argv[3] ?? "/";
+const path = process.argv[3] ?? "/drawings";
 const port = process.env.PORT ?? "3000";
 const width = Number(process.env.WIDTH ?? 1280);
 const height = Number(process.env.HEIGHT ?? 800);
@@ -17,7 +17,7 @@ try {
   page.on("console", (message) => console.error(`[page] ${message.text()}`));
   page.on("pageerror", (error) => console.error(`[page error] ${error.message}`));
   await page.goto(`http://localhost:${port}${path}`);
-  await page.waitForSelector("canvas, .unsupported");
+  await page.waitForSelector(".shell, .unsupported");
   await page.waitForTimeout(1500);
   await page.screenshot({ path: out });
   console.log(out);

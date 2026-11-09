@@ -73,6 +73,17 @@ describe("OfflineCache", () => {
     expect(await text(offline.respond(asset("app-1.wasm")))).toBe("wasm");
   });
 
+  it("opens the app at a deep link, offline and when the server has no file there", async () => {
+    const network = new FakeNetwork(files);
+    const { offline } = setup("v1", network);
+    await offline.install();
+
+    // The FakeNetwork answers 404 for /drawings, as httpd does before its E404 page.
+    expect(await text(offline.respond(navigate("drawings")))).toBe(`<app v1>${buildMarker("v1")}`);
+    network.online = false;
+    expect(await text(offline.respond(navigate("drawings")))).toBe(`<app v1>${buildMarker("v1")}`);
+  });
+
   it("serves assets from the cache without the network", async () => {
     const network = new FakeNetwork(files);
     const { offline } = setup("v1", network);
