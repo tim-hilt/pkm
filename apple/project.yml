@@ -27,6 +27,10 @@ targets:
       properties:
         # Drawings live in Documents, which Files (iOS) and Finder show.
         UIFileSharingEnabled: true
+        # `pkm://<context>[/<id>]` links open the app.
+        CFBundleURLTypes:
+          - CFBundleURLName: pkm
+            CFBundleURLSchemes: [pkm]
         # The `.excalidraw` type, for exporting Drawings.
         UTImportedTypeDeclarations:
           - UTTypeIdentifier: com.excalidraw.drawing

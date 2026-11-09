@@ -105,6 +105,18 @@ import Testing
         #expect(gallery.open?.editor.elementCount() == 8)
     }
 
+    @Test func aLinkToAKnownItemOpensItAndToAnUnknownOneLeavesTheGalleryWithoutFailure() throws {
+        try store.save(Data(contentsOf: SampleDrawing.url), as: "sample")
+        let gallery = Gallery(store: store)
+
+        gallery.openDrawing(linkedItemID: "nope")
+        #expect(gallery.open == nil)
+        #expect(gallery.failure == nil)
+
+        gallery.openDrawing(linkedItemID: gallery.drawings[0].id)
+        #expect(gallery.open?.name == "sample")
+    }
+
     @Test func aDrawingThatCannotBeOpenedStaysInTheGalleryWithAFailure() throws {
         try store.save(Data("not json".utf8), as: "broken")
         let gallery = Gallery(store: store)

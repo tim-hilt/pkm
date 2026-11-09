@@ -59,4 +59,23 @@ import Testing
         navigation.isItemOpen = false
         #expect(navigation.canSwitchContext)
     }
+
+    @Test func aContextLinkSwitchesToTheContext() {
+        let navigation = AppNavigation(remembering: nil)
+        #expect(navigation.follow(URL(string: "pkm://books")!) == .init(context: .books, itemID: nil))
+        #expect(navigation.selected == .books)
+    }
+
+    @Test func anItemLinkSwitchesToTheContextAndNamesTheItem() {
+        let navigation = AppNavigation(remembering: nil)
+        #expect(navigation.follow(URL(string: "pkm://drawings/abc123")!) == .init(context: .drawings, itemID: "abc123"))
+        #expect(navigation.selected == .drawings)
+    }
+
+    @Test func unknownContextsAndOtherURLsAreIgnored() {
+        let navigation = AppNavigation(remembering: nil)
+        #expect(navigation.follow(URL(string: "pkm://recipes/1")!) == nil)
+        #expect(navigation.follow(URL(string: "https://drawings/1")!) == nil)
+        #expect(navigation.selected == .tasks)
+    }
 }

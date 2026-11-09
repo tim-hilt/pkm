@@ -28,4 +28,20 @@ final class AppNavigation {
         self.defaults = defaults
         selected = defaults?.string(forKey: Self.lastContextKey).flatMap(AppContext.init(rawValue:)) ?? .tasks
     }
+
+    /// Follows a `pkm://<context>[/<id>]` link: switches to the Context and
+    /// returns the Item ID to open there, if any. Other URLs and unknown
+    /// Contexts are ignored (`nil` and nothing changes).
+    func follow(_ url: URL) -> Link? {
+        guard url.scheme == "pkm", let host = url.host(), let context = AppContext(rawValue: host) else { return nil }
+        selected = context
+        let id = url.pathComponents.dropFirst().first
+        return Link(context: context, itemID: id)
+    }
+
+    /// A followed link: the Context now shown and the Item asked for.
+    struct Link: Equatable {
+        let context: AppContext
+        let itemID: String?
+    }
 }

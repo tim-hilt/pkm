@@ -41,6 +41,7 @@ struct ContentView: View {
         #if os(iOS)
             .sheet(isPresented: $navigation.isShowingSettings) { SettingsSheet() }
         #endif
+        .onOpenURL { follow($0) }
         .task { attachCloudBacking() }
         .onChange(of: gallery.open != nil, initial: true) { navigation.isItemOpen = gallery.open != nil }
         .onChange(of: cloud.connection != nil, initial: true) { gallery.isCloudBacked = cloud.connection != nil }
@@ -54,6 +55,13 @@ struct ContentView: View {
 }
 
 extension ContentView {
+    /// Leaves any open Drawing, then shows what a `pkm://` link names.
+    private func follow(_ url: URL) {
+        gallery.close()
+        guard let link = navigation.follow(url), link.context == .drawings, let id = link.itemID else { return }
+        gallery.openDrawing(linkedItemID: id)
+    }
+
     /// Lets Cloud Backing Sync the Gallery's Drawings, and the Gallery tell it
     /// of changes. Not for the temporary stores of UI tests and screenshots.
     private func attachCloudBacking() {

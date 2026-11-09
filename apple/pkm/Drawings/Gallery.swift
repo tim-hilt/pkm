@@ -140,6 +140,12 @@ final class Gallery {
         }
     }
 
+    /// Opens the Drawing a link names; an unknown Item ID leaves the Gallery shown.
+    func openDrawing(linkedItemID id: String) {
+        guard (try? store.name(forItemID: id)) != nil else { return }
+        openDrawing(itemID: id)
+    }
+
     private func show(_ drawing: OpenDrawing) {
         // Deleted outside the app: back to the Gallery, without saving.
         drawing.keepsDeletedDrawingOpen = isCloudBacked
