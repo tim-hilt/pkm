@@ -7,7 +7,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use pkm_drawing::json::{Object, Value, parse};
+use pkm_base::json::{Object, Value, parse};
 use pkm_drawing::{
     Editor, Geometry, Modifiers, Part, PartKind, PointerButton, PointerEvent, PointerKind,
     PointerPhase, TextMeasurer, Verb,

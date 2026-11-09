@@ -21,11 +21,11 @@ use std::collections::{HashMap, HashSet};
 
 use crate::history::Step;
 use crate::hit_test::is_selectable;
-use crate::json::Value;
-use crate::random::Entropy;
 use crate::scene::{Element, Scene};
 use crate::selection::Selection;
 use crate::z_order;
+use pkm_base::json::Value;
+use pkm_base::random::Entropy;
 
 /// The group that selecting `element` selects: the outermost one it is in,
 /// not counting the editing group and those outside it.

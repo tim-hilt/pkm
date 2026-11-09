@@ -17,12 +17,12 @@
 use std::fmt;
 use std::str::Utf8Error;
 
-use crate::base64;
 use crate::geometry::{ImageStatus, TextAlign};
-use crate::json::{self, Object, ParseError, Value};
 use crate::linear;
-use crate::random::Entropy;
 use crate::restore;
+use pkm_base::base64;
+use pkm_base::json::{self, Object, ParseError, Value};
+use pkm_base::random::Entropy;
 
 /// The kinds of Element the core understands. Elements of any other type
 /// (frames, embeds, types from newer Excalidraw versions) stay in the Scene

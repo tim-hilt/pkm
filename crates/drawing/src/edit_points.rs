@@ -29,11 +29,11 @@ use crate::history::Step;
 use crate::input::PointerKind;
 use crate::linear;
 use crate::path::Point;
-use crate::random::Entropy;
 use crate::rough::Op;
 use crate::scene::{Element, ElementType, Scene};
 use crate::selection::Selection;
 use crate::transform_handles::{Grip, targets};
+use pkm_base::random::Entropy;
 
 /// How many handles of points a segment must be long on screen to have a
 /// handle in its middle (Excalidraw's `POINT_HANDLE_SIZE * 4`).

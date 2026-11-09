@@ -5,13 +5,13 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
-use pkm_drawing::json::{self, Value};
+use pkm_base::json::{self, Value};
 
 use crate::fake_http::{Answer, FakeServer, Request, parse_query};
 use crate::gdrive::Hosts;
 use crate::percent::encode;
-use crate::sha256::sha256;
+use pkm_base::base64;
+use pkm_base::sha256::sha256;
 
 pub(crate) const CLIENT_ID: &str = "123-abc.apps.googleusercontent.com";
 pub(crate) const REDIRECT: &str = "com.googleusercontent.apps.123-abc:/oauth2redirect";
@@ -186,7 +186,7 @@ fn token(request: &Request, fake: &mut State) -> Answer {
                 return rejected();
             };
             // PKCE: the verifier must be the one the challenge was made from.
-            let verifier = BASE64_URL_SAFE_NO_PAD.encode(sha256(form["code_verifier"].as_bytes()));
+            let verifier = base64::encode_url(&sha256(form["code_verifier"].as_bytes()));
             if verifier != challenge || form["redirect_uri"] != REDIRECT {
                 return rejected();
             }

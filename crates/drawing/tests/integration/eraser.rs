@@ -4,7 +4,7 @@
 //! Excalidraw's `eraser/index.ts` (which Elements a step of the eraser path
 //! touches) and `App.tsx` (previewing at 20 % opacity, erasing on release).
 
-use pkm_drawing::json::Value;
+use pkm_base::json::Value;
 use pkm_drawing::{Editor, Geometry, Tool};
 
 use crate::common;

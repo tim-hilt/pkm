@@ -1,0 +1,7 @@
+# What every Context and the cloud crate share: JSON, base64, SHA-256, the
+# clock and the random generator. Deliberately has no dependencies (ADR-0009).
+[package]
+name = "pkm-base"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true

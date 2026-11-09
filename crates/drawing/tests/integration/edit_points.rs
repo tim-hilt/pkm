@@ -8,7 +8,7 @@
 //! segment adds a point there, tapping selects a point, and deleting removes
 //! the selected ones.
 
-use pkm_drawing::json::Value;
+use pkm_base::json::Value;
 use pkm_drawing::{Editor, PartKind};
 
 use crate::common;

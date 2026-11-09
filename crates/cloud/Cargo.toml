@@ -8,10 +8,10 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+# JSON, base64 and SHA-256.
+pkm-base = { path = "../base" }
 # The merge of concurrent changes.
 pkm-drawing = { path = "../drawing" }
-# Basic auth.
-base64 = "0.22"
 # The PROPFIND answers of a WebDAV server.
 quick-xml = "0.42"
 

@@ -4,7 +4,7 @@
 //! the bytes in the Drawing's `files` as Excalidraw does and selects it, as
 //! one undo step.
 
-use pkm_drawing::json::{Value, parse};
+use pkm_base::json::{Value, parse};
 use pkm_drawing::{Editor, ImageFile, MagnifyEvent, Tool};
 
 use crate::common;

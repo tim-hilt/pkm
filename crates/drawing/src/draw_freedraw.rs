@@ -13,11 +13,11 @@
 use crate::draw_shape::new_element;
 use crate::history::Step;
 use crate::input::{PointerEvent, PointerKind};
-use crate::json::{Object, Value};
 use crate::path::Point;
-use crate::random::Entropy;
 use crate::scene::Scene;
 use crate::style::Style;
+use pkm_base::json::{Object, Value};
+use pkm_base::random::Entropy;
 
 /// Excalidraw's `DEFAULT_STROKE_STREAMLINE`: how much a mouse stroke is
 /// smoothed.

@@ -5,7 +5,7 @@
 //! Expected orders follow Excalidraw's `zindex.ts` and expected keys its
 //! `fractional-indexing` (worked out with the vendored implementation).
 
-use pkm_drawing::json::Value;
+use pkm_base::json::Value;
 use pkm_drawing::{Editor, ZOrder};
 
 use crate::common;

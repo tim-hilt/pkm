@@ -7,8 +7,8 @@
 use std::fs;
 use std::path::PathBuf;
 
+use pkm_base::json::{Value, parse};
 use pkm_drawing::Editor;
-use pkm_drawing::json::{Value, parse};
 
 fn fixture(path: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

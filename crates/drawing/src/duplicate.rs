@@ -13,12 +13,12 @@
 
 use std::collections::HashMap;
 
-use crate::clock::now_ms;
 use crate::history::Step;
-use crate::json::{Object, Value};
-use crate::random::Entropy;
 use crate::scene::Scene;
 use crate::selection::Selection;
+use pkm_base::clock::now_ms;
+use pkm_base::json::{Object, Value};
+use pkm_base::random::Entropy;
 
 /// Excalidraw's `DEFAULT_GRID_SIZE / 2`: how far a copy is from its original.
 const OFFSET: f64 = 10.0;

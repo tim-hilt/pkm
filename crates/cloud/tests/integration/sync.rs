@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
 
+use pkm_base::json;
 use pkm_cloud::{Blob, DirStorage, Storage, SyncState, sync_step};
-use pkm_drawing::json;
 
 struct Scratch(PathBuf);
 

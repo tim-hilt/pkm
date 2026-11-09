@@ -5,7 +5,7 @@
 use crate::common;
 
 use common::editor_with_element;
-use pkm_drawing::json::parse;
+use pkm_base::json::parse;
 use pkm_drawing::{Editor, Geometry, Image, ImageStatus, PartKind};
 
 const PHOTO: &str = r#""id":"i","type":"image","x":100,"y":50,"width":200,"height":100,

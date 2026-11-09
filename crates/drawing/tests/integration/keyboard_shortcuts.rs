@@ -242,7 +242,7 @@ fn escape_and_enter_finish_a_line_and_an_arrow_with_the_points_so_far() {
             assert_eq!(
                 elements[0]
                     .get("type")
-                    .and_then(pkm_drawing::json::Value::as_str),
+                    .and_then(pkm_base::json::Value::as_str),
                 Some(kind)
             );
             assert_eq!(

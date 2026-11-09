@@ -21,10 +21,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::json::Object;
-use crate::random::Entropy;
 use crate::scene::{Members, Scene};
 use crate::selection::Selection;
+use pkm_base::json::Object;
+use pkm_base::random::Entropy;
 
 /// Members that change with every revision of an Element without being
 /// part of what the user did.

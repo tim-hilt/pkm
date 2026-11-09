@@ -9,10 +9,10 @@ use std::collections::HashMap;
 
 use crate::color::parse_color;
 use crate::geometry::{Geometry, Hole, TextAlign, TextStyle};
-use crate::json::Value;
 use crate::linear;
 use crate::scene::{Element, ElementType, Scene, VerticalAlign};
 use crate::wrap;
+use pkm_base::json::Value;
 
 /// Measures text for the core; supplied by the client, which owns the font.
 ///

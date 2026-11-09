@@ -195,7 +195,7 @@ fn geometry_after_a_one_element_change_in_5000_elements_takes_well_under_a_frame
 
 /// The scene bounds of every Element as saved: `(min x, min y, max x, max y)`.
 fn scene_bounds(editor: &Editor) -> (f64, f64, f64, f64) {
-    use pkm_drawing::json::{Value, parse};
+    use pkm_base::json::{Value, parse};
     let drawing = parse(&String::from_utf8(editor.save()).unwrap()).unwrap();
     let number = |e: &Value, key: &str| e.get(key).and_then(Value::as_f64).unwrap_or(0.0);
     let mut bounds = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);

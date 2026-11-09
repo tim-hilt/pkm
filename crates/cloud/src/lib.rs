@@ -17,8 +17,6 @@ mod oauth;
 pub mod onedrive;
 mod percent;
 pub mod schedule;
-#[cfg(feature = "native")]
-mod sha256;
 pub mod step;
 pub mod storage;
 #[cfg(feature = "native")]

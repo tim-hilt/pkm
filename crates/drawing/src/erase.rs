@@ -18,8 +18,8 @@ use crate::history::Step;
 use crate::hit_test::{self, Reach};
 use crate::input::{PointerEvent, PointerKind};
 use crate::path::Point;
-use crate::random::Entropy;
 use crate::scene::Scene;
+use pkm_base::random::Entropy;
 
 /// An erase by one pointer, from going down to lifting.
 #[derive(Debug)]

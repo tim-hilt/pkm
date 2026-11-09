@@ -4,7 +4,7 @@
 //! Expected values are worked out by hand in the comments, from Excalidraw's
 //! rules for resizing and rotating (`resizeElements.ts`).
 
-use pkm_drawing::json::{Value, parse};
+use pkm_base::json::{Value, parse};
 use pkm_drawing::{Editor, PartKind};
 
 use crate::common;

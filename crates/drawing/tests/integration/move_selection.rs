@@ -3,8 +3,8 @@
 //! events in, Selection and saved Drawing out. Expected positions are worked
 //! out by hand in the comments.
 
+use pkm_base::json::{Value, parse};
 use pkm_drawing::Editor;
-use pkm_drawing::json::{Value, parse};
 
 use crate::common;
 use common::{editor_with, replay, tap};

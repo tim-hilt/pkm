@@ -15,11 +15,11 @@ use std::collections::HashSet;
 use crate::duplicate::Copying;
 use crate::frame::Frame;
 use crate::history::Step;
-use crate::json::{Object, Value, parse};
-use crate::random::Entropy;
 use crate::restore;
 use crate::scene::{Element, ElementType, Scene};
 use crate::selection::Selection;
+use pkm_base::json::{Object, Value, parse};
+use pkm_base::random::Entropy;
 
 /// The `type` of what Excalidraw puts on the clipboard.
 const CLIPBOARD: &str = "excalidraw/clipboard";

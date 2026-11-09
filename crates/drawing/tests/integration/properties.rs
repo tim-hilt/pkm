@@ -3,7 +3,7 @@
 //! Element out. Option values are literals from Excalidraw's own panel
 //! (stroke widths 1, 2, 4; roughness 0, 1, 2; roundness types 2 and 3).
 
-use pkm_drawing::json::Value;
+use pkm_base::json::Value;
 use pkm_drawing::scene::{FillPattern, LineStyle};
 use pkm_drawing::{Edges, Editor, Property, Sections, Sloppiness, StrokeWidth, Tool};
 

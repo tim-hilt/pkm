@@ -3,11 +3,9 @@
 //! Clients drive everything through [`Editor`].
 
 mod arrowhead;
-mod base64;
 mod binding;
 mod box_select;
 mod clipboard;
-mod clock;
 mod color;
 mod context_menu;
 mod cursor;
@@ -32,7 +30,6 @@ mod image;
 mod index_sync;
 pub mod input;
 mod insert_image;
-pub mod json;
 mod laser;
 mod linear;
 mod merge;
@@ -44,7 +41,6 @@ mod path;
 mod pencil_double_tap;
 mod pencil_only;
 mod properties;
-mod random;
 mod restore;
 mod rough;
 pub mod scene;
@@ -62,7 +58,6 @@ mod viewport;
 mod wrap;
 mod z_order;
 
-pub use clock::set_clock;
 pub use color::dark_mode_color;
 pub use context_menu::ContextMenu;
 pub use cursor::Cursor;
@@ -77,6 +72,7 @@ pub use input::{
 pub use insert_image::ImageFile;
 pub use merge::{MergeError, are_same_drawing, is_drawing, merge_drawings, merge_keeping_local};
 pub use pencil_double_tap::PencilDoubleTap;
+pub use pkm_base::clock::set_clock;
 pub use properties::{Properties, Property, Sections};
 pub use scene::LoadError;
 pub use shortcut::{Command, Shortcut, shortcuts};

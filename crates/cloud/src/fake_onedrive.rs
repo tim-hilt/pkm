@@ -6,13 +6,13 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
-use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
-use pkm_drawing::json::Value;
+use pkm_base::json::Value;
 
 use crate::fake_http::{Answer, FakeServer, Request, parse_query};
 use crate::onedrive::{Hosts, REDIRECT_URI};
 use crate::percent::{decode, encode};
-use crate::sha256::sha256;
+use pkm_base::base64;
+use pkm_base::sha256::sha256;
 
 pub(crate) const CLIENT_ID: &str = "client-id";
 pub(crate) const EMAIL: &str = "tim@example.com";
@@ -217,7 +217,7 @@ fn token(request: &Request, fake: &mut State) -> Answer {
             let Some(challenge) = fake.codes.remove(&form["code"]) else {
                 return rejected();
             };
-            let verifier = BASE64_URL_SAFE_NO_PAD.encode(sha256(form["code_verifier"].as_bytes()));
+            let verifier = base64::encode_url(&sha256(form["code_verifier"].as_bytes()));
             if verifier != challenge || form["redirect_uri"] != REDIRECT_URI {
                 return rejected();
             }

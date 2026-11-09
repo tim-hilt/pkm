@@ -10,7 +10,7 @@
 //! mode the arrow stops short of the shape at a gap of 5 plus half the shape's
 //! stroke width, so a shape with a stroke width of 2 has a gap of 6.
 
-use pkm_drawing::json::Value;
+use pkm_base::json::Value;
 use pkm_drawing::{Editor, PartKind, Tool};
 
 use crate::common;

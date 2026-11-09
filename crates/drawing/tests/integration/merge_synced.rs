@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use pkm_drawing::json::Value;
+use pkm_base::json::Value;
 use pkm_drawing::{Editor, Tool};
 
 use crate::common;

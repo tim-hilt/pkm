@@ -8,7 +8,7 @@
 //! Elements of the next group down are the ones that are selected. The
 //! expected fractional indices are worked out with its `fractional-indexing`.
 
-use pkm_drawing::json::Value;
+use pkm_base::json::Value;
 use pkm_drawing::{ContextMenu, Editor, PartKind, PointerKind, ZOrder};
 
 use crate::common;

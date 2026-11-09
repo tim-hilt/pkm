@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use pkm_drawing::json::Value;
+use pkm_base::json::Value;
 use pkm_drawing::scene::LineStyle;
 use pkm_drawing::{Editor, FontSize, Property, TextAlign, TextEditor, Tool};
 

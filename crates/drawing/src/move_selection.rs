@@ -12,9 +12,9 @@
 
 use crate::binding::Attachments;
 use crate::history::Step;
-use crate::random::Entropy;
 use crate::scene::{ElementType, Scene};
 use crate::selection::Selection;
+use pkm_base::random::Entropy;
 
 /// A drag of the Selection by one pointer.
 #[derive(Debug)]

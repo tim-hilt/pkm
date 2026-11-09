@@ -10,14 +10,14 @@ use std::io::{self, Read};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
-use pkm_drawing::json;
+use pkm_base::json;
 use ureq::http::{Request, Response};
 use ureq::{Agent, Body, SendBody};
 
 use crate::percent::{decode, encode};
-use crate::sha256::sha256;
 use crate::storage::ConnectError;
+use pkm_base::base64;
+use pkm_base::sha256::sha256;
 
 /// An access token is refreshed this long before it expires.
 const EXPIRY_MARGIN: Duration = Duration::from_secs(60);
@@ -41,7 +41,7 @@ pub(crate) struct OAuthConfig {
 fn random_token(n: usize) -> io::Result<String> {
     let mut bytes = vec![0u8; n];
     File::open("/dev/urandom")?.read_exact(&mut bytes)?;
-    Ok(BASE64_URL_SAFE_NO_PAD.encode(bytes))
+    Ok(base64::encode_url(&bytes))
 }
 
 /// A sign-in under way: the page to show, and what is needed to finish it.
@@ -56,7 +56,7 @@ impl SignIn {
     pub fn start(config: OAuthConfig) -> io::Result<Self> {
         let verifier = random_token(32)?;
         let state = random_token(16)?;
-        let challenge = BASE64_URL_SAFE_NO_PAD.encode(sha256(verifier.as_bytes()));
+        let challenge = base64::encode_url(&sha256(verifier.as_bytes()));
         let mut query = vec![
             ("client_id", config.client_id.as_str()),
             ("redirect_uri", &config.redirect_uri),
@@ -354,7 +354,7 @@ mod tests {
         // RFC 7636, appendix B.
         let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
         assert_eq!(
-            BASE64_URL_SAFE_NO_PAD.encode(sha256(verifier.as_bytes())),
+            base64::encode_url(&sha256(verifier.as_bytes())),
             "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
         );
     }

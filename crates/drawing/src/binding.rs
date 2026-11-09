@@ -31,11 +31,11 @@ use crate::edit_points;
 use crate::frame::Frame;
 use crate::history::Step;
 use crate::input::PointerKind;
-use crate::json::{Object, Value};
 use crate::outline::Outline;
 use crate::path::Point;
-use crate::random::Entropy;
 use crate::scene::{Element, ElementType, Scene};
+use pkm_base::json::{Object, Value};
+use pkm_base::random::Entropy;
 
 /// Excalidraw's `BASE_BINDING_GAP`; the stroke of the shape adds to it.
 const BASE_GAP: f64 = 5.0;

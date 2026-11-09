@@ -7,7 +7,7 @@
 //! nobody interprets.
 //!
 //! ```
-//! use pkm_drawing::json::parse;
+//! use pkm_base::json::parse;
 //!
 //! let value = parse(r#"{ "b": 1.0, "a": [true, null] }"#).unwrap();
 //! assert_eq!(value.to_json(), r#"{"b":1,"a":[true,null]}"#);

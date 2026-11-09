@@ -4,7 +4,7 @@
 //! Expected strings are literals taken from JavaScript's `JSON.stringify`
 //! (the spec for what excalidraw.com writes), never recomputed by the code.
 
-use pkm_drawing::json::{Value, parse};
+use pkm_base::json::{Value, parse};
 
 /// Parses `input` and serializes it compactly again.
 fn round_trip(input: &str) -> String {

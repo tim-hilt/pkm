@@ -15,7 +15,7 @@
 
 use crate::percent::{decode, encode};
 use crate::storage::{Blob, ConnectError};
-use base64::prelude::{BASE64_STANDARD, Engine};
+use pkm_base::base64;
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
 use std::io;
@@ -511,7 +511,7 @@ pub(crate) fn parse_listing(xml: &str) -> Result<Vec<Blob>, quick_xml::Error> {
 pub(crate) fn basic_auth(username: &str, password: &str) -> String {
     format!(
         "Basic {}",
-        BASE64_STANDARD.encode(format!("{username}:{password}"))
+        base64::encode(format!("{username}:{password}").as_bytes())
     )
 }
 

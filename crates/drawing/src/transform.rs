@@ -31,13 +31,13 @@ use crate::binding::Attachments;
 use crate::frame::Frame;
 use crate::history::Step;
 use crate::input::Modifiers;
-use crate::json::{Object, Value};
 use crate::path::Point;
-use crate::random::Entropy;
 use crate::scene::{Element, ElementType, Scene};
 use crate::selection::Selection;
 use crate::text::{self, TextMeasurer};
 use crate::transform_handles::{Handle, TransformBox};
+use pkm_base::json::{Object, Value};
+use pkm_base::random::Entropy;
 
 /// Excalidraw's `SHIFT_LOCKING_ANGLE`: the angle a snapped rotation is a
 /// multiple of.

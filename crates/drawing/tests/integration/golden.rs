@@ -10,7 +10,7 @@
 use crate::common;
 
 use common::{Fixture, Op, Shape};
-use pkm_drawing::json::Value;
+use pkm_base::json::Value;
 
 const FIXTURES: [&str; 5] = [
     "shapes",

@@ -17,10 +17,10 @@ use std::collections::HashSet;
 
 use crate::history::Step;
 use crate::index_sync;
-use crate::json::{Object, Value};
-use crate::random::Entropy;
 use crate::scene::Scene;
 use crate::selection::Selection;
+use pkm_base::json::{Object, Value};
+use pkm_base::random::Entropy;
 use stack::{Direction, Layer, Stack};
 
 /// How the Selection is moved in z-order.

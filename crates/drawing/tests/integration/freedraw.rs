@@ -13,7 +13,7 @@ use common::{
     Fixture, NON_ZERO, Shape, assert_part_matches_set, editor_with_element, editor_with_fixture,
     num, opaque, ops, parts_of, text,
 };
-use pkm_drawing::json::Value;
+use pkm_base::json::Value;
 use pkm_drawing::{Geometry, Part, PartKind, Verb};
 
 /// Checks every freedraw Element of the `freedraw` fixture that `keep`

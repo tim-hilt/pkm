@@ -7,7 +7,7 @@
 //! copying a labelled rectangle (in a group with its label), an ellipse and
 //! an arrow bound to both, with `serializeAsClipboardJSON`.
 
-use pkm_drawing::json::{Value, parse};
+use pkm_base::json::{Value, parse};
 use pkm_drawing::{Editor, ImageFile};
 
 use crate::common;

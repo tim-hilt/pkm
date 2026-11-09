@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use pkm_drawing::json::Value;
+use pkm_base::json::Value;
 use pkm_drawing::{Editor, TextAlign, TextEditor};
 
 use crate::common;

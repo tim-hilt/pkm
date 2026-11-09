@@ -17,10 +17,10 @@
 
 use std::collections::HashSet;
 
-use crate::json::{self, Object, Value};
 use crate::linear;
-use crate::random::Entropy;
 use crate::scene::{Element, ElementType};
+use pkm_base::json::{self, Object, Value};
+use pkm_base::random::Entropy;
 
 /// Excalidraw's `MAX_LINEAR_PX`: lines and arrows wider or taller than this
 /// would freeze the editor (a dashed one is millions of dashes), so they are

@@ -2,7 +2,7 @@
 //! sequences: pointer events and commands in, saved Drawing, Selection and
 //! undo/redo availability out.
 
-use pkm_drawing::json::{Value, parse};
+use pkm_base::json::{Value, parse};
 use pkm_drawing::{Editor, Tool};
 
 use crate::common;

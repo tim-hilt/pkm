@@ -11,10 +11,10 @@
 use crate::color::parse_color;
 use crate::draw_shape::{ADAPTIVE_RADIUS, PROPORTIONAL_RADIUS};
 use crate::geometry::TextAlign;
-use crate::json::{Object, Value};
-use crate::random::Entropy;
 use crate::scene::{Element, ElementType, FillPattern, LineStyle, Scene};
 use crate::style::{Edges, FontSize, Sloppiness, StrokeWidth, Style, fill_name, line_name};
+use pkm_base::json::{Object, Value};
+use pkm_base::random::Entropy;
 
 /// A change to one property, as the panel offers them.
 #[derive(Debug, Clone, PartialEq)]

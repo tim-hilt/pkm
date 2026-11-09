@@ -526,7 +526,7 @@ fn shift_click_changes_the_overlay_revision() {
 /// The x of the Element `id` in the saved Drawing.
 fn x_of(editor: &Editor, id: &str) -> f64 {
     let saved = String::from_utf8(editor.save()).unwrap();
-    let drawing = pkm_drawing::json::parse(&saved).unwrap();
+    let drawing = pkm_base::json::parse(&saved).unwrap();
     drawing
         .get("elements")
         .and_then(|e| e.as_array())

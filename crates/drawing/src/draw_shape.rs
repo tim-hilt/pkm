@@ -5,13 +5,13 @@
 //! pointer lifts it stays, unless it never grew, in which case it was a tap
 //! and nothing is drawn.
 
-use crate::clock::now_ms;
 use crate::history::Step;
-use crate::json::{Object, Value};
 use crate::properties::{self, takes_edges};
-use crate::random::Entropy;
 use crate::scene::{ElementType, Scene};
 use crate::style::{Edges, Style, fill_name, line_name};
+use pkm_base::clock::now_ms;
+use pkm_base::json::{Object, Value};
+use pkm_base::random::Entropy;
 
 /// Excalidraw's `ROUNDNESS`: rounded corners of rectangles take a fixed
 /// radius (the Element's size permitting), those of the other shapes a

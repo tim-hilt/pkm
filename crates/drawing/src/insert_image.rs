@@ -8,13 +8,13 @@
 //! images are laid out in a grid, as a whole centred on the point they are
 //! put at.
 
-use crate::clock::now_ms;
 use crate::draw_shape::new_element;
 use crate::history::Step;
-use crate::json::Value;
-use crate::random::Entropy;
 use crate::scene::Scene;
 use crate::style::Style;
+use pkm_base::clock::now_ms;
+use pkm_base::json::Value;
+use pkm_base::random::Entropy;
 
 /// Excalidraw's padding between images of a grid, in view points.
 const GRID_PADDING: f64 = 50.0;

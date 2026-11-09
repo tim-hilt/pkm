@@ -17,7 +17,7 @@ const ID_LENGTH: usize = 21;
 
 /// SplitMix64: tiny, fast, and good enough for ids and seeds.
 #[derive(Debug)]
-pub(crate) struct Entropy {
+pub struct Entropy {
     state: u64,
 }
 

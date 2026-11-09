@@ -9,7 +9,7 @@
 use crate::common;
 
 use common::{assert_rough_elements_match_golden, editor_with_element, ops, text};
-use pkm_drawing::json::Value;
+use pkm_base::json::Value;
 use pkm_drawing::{PartKind, Verb};
 
 fn is_a(kind: &'static str) -> impl Fn(&Value) -> bool {

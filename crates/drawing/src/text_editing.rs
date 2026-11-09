@@ -21,16 +21,16 @@ use crate::color::parse_color;
 use crate::draw_shape::new_element;
 use crate::geometry::TextAlign;
 use crate::history::Step;
-use crate::json::{Object, Value};
 use crate::linear;
 use crate::path::Point;
 use crate::properties::{self, Property, align_name};
-use crate::random::Entropy;
 use crate::scene::{Element, ElementType, Scene};
 use crate::style::Style;
 use crate::text::{self, TextMeasurer};
 use crate::viewport::Viewport;
 use crate::wrap;
+use pkm_base::json::{Object, Value};
+use pkm_base::random::Entropy;
 
 /// Excalifont, the font family of every new text.
 const FONT_FAMILY: f64 = 5.0;

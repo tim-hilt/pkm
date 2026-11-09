@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use crate::index_sync;
-use crate::json::{self, Object, Value};
+use pkm_base::json::{self, Object, Value};
 
 /// Why bytes could not be merged: a side is not a Drawing.
 #[derive(Debug, Clone, PartialEq, Eq)]

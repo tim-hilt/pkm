@@ -27,13 +27,13 @@ use crate::draw_shape::{Outcome, PROPORTIONAL_RADIUS, new_element};
 use crate::edit_points;
 use crate::history::Step;
 use crate::input::{PointerEvent, PointerKind, PointerPhase};
-use crate::json::{Object, Value};
 use crate::path::Point;
-use crate::random::Entropy;
 use crate::scene::{ElementType, Scene};
 use crate::style::Style;
 use crate::tap::slop;
 use crate::transform::SHIFT_LOCKING_ANGLE;
+use pkm_base::json::{Object, Value};
+use pkm_base::random::Entropy;
 
 /// Excalidraw's `LINE_CONFIRM_THRESHOLD`: how near a mouse or Pencil must be
 /// to a point to be on it, in view points.

@@ -8,7 +8,7 @@
 //! switching Tool, or for lines closing the loop) finishes it, as on
 //! excalidraw.com.
 
-use pkm_drawing::json::Value;
+use pkm_base::json::Value;
 use pkm_drawing::{Editor, Tool};
 
 use crate::common;

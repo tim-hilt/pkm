@@ -2,7 +2,7 @@
 //! seam with recorded pointer sequences: pointer events in, saved JSON, Tool
 //! and geometry out. Coordinates in the comments are worked out by hand.
 
-use pkm_drawing::json::{Value, parse};
+use pkm_base::json::{Value, parse};
 use pkm_drawing::{Editor, Modifiers, PointerEvent, PointerKind, PointerPhase, Tool};
 
 use PointerKind::{Finger, Mouse, Pencil};

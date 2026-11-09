@@ -7,9 +7,9 @@
 
 use crate::erase;
 use crate::history::Step;
-use crate::random::Entropy;
 use crate::scene::Scene;
 use crate::selection::Selection;
+use pkm_base::random::Entropy;
 
 /// Deletes the Elements of `selection`, and their labels, as part of `step`.
 pub(crate) fn delete(
