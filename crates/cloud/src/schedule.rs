@@ -165,11 +165,16 @@ impl Status {
     /// The status after a step: a lost access beats being offline, which beats
     /// a full cloud.
     pub fn after(outcome: &StepOutcome) -> Self {
-        if outcome.access_lost {
+        Self::after_all(std::slice::from_ref(outcome))
+    }
+
+    /// The status after the steps of all Context folders together.
+    pub fn after_all(outcomes: &[StepOutcome]) -> Self {
+        if outcomes.iter().any(|o| o.access_lost) {
             Status::AccessLost
-        } else if outcome.error.is_some() {
+        } else if outcomes.iter().any(|o| o.error.is_some()) {
             Status::Offline
-        } else if outcome.storage_full {
+        } else if outcomes.iter().any(|o| o.storage_full) {
             Status::Full
         } else {
             Status::UpToDate
@@ -328,5 +333,21 @@ mod tests {
         s.step_ended(secs(5), true);
         s.access_lost();
         assert_eq!(s.wait(secs(6)), None);
+    }
+
+    #[test]
+    fn the_status_covers_all_folders_the_worst_problem_winning() {
+        let ok = StepOutcome::default;
+        let full = || StepOutcome {
+            storage_full: true,
+            ..ok()
+        };
+        let lost = || StepOutcome {
+            access_lost: true,
+            ..ok()
+        };
+        assert_eq!(Status::after_all(&[ok(), ok()]), Status::UpToDate);
+        assert_eq!(Status::after_all(&[ok(), full()]), Status::Full);
+        assert_eq!(Status::after_all(&[full(), lost()]), Status::AccessLost);
     }
 }

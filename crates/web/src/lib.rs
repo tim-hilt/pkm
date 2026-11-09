@@ -1233,15 +1233,16 @@ pub struct WebDavProtocol(WebDav);
 
 #[wasm_bindgen]
 impl WebDavProtocol {
-    /// Throws `notHttps` for a URL that is not https.
+    /// The requests for the folder of Drawings. Throws `notHttps` for a URL
+    /// that is not https.
     #[wasm_bindgen(constructor)]
     pub fn new(url: &str, username: &str, password: &str) -> Result<WebDavProtocol, JsError> {
-        WebDav::new(url, username, password)
+        WebDav::new(url, username, password, Drawings::FOLDER)
             .map(Self)
             .map_err(|_| JsError::new("notHttps"))
     }
 
-    /// Checks the server and makes its `pkm` folder.
+    /// Checks the server and makes its `pkm/Drawings` folder.
     pub fn connect(&self) -> DavExchange {
         DavExchange::new(self.0.connect(), DavOutcome::connect)
     }
@@ -1279,7 +1280,9 @@ impl WebDavProtocol {
 // ---- The Sync step and its schedule (ADR-0016) ----
 
 use pkm_cloud::step::{LocalFile, Marks, Synced};
-use pkm_cloud::{Blob, Next, Request, Response, Schedule, Status, StepOutcome, SyncStep, Timing};
+use pkm_cloud::{
+    Blob, Drawings, Next, Request, Response, Schedule, Status, StepOutcome, SyncStep, Timing,
+};
 use std::time::Duration;
 
 /// What a Sync step asks the client to do; `kind` says which request it is
@@ -1439,7 +1442,7 @@ impl SyncRun {
     #[wasm_bindgen(constructor)]
     pub fn new(now_ms: f64) -> SyncRun {
         SyncRun {
-            step: SyncStep::new(now_ms as u64),
+            step: SyncStep::new(now_ms as u64, Arc::new(Drawings)),
             outcome: None,
         }
     }

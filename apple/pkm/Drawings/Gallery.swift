@@ -58,7 +58,7 @@ final class Gallery {
     /// Where Sync remembers what it Synced: in Application Support, not in the
     /// Drawings folder. Nil for the temporary stores of tests, which never Sync.
     var syncStateDirectory: URL? {
-        store.directory == .documentsDirectory
+        store.directory == DrawingStore.documentsFolder
             ? .applicationSupportDirectory.appending(path: "Sync", directoryHint: .isDirectory) : nil
     }
 

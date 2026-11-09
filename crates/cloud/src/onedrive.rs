@@ -1,5 +1,6 @@
 //! OneDrive as a Cloud Provider (ADR-0012): the Drawings are Synced with
-//! `Apps/pkm`, the app folder of a personal OneDrive.
+//! `Apps/pkm`, the app folder of a personal OneDrive, with a folder per Context
+//! in it (`Apps/pkm/Drawings`).
 //!
 //! Signs in with OAuth and PKCE and asks only for
 //! `Files.ReadWrite.AppFolder` (and `offline_access`, for a refresh token).
@@ -123,7 +124,7 @@ impl SignIn {
     pub fn finish(self, redirect: &str) -> Result<Account, ConnectError> {
         let agent = api_agent(self.hosts.https_only());
         let session = self.inner.finish(agent, redirect, Arc::new(|_| {}))?;
-        let storage = OneDriveStorage::from_session(self.hosts, session);
+        let storage = OneDriveStorage::from_session(self.hosts, session, "");
         let email = storage.account().map_err(|e| match e {
             AccountError::Unsupported => ConnectError::UnsupportedAccount,
             AccountError::Io(e) if e.kind() == io::ErrorKind::PermissionDenied => {
@@ -143,11 +144,13 @@ enum AccountError {
     Io(io::Error),
 }
 
-/// `Apps/pkm`. Tokens revoked are `PermissionDenied`, a full
+/// A Context's folder in `Apps/pkm`. Tokens revoked are `PermissionDenied`, a full
 /// OneDrive is `StorageFull`, anything else that fails is another kind.
 pub struct OneDriveStorage {
     session: Session,
     hosts: Hosts,
+    /// The Context's folder in the app folder: "Drawings".
+    context: String,
     simple_limit: usize,
     chunk_size: usize,
 }
@@ -160,18 +163,21 @@ impl fmt::Debug for OneDriveStorage {
 }
 
 impl OneDriveStorage {
-    /// The storage of an account signed in before, from its refresh token.
-    /// Contacts nobody, so it works offline; errors show on use. `on_rotate`
-    /// hears of a refresh token that replaces `refresh_token`, to be kept.
+    /// The storage of the folder of `context` ("Drawings") for an account
+    /// signed in before, from its refresh token. Contacts nobody, so it works
+    /// offline; errors show on use. `on_rotate` hears of a refresh token that
+    /// replaces `refresh_token`, to be kept.
     pub fn resume(
         client_id: &str,
         refresh_token: &str,
+        context: &str,
         on_rotate: impl Fn(&str) + Send + Sync + 'static,
     ) -> Self {
         Self::resume_with(
             Hosts::microsoft(),
             client_id,
             refresh_token,
+            context,
             Arc::new(on_rotate),
         )
     }
@@ -180,6 +186,7 @@ impl OneDriveStorage {
         hosts: Hosts,
         client_id: &str,
         refresh_token: &str,
+        context: &str,
         on_rotate: OnRotate,
     ) -> Self {
         let session = Session::resume(
@@ -188,13 +195,14 @@ impl OneDriveStorage {
             refresh_token.to_owned(),
             on_rotate,
         );
-        Self::from_session(hosts, session)
+        Self::from_session(hosts, session, context)
     }
 
-    fn from_session(hosts: Hosts, session: Session) -> Self {
+    fn from_session(hosts: Hosts, session: Session, context: &str) -> Self {
         Self {
             session,
             hosts,
+            context: context.to_owned(),
             simple_limit: SIMPLE_LIMIT,
             chunk_size: CHUNK_SIZE,
         }
@@ -202,7 +210,12 @@ impl OneDriveStorage {
 
     /// The URL of blob `name`, followed by `action` (`"/content"`, ...).
     fn blob_url(&self, name: &str, action: &str) -> String {
-        format!("{}:/{}:{action}", self.root_url(), encode(name))
+        format!(
+            "{}:/{}/{}:{action}",
+            self.root_url(),
+            encode(&self.context),
+            encode(name)
+        )
     }
 
     /// The app folder, which Graph creates on first access.
@@ -380,12 +393,18 @@ impl Storage for OneDriveStorage {
 
     fn list(&self) -> io::Result<Vec<Blob>> {
         let mut next = Some(format!(
-            "{}/children?$select=name,file,eTag&$top=200",
-            self.root_url()
+            "{}:/{}:/children?$select=name,file,eTag&$top=200",
+            self.root_url(),
+            encode(&self.context)
         ));
         let mut blobs = Vec::new();
         while let Some(url) = next {
-            let page = read_json(self.send("GET", &url, &[], &[])?, "GET")?;
+            let response = self.send("GET", &url, &[], &[])?;
+            // Graph makes the folder with the first upload.
+            if response.status().as_u16() == 404 {
+                return Ok(blobs);
+            }
+            let page = read_json(response, "GET")?;
             for item in page.get("value").and_then(Value::as_array).unwrap_or(&[]) {
                 let text = |key| item.get(key).and_then(Value::as_str);
                 // Folders have no `file`.
@@ -433,7 +452,13 @@ mod tests {
     }
 
     fn resumed(fake: &FakeMicrosoft, refresh_token: &str) -> OneDriveStorage {
-        OneDriveStorage::resume_with(fake.hosts(), CLIENT_ID, refresh_token, Arc::new(|_| {}))
+        OneDriveStorage::resume_with(
+            fake.hosts(),
+            CLIENT_ID,
+            refresh_token,
+            "Drawings",
+            Arc::new(|_| {}),
+        )
     }
 
     fn onedrive_storage() -> Option<(FakeMicrosoft, OneDriveStorage)> {
@@ -552,7 +577,7 @@ mod tests {
     fn listing_follows_all_pages() {
         let (fake, storage) = onedrive_storage().unwrap();
         for i in 0..5 {
-            fake.add_file(&format!("D{i}.excalidraw"), b"{}");
+            fake.add_file(&format!("Drawings/D{i}.excalidraw"), b"{}");
         }
 
         assert_eq!(storage.list().unwrap().len(), 5);
@@ -567,7 +592,7 @@ mod tests {
 
         put_bytes(&storage, "Big.excalidraw", &content);
 
-        assert_eq!(fake.files()["Big.excalidraw"].data, content);
+        assert_eq!(fake.files()["Drawings/Big.excalidraw"].data, content);
         let uploads = fake
             .requests()
             .iter()
@@ -591,7 +616,7 @@ mod tests {
 
         let requests = fake.requests();
         assert!(requests.iter().all(|r| !r.contains("createUploadSession")));
-        assert_eq!(fake.files()["Sketch.excalidraw"].data, b"{}");
+        assert_eq!(fake.files()["Drawings/Sketch.excalidraw"].data, b"{}");
     }
 
     #[test]
@@ -619,6 +644,7 @@ mod tests {
             fake.hosts(),
             CLIENT_ID,
             &account.refresh_token,
+            "Drawings",
             Arc::new(move |token| log.lock().unwrap().push(token.to_owned())),
         );
 

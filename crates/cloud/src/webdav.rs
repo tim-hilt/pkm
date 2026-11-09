@@ -14,7 +14,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use ureq::Agent;
 use ureq::http::Request;
 
-/// The `pkm` folder of a WebDAV server. A rejected login (HTTP 401) is an
+/// The folder of a Context in the `pkm` folder of a WebDAV server
+/// (`pkm/Drawings`). A rejected login (HTTP 401) is an
 /// `io::ErrorKind::PermissionDenied` error, a full server (507) is
 /// `StorageFull`, anything else that fails to connect is another kind.
 pub struct WebDavStorage {
@@ -34,24 +35,36 @@ impl fmt::Debug for WebDavStorage {
 
 impl WebDavStorage {
     /// Connects to the WebDAV server at `url` and checks the details. Creates
-    /// the `pkm` folder inside `url` if it's missing; uses it if not.
-    pub fn connect(url: &str, username: &str, password: &str) -> Result<Self, ConnectError> {
-        Self::connect_with(url, username, password, tls_config())
+    /// the `pkm` folder inside `url` and the folder of `context` ("Drawings")
+    /// in it if they're missing; uses them if not.
+    pub fn connect(
+        url: &str,
+        username: &str,
+        password: &str,
+        context: &str,
+    ) -> Result<Self, ConnectError> {
+        Self::connect_with(url, username, password, context, tls_config())
     }
 
     /// The storage of a server that was connected before, e.g. at the last
     /// launch. Contacts nobody, so it works offline; errors show on use.
-    pub fn resume(url: &str, username: &str, password: &str) -> Result<Self, ConnectError> {
-        Self::new(url, username, password, tls_config())
+    pub fn resume(
+        url: &str,
+        username: &str,
+        password: &str,
+        context: &str,
+    ) -> Result<Self, ConnectError> {
+        Self::new(url, username, password, context, tls_config())
     }
 
     fn connect_with(
         url: &str,
         username: &str,
         password: &str,
+        context: &str,
         tls: ureq::tls::TlsConfig,
     ) -> Result<Self, ConnectError> {
-        let storage = Self::new(url, username, password, tls)?;
+        let storage = Self::new(url, username, password, context, tls)?;
         storage.run(storage.protocol.connect())?;
         Ok(storage)
     }
@@ -61,9 +74,10 @@ impl WebDavStorage {
         url: &str,
         username: &str,
         password: &str,
+        context: &str,
         tls: ureq::tls::TlsConfig,
     ) -> Result<Self, ConnectError> {
-        let protocol = WebDav::new(url, username, password)?;
+        let protocol = WebDav::new(url, username, password, context)?;
         let config = Agent::config_builder()
             .https_only(true)
             // PROPFIND, MKCOL and MOVE.
@@ -252,7 +266,7 @@ mod tests {
 
         fn connect_as(&self, user: &str, pass: &str) -> Result<WebDavStorage, ConnectError> {
             let tls = trusting(&self.cert);
-            WebDavStorage::connect_with(&self.url, user, pass, tls)
+            WebDavStorage::connect_with(&self.url, user, pass, "Drawings", tls)
         }
 
         fn stop(&mut self) {
@@ -322,7 +336,7 @@ mod tests {
             "",
             "https:/x",
         ] {
-            let error = WebDavStorage::connect(url, "u", "p").unwrap_err();
+            let error = WebDavStorage::connect(url, "u", "p", "Drawings").unwrap_err();
             assert_eq!(error, ConnectError::NotHttps, "{url:?}");
         }
     }
@@ -330,11 +344,11 @@ mod tests {
     #[test]
     fn resuming_needs_an_https_url_but_contacts_no_server() {
         assert_eq!(
-            WebDavStorage::resume("http://example.com", "u", "p").unwrap_err(),
+            WebDavStorage::resume("http://example.com", "u", "p", "Drawings").unwrap_err(),
             ConnectError::NotHttps
         );
         // Nobody listens there: resuming works offline, using it fails.
-        let storage = WebDavStorage::resume("https://127.0.0.1:1", "u", "p").unwrap();
+        let storage = WebDavStorage::resume("https://127.0.0.1:1", "u", "p", "Drawings").unwrap();
         assert!(storage.list().is_err());
     }
 
@@ -346,7 +360,7 @@ mod tests {
             .unwrap()
             .port();
         let url = format!("https://127.0.0.1:{port}");
-        let error = WebDavStorage::connect(&url, "u", "p").unwrap_err();
+        let error = WebDavStorage::connect(&url, "u", "p", "Drawings").unwrap_err();
         assert_eq!(error, ConnectError::Unreachable);
     }
 
@@ -374,16 +388,16 @@ mod tests {
         let Some(server) = Rclone::webdav() else {
             return;
         };
-        let error = WebDavStorage::connect(&server.url, USER, PASSWORD).unwrap_err();
+        let error = WebDavStorage::connect(&server.url, USER, PASSWORD, "Drawings").unwrap_err();
         assert_eq!(error, ConnectError::Unreachable);
     }
 
     #[test]
-    fn connecting_creates_the_pkm_folder_and_reuses_it() {
+    fn connecting_creates_the_context_folder_and_reuses_it() {
         let Some(server) = Rclone::webdav() else {
             return;
         };
-        let folder = server.dir.0.join(FOLDER);
+        let folder = server.dir.0.join(FOLDER).join("Drawings");
         assert!(!folder.exists());
 
         let first = server.connect().unwrap();
@@ -407,10 +421,11 @@ mod tests {
 
         let url = format!("{}/my%20files/", server.url);
         let storage =
-            WebDavStorage::connect_with(&url, USER, PASSWORD, trusting(&server.cert)).unwrap();
+            WebDavStorage::connect_with(&url, USER, PASSWORD, "Drawings", trusting(&server.cert))
+                .unwrap();
         storage.put("blob", &mut &b"x"[..]).unwrap();
 
-        assert!(server.dir.0.join("my files/pkm/blob").is_file());
+        assert!(server.dir.0.join("my files/pkm/Drawings/blob").is_file());
     }
 
     #[test]

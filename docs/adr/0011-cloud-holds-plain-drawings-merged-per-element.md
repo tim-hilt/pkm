@@ -1,6 +1,6 @@
 # The cloud holds plain `.excalidraw` files, merged Element by Element
 
-Cloud Backing keeps each Drawing as a plain `.excalidraw` file in the Cloud Provider's `pkm` folder, readable by excalidraw.com and other tools (ADR-0003). The Device's Documents folder stays the source of truth; the cloud is a copy Synced with it, for every Cloud Provider alike, iCloud Drive included. Conflicts are merged per Element the way Excalidraw's collaboration does: the higher `version` wins, `versionNonce` breaks ties, erased Elements stay as `isDeleted` so that erasing merges too, and the `files` map is united by id. Each Device remembers the state of each Drawing at its last Sync. The merge is in the core, pure and order-independent.
+Cloud Backing keeps each Drawing as a plain `.excalidraw` file in the Cloud Provider's `pkm/Drawings` folder (ADR-0020), readable by excalidraw.com and other tools (ADR-0003). The Device's Documents folder stays the source of truth; the cloud is a copy Synced with it, for every Cloud Provider alike, iCloud Drive included. Conflicts are merged per Element the way Excalidraw's collaboration does: the higher `version` wins, `versionNonce` breaks ties, erased Elements stay as `isDeleted` so that erasing merges too, and the `files` map is united by id. Each Device remembers the state of each Drawing at its last Sync. The merge is in the core, pure and order-independent.
 
 ## Considered Options
 

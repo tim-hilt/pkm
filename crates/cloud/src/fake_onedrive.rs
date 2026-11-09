@@ -317,7 +317,7 @@ fn graph(request: &Request, base: &str, fake: &mut State) -> Answer {
                 ),
             )
         }
-        ("GET", "/children") => children(request, base, fake),
+        ("GET", "/children") => children(&name, request, base, fake),
         ("GET", "/content") => match fake.files.contains_key(&name) {
             true => {
                 let mut redirect = Answer::data(302, Vec::new());
@@ -347,20 +347,30 @@ fn graph(request: &Request, base: &str, fake: &mut State) -> Answer {
     }
 }
 
-/// The blobs, two to a page, the link to the next page carrying the offset.
-fn children(request: &Request, base: &str, fake: &State) -> Answer {
+/// The blobs in folder `folder` of the app folder, two to a page, the link to
+/// the next page carrying the offset. A folder with no blobs doesn't exist,
+/// as Graph makes it with the first upload.
+fn children(folder: &str, request: &Request, base: &str, fake: &State) -> Answer {
     const PAGE: usize = 2;
+    let prefix = format!("{folder}/");
+    let blobs: Vec<_> = fake
+        .files
+        .iter()
+        .filter_map(|(name, file)| Some((name.strip_prefix(&prefix)?, file)))
+        .collect();
+    if blobs.is_empty() {
+        return failure(404, "itemNotFound");
+    }
     let start: usize = request
         .query
         .get("$skiptoken")
         .and_then(|t| t.parse().ok())
         .unwrap_or(0);
-    let items: Vec<String> = fake
-        .files
+    let items: Vec<String> = blobs
         .iter()
         .skip(start)
         .take(PAGE)
-        .map(|(name, file)| {
+        .map(|&(name, file)| {
             format!(
                 r#"{{"name":{},"size":{},"eTag":"\"v{}\"","file":{{}}}}"#,
                 quote(name),
@@ -369,9 +379,10 @@ fn children(request: &Request, base: &str, fake: &State) -> Answer {
             )
         })
         .collect();
-    let next = if start + PAGE < fake.files.len() {
+    let next = if start + PAGE < blobs.len() {
         format!(
-            r#","@odata.nextLink":"{base}{APP_ROOT}/children?$skiptoken={}""#,
+            r#","@odata.nextLink":"{base}{APP_ROOT}:/{}:/children?$skiptoken={}""#,
+            encode(folder),
             start + PAGE
         )
     } else {

@@ -305,10 +305,14 @@ fn drive(request: &Request, fake: &mut State) -> Answer {
         ("POST", "/drive/v3/files") => {
             let value = json::parse(&String::from_utf8_lossy(&request.body)).unwrap();
             let id = fake.id("folder-");
+            let parent = value
+                .get("parents")
+                .and_then(|parents| parents.as_array()?.first()?.as_str())
+                .unwrap_or("root");
             fake.files.push(File {
                 id: id.clone(),
                 name: value.get("name").unwrap().as_str().unwrap().into(),
-                parent: "root".into(),
+                parent: parent.into(),
                 mime: value.get("mimeType").unwrap().as_str().unwrap().into(),
                 data: Vec::new(),
                 version: 1,

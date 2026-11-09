@@ -1,8 +1,11 @@
 import Foundation
 
 extension DrawingStore {
-    /// The app's Documents folder, which Files and Finder show, with the
-    /// caches in Caches. UI tests ask for empty temporary folders instead.
+    /// The Drawings folder in the app's Documents, which Files and Finder
+    /// show, with the caches in Caches. UI tests ask for empty temporary
+    /// folders instead.
+    static let documentsFolder = URL.documentsDirectory.appending(path: "Drawings", directoryHint: .isDirectory)
+
     static var appDrawings: DrawingStore {
         appDrawings(temporary: ProcessInfo.processInfo.arguments.contains("-UITestingTemporaryStore"))
     }
@@ -15,8 +18,9 @@ extension DrawingStore {
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             return DrawingStore(directory: directory, cacheDirectory: root.appending(path: "Caches"))
         }
+        try? FileManager.default.createDirectory(at: documentsFolder, withIntermediateDirectories: true)
         return DrawingStore(
-            directory: .documentsDirectory,
+            directory: documentsFolder,
             cacheDirectory: .cachesDirectory.appending(path: "Drawings", directoryHint: .isDirectory))
     }
 }

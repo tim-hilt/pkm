@@ -4,11 +4,14 @@
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
+use std::sync::{Arc, Mutex};
 
 use pkm_base::json;
-use pkm_cloud::{Blob, DirStorage, Storage, SyncState, sync_step};
+use pkm_cloud::{
+    Blob, DirStorage, Drawings, Folder, Merge, Progress, Storage, SyncState, sync_folders,
+    sync_step,
+};
 
 struct Scratch(PathBuf);
 
@@ -115,6 +118,8 @@ impl Cloud {
 struct Device {
     drawings: Scratch,
     state: Scratch,
+    /// A second Context folder, for the tests of several (`sync_both`).
+    notes: Notes,
 }
 
 impl Device {
@@ -122,6 +127,7 @@ impl Device {
         Device {
             drawings: Scratch::new("drawings"),
             state: Scratch::new("state"),
+            notes: Notes::new(),
         }
     }
 
@@ -1107,4 +1113,342 @@ fn an_icloud_placeholder_is_absent_until_downloaded_and_a_later_step_finds_the_f
 
     assert_eq!(step(&device), ["Sketch"]);
     assert_eq!(device.read("Sketch.excalidraw").unwrap(), b"one");
+}
+
+// --- Characterization -------------------------------------------------------
+
+/// A realistic set of Drawings (an image, renames, concurrent edits, an erase,
+/// a name clash) Synced by three Devices. What the Drawings folders and the
+/// cloud hold at the end was recorded from the engine before it learned about
+/// Context folders (`expected_final`), so that rewriting it can't change it.
+fn realistic_scenario(sync: impl Fn(&Device)) -> (Device, Device, Device) {
+    let image = r#"{"f1":{"id":"f1","mimeType":"image/png","dataURL":"data:image/png;base64,iVBORw0KGgo="}}"#;
+    let image_element = |id: &str, version, index: &str| {
+        element(id, version, index, 0).replace("rectangle", "image")
+    };
+    let (phone, tablet, laptop) = (Device::new(), Device::new(), Device::new());
+    phone.write(
+        "Sketch.excalidraw",
+        &drawing(&[element("a", 1, "a0", 0), element("b", 1, "a1", 0)]),
+    );
+    phone.write(
+        "Map.excalidraw",
+        &with(&[image_element("m", 1, "a0")], "{}", image),
+    );
+    phone.write("Plan.excalidraw", &drawing(&[element("p", 1, "a0", 0)]));
+    for device in [&phone, &tablet, &laptop] {
+        sync(device);
+    }
+
+    // Everyone changes something while apart.
+    phone.write(
+        "Sketch.excalidraw",
+        &drawing(&[element("a", 2, "a0", 10), element("b", 1, "a1", 0)]),
+    );
+    phone.rename("Map.excalidraw", "Atlas.excalidraw");
+    tablet.write(
+        "Sketch.excalidraw",
+        &with(
+            &[
+                element("a", 1, "a0", 0),
+                element("b", 3, "a1", 30),
+                image_element("n", 1, "a2"),
+            ],
+            "{}",
+            r#"{"f2":{"id":"f2","mimeType":"image/png","dataURL":"data:image/png;base64,AAAA"}}"#,
+        ),
+    );
+    laptop.write(
+        "Sketch.excalidraw",
+        &drawing(&[erased("a", 3, "a0"), element("b", 1, "a1", 0)]),
+    );
+    laptop.rename("Plan.excalidraw", "Plan B.excalidraw");
+    laptop.write("Idea.excalidraw", &drawing(&[element("i", 1, "a0", 1)]));
+    tablet.write("Idea.excalidraw", &drawing(&[element("j", 1, "a0", 2)]));
+
+    for _ in 0..3 {
+        for device in [&phone, &tablet, &laptop] {
+            sync(device);
+        }
+    }
+    (phone, tablet, laptop)
+}
+
+/// Every file of a folder with its content, in name order.
+fn snapshot(dir: &Path) -> Vec<(String, String)> {
+    listing(dir)
+        .into_iter()
+        .filter(|name| !name.starts_with('.'))
+        .map(|name| {
+            let bytes = fs::read(dir.join(&name)).unwrap();
+            (name, String::from_utf8(bytes).unwrap())
+        })
+        .collect()
+}
+
+#[test]
+fn three_devices_with_a_realistic_set_of_drawings_end_with_the_recorded_files() {
+    let cloud = Cloud::new();
+    let (phone, tablet, laptop) = realistic_scenario(|device| {
+        device.sync(&cloud);
+    });
+
+    let expected = expected_final();
+    assert_eq!(snapshot(&cloud.dir.0), expected);
+    for device in [&phone, &tablet, &laptop] {
+        assert_eq!(snapshot(&device.drawings.0), expected);
+    }
+}
+
+/// The files recorded from the engine before Context folders, by name, in
+/// `fixtures/realistic-drawings.json`.
+fn expected_final() -> Vec<(String, String)> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/integration/fixtures/realistic-drawings.json");
+    let recorded = json::parse(&fs::read_to_string(path).unwrap()).unwrap();
+    let mut files: Vec<_> = recorded
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(name, bytes)| (name.to_owned(), bytes.as_str().unwrap().to_owned()))
+        .collect();
+    files.sort();
+    files
+}
+
+// --- Several Context folders ------------------------------------------------
+
+/// Files that are kept as they are, never merged: a Context without a merge.
+struct Opaque;
+
+impl Merge for Opaque {
+    fn extension(&self) -> &str {
+        ""
+    }
+    fn merge(&self, _: Option<&[u8]>, _: &[u8], _: &[u8]) -> Option<Vec<u8>> {
+        None
+    }
+    fn is_item(&self, _: &[u8]) -> bool {
+        false
+    }
+    fn same_item(&self, _: &[u8], _: &[u8]) -> Option<bool> {
+        None
+    }
+}
+
+/// A Device's second Context folder, "Notes", with its Sync state.
+struct Notes {
+    dir: Scratch,
+    state: Scratch,
+}
+
+impl Notes {
+    fn new() -> Self {
+        Notes {
+            dir: Scratch::new("notes"),
+            state: Scratch::new("notes-state"),
+        }
+    }
+
+    fn write(&self, file: &str, bytes: &[u8]) {
+        fs::write(self.dir.0.join(file), bytes).unwrap();
+    }
+
+    fn read(&self, file: &str) -> Option<Vec<u8>> {
+        fs::read(self.dir.0.join(file)).ok()
+    }
+}
+
+/// One step over the Drawings and the Notes folder of a Device, each with its
+/// own cloud folder. Returns the progress reported.
+fn sync_both(device: &Device, drawings_cloud: &Cloud, notes_cloud: &Cloud) -> Vec<(u32, u32)> {
+    let drawings_state = SyncState::open(&device.state.0).unwrap();
+    let notes_state = SyncState::open(&device.notes.state.0).unwrap();
+    let folders = [
+        Folder {
+            dir: &device.drawings.0,
+            state: &drawings_state,
+            storage: &drawings_cloud.storage,
+            merge: Arc::new(Drawings),
+        },
+        Folder {
+            dir: &device.notes.dir.0,
+            state: &notes_state,
+            storage: &notes_cloud.storage,
+            merge: Arc::new(Opaque),
+        },
+    ];
+    let progress = Mutex::new(Vec::new());
+    let outcomes = sync_folders(
+        &folders,
+        &AtomicBool::new(false),
+        &|Progress { done, total }| progress.lock().unwrap().push((done, total)),
+    );
+    assert_eq!(outcomes.len(), 2);
+    for outcome in &outcomes {
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+    }
+    progress.into_inner().unwrap()
+}
+
+#[test]
+fn the_realistic_scenario_gives_the_same_drawings_with_a_second_folder_beside_them() {
+    let (cloud, notes_cloud) = (Cloud::new(), Cloud::new());
+    let turn = AtomicU32::new(0);
+    let (phone, tablet, laptop) = realistic_scenario(|device| {
+        // A Notes file turns up on the Device before each Sync.
+        let n = turn.fetch_add(1, Relaxed);
+        device.notes.write(&format!("note-{n}.txt"), b"a note");
+        sync_both(device, &cloud, &notes_cloud);
+    });
+
+    for device in [&phone, &tablet, &laptop] {
+        sync_both(device, &cloud, &notes_cloud);
+    }
+    let expected = expected_final();
+    assert_eq!(snapshot(&cloud.dir.0), expected);
+    for device in [&phone, &tablet, &laptop] {
+        assert_eq!(snapshot(&device.drawings.0), expected);
+        // Every Notes file reached every Device, and no Drawing is among them.
+        assert_eq!(
+            listing(&device.notes.dir.0).len(),
+            turn.load(Relaxed) as usize
+        );
+        assert!(
+            listing(&device.notes.dir.0)
+                .iter()
+                .all(|f| f.ends_with(".txt"))
+        );
+    }
+    // Folders never leak into each other, on any side.
+    assert!(
+        listing(&cloud.dir.0)
+            .iter()
+            .all(|f| f.ends_with(".excalidraw") || f.starts_with('.'))
+    );
+    assert!(
+        listing(&notes_cloud.dir.0)
+            .iter()
+            .all(|f| f.ends_with(".txt") || f.starts_with('.'))
+    );
+}
+
+#[test]
+fn the_files_of_one_folder_never_reach_another_even_under_the_same_name() {
+    let (cloud, notes_cloud) = (Cloud::new(), Cloud::new());
+    let (phone, tablet) = (Device::new(), Device::new());
+    phone.write("Same.excalidraw", b"a drawing");
+    phone.notes.write("Same.excalidraw", b"a note");
+
+    sync_both(&phone, &cloud, &notes_cloud);
+    sync_both(&tablet, &cloud, &notes_cloud);
+
+    assert_eq!(tablet.read("Same.excalidraw").unwrap(), b"a drawing");
+    assert_eq!(tablet.notes.read("Same.excalidraw").unwrap(), b"a note");
+    assert_eq!(cloud.read("Same.excalidraw").unwrap(), b"a drawing");
+    assert_eq!(notes_cloud.read("Same.excalidraw").unwrap(), b"a note");
+}
+
+#[test]
+fn an_opaque_folder_syncs_adds_changes_and_deletes_but_leaves_conflicts_alone() {
+    let (cloud, notes_cloud) = (Cloud::new(), Cloud::new());
+    let (phone, tablet) = (Device::new(), Device::new());
+    phone.notes.write("a.txt", b"one");
+    phone.notes.write("b.txt", b"one");
+    sync_both(&phone, &cloud, &notes_cloud);
+    sync_both(&tablet, &cloud, &notes_cloud);
+    assert_eq!(tablet.notes.read("a.txt").unwrap(), b"one");
+
+    // Changed on both sides: nothing is merged, both keep theirs.
+    phone.notes.write("a.txt", b"phone");
+    tablet.notes.write("a.txt", b"tablet");
+    // Changed on one side only, and deleted on one side only.
+    phone.notes.write("b.txt", b"two");
+    phone.notes.write("c.txt", b"new");
+    sync_both(&phone, &cloud, &notes_cloud);
+    sync_both(&tablet, &cloud, &notes_cloud);
+    sync_both(&phone, &cloud, &notes_cloud);
+
+    assert_eq!(phone.notes.read("a.txt").unwrap(), b"phone");
+    assert_eq!(tablet.notes.read("a.txt").unwrap(), b"tablet");
+    assert_eq!(tablet.notes.read("b.txt").unwrap(), b"two");
+    assert_eq!(tablet.notes.read("c.txt").unwrap(), b"new");
+    fs::remove_file(tablet.notes.dir.0.join("c.txt")).unwrap();
+    sync_both(&tablet, &cloud, &notes_cloud);
+    sync_both(&phone, &cloud, &notes_cloud);
+    assert_eq!(phone.notes.read("c.txt"), None);
+}
+
+#[test]
+fn an_idle_poll_is_one_listing_per_folder_and_nothing_else() {
+    let (cloud, notes_cloud) = (Cloud::new(), Cloud::new());
+    let phone = Device::new();
+    phone.write("Sketch.excalidraw", b"one");
+    phone.settle("Sketch.excalidraw");
+    phone.notes.write("a.txt", b"one");
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    fs::File::options()
+        .write(true)
+        .open(phone.notes.dir.0.join("a.txt"))
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
+    // Uploads, then settles the stamps of both folders.
+    for _ in 0..3 {
+        sync_both(&phone, &cloud, &notes_cloud);
+    }
+    cloud.take_calls();
+    notes_cloud.take_calls();
+
+    sync_both(&phone, &cloud, &notes_cloud);
+
+    for cloud in [&cloud, &notes_cloud] {
+        let calls = cloud.take_calls();
+        assert_eq!(calls.lists, 1);
+        assert!(calls.gets.is_empty() && calls.puts.is_empty() && calls.deletes.is_empty());
+    }
+}
+
+#[test]
+fn progress_counts_the_transfers_of_all_folders_together() {
+    let (cloud, notes_cloud) = (Cloud::new(), Cloud::new());
+    let phone = Device::new();
+    phone.write("A.excalidraw", b"a");
+    phone.write("B.excalidraw", b"b");
+    phone.notes.write("c.txt", b"c");
+
+    let progress = sync_both(&phone, &cloud, &notes_cloud);
+
+    assert_eq!(progress, [(0, 2), (1, 2), (2, 2), (2, 3), (3, 3)]);
+}
+
+#[test]
+fn a_folder_that_fails_does_not_stop_the_others_from_reporting() {
+    let cloud = Cloud::new();
+    let phone = Device::new();
+    phone.write("A.excalidraw", b"a");
+    let state = SyncState::open(&phone.state.0).unwrap();
+    let missing = Scratch::new("gone").0.join("not-here");
+    let notes_state = SyncState::open(&phone.notes.state.0).unwrap();
+    let notes_cloud = Cloud::new();
+    let folders = [
+        Folder {
+            dir: &missing,
+            state: &notes_state,
+            storage: &notes_cloud.storage,
+            merge: Arc::new(Opaque),
+        },
+        Folder {
+            dir: &phone.drawings.0,
+            state: &state,
+            storage: &cloud.storage,
+            merge: Arc::new(Drawings),
+        },
+    ];
+
+    let outcomes = sync_folders(&folders, &AtomicBool::new(false), &|_| {});
+
+    assert!(outcomes[0].error.is_some());
+    assert!(outcomes[1].error.is_none());
+    assert_eq!(cloud.read("A.excalidraw").unwrap(), b"a");
 }

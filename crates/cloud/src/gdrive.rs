@@ -1,5 +1,5 @@
-//! Google Drive as a Cloud Provider (ADR-0012): the Drawings are Synced with
-//! `My Drive/pkm`.
+//! Google Drive as a Cloud Provider (ADR-0012): each Context is Synced with
+//! its folder in `My Drive/pkm` (`pkm/Drawings`).
 //!
 //! Signs in with OAuth and PKCE and asks only for `drive.file`, so the app
 //! sees nothing but the files it created itself. Blocking, no async runtime.
@@ -19,7 +19,8 @@ use crate::oauth::{OAuthConfig, OnRotate, Session, SignIn as OAuthSignIn};
 use crate::percent::encode;
 use crate::storage::{Blob, ConnectError, Storage, check_name, unique_name};
 
-/// The folder in My Drive that holds everything the app stores.
+/// The folder in My Drive that holds everything the app stores, a folder per
+/// Context in it.
 const FOLDER: &str = "pkm";
 const FOLDER_TYPE: &str = "application/vnd.google-apps.folder";
 const SCOPE: &str = "https://www.googleapis.com/auth/drive.file";
@@ -127,11 +128,13 @@ impl SignIn {
         let session = self
             .inner
             .finish(agent.clone(), redirect, Arc::new(|_| {}))?;
-        let storage = GoogleDriveStorage::from_session(self.hosts, session);
-        storage.folder_id().map_err(|e| match e.kind() {
-            io::ErrorKind::PermissionDenied => ConnectError::AccessDenied,
-            _ => ConnectError::Unreachable,
-        })?;
+        let storage = GoogleDriveStorage::from_session(self.hosts, session, "");
+        storage
+            .folder_in("root", FOLDER)
+            .map_err(|e| match e.kind() {
+                io::ErrorKind::PermissionDenied => ConnectError::AccessDenied,
+                _ => ConnectError::Unreachable,
+            })?;
         let email = storage.email().unwrap_or_else(|_| "Google account".into());
         Ok(Account {
             refresh_token: storage.session.refresh_token(),
@@ -140,12 +143,14 @@ impl SignIn {
     }
 }
 
-/// `My Drive/pkm`. Tokens revoked are `PermissionDenied`, a full
+/// A Context's folder in `My Drive/pkm`. Tokens revoked are `PermissionDenied`, a full
 /// Drive is `StorageFull`, anything else that fails is another kind.
 pub struct GoogleDriveStorage {
     session: Session,
     hosts: Hosts,
-    /// The ID of the `pkm` folder, once known.
+    /// The Context's folder: "Drawings".
+    context: String,
+    /// The ID of the Context's folder, once known.
     folder: Mutex<Option<String>>,
 }
 
@@ -157,18 +162,21 @@ impl fmt::Debug for GoogleDriveStorage {
 }
 
 impl GoogleDriveStorage {
-    /// The storage of an account signed in before, from its refresh token.
-    /// Contacts nobody, so it works offline; errors show on use. `on_rotate`
-    /// hears of a refresh token that replaces `refresh_token`, to be kept.
+    /// The storage of the folder of `context` ("Drawings") for an account
+    /// signed in before, from its refresh token. Contacts nobody, so it works
+    /// offline; errors show on use. `on_rotate` hears of a refresh token that
+    /// replaces `refresh_token`, to be kept.
     pub fn resume(
         client_id: &str,
         refresh_token: &str,
+        context: &str,
         on_rotate: impl Fn(&str) + Send + Sync + 'static,
     ) -> Self {
         Self::resume_with(
             Hosts::google(),
             client_id,
             refresh_token,
+            context,
             Arc::new(on_rotate),
         )
     }
@@ -177,6 +185,7 @@ impl GoogleDriveStorage {
         hosts: Hosts,
         client_id: &str,
         refresh_token: &str,
+        context: &str,
         on_rotate: OnRotate,
     ) -> Self {
         let agent = api_agent(hosts.https_only());
@@ -186,13 +195,14 @@ impl GoogleDriveStorage {
             refresh_token.to_owned(),
             on_rotate,
         );
-        Self::from_session(hosts, session)
+        Self::from_session(hosts, session, context)
     }
 
-    fn from_session(hosts: Hosts, session: Session) -> Self {
+    fn from_session(hosts: Hosts, session: Session, context: &str) -> Self {
         Self {
             session,
             hosts,
+            context: context.to_owned(),
             folder: Mutex::new(None),
         }
     }
@@ -268,35 +278,45 @@ impl GoogleDriveStorage {
         }
     }
 
-    /// The ID of the `pkm` folder: found, or created now.
+    /// The ID of the Context's folder in `pkm`: found, or created now, with
+    /// `pkm` itself.
     fn folder_id(&self) -> io::Result<String> {
         let mut known = self.folder.lock().unwrap();
         if let Some(id) = &*known {
             return Ok(id.clone());
         }
-        let q = format!(
-            "mimeType = '{FOLDER_TYPE}' and name = '{FOLDER}' and 'root' in parents and trashed = false"
-        );
-        let id = match self.query(&q, Some(1))?.into_iter().next() {
-            Some((id, ..)) => id,
-            None => {
-                let mut meta = Object::new();
-                meta.insert("name".into(), Value::String(FOLDER.into()));
-                meta.insert("mimeType".into(), Value::String(FOLDER_TYPE.into()));
-                let created = self.json(
-                    "POST",
-                    &format!("{}/files?fields=id", self.hosts.api),
-                    Some(&Value::Object(meta)),
-                )?;
-                created
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| io::Error::other("no folder id"))?
-                    .to_owned()
-            }
-        };
+        let app = self.folder_in("root", FOLDER)?;
+        let id = self.folder_in(&app, &self.context)?;
         *known = Some(id.clone());
         Ok(id)
+    }
+
+    /// The ID of the folder `name` in folder `parent`: found, or created now.
+    fn folder_in(&self, parent: &str, name: &str) -> io::Result<String> {
+        let q = format!(
+            "mimeType = '{FOLDER_TYPE}' and name = '{}' and '{parent}' in parents and trashed = false",
+            escape(name)
+        );
+        if let Some((id, ..)) = self.query(&q, Some(1))?.into_iter().next() {
+            return Ok(id);
+        }
+        let mut meta = Object::new();
+        meta.insert("name".into(), Value::String(name.into()));
+        meta.insert("mimeType".into(), Value::String(FOLDER_TYPE.into()));
+        meta.insert(
+            "parents".into(),
+            Value::Array(vec![Value::String(parent.into())]),
+        );
+        let created = self.json(
+            "POST",
+            &format!("{}/files?fields=id", self.hosts.api),
+            Some(&Value::Object(meta)),
+        )?;
+        Ok(created
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| io::Error::other("no folder id"))?
+            .to_owned())
     }
 
     /// The ID of the file `name` in the folder; the oldest if there are two.
@@ -482,7 +502,13 @@ mod tests {
     }
 
     fn resumed(fake: &FakeGoogle, refresh_token: &str) -> GoogleDriveStorage {
-        GoogleDriveStorage::resume_with(fake.hosts(), CLIENT_ID, refresh_token, Arc::new(|_| {}))
+        GoogleDriveStorage::resume_with(
+            fake.hosts(),
+            CLIENT_ID,
+            refresh_token,
+            "Drawings",
+            Arc::new(|_| {}),
+        )
     }
 
     fn drive_storage() -> Option<(FakeGoogle, GoogleDriveStorage)> {
@@ -595,7 +621,7 @@ mod tests {
             .iter()
             .filter(|f| f.mime == FOLDER_TYPE)
             .count();
-        assert_eq!(folders, 1);
+        assert_eq!(folders, 2, "pkm and Drawings");
     }
 
     #[test]
@@ -613,7 +639,9 @@ mod tests {
         put_bytes(&storage, "Sketch.excalidraw", b"{}");
 
         let files = fake.files();
-        let folder = files.iter().find(|f| f.mime == FOLDER_TYPE).unwrap();
+        let app = files.iter().find(|f| f.name == "pkm").unwrap();
+        let folder = files.iter().find(|f| f.name == "Drawings").unwrap();
+        assert_eq!(folder.parent, app.id);
         let inside: Vec<_> = files.iter().filter(|f| f.parent == folder.id).collect();
         assert_eq!(inside.len(), 1);
         assert_eq!(inside[0].data, b"{}");
@@ -635,10 +663,22 @@ mod tests {
         assert_eq!(names(&storage).len(), 2);
     }
 
+    /// The ID of the Context's folder, which the first call makes.
+    fn drawings_folder(fake: &FakeGoogle, storage: &GoogleDriveStorage) -> String {
+        storage.list().unwrap();
+        let files = fake.files();
+        files
+            .iter()
+            .find(|f| f.name == "Drawings")
+            .unwrap()
+            .id
+            .clone()
+    }
+
     #[test]
     fn listing_follows_all_pages() {
         let (fake, storage) = drive_storage().unwrap();
-        let folder = fake.files()[0].id.clone();
+        let folder = drawings_folder(&fake, &storage);
         for i in 0..1005 {
             fake.add_file(&format!("D{i}.excalidraw"), &folder, b"{}");
         }
@@ -649,7 +689,7 @@ mod tests {
     #[test]
     fn two_files_of_one_name_show_as_one_blob_the_oldest() {
         let (fake, storage) = drive_storage().unwrap();
-        let folder = fake.files()[0].id.clone();
+        let folder = drawings_folder(&fake, &storage);
         fake.add_file("Sketch.excalidraw", &folder, b"old");
         fake.add_file("Sketch.excalidraw", &folder, b"new");
 
@@ -704,6 +744,7 @@ mod tests {
             fake.hosts(),
             CLIENT_ID,
             &account.refresh_token,
+            "Drawings",
             Arc::new(move |token| log.lock().unwrap().push(token.to_owned())),
         );
 

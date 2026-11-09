@@ -8,7 +8,8 @@
 //! result, and `failed` ends it when the request could not be sent at all
 //! (no network, an untrusted certificate, CORS).
 //!
-//! Everything lives in an `pkm` folder inside the Server URL.
+//! Everything lives in the `pkm` folder inside the Server URL, one folder in
+//! it per Context (`pkm/Drawings`).
 //! Blobs are uploaded to a hidden temporary name and then moved into place, so
 //! a half-written blob is never visible under its final name. Every request
 //! carries `Authorization: Basic`, so no client ever waits for a challenge.
@@ -69,6 +70,8 @@ pub struct WebDav {
     /// The Server URL, without a trailing slash.
     base: String,
     /// The URL of the `pkm` folder inside it.
+    parent: String,
+    /// The URL of the Context's folder inside that.
     root: String,
     /// The `Authorization` header value.
     pub(crate) auth: String,
@@ -84,8 +87,14 @@ impl std::fmt::Debug for WebDav {
 }
 
 impl WebDav {
-    /// The protocol for `url`, which must be https.
-    pub fn new(url: &str, username: &str, password: &str) -> Result<Self, ConnectError> {
+    /// The protocol for `url`, which must be https, for the folder of
+    /// `context` ("Drawings").
+    pub fn new(
+        url: &str,
+        username: &str,
+        password: &str,
+        context: &str,
+    ) -> Result<Self, ConnectError> {
         let url = url.trim();
         if !url
             .get(..8)
@@ -94,19 +103,22 @@ impl WebDav {
             return Err(ConnectError::NotHttps);
         }
         let base = url.trim_end_matches('/').to_owned();
+        let parent = format!("{base}/{FOLDER}");
         Ok(Self {
-            root: format!("{base}/{FOLDER}"),
+            root: format!("{parent}/{}", encode(context)),
+            parent,
             base,
             auth: basic_auth(username, password),
         })
     }
 
     /// Checks that the server is a WebDAV server that accepts the login, and
-    /// that the `pkm` folder is there, creating it if not.
+    /// that the Context's folder in `pkm` is there, creating them if not.
     pub fn connect(&self) -> impl Exchange<Output = Result<(), ConnectError>> + use<> {
         Connect {
             dav: self.clone(),
             phase: ConnectPhase::Server,
+            folder: 0,
         }
     }
 
@@ -258,6 +270,26 @@ enum ConnectPhase {
 struct Connect {
     dav: WebDav,
     phase: ConnectPhase,
+    /// Which of the folders to make sure of the phase is about.
+    folder: usize,
+}
+
+impl Connect {
+    /// Makes sure of the folders in turn: `pkm`, then the Context's inside it.
+    fn folder_url(&self) -> &str {
+        [&self.dav.parent, &self.dav.root][self.folder]
+    }
+
+    /// The folder is there: on to the next, or done.
+    fn found(&mut self) -> Turn<Result<(), ConnectError>> {
+        self.phase = ConnectPhase::Folder;
+        self.folder += 1;
+        if self.folder < 2 {
+            Turn::Send(self.dav.propfind(self.folder_url(), "0"))
+        } else {
+            Turn::Done(Ok(()))
+        }
+    }
 }
 
 impl Exchange for Connect {
@@ -277,25 +309,25 @@ impl Exchange for Connect {
         match self.phase {
             ConnectPhase::Server => match status {
                 207 => {
+                    // Its folders are there, or are created now.
                     self.phase = ConnectPhase::Folder;
-                    // Its folder is there, or is created now.
-                    Turn::Send(self.dav.propfind(&self.dav.root, "0"))
+                    Turn::Send(self.dav.propfind(self.folder_url(), "0"))
                 }
                 500..=599 => fail(ConnectError::Unreachable),
                 _ => fail(ConnectError::NotWebDav),
             },
             ConnectPhase::Folder => match status {
-                207 => Turn::Done(Ok(())),
+                207 => self.found(),
                 404 => {
                     self.phase = ConnectPhase::MakeFolder;
-                    Turn::Send(self.dav.mkcol(&self.dav.root))
+                    Turn::Send(self.dav.mkcol(self.folder_url()))
                 }
                 507 => fail(ConnectError::Unreachable),
                 _ => fail(ConnectError::NotWebDav),
             },
             ConnectPhase::MakeFolder => match status {
                 // 405: it exists already.
-                200..=299 | 405 => Turn::Done(Ok(())),
+                200..=299 | 405 => self.found(),
                 _ => fail(ConnectError::NotWebDav),
             },
         }
@@ -522,7 +554,7 @@ mod tests {
     const AUTH: &str = "Basic dTpw";
 
     fn dav() -> WebDav {
-        WebDav::new(" https://host/dav/ ", "u", "p").unwrap()
+        WebDav::new(" https://host/dav/ ", "u", "p", "Drawings").unwrap()
     }
 
     fn answer(status: u16, body: &str) -> HttpAnswer {
@@ -555,32 +587,52 @@ mod tests {
     fn only_https_urls_are_taken() {
         for url in ["http://x", "x", "ftp://x", "", "https:/x"] {
             assert_eq!(
-                WebDav::new(url, "u", "p").unwrap_err(),
+                WebDav::new(url, "u", "p", "Drawings").unwrap_err(),
                 ConnectError::NotHttps,
                 "{url:?}"
             );
         }
-        assert!(WebDav::new("HTTPS://x", "u", "p").is_ok());
+        assert!(WebDav::new("HTTPS://x", "u", "p", "Drawings").is_ok());
     }
 
     #[test]
     fn connecting_checks_the_server_then_finds_the_folder() {
-        let (sent, result) = run(dav().connect(), &[answer(207, ""), answer(207, "")]);
+        let answers = [answer(207, ""), answer(207, ""), answer(207, "")];
+        let (sent, result) = run(dav().connect(), &answers);
         assert_eq!(
             sent,
-            ["PROPFIND https://host/dav", "PROPFIND https://host/dav/pkm"]
+            [
+                "PROPFIND https://host/dav",
+                "PROPFIND https://host/dav/pkm",
+                "PROPFIND https://host/dav/pkm/Drawings"
+            ]
         );
         assert_eq!(result, Ok(()));
     }
 
     #[test]
     fn connecting_creates_a_missing_folder() {
-        let answers = [answer(207, ""), answer(404, ""), answer(201, "")];
+        let answers = [
+            answer(207, ""),
+            answer(404, ""),
+            answer(201, ""),
+            answer(404, ""),
+            answer(201, ""),
+        ];
         let (sent, result) = run(dav().connect(), &answers);
         assert_eq!(sent[2], "MKCOL https://host/dav/pkm");
+        assert_eq!(sent[3], "PROPFIND https://host/dav/pkm/Drawings");
+        assert_eq!(sent[4], "MKCOL https://host/dav/pkm/Drawings");
         assert_eq!(result, Ok(()));
 
-        let answers = [answer(207, ""), answer(404, ""), answer(405, "")];
+        // `pkm` exists already (405), and so does the Context's folder.
+        let answers = [
+            answer(207, ""),
+            answer(404, ""),
+            answer(405, ""),
+            answer(404, ""),
+            answer(405, ""),
+        ];
         assert_eq!(run(dav().connect(), &answers).1, Ok(()));
     }
 
@@ -614,7 +666,7 @@ mod tests {
     fn listing_asks_for_depth_one_and_reads_the_answer() {
         let mut list = dav().list();
         let request = list.start();
-        assert_eq!(line(&request), "PROPFIND https://host/dav/pkm");
+        assert_eq!(line(&request), "PROPFIND https://host/dav/pkm/Drawings");
         assert!(request.headers.contains(&("Depth", "1".to_owned())));
         let xml = r#"<D:multistatus xmlns:D="DAV:"><D:response><D:href>/a</D:href>
             <D:propstat><D:prop><D:getetag>"e"</D:getetag></D:prop></D:propstat></D:response></D:multistatus>"#;
@@ -647,7 +699,7 @@ mod tests {
     #[test]
     fn getting_gives_the_body_none_or_an_error() {
         let (sent, result) = run(dav().get("a b"), &[answer(200, "hi")]);
-        assert_eq!(sent, ["GET https://host/dav/pkm/a%20b"]);
+        assert_eq!(sent, ["GET https://host/dav/pkm/Drawings/a%20b"]);
         assert_eq!(result.unwrap(), Some(b"hi".to_vec()));
         assert_eq!(run(dav().get("x"), &[answer(404, "")]).1.unwrap(), None);
         let error = run(dav().get("x"), &[answer(401, "")]).1.unwrap_err();
@@ -658,7 +710,7 @@ mod tests {
     #[test]
     fn deleting_a_missing_blob_is_fine() {
         let (sent, result) = run(dav().delete("x"), &[answer(404, "")]);
-        assert_eq!(sent, ["DELETE https://host/dav/pkm/x"]);
+        assert_eq!(sent, ["DELETE https://host/dav/pkm/Drawings/x"]);
         assert!(result.is_ok());
         assert!(run(dav().delete("x"), &[answer(204, "")]).1.is_ok());
         assert!(run(dav().delete("x"), &[answer(500, "")]).1.is_err());
@@ -668,16 +720,22 @@ mod tests {
     fn putting_uploads_to_incoming_then_moves() {
         let mut put = dav().put("a", "t1", b"data".to_vec(), true);
         let upload = put.start();
-        assert_eq!(line(&upload), "PUT https://host/dav/pkm/.incoming/t1");
+        assert_eq!(
+            line(&upload),
+            "PUT https://host/dav/pkm/Drawings/.incoming/t1"
+        );
         assert_eq!(upload.body, b"data");
         let Turn::Send(moved) = put.answer(answer(201, "")) else {
             panic!("no move");
         };
-        assert_eq!(line(&moved), "MOVE https://host/dav/pkm/.incoming/t1");
+        assert_eq!(
+            line(&moved),
+            "MOVE https://host/dav/pkm/Drawings/.incoming/t1"
+        );
         assert!(
             moved
                 .headers
-                .contains(&("Destination", "https://host/dav/pkm/a".to_owned()))
+                .contains(&("Destination", "https://host/dav/pkm/Drawings/a".to_owned()))
         );
         assert!(moved.headers.contains(&("Overwrite", "T".to_owned())));
         assert!(matches!(put.answer(answer(204, "")), Turn::Done(Ok(()))));
@@ -689,7 +747,7 @@ mod tests {
         let (sent, result) = run(dav().put("a", "t", Vec::new(), false), &answers);
         let methods: Vec<_> = sent.iter().map(|s| s.split(' ').next().unwrap()).collect();
         assert_eq!(methods, ["MKCOL", "PUT", "MOVE"]);
-        assert_eq!(sent[0], "MKCOL https://host/dav/pkm/.incoming");
+        assert_eq!(sent[0], "MKCOL https://host/dav/pkm/Drawings/.incoming");
         assert!(result.is_ok());
         // It exists already.
         let answers = [answer(405, ""), answer(201, ""), answer(201, "")];
@@ -726,7 +784,10 @@ mod tests {
             ),
         ] {
             let (sent, result) = put(&answers);
-            assert_eq!(sent[last], "DELETE https://host/dav/pkm/.incoming/t");
+            assert_eq!(
+                sent[last],
+                "DELETE https://host/dav/pkm/Drawings/.incoming/t"
+            );
             assert_eq!(result.unwrap_err().kind(), kind);
         }
         let error = put(&[answer(500, ""), answer(500, "")]).1.unwrap_err();

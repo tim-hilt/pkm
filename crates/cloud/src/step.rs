@@ -1,5 +1,8 @@
-//! The Sync engine (ADR-0011) as a step machine (ADR-0016): one step makes the Device's Drawings folder and
-//! the cloud folder agree for every Drawing changed on one side only.
+//! The Sync engine (ADR-0011) as a step machine (ADR-0016): one step makes one
+//! Context folder of the Device and its cloud folder agree for every Item
+//! changed on one side only. The Context's `Merge` hook (ADR-0020) says which
+//! files are Items and how two versions become one. Below, an Item is called a
+//! Drawing, the first Context's.
 //!
 //! The engine does no I/O. A `SyncStep` yields one `Request` at a time (list
 //! the cloud folder, read a local Drawing, upload a blob, ...) and is handed
@@ -41,12 +44,10 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
-use pkm_drawing::{are_same_drawing, is_drawing, merge_drawings};
+use std::sync::Arc;
 
+use crate::merge::Merge;
 use crate::storage::Blob;
-
-/// The file extension of a Drawing, with its dot.
-pub const EXTENSION: &str = ".excalidraw";
 
 /// How long a file must have been left alone for its stamp to be trusted:
 /// file systems with coarse clocks can give two writes the same time.
@@ -210,11 +211,12 @@ struct Shared {
 impl SyncStep {
     /// A step starting at `now_ms` (milliseconds since the epoch), which tells
     /// whether a file has been left alone long enough for its stamp to count.
-    pub fn new(now_ms: u64) -> Self {
+    pub fn new(now_ms: u64, merge: Arc<dyn Merge>) -> Self {
         let shared = Rc::new(RefCell::new(Shared::default()));
         let mut engine = Engine {
             shared: Rc::clone(&shared),
             now_ms,
+            merge,
             done: 0,
             total: 0,
             remote: HashMap::new(),
@@ -294,6 +296,7 @@ fn unexpected() -> io::Error {
 struct Engine {
     shared: Rc<RefCell<Shared>>,
     now_ms: u64,
+    merge: Arc<dyn Merge>,
     /// Drawings to transfer in this step, and how many are done.
     total: u32,
     done: u32,
@@ -434,7 +437,7 @@ impl Engine {
         match self.ask(Request::ListCloud).await? {
             Response::Cloud(blobs) => Ok(blobs
                 .into_iter()
-                .filter(|blob| is_drawing_file(&blob.name))
+                .filter(|blob| self.merge.accepts(&blob.name))
                 .map(|blob| (blob.name, blob.marker))
                 .collect()),
             _ => Err(unexpected()),
@@ -445,7 +448,7 @@ impl Engine {
         match self.ask(Request::ListLocal).await? {
             Response::Local(files) => Ok(files
                 .into_iter()
-                .filter(|f| is_drawing_file(&f.file))
+                .filter(|f| self.merge.accepts(&f.file))
                 .collect()),
             _ => Err(unexpected()),
         }
@@ -557,16 +560,16 @@ impl Engine {
         let Some(remote) = self.fetch(file).await? else {
             return Ok(()); // deleted since the listing
         };
-        match merge_drawings(Some(&base.bytes), &local, &remote) {
-            Ok(merged) => {
+        match self.merge.merge(Some(&base.bytes), &local, &remote) {
+            Some(merged) => {
                 self.write_merged(file, marker, &local, &remote, merged)
                     .await
             }
             // Not a Drawing on one side. The cloud's file replaces the local
             // one only if that is unchanged and no Drawing either. Until then
             // every step downloads it again.
-            Err(_) if local_changed || is_drawing(&local) => Ok(()),
-            Err(_) => self.write_local(file, &remote, marker, Some(&local)).await,
+            None if local_changed || self.merge.is_item(&local) => Ok(()),
+            None => self.write_local(file, &remote, marker, Some(&local)).await,
         }
     }
 
@@ -579,15 +582,15 @@ impl Engine {
         local: Vec<u8>,
         base: &Synced,
     ) -> io::Result<()> {
-        match merge_drawings(Some(&base.bytes), &local, &base.bytes) {
-            Ok(merged) => {
+        match self.merge.merge(Some(&base.bytes), &local, &base.bytes) {
+            Some(merged) => {
                 self.write_merged(file, marker, &local, &base.bytes, merged)
                     .await
             }
             // Not a Drawing on one side: it replaces the cloud's file only if
             // that is no Drawing either.
-            Err(_) if is_drawing(&base.bytes) => Ok(()),
-            Err(_) => self.upload(file, local).await,
+            None if self.merge.is_item(&base.bytes) => Ok(()),
+            None => self.upload(file, local).await,
         }
     }
 
@@ -620,14 +623,17 @@ impl Engine {
         let Some(remote) = self.fetch(file).await? else {
             return Ok(()); // deleted since the listing
         };
-        match are_same_drawing(&local, &remote) {
-            Err(_) => Ok(()),
-            Ok(true) => {
-                let merged = merge_drawings(None, &local, &remote).map_err(io::Error::other)?;
+        match self.merge.same_item(&local, &remote) {
+            None => Ok(()),
+            Some(true) => {
+                let merged = self
+                    .merge
+                    .merge(None, &local, &remote)
+                    .ok_or_else(|| io::Error::other("not mergeable"))?;
                 self.write_merged(file, marker, &local, &remote, merged)
                     .await
             }
-            Ok(false) => {
+            Some(false) => {
                 let renamed = self.next_free_name(file).await?;
                 let happened = self
                     .guarded(Request::RenameLocal {
@@ -639,7 +645,7 @@ impl Engine {
                 if !happened {
                     return Ok(()); // the app wrote it meanwhile
                 }
-                self.outcome().changed.push(name_of(&renamed));
+                self.outcome().changed.push(self.merge.name_of(&renamed));
                 // Writing the cloud's Drawing reports `file` itself.
                 self.write_local(file, &remote, marker, None).await?;
                 self.upload(&renamed, local).await
@@ -649,12 +655,11 @@ impl Engine {
 
     /// `file` with the lowest number from 2 up that no side uses: "Sketch 2".
     async fn next_free_name(&self, file: &str) -> io::Result<String> {
-        let stem = name_of(file);
         let mut taken: BTreeSet<String> = self.remote.keys().cloned().collect();
         taken.extend(self.list_local().await?.into_iter().map(|f| f.file));
         taken.extend(self.list_synced().await?);
         Ok((2..)
-            .map(|n| format!("{stem} {n}{EXTENSION}"))
+            .map(|n| self.merge.numbered(file, n))
             .find(|candidate| !taken.contains(candidate))
             .expect("a free name"))
     }
@@ -719,7 +724,7 @@ impl Engine {
             })
             .await?;
         if happened {
-            self.outcome().changed.push(name_of(file));
+            self.outcome().changed.push(self.merge.name_of(file));
         }
         Ok(happened)
     }
@@ -732,7 +737,7 @@ impl Engine {
             })
             .await?;
         if happened {
-            self.outcome().changed.push(name_of(file));
+            self.outcome().changed.push(self.merge.name_of(file));
         }
         self.forget(file).await
     }
@@ -822,17 +827,10 @@ fn decide(local: Option<&[u8]>, remote: Option<&str>, base: Option<&Synced>) -> 
     }
 }
 
-pub fn is_drawing_file(file: &str) -> bool {
-    file.len() > EXTENSION.len() && file.ends_with(EXTENSION) && !file.starts_with('.')
-}
-
-pub fn name_of(file: &str) -> String {
-    file.strip_suffix(EXTENSION).unwrap_or(file).to_owned()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::merge::Drawings;
 
     /// A Device and a cloud in memory, answering a step's requests.
     #[derive(Default)]
@@ -941,7 +939,7 @@ mod tests {
         /// Runs a step to its end.
         fn step(&mut self, now_ms: u64) -> StepOutcome {
             self.requests.clear();
-            let mut step = SyncStep::new(now_ms);
+            let mut step = SyncStep::new(now_ms, Arc::new(Drawings));
             let mut reply = None;
             loop {
                 match step.resume(reply.take()) {
@@ -1001,7 +999,7 @@ mod tests {
 
     #[test]
     fn a_failing_request_is_the_outcomes_error_and_rejected_credentials_stop_the_step() {
-        let mut step = SyncStep::new(0);
+        let mut step = SyncStep::new(0, Arc::new(Drawings));
         assert!(matches!(
             step.resume(None),
             Next::Request(Request::ListCloud)
@@ -1016,7 +1014,7 @@ mod tests {
 
     #[test]
     fn a_cancelled_step_ends_interrupted() {
-        let mut step = SyncStep::new(0);
+        let mut step = SyncStep::new(0, Arc::new(Drawings));
         step.resume(None);
         let outcome = step.cancel();
         assert_eq!(outcome.error.unwrap().kind(), io::ErrorKind::Interrupted);

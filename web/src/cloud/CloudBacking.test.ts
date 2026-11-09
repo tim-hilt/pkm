@@ -32,11 +32,12 @@ const failure = async (promise: Promise<unknown>) => {
 };
 
 describe("Connect", () => {
-  it("connects and makes the pkm folder", async () => {
+  it("connects and makes the Drawings folder in pkm", async () => {
     const cloud = await open();
     await cloud.connect(url, "user", "secret");
     expect(cloud.connection).toEqual({ provider: "WebDAV", server: url });
     expect(server.hasFolder("pkm")).toBe(true);
+    expect(server.hasFolder("pkm/Drawings")).toBe(true);
   });
 
   it("keeps an existing folder and its Drawings", async () => {

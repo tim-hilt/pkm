@@ -1,22 +1,25 @@
 //! The native Sync runner (ADR-0016): answers the requests of the Sync step
-//! machine (`step`, where the rules of ADR-0011 live) with file access in the
-//! Drawings folder and the Sync state folder, and the blocking `Storage`.
+//! machine (`step`, where the rules of ADR-0011 live) with file access in a
+//! Context's folder and its Sync state folder, and the blocking `Storage`.
+//! Syncs any number of Context folders one after the other (ADR-0020).
 
+use std::cell::Cell;
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::merge::{Drawings, Merge};
 use crate::step::{
     LocalFile, Marks, Next, Progress, Request, Response, StepOutcome, SyncStep, Synced,
-    is_drawing_file,
 };
 use crate::storage::{Storage, write_file_atomically};
 
-/// What this Device remembers of each Drawing at its last Sync, in a folder of
-/// its own: never inside the Drawings folder, never Synced. Forgotten on
-/// Disconnect (`forget`).
+/// What this Device remembers of each Item of one Context folder at its last
+/// Sync, in a folder of its own: never inside the Context folder, never
+/// Synced. Forgotten on Disconnect (`forget`).
 #[derive(Debug, Clone)]
 pub struct SyncState {
     dir: PathBuf,
@@ -106,7 +109,12 @@ impl SyncState {
     }
 
     fn files(&self) -> io::Result<Vec<String>> {
-        file_names(&self.dir.join("markers"))
+        Ok(
+            files_in(&self.dir.join("markers"), |name| !name.starts_with('.'))?
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect(),
+        )
     }
 }
 
@@ -137,9 +145,52 @@ fn now_ms() -> u64 {
         .map_or(0, |t| t.as_millis() as u64)
 }
 
-/// Runs one Sync step between `drawings` (the Device's Drawings folder) and
-/// `storage`, and lists the cloud once when nothing changed. Stops as soon as
-/// `cancel` is set, also in the middle of a transfer.
+/// One Context folder to Sync: its folder on this Device, what is remembered
+/// of it, its cloud folder and its merge hook.
+pub struct Folder<'a> {
+    pub dir: &'a Path,
+    pub state: &'a SyncState,
+    pub storage: &'a dyn Storage,
+    pub merge: Arc<dyn Merge>,
+}
+
+/// Runs one Sync step for each of `folders` in turn, and lists each cloud
+/// folder once when nothing changed. Stops as soon as `cancel` is set, also in
+/// the middle of a transfer, or once access is lost. Gives the outcome of each
+/// folder that ran, in order.
+///
+/// `progress` counts the transfers of all folders together: each folder adds
+/// its own once it knows them, so the total grows as the folders come up.
+pub fn sync_folders(
+    folders: &[Folder],
+    cancel: &AtomicBool,
+    progress: &dyn Fn(Progress),
+) -> Vec<StepOutcome> {
+    let mut outcomes = Vec::new();
+    let (mut finished, mut planned) = (0, 0);
+    for folder in folders {
+        let latest = Cell::new(None);
+        let outcome = sync_folder(folder, cancel, &|p| {
+            latest.set(Some(p));
+            progress(Progress {
+                done: finished + p.done,
+                total: planned + p.total,
+            });
+        });
+        if let Some(p) = latest.get() {
+            finished += p.done;
+            planned += p.total;
+        }
+        let stop = outcome.access_lost || cancel.load(Relaxed);
+        outcomes.push(outcome);
+        if stop {
+            break;
+        }
+    }
+    outcomes
+}
+
+/// `sync_folders` for the Drawings folder alone.
 pub fn sync_step(
     drawings: &Path,
     state: &SyncState,
@@ -158,13 +209,24 @@ pub fn sync_step_reporting(
     cancel: &AtomicBool,
     progress: &dyn Fn(Progress),
 ) -> StepOutcome {
-    let runner = Runner {
-        drawings,
+    let folder = Folder {
+        dir: drawings,
         state,
         storage,
+        merge: Arc::new(Drawings),
+    };
+    sync_folders(&[folder], cancel, progress).remove(0)
+}
+
+fn sync_folder(folder: &Folder, cancel: &AtomicBool, progress: &dyn Fn(Progress)) -> StepOutcome {
+    let runner = Runner {
+        dir: folder.dir,
+        state: folder.state,
+        storage: folder.storage,
+        merge: &*folder.merge,
         cancel,
     };
-    let mut step = SyncStep::new(now_ms());
+    let mut step = SyncStep::new(now_ms(), Arc::clone(&folder.merge));
     let mut reported = None;
     let mut reply = None;
     loop {
@@ -194,9 +256,10 @@ pub fn sync_step_reporting(
 }
 
 struct Runner<'a> {
-    drawings: &'a Path,
+    dir: &'a Path,
     state: &'a SyncState,
     storage: &'a dyn Storage,
+    merge: &'a dyn Merge,
     cancel: &'a AtomicBool,
 }
 
@@ -247,7 +310,7 @@ impl Runner<'_> {
                 expected,
             } => Response::Happened(
                 if self.read_local(&file)?.as_deref() == expected.as_deref() {
-                    write_file_atomically(&self.drawings.join(&file), &bytes)?;
+                    write_file_atomically(&self.dir.join(&file), &bytes)?;
                     true
                 } else {
                     false
@@ -255,7 +318,7 @@ impl Runner<'_> {
             ),
             Request::RenameLocal { from, to, expected } => Response::Happened(
                 if self.read_local(&from)?.as_deref() == Some(&expected[..]) {
-                    fs::rename(self.drawings.join(&from), self.drawings.join(&to))?;
+                    fs::rename(self.dir.join(&from), self.dir.join(&to))?;
                     true
                 } else {
                     false
@@ -263,7 +326,7 @@ impl Runner<'_> {
             ),
             Request::DeleteLocal { file, expected } => Response::Happened(
                 if self.read_local(&file)?.as_deref() == Some(&expected[..]) {
-                    fs::remove_file(self.drawings.join(&file))?;
+                    fs::remove_file(self.dir.join(&file))?;
                     true
                 } else {
                     false
@@ -273,7 +336,7 @@ impl Runner<'_> {
     }
 
     fn list_local(&self) -> io::Result<Vec<LocalFile>> {
-        Ok(drawing_files(self.drawings)?
+        Ok(files_in(self.dir, |name| self.merge.accepts(name))?
             .into_iter()
             .map(|(file, meta)| LocalFile {
                 file,
@@ -283,9 +346,9 @@ impl Runner<'_> {
     }
 
     fn read_local(&self, file: &str) -> io::Result<Option<Vec<u8>>> {
-        match fs::read(self.drawings.join(file)) {
+        match fs::read(self.dir.join(file)) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-            // Not a file (a folder called so): not a Drawing.
+            // Not a file (a folder called so): not an Item.
             Err(e) if e.kind() == io::ErrorKind::IsADirectory => Ok(None),
             other => other.map(Some),
         }
@@ -321,21 +384,14 @@ impl<R: Read> Read for Cancellable<'_, R> {
     }
 }
 
-/// The names of the Drawing files in `dir`.
-fn file_names(dir: &Path) -> io::Result<Vec<String>> {
-    Ok(drawing_files(dir)?
-        .into_iter()
-        .map(|(name, _)| name)
-        .collect())
-}
-
-/// The Drawing files in `dir` with their metadata, from one scan.
-fn drawing_files(dir: &Path) -> io::Result<Vec<(String, fs::Metadata)>> {
+/// The files in `dir` that `wanted` accepts by name, with their metadata,
+/// from one scan.
+fn files_in(dir: &Path, wanted: impl Fn(&str) -> bool) -> io::Result<Vec<(String, fs::Metadata)>> {
     let mut files = Vec::new();
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
-        if is_drawing_file(&name) {
+        if wanted(&name) {
             let meta = entry.metadata()?;
             if meta.is_file() {
                 files.push((name, meta));

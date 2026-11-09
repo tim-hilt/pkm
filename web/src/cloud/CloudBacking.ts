@@ -136,7 +136,7 @@ export class CloudBacking {
     return data && JSON.parse(new TextDecoder().decode(data));
   }
 
-  /** Throws `ConnectFailed` unless the server takes `credentials` and has (or now has) its `pkm` folder. */
+  /** Throws `ConnectFailed` unless the server takes `credentials` and has (or now has) its `pkm/Drawings` folder. */
   private async check({ url, username, password }: Credentials): Promise<void> {
     let protocol;
     try {
@@ -186,7 +186,7 @@ export class CloudBacking {
   }
 
   /**
-   * Checks the server and makes its `pkm` folder, then keeps the
+   * Checks the server and makes its `pkm/Drawings` folder, then keeps the
    * connection. Throws `ConnectFailed` and changes nothing if that fails.
    */
   async connect(url: string, username: string, password: string): Promise<void> {

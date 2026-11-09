@@ -1,4 +1,4 @@
-//! The Sync loop: when Sync steps run. On start and on coming to the front,
+//! The Sync loop: when Sync steps run, each Syncing every Context folder. On start and on coming to the front,
 //! a few seconds after the last local change, and every 10 seconds while in
 //! front; never in the background. While steps fail (offline) it waits longer
 //! each time. While the Device is offline no step runs, and coming online Syncs
@@ -12,27 +12,43 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use crate::merge::Merge;
 use crate::schedule::{Schedule, Status, Timing};
-use crate::step::Progress;
+use crate::step::{Progress, StepOutcome};
 use crate::storage::Storage;
-use crate::sync::{SyncState, sync_step_reporting};
+use crate::sync::{Folder, SyncState, sync_folders};
 
 /// Hears what the loop does, on its thread. The status comes at the end of
 /// every step, so the observer can tell when Sync last went through.
 pub trait Observer: Send + Sync {
-    /// The names of the Drawings a step wrote or deleted locally. A rename is
-    /// the old name and the new one.
-    fn changed(&self, names: Vec<String>);
-    /// How far the transfers of a step are; none once it is over.
+    /// The names of the Items of Context folder `folder` a step wrote or
+    /// deleted locally. A rename is the old name and the new one.
+    fn changed(&self, folder: &str, names: Vec<String>);
+    /// How far the transfers of a step are, all folders together; none once it
+    /// is over.
     fn progress(&self, progress: Option<Progress>);
     /// The status: when a step starts transferring, and when a step ends or
     /// the Device goes offline.
     fn status(&self, status: Status);
 }
 
+/// A Context folder the loop Syncs.
+#[derive(Clone)]
+pub struct SyncFolder {
+    /// The Context's name, as the observer hears it: "Drawings".
+    pub name: String,
+    /// The folder on this Device.
+    pub dir: PathBuf,
+    /// What is remembered of the folder; one per folder.
+    pub state: SyncState,
+    /// The folder in the cloud.
+    pub storage: Arc<dyn Storage>,
+    pub merge: Arc<dyn Merge>,
+}
+
 struct Shared {
     schedule: Mutex<Schedule>,
-    storage: Mutex<Arc<dyn Storage>>,
+    folders: Mutex<Vec<SyncFolder>>,
     observer: Arc<dyn Observer>,
     wake: Condvar,
     cancel: AtomicBool,
@@ -48,7 +64,8 @@ impl Shared {
     }
 }
 
-/// Runs Sync steps between the Drawings folder and a storage until dropped.
+/// Runs Sync steps between the Context folders and their cloud folders until
+/// dropped.
 pub struct SyncLoop {
     shared: Arc<Shared>,
     started: Instant,
@@ -56,26 +73,19 @@ pub struct SyncLoop {
 }
 
 impl SyncLoop {
-    /// Starts Syncing `drawings` with `storage`, remembering in the state
-    /// folder `state`. The first step runs at once.
-    pub fn start(
-        drawings: PathBuf,
-        state: SyncState,
-        storage: Arc<dyn Storage>,
-        timing: Timing,
-        observer: Arc<dyn Observer>,
-    ) -> Self {
+    /// Starts Syncing `folders`. The first step runs at once.
+    pub fn start(folders: Vec<SyncFolder>, timing: Timing, observer: Arc<dyn Observer>) -> Self {
         let started = Instant::now();
         let shared = Arc::new(Shared {
             schedule: Mutex::new(Schedule::new(timing, Duration::ZERO)),
-            storage: Mutex::new(storage),
+            folders: Mutex::new(folders),
             observer,
             wake: Condvar::new(),
             cancel: AtomicBool::new(false),
         });
         let worker = Arc::clone(&shared);
         let thread = thread::spawn(move || {
-            run(&worker, started, &drawings, &state);
+            run(&worker, started);
         });
         Self {
             shared,
@@ -112,21 +122,27 @@ impl SyncLoop {
         self.shared.wake.notify_all();
     }
 
-    /// The user Reconnected with `storage`, which holds the new credentials:
-    /// Sync resumes where it stopped. If they are rejected too, the loop is
-    /// blocked again.
-    pub fn reconnect(&self, storage: Arc<dyn Storage>) {
-        *self
+    /// The user Reconnected: `storages` hold the new credentials, the cloud
+    /// folder of each Context folder in the order they were started in. Sync
+    /// resumes where it stopped. If they are rejected too, the loop is blocked
+    /// again.
+    pub fn reconnect(&self, storages: Vec<Arc<dyn Storage>>) {
+        let mut folders = self
             .shared
-            .storage
+            .folders
             .lock()
-            .unwrap_or_else(|e| e.into_inner()) = storage;
+            .unwrap_or_else(|e| e.into_inner());
+        assert_eq!(folders.len(), storages.len(), "one storage per folder");
+        for (folder, storage) in folders.iter_mut().zip(storages) {
+            folder.storage = storage;
+        }
+        drop(folders);
         let now = self.started.elapsed();
         self.shared.lock().reconnected(now);
         self.shared.wake.notify_all();
     }
 
-    /// A Drawing changed on this Device.
+    /// An Item changed on this Device.
     pub fn local_change(&self) {
         let now = self.started.elapsed();
         self.shared.lock().local_change(now);
@@ -144,7 +160,7 @@ impl Drop for SyncLoop {
     }
 }
 
-fn run(shared: &Shared, started: Instant, drawings: &std::path::Path, state: &SyncState) {
+fn run(shared: &Shared, started: Instant) {
     let observer = &*shared.observer;
     let mut schedule = shared.lock();
     loop {
@@ -154,29 +170,30 @@ fn run(shared: &Shared, started: Instant, drawings: &std::path::Path, state: &Sy
         let now = started.elapsed();
         if schedule.take_due(now) {
             drop(schedule);
-            let storage = Arc::clone(&shared.storage.lock().unwrap_or_else(|e| e.into_inner()));
+            let folders = shared
+                .folders
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
             let transferring = AtomicBool::new(false);
-            let outcome = sync_step_reporting(drawings, state, &*storage, &shared.cancel, &|p| {
-                if !transferring.swap(true, Relaxed) {
-                    shared.publish(Status::Syncing);
-                }
-                observer.progress(Some(p));
-            });
+            let outcomes = run_step(&folders, shared, &transferring);
             if transferring.load(Relaxed) {
                 observer.progress(None);
             }
-            if !outcome.changed.is_empty() {
-                observer.changed(outcome.changed.clone());
+            for (folder, outcome) in folders.iter().zip(&outcomes) {
+                if !outcome.changed.is_empty() {
+                    observer.changed(&folder.name, outcome.changed.clone());
+                }
             }
             let cancelled = shared.cancel.load(Relaxed);
             if !cancelled {
-                shared.publish(Status::after(&outcome));
+                shared.publish(Status::after_all(&outcomes));
             }
             schedule = shared.lock();
             let now = started.elapsed();
             // Cancelling is no failure of the cloud.
-            schedule.step_ended(now, outcome.error.is_none());
-            if outcome.access_lost {
+            schedule.step_ended(now, outcomes.iter().all(|o| o.error.is_none()));
+            if outcomes.iter().any(|o| o.access_lost) {
                 schedule.access_lost();
             }
         } else {
@@ -195,6 +212,29 @@ fn run(shared: &Shared, started: Instant, drawings: &std::path::Path, state: &Sy
             };
         }
     }
+}
+
+/// One step over all `folders`, telling the observer how far it is.
+fn run_step(
+    folders: &[SyncFolder],
+    shared: &Shared,
+    transferring: &AtomicBool,
+) -> Vec<StepOutcome> {
+    let borrowed: Vec<Folder> = folders
+        .iter()
+        .map(|folder| Folder {
+            dir: &folder.dir,
+            state: &folder.state,
+            storage: &*folder.storage,
+            merge: Arc::clone(&folder.merge),
+        })
+        .collect();
+    sync_folders(&borrowed, &shared.cancel, &|p| {
+        if !transferring.swap(true, Relaxed) {
+            shared.publish(Status::Syncing);
+        }
+        shared.observer.progress(Some(p));
+    })
 }
 
 #[cfg(test)]
@@ -224,7 +264,7 @@ mod tests {
     }
 
     impl Observer for Told {
-        fn changed(&self, names: Vec<String>) {
+        fn changed(&self, _: &str, names: Vec<String>) {
             self.changed.lock().unwrap().extend(names);
         }
         fn progress(&self, progress: Option<Progress>) {
@@ -239,6 +279,20 @@ mod tests {
     impl Told {
         fn statuses(&self) -> Vec<Status> {
             self.statuses.lock().unwrap().clone()
+        }
+    }
+
+    fn drawings_folder(
+        drawings: &Scratch,
+        state: &Scratch,
+        storage: Arc<dyn Storage>,
+    ) -> SyncFolder {
+        SyncFolder {
+            name: "Drawings".into(),
+            dir: drawings.0.clone(),
+            state: SyncState::open(&state.0).unwrap(),
+            storage,
+            merge: Arc::new(crate::Drawings),
         }
     }
 
@@ -260,9 +314,7 @@ mod tests {
         put_bytes(&*storage, "Sketch.excalidraw", b"one");
         let told = Arc::new(Told::default());
         let sync = SyncLoop::start(
-            drawings.0.clone(),
-            SyncState::open(&state.0).unwrap(),
-            storage.clone(),
+            vec![drawings_folder(&drawings, &state, storage.clone())],
             fast(),
             told.clone(),
         );
@@ -280,9 +332,7 @@ mod tests {
         put_bytes(&*storage, "A.excalidraw", DRAWING);
         let told = Arc::new(Told::default());
         let _sync = SyncLoop::start(
-            drawings.0.clone(),
-            SyncState::open(&state.0).unwrap(),
-            storage,
+            vec![drawings_folder(&drawings, &state, storage)],
             fast(),
             told.clone(),
         );
@@ -346,9 +396,7 @@ mod tests {
         std::fs::write(drawings.0.join("A.excalidraw"), DRAWING).unwrap();
         let told = Arc::new(Told::default());
         let sync = SyncLoop::start(
-            drawings.0.clone(),
-            SyncState::open(&state.0).unwrap(),
-            rejecting.clone(),
+            vec![drawings_folder(&drawings, &state, rejecting.clone())],
             fast(),
             told.clone(),
         );
@@ -364,7 +412,7 @@ mod tests {
         );
 
         // Rejected again: blocked again.
-        sync.reconnect(rejecting.clone());
+        sync.reconnect(vec![rejecting.clone()]);
         eventually(|| rejecting.calls.load(Relaxed) > calls);
         thread::sleep(Duration::from_millis(100));
         let calls = rejecting.calls.load(Relaxed);
@@ -372,7 +420,7 @@ mod tests {
         assert_eq!(rejecting.calls.load(Relaxed), calls);
         assert_eq!(told.statuses().last(), Some(&Status::AccessLost));
 
-        sync.reconnect(gate(&cloud, false));
+        sync.reconnect(vec![gate(&cloud, false)]);
         eventually(|| told.statuses().last() == Some(&Status::UpToDate));
         assert!(cloud.0.join("A.excalidraw").exists());
     }
@@ -383,9 +431,7 @@ mod tests {
         let storage = gate(&cloud, false);
         let told = Arc::new(Told::default());
         let sync = SyncLoop::start(
-            drawings.0.clone(),
-            SyncState::open(&state.0).unwrap(),
-            storage.clone(),
+            vec![drawings_folder(&drawings, &state, storage.clone())],
             fast(),
             told.clone(),
         );
@@ -441,12 +487,11 @@ mod tests {
     fn dropping_the_loop_cancels_a_running_transfer() {
         let (drawings, state) = (Scratch::new("d"), Scratch::new("s"));
         let started = Arc::new(AtomicBool::new(false));
+        let storage = Arc::new(Endless {
+            started: Arc::clone(&started),
+        });
         let sync = SyncLoop::start(
-            drawings.0.clone(),
-            SyncState::open(&state.0).unwrap(),
-            Arc::new(Endless {
-                started: Arc::clone(&started),
-            }),
+            vec![drawings_folder(&drawings, &state, storage)],
             Timing::default(),
             Arc::new(Told::default()),
         );
