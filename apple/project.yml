@@ -50,7 +50,8 @@ targets:
         PRODUCT_MODULE_NAME: pkm
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: $(inherited)
-        MARKETING_VERSION: "0.1.0"
+        # Set from the latest git tag by `make apple-project` (scripts/version.sh).
+        MARKETING_VERSION: "${MARKETING_VERSION}"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "6.0"
         # User-facing strings live in pkm/Localizable.xcstrings.

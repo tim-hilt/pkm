@@ -11,7 +11,7 @@ SIM ?= $(SIM_IPHONE)
 CORE_XCFRAMEWORK := apple/Generated/pkmCoreFFI.xcframework
 CORE_SOURCES := Cargo.toml Cargo.lock scripts/build-core-apple.sh $(shell find crates -type f)
 
-.PHONY: web-wasm web-install web-lint web-test web-test-browser web-record-references web-fmt web-dev core-apple apple-project build ipa test test-ios test-ui record-references lint fmt check sim run clean golden-fixtures bench visual-parity visual-parity-app screenshot
+.PHONY: web-wasm web-install web-lint web-test web-test-browser web-record-references web-fmt web-dev core-apple apple-project build ipa test test-ios test-ui record-references lint fmt check release-notes sim run clean golden-fixtures bench visual-parity visual-parity-app screenshot
 
 # The web app (web/): the core as wasm in web/generated (rebuilt only when the
 # Rust sources change), Bun for packages and the dev server.
@@ -63,7 +63,7 @@ $(CORE_XCFRAMEWORK): $(CORE_SOURCES)
 
 # The project references the generated files, so they must exist first.
 apple-project: core-apple
-	cd apple && xcodegen generate --quiet
+	cd apple && MARKETING_VERSION=$$(../scripts/version.sh) xcodegen generate --quiet
 
 # Regenerates the project first, so new Swift files are picked up.
 build: apple-project
@@ -122,6 +122,12 @@ fmt: web-fmt
 # Run this before committing.
 check: web-lint web-test fmt lint
 	cargo test --workspace --locked -q
+
+# Prints the next version and the changelog since the last tag (cliff.toml);
+# changes nothing. Tag a release with that version to ship it.
+release-notes:
+	@git cliff --bump --unreleased --strip header 2>/dev/null | sed '/^$$/N;/^\n$$/D'
+	@echo "next version: $$(git cliff --bumped-version 2>/dev/null)"
 
 # Creates the SIM device unless it exists.
 sim:
