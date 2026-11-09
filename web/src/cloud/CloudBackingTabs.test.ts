@@ -10,7 +10,7 @@ import { MemoryWebDav } from "./MemoryWebDav";
 const generated = new URL("../../generated/", import.meta.url);
 let core: Core;
 beforeAll(async () => {
-  core = await loadCore(readFileSync(new URL("excalidraw_native_web_bg.wasm", generated)));
+  core = await loadCore(readFileSync(new URL("pkm_web_bg.wasm", generated)));
 });
 
 const url = "https://dav.example/dav";
@@ -78,7 +78,7 @@ describe("several tabs of one browser", () => {
     two.cloud.localChange();
     await advance(5_000);
     await advance(5_000);
-    expect(server.contents("ExcalidrawNative").size).toBe(2);
+    expect(server.contents("pkm").size).toBe(2);
     expect(overlapped).toBe(false);
   });
 
@@ -110,7 +110,7 @@ describe("several tabs of one browser", () => {
     expect(two.cloud.connection?.server).toBe(url);
     await two.store.save(bytes("x"), "Mine");
     await advance(5_000);
-    expect(text(server.contents("ExcalidrawNative").get("Mine.excalidraw"))).toBe("x");
+    expect(text(server.contents("pkm").get("Mine.excalidraw"))).toBe("x");
   });
 
   it("Disconnect in one tab stops Sync in the other", async () => {

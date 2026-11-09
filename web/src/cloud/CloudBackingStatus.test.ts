@@ -9,7 +9,7 @@ import { MemoryWebDav } from "./MemoryWebDav";
 const generated = new URL("../../generated/", import.meta.url);
 let core: Core;
 beforeAll(async () => {
-  core = await loadCore(readFileSync(new URL("excalidraw_native_web_bg.wasm", generated)));
+  core = await loadCore(readFileSync(new URL("pkm_web_bg.wasm", generated)));
 });
 
 const url = "https://dav.example/dav";
@@ -71,8 +71,7 @@ describe("status", () => {
   });
 
   it("counts the Drawings that transfer, and clears the progress after", async () => {
-    for (const name of ["A", "B", "C"])
-      server.put("ExcalidrawNative", `${name}.excalidraw`, drawing(name));
+    for (const name of ["A", "B", "C"]) server.put("pkm", `${name}.excalidraw`, drawing(name));
     const { cloud, progress } = await device();
     await cloud.connect(url, "user", "secret");
     await advance(0);
@@ -104,7 +103,7 @@ describe("access lost", () => {
     await advance(0);
     expect(cloud.syncReport.status).toBe("upToDate");
     expect(cloud.hasProblem).toBe(false);
-    expect(server.contents("ExcalidrawNative").has("Sketch.excalidraw")).toBe(true);
+    expect(server.contents("pkm").has("Sketch.excalidraw")).toBe(true);
   });
 });
 
@@ -114,18 +113,18 @@ describe("full", () => {
     await cloud.connect(url, "user", "secret");
     await advance(0);
     server.full = true;
-    server.put("ExcalidrawNative", "Remote.excalidraw", drawing("R"));
+    server.put("pkm", "Remote.excalidraw", drawing("R"));
     await store.add(drawing("A"), "Local");
     await advance(5_000);
     expect(cloud.syncReport.status).toBe("full");
     expect(cloud.hasProblem).toBe(true);
     expect((await store.list()).map((e) => e.name).sort()).toEqual(["Local", "Remote"]);
-    expect(server.contents("ExcalidrawNative").has("Local.excalidraw")).toBe(false);
+    expect(server.contents("pkm").has("Local.excalidraw")).toBe(false);
 
     server.full = false;
     await advance(10_000);
     expect(cloud.syncReport.status).toBe("upToDate");
-    expect(server.contents("ExcalidrawNative").has("Local.excalidraw")).toBe(true);
+    expect(server.contents("pkm").has("Local.excalidraw")).toBe(true);
   });
 });
 

@@ -146,7 +146,7 @@ describe("input through the core", () => {
   let core: Core;
   beforeAll(async () => {
     core = await loadCore(
-      readFileSync(new URL("../../generated/excalidraw_native_web_bg.wasm", import.meta.url)),
+      readFileSync(new URL("../../generated/pkm_web_bg.wasm", import.meta.url)),
     );
   });
 

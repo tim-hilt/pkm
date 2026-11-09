@@ -1,6 +1,6 @@
 # Excalifont
 
-Excalifont is the only bundled font (`apple/ExcalidrawNative/Resources/Fonts`,
+Excalifont is the only bundled font (`apple/pkm/Resources/Fonts`,
 SIL Open Font License 1.1; the licence text is next to it). Every text is
 drawn with it, whatever `fontFamily` the Element has; the family stays in the
 file.

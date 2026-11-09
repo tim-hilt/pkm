@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use excalidraw_native_core::{Editor, Modifiers, ScrollEvent, Tool};
+use pkm_core::{Editor, Modifiers, ScrollEvent, Tool};
 
 use crate::common;
 use common::{FixedWidth, editor_with, replay, tap};

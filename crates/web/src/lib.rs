@@ -12,7 +12,7 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 extern "C" {
     /// A JS object that measures text for the core: the client's font
-    /// machinery. See [`excalidraw_native_core::TextMeasurer`].
+    /// machinery. See [`pkm_core::TextMeasurer`].
     pub type TextMeasurer;
 
     /// The advance width in Scene units of `text`, a single line, at `font_size`.
@@ -32,7 +32,7 @@ struct Measurer(TextMeasurer);
 unsafe impl Send for Measurer {}
 unsafe impl Sync for Measurer {}
 
-impl excalidraw_native_core::TextMeasurer for Measurer {
+impl pkm_core::TextMeasurer for Measurer {
     fn line_width(&self, text: &str, font_size: f64) -> f64 {
         self.0.line_width(text, font_size)
     }
@@ -43,7 +43,7 @@ impl excalidraw_native_core::TextMeasurer for Measurer {
 /// UniFFI's remote enums do for the bindings.
 macro_rules! mirror_enum {
     ($(#[$meta:meta])* $name:ident { $($variant:ident),* $(,)? }) => {
-        mirror_enum!($(#[$meta])* $name in excalidraw_native_core::$name { $($variant),* });
+        mirror_enum!($(#[$meta])* $name in pkm_core::$name { $($variant),* });
     };
     ($(#[$meta:meta])* $name:ident in $core:path { $($variant:ident),* $(,)? }) => {
         $(#[$meta])*
@@ -92,8 +92,8 @@ mirror_enum!(
 );
 
 // The options of the properties panel.
-mirror_enum!(FillPattern in excalidraw_native_core::scene::FillPattern { Hachure, CrossHatch, Zigzag, Solid });
-mirror_enum!(LineStyle in excalidraw_native_core::scene::LineStyle { Solid, Dashed, Dotted });
+mirror_enum!(FillPattern in pkm_core::scene::FillPattern { Hachure, CrossHatch, Zigzag, Solid });
+mirror_enum!(LineStyle in pkm_core::scene::LineStyle { Solid, Dashed, Dotted });
 mirror_enum!(StrokeWidth { Thin, Medium, Bold });
 mirror_enum!(Sloppiness {
     Architect,
@@ -107,15 +107,15 @@ mirror_enum!(FontSize {
     Large,
     ExtraLarge
 });
-mirror_enum!(TextAlign in excalidraw_native_core::TextAlign { Left, Center, Right });
+mirror_enum!(TextAlign in pkm_core::TextAlign { Left, Center, Right });
 mirror_enum!(
     /// Where a layer command moves the Selection in the z-order.
     ZOrder { Forward, Backward, ToFront, ToBack }
 );
 
 /// Modifier keys as a bit set: shift 1, ctrl 2, alt 4, meta 8.
-fn modifiers(bits: u8) -> excalidraw_native_core::input::Modifiers {
-    excalidraw_native_core::input::Modifiers {
+fn modifiers(bits: u8) -> pkm_core::input::Modifiers {
+    pkm_core::input::Modifiers {
         shift: bits & 1 != 0,
         ctrl: bits & 2 != 0,
         alt: bits & 4 != 0,
@@ -123,7 +123,7 @@ fn modifiers(bits: u8) -> excalidraw_native_core::input::Modifiers {
     }
 }
 
-/// What the Canvas shows; see [`excalidraw_native_core::Viewport`].
+/// What the Canvas shows; see [`pkm_core::Viewport`].
 #[wasm_bindgen]
 #[derive(Clone, Copy)]
 pub struct ViewportState {
@@ -148,10 +148,10 @@ impl ViewportState {
     }
 }
 
-/// Handle to the core's editor; see [`excalidraw_native_core::Editor`].
+/// Handle to the core's editor; see [`pkm_core::Editor`].
 #[wasm_bindgen]
 pub struct Editor {
-    inner: RefCell<excalidraw_native_core::Editor>,
+    inner: RefCell<pkm_core::Editor>,
 }
 
 #[wasm_bindgen]
@@ -159,9 +159,9 @@ impl Editor {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
         // The browser has no system time for the core to ask for.
-        excalidraw_native_core::set_clock(date_now);
+        pkm_core::set_clock(date_now);
         Self {
-            inner: RefCell::new(excalidraw_native_core::Editor::new()),
+            inner: RefCell::new(pkm_core::Editor::new()),
         }
     }
 
@@ -180,7 +180,7 @@ impl Editor {
     }
 
     /// Hands the core the client's way to measure text; see
-    /// [`excalidraw_native_core::Editor::set_text_measurer`]. Call it before
+    /// [`pkm_core::Editor::set_text_measurer`]. Call it before
     /// loading a Drawing.
     #[wasm_bindgen(js_name = setTextMeasurer)]
     pub fn set_text_measurer(&self, measurer: TextMeasurer) {
@@ -203,7 +203,7 @@ impl Editor {
     }
 
     /// The text view to show over the Canvas, `undefined` if no text is being
-    /// edited; see [`excalidraw_native_core::Editor::text_editor`]. Read it
+    /// edited; see [`pkm_core::Editor::text_editor`]. Read it
     /// with the viewport after every input or command.
     #[wasm_bindgen(js_name = textEditor)]
     pub fn text_editor(&self) -> Option<TextEditor> {
@@ -234,7 +234,7 @@ impl Editor {
 
     /// Takes in `bytes`, the Drawing as Sync rewrote its file, without
     /// reloading and without an undo step; see
-    /// [`excalidraw_native_core::Editor::merge_synced`]. Throws if `bytes`
+    /// [`pkm_core::Editor::merge_synced`]. Throws if `bytes`
     /// are not a Drawing; nothing changes then.
     #[wasm_bindgen(js_name = mergeSynced)]
     pub fn merge_synced(&self, bytes: &[u8]) -> Result<(), JsError> {
@@ -376,7 +376,7 @@ impl Editor {
     }
 
     /// A step of a finger, Pencil or mouse; see
-    /// [`excalidraw_native_core::Editor::pointer`]. `modifiers` is a bit set:
+    /// [`pkm_core::Editor::pointer`]. `modifiers` is a bit set:
     /// shift 1, ctrl 2, alt 4, meta 8. The fields are the core's
     /// `PointerEvent`, flat, so that no object is made per event.
     #[wasm_bindgen]
@@ -395,7 +395,7 @@ impl Editor {
     ) {
         self.inner
             .borrow_mut()
-            .pointer(excalidraw_native_core::input::PointerEvent {
+            .pointer(pkm_core::input::PointerEvent {
                 id: id.into(),
                 phase: phase.into(),
                 x,
@@ -413,7 +413,7 @@ impl Editor {
     pub fn scroll(&self, x: f64, y: f64, dx: f64, dy: f64, modifier_bits: u8) {
         self.inner
             .borrow_mut()
-            .scroll(excalidraw_native_core::input::ScrollEvent {
+            .scroll(pkm_core::input::ScrollEvent {
                 x,
                 y,
                 dx,
@@ -426,7 +426,7 @@ impl Editor {
     pub fn magnify(&self, x: f64, y: f64, magnification: f64) {
         self.inner
             .borrow_mut()
-            .magnify(excalidraw_native_core::input::MagnifyEvent {
+            .magnify(pkm_core::input::MagnifyEvent {
                 x,
                 y,
                 magnification,
@@ -434,12 +434,12 @@ impl Editor {
     }
 
     /// Performs the Command the core binds to the key `key` (see
-    /// [`excalidraw_native_core::Shortcut::key`]) with the modifier bits
+    /// [`pkm_core::Shortcut::key`]) with the modifier bits
     /// `modifiers`; `false` if no Command is.
     #[wasm_bindgen(js_name = pressKey)]
     pub fn press_key(&self, key: &str, modifiers_bits: u8) -> bool {
         let held = modifiers(modifiers_bits);
-        let Some(shortcut) = excalidraw_native_core::shortcuts()
+        let Some(shortcut) = pkm_core::shortcuts()
             .into_iter()
             .find(|s| s.key == key && s.modifiers == held)
         else {
@@ -450,14 +450,14 @@ impl Editor {
     }
 
     /// The clipboard text for copying the Selection; `undefined` with nothing
-    /// selected. See [`excalidraw_native_core::Editor::copy_selection`].
+    /// selected. See [`pkm_core::Editor::copy_selection`].
     #[wasm_bindgen(js_name = copySelection)]
     pub fn copy_selection(&self) -> Option<String> {
         self.inner.borrow().copy_selection()
     }
 
     /// Copies the Selection and deletes it. See
-    /// [`excalidraw_native_core::Editor::cut_selection`].
+    /// [`pkm_core::Editor::cut_selection`].
     #[wasm_bindgen(js_name = cutSelection)]
     pub fn cut_selection(&self) -> Option<String> {
         self.inner.borrow_mut().cut_selection()
@@ -499,7 +499,7 @@ impl Editor {
     }
 
     /// Puts pasted images in the middle of the view; see
-    /// [`excalidraw_native_core::Editor::insert_images`].
+    /// [`pkm_core::Editor::insert_images`].
     #[wasm_bindgen(js_name = insertImages)]
     pub fn insert_images(&self, images: Vec<ImageFile>) {
         self.inner
@@ -508,7 +508,7 @@ impl Editor {
     }
 
     /// Puts dropped images around the point `(x, y)` of the view; see
-    /// [`excalidraw_native_core::Editor::insert_images_at`].
+    /// [`pkm_core::Editor::insert_images_at`].
     #[wasm_bindgen(js_name = insertImagesAt)]
     pub fn insert_images_at(&self, images: Vec<ImageFile>, x: f64, y: f64) {
         self.inner.borrow_mut().insert_images_at(
@@ -540,7 +540,7 @@ impl Editor {
     }
 
     /// What the properties panel shows; see
-    /// [`excalidraw_native_core::Editor::properties`]. Read it after every
+    /// [`pkm_core::Editor::properties`]. Read it after every
     /// input or command.
     pub fn properties(&self) -> Properties {
         let shown = self.inner.borrow().properties();
@@ -579,53 +579,53 @@ impl Editor {
     /// Sets a property on the Selection and as the style of the next Element.
     #[wasm_bindgen(js_name = setStrokeColor)]
     pub fn set_stroke_color(&self, color: String) {
-        self.set_property(excalidraw_native_core::Property::StrokeColor(color));
+        self.set_property(pkm_core::Property::StrokeColor(color));
     }
 
     #[wasm_bindgen(js_name = setBackgroundColor)]
     pub fn set_background_color(&self, color: String) {
-        self.set_property(excalidraw_native_core::Property::BackgroundColor(color));
+        self.set_property(pkm_core::Property::BackgroundColor(color));
     }
 
     #[wasm_bindgen(js_name = setFillStyle)]
     pub fn set_fill_style(&self, value: FillPattern) {
-        self.set_property(excalidraw_native_core::Property::FillStyle(value.into()));
+        self.set_property(pkm_core::Property::FillStyle(value.into()));
     }
 
     #[wasm_bindgen(js_name = setStrokeWidth)]
     pub fn set_stroke_width(&self, value: StrokeWidth) {
-        self.set_property(excalidraw_native_core::Property::StrokeWidth(value.into()));
+        self.set_property(pkm_core::Property::StrokeWidth(value.into()));
     }
 
     #[wasm_bindgen(js_name = setStrokeStyle)]
     pub fn set_stroke_style(&self, value: LineStyle) {
-        self.set_property(excalidraw_native_core::Property::StrokeStyle(value.into()));
+        self.set_property(pkm_core::Property::StrokeStyle(value.into()));
     }
 
     #[wasm_bindgen(js_name = setSloppiness)]
     pub fn set_sloppiness(&self, value: Sloppiness) {
-        self.set_property(excalidraw_native_core::Property::Sloppiness(value.into()));
+        self.set_property(pkm_core::Property::Sloppiness(value.into()));
     }
 
     #[wasm_bindgen(js_name = setEdges)]
     pub fn set_edges(&self, value: Edges) {
-        self.set_property(excalidraw_native_core::Property::Edges(value.into()));
+        self.set_property(pkm_core::Property::Edges(value.into()));
     }
 
     /// `0` to `100`.
     #[wasm_bindgen(js_name = setOpacity)]
     pub fn set_opacity(&self, value: f64) {
-        self.set_property(excalidraw_native_core::Property::Opacity(value));
+        self.set_property(pkm_core::Property::Opacity(value));
     }
 
     #[wasm_bindgen(js_name = setFontSize)]
     pub fn set_font_size(&self, value: FontSize) {
-        self.set_property(excalidraw_native_core::Property::FontSize(value.into()));
+        self.set_property(pkm_core::Property::FontSize(value.into()));
     }
 
     #[wasm_bindgen(js_name = setTextAlign)]
     pub fn set_text_align(&self, value: TextAlign) {
-        self.set_property(excalidraw_native_core::Property::TextAlign(value.into()));
+        self.set_property(pkm_core::Property::TextAlign(value.into()));
     }
 
     /// Duplicates the Selection.
@@ -643,7 +643,7 @@ impl Editor {
         self.inner.borrow_mut().move_in_z_order(how.into());
     }
 
-    /// Groups the Selection (see [`excalidraw_native_core::Editor::group`]).
+    /// Groups the Selection (see [`pkm_core::Editor::group`]).
     pub fn group(&self) {
         self.inner.borrow_mut().group();
     }
@@ -658,17 +658,17 @@ impl Editor {
     pub fn select_all(&self) {
         self.inner
             .borrow_mut()
-            .perform(excalidraw_native_core::Command::SelectAll);
+            .perform(pkm_core::Command::SelectAll);
     }
 
     /// A finger or mouse held at the view point `(x, y)`: the Context menu to
     /// show, `undefined` if the press means nothing. See
-    /// [`excalidraw_native_core::Editor::long_press`].
+    /// [`pkm_core::Editor::long_press`].
     #[wasm_bindgen(js_name = longPress)]
     pub fn long_press(&self, x: f64, y: f64, kind: PointerKind) -> Option<ContextMenu> {
         let menu = self.inner.borrow_mut().long_press(x, y, kind.into())?;
         Some(match menu {
-            excalidraw_native_core::ContextMenu::Element {
+            pkm_core::ContextMenu::Element {
                 can_group,
                 can_ungroup,
             } => ContextMenu {
@@ -676,7 +676,7 @@ impl Editor {
                 can_group,
                 can_ungroup,
             },
-            excalidraw_native_core::ContextMenu::Canvas => ContextMenu {
+            pkm_core::ContextMenu::Canvas => ContextMenu {
                 element: false,
                 can_group: false,
                 can_ungroup: false,
@@ -698,7 +698,7 @@ impl Editor {
     }
 }
 
-/// The Context menu to show; see [`excalidraw_native_core::ContextMenu`].
+/// The Context menu to show; see [`pkm_core::ContextMenu`].
 #[wasm_bindgen]
 pub struct ContextMenu {
     /// The Element menu (else the Canvas's).
@@ -716,7 +716,7 @@ mirror_enum! {
 }
 
 /// An image export for the client to rasterise; see
-/// [`excalidraw_native_core::Export`].
+/// [`pkm_core::Export`].
 #[wasm_bindgen]
 pub struct Export {
     geometry: Option<Geometry>,
@@ -741,12 +741,12 @@ impl Export {
 }
 
 impl Editor {
-    fn set_property(&self, property: excalidraw_native_core::Property) {
+    fn set_property(&self, property: pkm_core::Property) {
         self.inner.borrow_mut().set_property(property);
     }
 }
 
-/// An image to paste or drop; see [`excalidraw_native_core::ImageFile`].
+/// An image to paste or drop; see [`pkm_core::ImageFile`].
 #[wasm_bindgen(getter_with_clone)]
 pub struct ImageFile {
     #[wasm_bindgen(js_name = fileId)]
@@ -778,7 +778,7 @@ impl ImageFile {
     }
 }
 
-impl From<ImageFile> for excalidraw_native_core::ImageFile {
+impl From<ImageFile> for pkm_core::ImageFile {
     fn from(file: ImageFile) -> Self {
         Self {
             file_id: file.file_id,
@@ -791,7 +791,7 @@ impl From<ImageFile> for excalidraw_native_core::ImageFile {
 }
 
 /// The text view to show over the Canvas while a text is edited, in view
-/// coordinates; see [`excalidraw_native_core::TextEditor`].
+/// coordinates; see [`pkm_core::TextEditor`].
 #[wasm_bindgen(getter_with_clone)]
 pub struct TextEditor {
     /// The text as typed: what the text view starts with.
@@ -819,7 +819,7 @@ pub struct TextEditor {
 }
 
 /// What the properties panel shows: `undefined` where the Selection's
-/// Elements differ. See [`excalidraw_native_core::Properties`].
+/// Elements differ. See [`pkm_core::Properties`].
 #[wasm_bindgen(getter_with_clone)]
 pub struct Properties {
     #[wasm_bindgen(js_name = strokeColor)]
@@ -865,16 +865,16 @@ pub struct Sections {
 }
 
 /// Whether two Drawings' files are the same Drawing (they share Elements, or
-/// are both empty); see [`excalidraw_native_core::are_same_drawing`].
+/// are both empty); see [`pkm_core::are_same_drawing`].
 #[wasm_bindgen(js_name = areSameDrawing)]
 pub fn are_same_drawing(a: &[u8], b: &[u8]) -> bool {
-    matches!(excalidraw_native_core::are_same_drawing(a, b), Ok(true))
+    matches!(pkm_core::are_same_drawing(a, b), Ok(true))
 }
 
 /// How Excalidraw shows a CSS colour in its dark theme, for swatches.
 #[wasm_bindgen(js_name = darkModeColor)]
 pub fn dark_mode_color(css: &str) -> String {
-    excalidraw_native_core::dark_mode_color(css)
+    pkm_core::dark_mode_color(css)
 }
 
 impl Default for Editor {
@@ -889,7 +889,7 @@ impl Default for Editor {
 /// memory may grow in between, so clients make their views of it afresh.
 #[wasm_bindgen]
 pub struct Geometry {
-    inner: excalidraw_native_core::Geometry,
+    inner: pkm_core::Geometry,
 }
 
 #[wasm_bindgen]
@@ -908,7 +908,7 @@ impl Geometry {
     /// mirror of the record has the same layout.
     #[wasm_bindgen(js_name = partStride)]
     pub fn part_stride(&self) -> u32 {
-        size_of::<excalidraw_native_core::Part>() as u32
+        size_of::<pkm_core::Part>() as u32
     }
 
     #[wasm_bindgen(js_name = partsAddress)]
@@ -943,7 +943,7 @@ impl Geometry {
 
     #[wasm_bindgen(js_name = textLineStride)]
     pub fn text_line_stride(&self) -> u32 {
-        size_of::<excalidraw_native_core::TextLine>() as u32
+        size_of::<pkm_core::TextLine>() as u32
     }
 
     #[wasm_bindgen(js_name = textLinesAddress)]
@@ -968,7 +968,7 @@ impl Geometry {
 
     #[wasm_bindgen(js_name = imageStride)]
     pub fn image_stride(&self) -> u32 {
-        size_of::<excalidraw_native_core::Image>() as u32
+        size_of::<pkm_core::Image>() as u32
     }
 
     #[wasm_bindgen(js_name = imagesAddress)]
@@ -989,8 +989,8 @@ impl Geometry {
 
 // ---- The WebDAV protocol (ADR-0016) ----
 
-use excalidraw_native_cloud::ConnectError;
-use excalidraw_native_cloud::webdav_protocol::{Exchange, HttpAnswer, HttpRequest, Turn, WebDav};
+use pkm_cloud::ConnectError;
+use pkm_cloud::webdav_protocol::{Exchange, HttpAnswer, HttpRequest, Turn, WebDav};
 
 /// A request for the client to send with `fetch`.
 #[wasm_bindgen]
@@ -1202,7 +1202,7 @@ impl WebDavProtocol {
             .map_err(|_| JsError::new("notHttps"))
     }
 
-    /// Checks the server and makes its `ExcalidrawNative` folder.
+    /// Checks the server and makes its `pkm` folder.
     pub fn connect(&self) -> DavExchange {
         DavExchange::new(self.0.connect(), DavOutcome::connect)
     }
@@ -1239,10 +1239,8 @@ impl WebDavProtocol {
 
 // ---- The Sync step and its schedule (ADR-0016) ----
 
-use excalidraw_native_cloud::step::{LocalFile, Marks, Synced};
-use excalidraw_native_cloud::{
-    Blob, Next, Request, Response, Schedule, Status, StepOutcome, SyncStep, Timing,
-};
+use pkm_cloud::step::{LocalFile, Marks, Synced};
+use pkm_cloud::{Blob, Next, Request, Response, Schedule, Status, StepOutcome, SyncStep, Timing};
 use std::time::Duration;
 
 /// What a Sync step asks the client to do; `kind` says which request it is

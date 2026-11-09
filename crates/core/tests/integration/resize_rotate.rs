@@ -4,8 +4,8 @@
 //! Expected values are worked out by hand in the comments, from Excalidraw's
 //! rules for resizing and rotating (`resizeElements.ts`).
 
-use excalidraw_native_core::json::{Value, parse};
-use excalidraw_native_core::{Editor, PartKind};
+use pkm_core::json::{Value, parse};
+use pkm_core::{Editor, PartKind};
 
 use crate::common;
 use common::{FixedWidth, editor_with, replay, tap};

@@ -7,7 +7,7 @@
 //! nobody interprets.
 //!
 //! ```
-//! use excalidraw_native_core::json::parse;
+//! use pkm_core::json::parse;
 //!
 //! let value = parse(r#"{ "b": 1.0, "a": [true, null] }"#).unwrap();
 //! assert_eq!(value.to_json(), r#"{"b":1,"a":[true,null]}"#);

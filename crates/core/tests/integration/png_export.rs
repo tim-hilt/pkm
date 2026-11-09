@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 
 use std::sync::Arc;
 
-use excalidraw_native_core::{Editor, ExportScope, Tool};
+use pkm_core::{Editor, ExportScope, Tool};
 
 use crate::common;
 use common::{FixedWidth, editor_with, tap};
@@ -17,7 +17,7 @@ fn rectangle(id: &str, x: f64) -> String {
     )
 }
 
-fn drawn_elements(export: &excalidraw_native_core::Export) -> BTreeSet<u32> {
+fn drawn_elements(export: &pkm_core::Export) -> BTreeSet<u32> {
     export.geometry.parts().iter().map(|p| p.element).collect()
 }
 

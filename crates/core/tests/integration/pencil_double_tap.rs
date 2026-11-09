@@ -3,7 +3,7 @@
 //! settings, and the core changes the Tool. Tool, Tool lock and saved Drawing
 //! are read back.
 
-use excalidraw_native_core::{Editor, PencilDoubleTap, Tool};
+use pkm_core::{Editor, PencilDoubleTap, Tool};
 
 use crate::common;
 use common::{editor_with, replay, saved_elements};

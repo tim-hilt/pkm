@@ -3,7 +3,7 @@
 # Depends on the core, on the cloud crate without its `native` feature (ADR-0016)
 # and on `wasm-bindgen`.
 [package]
-name = "excalidraw-native-web"
+name = "pkm-web"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -12,6 +12,6 @@ publish.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-excalidraw-native-core = { path = "../core" }
-excalidraw-native-cloud = { path = "../cloud", default-features = false }
+pkm-core = { path = "../core" }
+pkm-cloud = { path = "../cloud", default-features = false }
 wasm-bindgen = "0.2"

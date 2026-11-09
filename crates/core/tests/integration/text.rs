@@ -7,7 +7,7 @@ use crate::common;
 use std::sync::Arc;
 
 use common::{FixedWidth, editor_with_element, editor_with_fixture};
-use excalidraw_native_core::{Editor, Geometry, TextAlign, TextLine, TextMeasurer};
+use pkm_core::{Editor, Geometry, TextAlign, TextLine, TextMeasurer};
 
 fn measured(element: &str) -> Editor {
     let mut editor = editor_with_element(element);

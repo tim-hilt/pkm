@@ -5,8 +5,8 @@
 
 use std::sync::Arc;
 
-use excalidraw_native_core::json::Value;
-use excalidraw_native_core::{Editor, Tool};
+use pkm_core::json::Value;
+use pkm_core::{Editor, Tool};
 
 use crate::common;
 use common::{FixedWidth, editor_with, num, replay, saved_elements, tap};

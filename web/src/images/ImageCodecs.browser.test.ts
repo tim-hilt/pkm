@@ -6,7 +6,7 @@ import { blue, green, noise, png, quadrants, red, reencoded } from "../testing/T
 import { browserImageCodec } from "./BrowserImageCodec";
 import { fileIdFor, maxImportFileSize, maxImportPixelSize, prepareImage } from "./ImageImporter";
 import { insertImages } from "./ImageInsertion";
-import wasmUrl from "../../generated/excalidraw_native_web_bg.wasm?url";
+import wasmUrl from "../../generated/pkm_web_bg.wasm?url";
 import fontUrl from "../../generated/Excalifont-Regular.ttf?url";
 
 /**

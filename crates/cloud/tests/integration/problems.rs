@@ -7,9 +7,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
 
-use excalidraw_native_cloud::{
-    Blob, DirStorage, Progress, StepOutcome, Storage, SyncState, sync_step_reporting,
-};
+use pkm_cloud::{Blob, DirStorage, Progress, StepOutcome, Storage, SyncState, sync_step_reporting};
 
 struct Scratch(PathBuf);
 
@@ -17,7 +15,7 @@ impl Scratch {
     fn new(prefix: &str) -> Self {
         static NEXT: AtomicU32 = AtomicU32::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "excalidraw-native-problems-{prefix}-{}-{}",
+            "pkm-problems-{prefix}-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Relaxed)
         ));

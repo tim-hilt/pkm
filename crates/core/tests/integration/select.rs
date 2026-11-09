@@ -9,7 +9,7 @@
 //! Expected values (distances, corners) are worked out by hand in the
 //! comments, not computed with the formulas of the code under test.
 
-use excalidraw_native_core::{Editor, Modifiers, PartKind, Tool, Verb};
+use pkm_core::{Editor, Modifiers, PartKind, Tool, Verb};
 
 use crate::common;
 use common::{editor_with, replay, tap};
@@ -831,7 +831,7 @@ fn the_overlay_revision_tells_when_the_overlay_may_have_changed() {
     assert_ne!(editor.overlay_revision(), selected);
     let zoomed = editor.overlay_revision();
 
-    editor.scroll(excalidraw_native_core::ScrollEvent {
+    editor.scroll(pkm_core::ScrollEvent {
         x: 0.0,
         y: 0.0,
         dx: 30.0,

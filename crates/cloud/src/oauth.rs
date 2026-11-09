@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
-use excalidraw_native_core::json;
+use pkm_core::json;
 use ureq::http::{Request, Response};
 use ureq::{Agent, Body, SendBody};
 

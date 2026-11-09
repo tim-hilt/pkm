@@ -14,14 +14,14 @@ rustup target add wasm32-unknown-unknown >/dev/null
 
 # The cloud crate without its native code must keep building for the web (ADR-0016).
 cargo build --locked -q --profile web --target wasm32-unknown-unknown \
-    -p excalidraw-native-cloud --no-default-features
-cargo build --locked -q --profile web --target wasm32-unknown-unknown -p excalidraw-native-web
+    -p pkm-cloud --no-default-features
+cargo build --locked -q --profile web --target wasm32-unknown-unknown -p pkm-web
 rm -rf web/generated
 mkdir -p web/generated
 wasm-bindgen --target web --out-dir web/generated \
-    target/wasm32-unknown-unknown/web/excalidraw_native_web.wasm
+    target/wasm32-unknown-unknown/web/pkm_web.wasm
 # Only the JS needs the wasm's types; the bundler treats the .wasm as an asset.
-rm web/generated/excalidraw_native_web_bg.wasm.d.ts
-cp apple/ExcalidrawNative/Resources/sample.excalidraw web/generated/
+rm web/generated/pkm_web_bg.wasm.d.ts
+cp apple/pkm/Resources/sample.excalidraw web/generated/
 # The font is served as is: the web app reads the TTF itself (no woff2).
-cp apple/ExcalidrawNative/Resources/Fonts/Excalifont-Regular.ttf web/generated/
+cp apple/pkm/Resources/Fonts/Excalifont-Regular.ttf web/generated/

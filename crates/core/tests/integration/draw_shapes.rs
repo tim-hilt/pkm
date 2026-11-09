@@ -2,8 +2,8 @@
 //! seam with recorded pointer sequences: pointer events in, saved JSON, Tool
 //! and geometry out. Coordinates in the comments are worked out by hand.
 
-use excalidraw_native_core::json::{Value, parse};
-use excalidraw_native_core::{Editor, Modifiers, PointerEvent, PointerKind, PointerPhase, Tool};
+use pkm_core::json::{Value, parse};
+use pkm_core::{Editor, Modifiers, PointerEvent, PointerKind, PointerPhase, Tool};
 
 use PointerKind::{Finger, Mouse, Pencil};
 use PointerPhase::{Cancel, Down, Move, Up};
@@ -28,7 +28,7 @@ fn send(
         x,
         y,
         kind,
-        button: excalidraw_native_core::PointerButton::Primary,
+        button: pkm_core::PointerButton::Primary,
         pressure: 0.5,
         timestamp: 0.0,
         modifiers,

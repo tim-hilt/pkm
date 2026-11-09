@@ -132,7 +132,7 @@ gate_on_tests() {
     failing=$(grep -v 'CVDisplayLinkCreateWithCGDisplays' <<<"$output" | tail -n 150)
     run_pi "Fixing tests after $1 (attempt $attempt)" claude-sonnet-5-5 medium \
       "fix-$name-$(basename "$1" .md)-$attempt" \
-      "/skill:diagnosing-bugs \`make test\` failed after $1. Find the root cause and fix it; do not weaken or delete tests to make them pass. Full output is in /tmp/excalidraw-native-test.log; the tail follows:
+      "/skill:diagnosing-bugs \`make test\` failed after $1. Find the root cause and fix it; do not weaken or delete tests to make them pass. Full output is in /tmp/pkm-test.log; the tail follows:
 
 $failing
 

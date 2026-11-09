@@ -8,7 +8,7 @@
 //! result, and `failed` ends it when the request could not be sent at all
 //! (no network, an untrusted certificate, CORS).
 //!
-//! Everything lives in an `ExcalidrawNative` folder inside the Server URL.
+//! Everything lives in an `pkm` folder inside the Server URL.
 //! Blobs are uploaded to a hidden temporary name and then moved into place, so
 //! a half-written blob is never visible under its final name. Every request
 //! carries `Authorization: Basic`, so no client ever waits for a challenge.
@@ -21,7 +21,7 @@ use quick_xml::reader::Reader;
 use std::io;
 
 /// The folder in the Server URL that holds everything the app stores.
-pub const FOLDER: &str = "ExcalidrawNative";
+pub const FOLDER: &str = "pkm";
 
 /// The folder where blobs are uploaded before they are moved into place. It
 /// starts with a dot, so it is no valid blob name and never listed. It is not
@@ -68,7 +68,7 @@ pub trait Exchange {
 pub struct WebDav {
     /// The Server URL, without a trailing slash.
     base: String,
-    /// The URL of the `ExcalidrawNative` folder inside it.
+    /// The URL of the `pkm` folder inside it.
     root: String,
     /// The `Authorization` header value.
     pub(crate) auth: String,
@@ -102,7 +102,7 @@ impl WebDav {
     }
 
     /// Checks that the server is a WebDAV server that accepts the login, and
-    /// that the `ExcalidrawNative` folder is there, creating it if not.
+    /// that the `pkm` folder is there, creating it if not.
     pub fn connect(&self) -> impl Exchange<Output = Result<(), ConnectError>> + use<> {
         Connect {
             dav: self.clone(),
@@ -568,10 +568,7 @@ mod tests {
         let (sent, result) = run(dav().connect(), &[answer(207, ""), answer(207, "")]);
         assert_eq!(
             sent,
-            [
-                "PROPFIND https://host/dav",
-                "PROPFIND https://host/dav/ExcalidrawNative"
-            ]
+            ["PROPFIND https://host/dav", "PROPFIND https://host/dav/pkm"]
         );
         assert_eq!(result, Ok(()));
     }
@@ -580,7 +577,7 @@ mod tests {
     fn connecting_creates_a_missing_folder() {
         let answers = [answer(207, ""), answer(404, ""), answer(201, "")];
         let (sent, result) = run(dav().connect(), &answers);
-        assert_eq!(sent[2], "MKCOL https://host/dav/ExcalidrawNative");
+        assert_eq!(sent[2], "MKCOL https://host/dav/pkm");
         assert_eq!(result, Ok(()));
 
         let answers = [answer(207, ""), answer(404, ""), answer(405, "")];
@@ -617,7 +614,7 @@ mod tests {
     fn listing_asks_for_depth_one_and_reads_the_answer() {
         let mut list = dav().list();
         let request = list.start();
-        assert_eq!(line(&request), "PROPFIND https://host/dav/ExcalidrawNative");
+        assert_eq!(line(&request), "PROPFIND https://host/dav/pkm");
         assert!(request.headers.contains(&("Depth", "1".to_owned())));
         let xml = r#"<D:multistatus xmlns:D="DAV:"><D:response><D:href>/a</D:href>
             <D:propstat><D:prop><D:getetag>"e"</D:getetag></D:prop></D:propstat></D:response></D:multistatus>"#;
@@ -650,7 +647,7 @@ mod tests {
     #[test]
     fn getting_gives_the_body_none_or_an_error() {
         let (sent, result) = run(dav().get("a b"), &[answer(200, "hi")]);
-        assert_eq!(sent, ["GET https://host/dav/ExcalidrawNative/a%20b"]);
+        assert_eq!(sent, ["GET https://host/dav/pkm/a%20b"]);
         assert_eq!(result.unwrap(), Some(b"hi".to_vec()));
         assert_eq!(run(dav().get("x"), &[answer(404, "")]).1.unwrap(), None);
         let error = run(dav().get("x"), &[answer(401, "")]).1.unwrap_err();
@@ -661,7 +658,7 @@ mod tests {
     #[test]
     fn deleting_a_missing_blob_is_fine() {
         let (sent, result) = run(dav().delete("x"), &[answer(404, "")]);
-        assert_eq!(sent, ["DELETE https://host/dav/ExcalidrawNative/x"]);
+        assert_eq!(sent, ["DELETE https://host/dav/pkm/x"]);
         assert!(result.is_ok());
         assert!(run(dav().delete("x"), &[answer(204, "")]).1.is_ok());
         assert!(run(dav().delete("x"), &[answer(500, "")]).1.is_err());
@@ -671,22 +668,17 @@ mod tests {
     fn putting_uploads_to_incoming_then_moves() {
         let mut put = dav().put("a", "t1", b"data".to_vec(), true);
         let upload = put.start();
-        assert_eq!(
-            line(&upload),
-            "PUT https://host/dav/ExcalidrawNative/.incoming/t1"
-        );
+        assert_eq!(line(&upload), "PUT https://host/dav/pkm/.incoming/t1");
         assert_eq!(upload.body, b"data");
         let Turn::Send(moved) = put.answer(answer(201, "")) else {
             panic!("no move");
         };
-        assert_eq!(
-            line(&moved),
-            "MOVE https://host/dav/ExcalidrawNative/.incoming/t1"
+        assert_eq!(line(&moved), "MOVE https://host/dav/pkm/.incoming/t1");
+        assert!(
+            moved
+                .headers
+                .contains(&("Destination", "https://host/dav/pkm/a".to_owned()))
         );
-        assert!(moved.headers.contains(&(
-            "Destination",
-            "https://host/dav/ExcalidrawNative/a".to_owned()
-        )));
         assert!(moved.headers.contains(&("Overwrite", "T".to_owned())));
         assert!(matches!(put.answer(answer(204, "")), Turn::Done(Ok(()))));
     }
@@ -697,7 +689,7 @@ mod tests {
         let (sent, result) = run(dav().put("a", "t", Vec::new(), false), &answers);
         let methods: Vec<_> = sent.iter().map(|s| s.split(' ').next().unwrap()).collect();
         assert_eq!(methods, ["MKCOL", "PUT", "MOVE"]);
-        assert_eq!(sent[0], "MKCOL https://host/dav/ExcalidrawNative/.incoming");
+        assert_eq!(sent[0], "MKCOL https://host/dav/pkm/.incoming");
         assert!(result.is_ok());
         // It exists already.
         let answers = [answer(405, ""), answer(201, ""), answer(201, "")];
@@ -734,10 +726,7 @@ mod tests {
             ),
         ] {
             let (sent, result) = put(&answers);
-            assert_eq!(
-                sent[last],
-                "DELETE https://host/dav/ExcalidrawNative/.incoming/t"
-            );
+            assert_eq!(sent[last], "DELETE https://host/dav/pkm/.incoming/t");
             assert_eq!(result.unwrap_err().kind(), kind);
         }
         let error = put(&[answer(500, ""), answer(500, "")]).1.unwrap_err();
@@ -782,19 +771,19 @@ mod tests {
     fn listing_gives_files_but_no_directories_hidden_files_or_the_listed_directory() {
         let xml = r#"<?xml version="1.0" encoding="utf-8"?>
             <D:multistatus xmlns:D="DAV:">
-              <D:response><D:href>/dav/ExcalidrawNative/</D:href>
+              <D:response><D:href>/dav/pkm/</D:href>
                 <D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop></D:propstat>
               </D:response>
-              <D:response><D:href>/dav/ExcalidrawNative/a%20b&amp;c.excalidraw</D:href>
+              <D:response><D:href>/dav/pkm/a%20b&amp;c.excalidraw</D:href>
                 <D:propstat><D:prop><D:resourcetype/><D:getcontentlength>12</D:getcontentlength><D:getetag>"e1"</D:getetag></D:prop></D:propstat>
               </D:response>
-              <response xmlns="DAV:"><href>https://host/dav/ExcalidrawNative/sub/</href>
+              <response xmlns="DAV:"><href>https://host/dav/pkm/sub/</href>
                 <propstat><prop><resourcetype><collection></collection></resourcetype></prop></propstat>
               </response>
-              <D:response><D:href>/dav/ExcalidrawNative/.incoming-1</D:href>
+              <D:response><D:href>/dav/pkm/.incoming-1</D:href>
                 <D:propstat><D:prop><D:getcontentlength>3</D:getcontentlength></D:prop></D:propstat>
               </D:response>
-              <D:response><D:href>/dav/ExcalidrawNative/x</D:href>
+              <D:response><D:href>/dav/pkm/x</D:href>
                 <D:propstat><D:prop><D:getcontentlength>7</D:getcontentlength><D:getlastmodified>Mon, 01 Jan 2024 10:00:00 GMT</D:getlastmodified></D:prop></D:propstat>
                 <D:propstat><D:prop><D:foo/></D:prop><D:status>HTTP/1.1 404 Not Found</D:status></D:propstat>
               </D:response>

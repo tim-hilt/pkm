@@ -9,7 +9,7 @@ import { MemoryWebDav } from "./MemoryWebDav";
 const generated = new URL("../../generated/", import.meta.url);
 let core: Core;
 beforeAll(async () => {
-  core = await loadCore(readFileSync(new URL("excalidraw_native_web_bg.wasm", generated)));
+  core = await loadCore(readFileSync(new URL("pkm_web_bg.wasm", generated)));
 });
 
 const url = "https://dav.example/dav";
@@ -32,11 +32,11 @@ const failure = async (promise: Promise<unknown>) => {
 };
 
 describe("Connect", () => {
-  it("connects and makes the ExcalidrawNative folder", async () => {
+  it("connects and makes the pkm folder", async () => {
     const cloud = await open();
     await cloud.connect(url, "user", "secret");
     expect(cloud.connection).toEqual({ provider: "WebDAV", server: url });
-    expect(server.hasFolder("ExcalidrawNative")).toBe(true);
+    expect(server.hasFolder("pkm")).toBe(true);
   });
 
   it("keeps an existing folder and its Drawings", async () => {

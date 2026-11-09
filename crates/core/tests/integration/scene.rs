@@ -7,8 +7,8 @@
 use std::fs;
 use std::path::PathBuf;
 
-use excalidraw_native_core::Editor;
-use excalidraw_native_core::json::{Value, parse};
+use pkm_core::Editor;
+use pkm_core::json::{Value, parse};
 
 fn fixture(path: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

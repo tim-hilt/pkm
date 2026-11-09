@@ -8,8 +8,8 @@
 //! segment adds a point there, tapping selects a point, and deleting removes
 //! the selected ones.
 
-use excalidraw_native_core::json::Value;
-use excalidraw_native_core::{Editor, PartKind};
+use pkm_core::json::Value;
+use pkm_core::{Editor, PartKind};
 
 use crate::common;
 use common::{editor_with, ops, replay, saved_elements, saved_points, tap};

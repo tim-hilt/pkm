@@ -3,7 +3,7 @@
 //! changes. Expected colours come from Excalidraw's `applyDarkModeFilter`
 //! (`packages/common/src/colors.ts`), run on each input.
 
-use excalidraw_native_core::{Editor, ExportScope, Property, TextMeasurer, Tool, dark_mode_color};
+use pkm_core::{Editor, ExportScope, Property, TextMeasurer, Tool, dark_mode_color};
 use std::sync::Arc;
 
 use crate::common::{FixedWidth, editor_with, replay, tap};
@@ -332,7 +332,7 @@ fn the_erase_preview_shows_faded_elements_in_their_dark_colours() {
 fn launch_screen_background_follows_the_appearance() {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../apple/ExcalidrawNative/Resources/Assets.xcassets/LaunchBackground.colorset/Contents.json"
+        "/../../apple/pkm/Resources/Assets.xcassets/LaunchBackground.colorset/Contents.json"
     );
     let file = std::fs::read_to_string(path).expect("colour set exists");
     // Components of each variant, in file order: light first, then dark.

@@ -28,9 +28,9 @@ ipad) SIM='iPad Pro (12.9-inch) (4th generation)' ;;
 esac
 
 if [ "$DEVICE" = mac ]; then
-    xcodebuild -quiet -scheme ExcalidrawNative -destination 'platform=macOS' -derivedDataPath "$DERIVED" build
-    app="$DERIVED/Build/Products/Debug/Excalidraw Native.app"
-    pkill -x 'Excalidraw Native' 2>/dev/null || true
+    xcodebuild -quiet -scheme pkm -destination 'platform=macOS' -derivedDataPath "$DERIVED" build
+    app="$DERIVED/Build/Products/Debug/pkm.app"
+    pkill -x 'pkm' 2>/dev/null || true
     open -n "$app" --args "$LAUNCH_ARG"
     sleep 8
     # Capture just the app's window, so other windows never end up in the file.
@@ -39,18 +39,18 @@ if [ "$DEVICE" = mac ]; then
         const list = ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo(1, 0)));
         let id = "";
         for (const w of Array.from(list)) {
-            if (w.kCGWindowOwnerName === "Excalidraw Native" && w.kCGWindowLayer === 0 && (w.kCGWindowName || "").includes("'"$WINDOW_NAME"'")) { id = w.kCGWindowNumber; break; }
+            if (w.kCGWindowOwnerName === "pkm" && w.kCGWindowLayer === 0 && (w.kCGWindowName || "").includes("'"$WINDOW_NAME"'")) { id = w.kCGWindowNumber; break; }
         }
         id')
     screencapture -x -o -l "$window" "$OUT"
-    pkill -x 'Excalidraw Native' || true
+    pkill -x 'pkm' || true
 else
     xcrun simctl list devices available | grep -qF "    $SIM (" || xcrun simctl create "$SIM" "$SIM" >/dev/null
-    xcodebuild -quiet -scheme ExcalidrawNative -destination "platform=iOS Simulator,name=$SIM" -derivedDataPath "$DERIVED" build
+    xcodebuild -quiet -scheme pkm -destination "platform=iOS Simulator,name=$SIM" -derivedDataPath "$DERIVED" build
     xcrun simctl boot "$SIM" 2>/dev/null || true
     xcrun simctl bootstatus "$SIM" >/dev/null
-    xcrun simctl install "$SIM" "$DERIVED/Build/Products/Debug-iphonesimulator/Excalidraw Native.app"
-    xcrun simctl launch --terminate-running-process "$SIM" com.timhilt.excalidrawnative "$LAUNCH_ARG" >/dev/null
+    xcrun simctl install "$SIM" "$DERIVED/Build/Products/Debug-iphonesimulator/pkm.app"
+    xcrun simctl launch --terminate-running-process "$SIM" com.timhilt.pkm "$LAUNCH_ARG" >/dev/null
     sleep 8
     xcrun simctl io "$SIM" screenshot "$OUT"
 fi

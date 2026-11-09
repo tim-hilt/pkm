@@ -264,35 +264,35 @@ dependencies = [
 ]
 
 [[package]]
-name = "excalidraw-native-bindings"
+name = "pkm-bindings"
 version = "0.1.0"
 dependencies = [
- "excalidraw-native-cloud",
- "excalidraw-native-core",
+ "pkm-cloud",
+ "pkm-core",
  "uniffi",
 ]
 
 [[package]]
-name = "excalidraw-native-cloud"
+name = "pkm-cloud"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "excalidraw-native-core",
+ "pkm-core",
  "libc",
  "quick-xml",
  "ureq",
 ]
 
 [[package]]
-name = "excalidraw-native-core"
+name = "pkm-core"
 version = "0.1.0"
 
 [[package]]
-name = "excalidraw-native-web"
+name = "pkm-web"
 version = "0.1.0"
 dependencies = [
- "excalidraw-native-cloud",
- "excalidraw-native-core",
+ "pkm-cloud",
+ "pkm-core",
  "wasm-bindgen",
 ]
 

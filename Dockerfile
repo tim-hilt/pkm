@@ -22,8 +22,8 @@ COPY Cargo.toml ./
 COPY crates crates
 COPY scripts/build-web-wasm.sh scripts/
 # The script copies the sample Drawing and the font from here.
-COPY apple/ExcalidrawNative/Resources/sample.excalidraw apple/ExcalidrawNative/Resources/
-COPY apple/ExcalidrawNative/Resources/Fonts/Excalifont-Regular.ttf apple/ExcalidrawNative/Resources/Fonts/
+COPY apple/pkm/Resources/sample.excalidraw apple/pkm/Resources/
+COPY apple/pkm/Resources/Fonts/Excalifont-Regular.ttf apple/pkm/Resources/Fonts/
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
     scripts/build-web-wasm.sh

@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
 
-use excalidraw_native_cloud::{Blob, DirStorage, Storage, SyncState, sync_step};
-use excalidraw_native_core::json;
+use pkm_cloud::{Blob, DirStorage, Storage, SyncState, sync_step};
+use pkm_core::json;
 
 struct Scratch(PathBuf);
 
@@ -16,7 +16,7 @@ impl Scratch {
     fn new(prefix: &str) -> Self {
         static NEXT: AtomicU32 = AtomicU32::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "excalidraw-native-sync-{prefix}-{}-{}",
+            "pkm-sync-{prefix}-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Relaxed)
         ));

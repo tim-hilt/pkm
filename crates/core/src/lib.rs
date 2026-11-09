@@ -1,4 +1,4 @@
-//! Platform-independent core of Excalidraw Native (ADR-0001).
+//! Platform-independent core of pkm (ADR-0001).
 //!
 //! Clients drive everything through [`Editor`].
 

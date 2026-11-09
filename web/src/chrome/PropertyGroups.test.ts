@@ -11,7 +11,7 @@ beforeAll(async () => {
   const font = new Excalifont(
     new Uint8Array(readFileSync(new URL("Excalifont-Regular.ttf", generated))),
   );
-  core = await loadCore(readFileSync(new URL("excalidraw_native_web_bg.wasm", generated)), font);
+  core = await loadCore(readFileSync(new URL("pkm_web_bg.wasm", generated)), font);
 });
 
 describe("the option groups of the Properties panel", () => {

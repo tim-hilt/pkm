@@ -2,9 +2,7 @@
 //! pointer of any kind drags the Canvas around. Expected viewports are worked
 //! out by hand in the comments.
 
-use excalidraw_native_core::{
-    Editor, MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase, Tool,
-};
+use pkm_core::{Editor, MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase, Tool};
 
 use PointerKind::{Finger, Mouse, Pencil};
 use PointerPhase::{Cancel, Down, Move, Up};
@@ -16,7 +14,7 @@ fn send(editor: &mut Editor, id: u64, kind: PointerKind, phase: PointerPhase, x:
         x,
         y,
         kind,
-        button: excalidraw_native_core::PointerButton::Primary,
+        button: pkm_core::PointerButton::Primary,
         pressure: 0.5,
         timestamp: 0.0,
         modifiers: Modifiers::default(),

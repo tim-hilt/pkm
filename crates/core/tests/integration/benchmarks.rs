@@ -9,7 +9,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use excalidraw_native_core::{Editor, Modifiers, PointerEvent, PointerKind, PointerPhase};
+use pkm_core::{Editor, Modifiers, PointerEvent, PointerKind, PointerPhase};
 
 fn benchmark_scene(count: u64) -> Vec<u8> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -82,7 +82,7 @@ fn pointer(
         x,
         y,
         kind,
-        button: excalidraw_native_core::PointerButton::Primary,
+        button: pkm_core::PointerButton::Primary,
         pressure: 0.5,
         timestamp: t,
         modifiers: Modifiers::default(),
@@ -195,7 +195,7 @@ fn geometry_after_a_one_element_change_in_5000_elements_takes_well_under_a_frame
 
 /// The scene bounds of every Element as saved: `(min x, min y, max x, max y)`.
 fn scene_bounds(editor: &Editor) -> (f64, f64, f64, f64) {
-    use excalidraw_native_core::json::{Value, parse};
+    use pkm_core::json::{Value, parse};
     let drawing = parse(&String::from_utf8(editor.save()).unwrap()).unwrap();
     let number = |e: &Value, key: &str| e.get(key).and_then(Value::as_f64).unwrap_or(0.0);
     let mut bounds = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);

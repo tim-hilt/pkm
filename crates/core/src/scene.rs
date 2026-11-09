@@ -324,7 +324,7 @@ impl Scene {
         let mut root = Object::new();
         root.insert("type".into(), Value::String("excalidraw".into()));
         root.insert("version".into(), Value::Number(2.0));
-        root.insert("source".into(), Value::String("Excalidraw Native".into()));
+        root.insert("source".into(), Value::String("pkm".into()));
         root.insert("elements".into(), Value::Array(Vec::new()));
         root.insert("appState".into(), Value::Object(app_state));
         root.insert("files".into(), Value::Object(Object::new()));

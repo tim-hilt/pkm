@@ -2,7 +2,7 @@
 //! pointer events and the hovered view point in, `Editor::cursor` out. The
 //! cursor tells what pressing there would do, as on excalidraw.com.
 
-use excalidraw_native_core::{Cursor, Editor, Tool};
+use pkm_core::{Cursor, Editor, Tool};
 
 use crate::common;
 use common::{editor_with, replay, tap};

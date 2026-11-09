@@ -9,7 +9,7 @@ import { MemoryWebDav } from "./MemoryWebDav";
 const generated = new URL("../../generated/", import.meta.url);
 let core: Core;
 beforeAll(async () => {
-  core = await loadCore(readFileSync(new URL("excalidraw_native_web_bg.wasm", generated)));
+  core = await loadCore(readFileSync(new URL("pkm_web_bg.wasm", generated)));
 });
 
 const url = "https://dav.example/dav";
@@ -65,7 +65,7 @@ async function sync(...devices: Device[]): Promise<void> {
 /** Long enough for a debounced step and for the files to settle. */
 const settle = (ms = 5_000) => advance(ms);
 
-const cloudFile = (name: string) => server.contents("ExcalidrawNative").get(`${name}.excalidraw`);
+const cloudFile = (name: string) => server.contents("pkm").get(`${name}.excalidraw`);
 const names = async ({ store }: Device) =>
   (await store.list())
     .map((e) => e.name)
@@ -125,7 +125,7 @@ describe("changes made on one side only", () => {
 
     await browser.store.rename("Old", "New");
     await settle();
-    expect([...server.contents("ExcalidrawNative").keys()]).toEqual(["New.excalidraw"]);
+    expect([...server.contents("pkm").keys()]).toEqual(["New.excalidraw"]);
     await sync(tablet);
     expect(await names(tablet)).toEqual(["New"]);
 
@@ -153,7 +153,7 @@ describe("changes made on one side only", () => {
     await settle();
     await sync(browser);
     expect(await names(browser)).toEqual([]);
-    expect(server.contents("ExcalidrawNative").size).toBe(0);
+    expect(server.contents("pkm").size).toBe(0);
   });
 
   it("a Drawing the server changed shows in the Gallery with a new modification time", async () => {
@@ -199,7 +199,7 @@ describe("changes made on one side only", () => {
     await browser.store.add(bytes("imported"), "Imported");
     await browser.store.duplicate("Imported");
     await settle();
-    expect([...server.contents("ExcalidrawNative").keys()].sort()).toEqual([
+    expect([...server.contents("pkm").keys()].sort()).toEqual([
       "Imported copy.excalidraw",
       "Imported.excalidraw",
     ]);
@@ -315,7 +315,7 @@ describe("Disconnect", () => {
     await browser.cloud.connect(url, "user", "secret");
     await settle(30_000);
     expect(await names(browser)).toEqual(["A"]);
-    expect([...server.contents("ExcalidrawNative").keys()]).toEqual(["A.excalidraw"]);
+    expect([...server.contents("pkm").keys()]).toEqual(["A.excalidraw"]);
   });
 
   it("Syncs again after a restart of the module", async () => {
@@ -450,7 +450,7 @@ describe("first Connect", () => {
     await browser.cloud.connect(url, "user", "secret");
     await settle();
     expect(await names(browser)).toEqual(["S"]);
-    expect([...server.contents("ExcalidrawNative").keys()]).toEqual(["S.excalidraw"]);
+    expect([...server.contents("pkm").keys()]).toEqual(["S.excalidraw"]);
   });
 
   it("keeps unrelated same-named Drawings, renaming the browser's", async () => {
@@ -464,7 +464,7 @@ describe("first Connect", () => {
     expect(await names(browser)).toEqual(["Sketch", "Sketch 2"]);
     expect(elementsOf(await browser.store.open("Sketch"))).toEqual(["x@1"]);
     expect(elementsOf(await browser.store.open("Sketch 2"))).toEqual(["y@1"]);
-    expect([...server.contents("ExcalidrawNative").keys()].sort()).toEqual([
+    expect([...server.contents("pkm").keys()].sort()).toEqual([
       "Sketch 2.excalidraw",
       "Sketch.excalidraw",
     ]);
@@ -536,7 +536,7 @@ describe("unreadable Drawings", () => {
       drawing(element("a", 2, "a0", 5), element("b", 1, "a1", 0)),
       drawing(element("a", 1, "a0", 0), element("b", 1, "a1", 0)),
     );
-    server.put("ExcalidrawNative", "S.excalidraw", bytes("{broken"));
+    server.put("pkm", "S.excalidraw", bytes("{broken"));
     await browser.store.save(drawing(element("a", 3, "a0", 6), element("b", 1, "a1", 0)), "S");
     const local = await browser.store.open("S");
     await settle();

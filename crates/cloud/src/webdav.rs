@@ -14,7 +14,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use ureq::Agent;
 use ureq::http::Request;
 
-/// The `ExcalidrawNative` folder of a WebDAV server. A rejected login (HTTP 401) is an
+/// The `pkm` folder of a WebDAV server. A rejected login (HTTP 401) is an
 /// `io::ErrorKind::PermissionDenied` error, a full server (507) is
 /// `StorageFull`, anything else that fails to connect is another kind.
 pub struct WebDavStorage {
@@ -34,7 +34,7 @@ impl fmt::Debug for WebDavStorage {
 
 impl WebDavStorage {
     /// Connects to the WebDAV server at `url` and checks the details. Creates
-    /// the `ExcalidrawNative` folder inside `url` if it's missing; uses it if not.
+    /// the `pkm` folder inside `url` if it's missing; uses it if not.
     pub fn connect(url: &str, username: &str, password: &str) -> Result<Self, ConnectError> {
         Self::connect_with(url, username, password, tls_config())
     }
@@ -379,7 +379,7 @@ mod tests {
     }
 
     #[test]
-    fn connecting_creates_the_excalidraw_native_folder_and_reuses_it() {
+    fn connecting_creates_the_pkm_folder_and_reuses_it() {
         let Some(server) = Rclone::webdav() else {
             return;
         };
@@ -410,13 +410,7 @@ mod tests {
             WebDavStorage::connect_with(&url, USER, PASSWORD, trusting(&server.cert)).unwrap();
         storage.put("blob", &mut &b"x"[..]).unwrap();
 
-        assert!(
-            server
-                .dir
-                .0
-                .join("my files/ExcalidrawNative/blob")
-                .is_file()
-        );
+        assert!(server.dir.0.join("my files/pkm/blob").is_file());
     }
 
     #[test]

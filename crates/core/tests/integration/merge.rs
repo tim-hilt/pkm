@@ -2,8 +2,8 @@
 //! bytes out. Expected values are literals worked out from Excalidraw's
 //! `reconcileElements`, never recomputed with the merge's own rules.
 
-use excalidraw_native_core::json::{Value, parse};
-use excalidraw_native_core::{are_same_drawing, merge_drawings};
+use pkm_core::json::{Value, parse};
+use pkm_core::{are_same_drawing, merge_drawings};
 
 fn element(id: &str, version: u32, nonce: u32, index: &str) -> String {
     format!(

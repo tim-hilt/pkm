@@ -1,4 +1,4 @@
-# Excalidraw Native
+# pkm
 
 A native, touch-first re-implementation of Excalidraw for Apple devices (later Android and Linux), with a web app for everywhere else, storing everything locally.
 

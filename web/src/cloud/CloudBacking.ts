@@ -1,4 +1,4 @@
-import type { SyncSchedule } from "../../generated/excalidraw_native_web.js";
+import type { SyncSchedule } from "../../generated/pkm_web.js";
 import type { Core } from "../core/Core";
 import type { DrawingStore } from "../gallery/DrawingStore";
 import type { FileStorage } from "../storage/FileStorage";
@@ -136,7 +136,7 @@ export class CloudBacking {
     return data && JSON.parse(new TextDecoder().decode(data));
   }
 
-  /** Throws `ConnectFailed` unless the server takes `credentials` and has (or now has) its `ExcalidrawNative` folder. */
+  /** Throws `ConnectFailed` unless the server takes `credentials` and has (or now has) its `pkm` folder. */
   private async check({ url, username, password }: Credentials): Promise<void> {
     let protocol;
     try {
@@ -186,7 +186,7 @@ export class CloudBacking {
   }
 
   /**
-   * Checks the server and makes its `ExcalidrawNative` folder, then keeps the
+   * Checks the server and makes its `pkm` folder, then keeps the
    * connection. Throws `ConnectFailed` and changes nothing if that fails.
    */
   async connect(url: string, username: string, password: string): Promise<void> {

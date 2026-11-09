@@ -1,9 +1,9 @@
 # Self-hosting Cloud Backing with WebDAV
 
 Cloud Backing can keep your Drawings on a WebDAV server you run yourself. The
-app creates a folder called `ExcalidrawNative` under the server URL you enter
+app creates a folder called `pkm` under the server URL you enter
 and keeps every Drawing in it as a plain `.excalidraw` file. Other apps can
-share the server: nothing outside `ExcalidrawNative` is touched.
+share the server: nothing outside `pkm` is touched.
 
 The app only talks https, so your password never travels in plain text.
 
@@ -27,7 +27,7 @@ The app only talks https, so your password never travels in plain text.
    iPhone and iPad), pick WebDAV, enter `https://dav.example.com`, your
    username and password and tap Connect.
 
-The Drawings then live in `/srv/webdav/ExcalidrawNative/`.
+The Drawings then live in `/srv/webdav/pkm/`.
 
 ## The web app
 

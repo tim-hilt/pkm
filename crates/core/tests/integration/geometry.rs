@@ -7,9 +7,7 @@
 
 use std::mem::{offset_of, size_of};
 
-use excalidraw_native_core::{
-    Dash, FillRule, FillStyle, Geometry, Part, PartKind, StrokeStyle, Verb,
-};
+use pkm_core::{Dash, FillRule, FillStyle, Geometry, Part, PartKind, StrokeStyle, Verb};
 
 #[test]
 fn parts_follow_each_other_in_the_shared_buffers() {

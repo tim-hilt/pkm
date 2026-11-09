@@ -2,14 +2,14 @@
 # the HTTP client (ADR-0012). Copied from Leaf and adapted. Kept out of the
 # core, which has no dependencies (ADR-0009).
 [package]
-name = "excalidraw-native-cloud"
+name = "pkm-cloud"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
 [dependencies]
 # The merge of concurrent changes.
-excalidraw-native-core = { path = "../core" }
+pkm-core = { path = "../core" }
 # Basic auth.
 base64 = "0.22"
 # The PROPFIND answers of a WebDAV server.

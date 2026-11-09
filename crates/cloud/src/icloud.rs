@@ -1,5 +1,5 @@
 //! iCloud Drive as a Cloud Provider: the user grants its root once, and the
-//! Drawings are Synced with the `ExcalidrawNative` folder in it through the
+//! Drawings are Synced with the `pkm` folder in it through the
 //! directory storage (ADR-0012).
 
 use std::fs;
@@ -12,10 +12,10 @@ use crate::storage::ConnectError;
 const ROOT_NAME: &str = "com~apple~CloudDocs";
 
 /// The folder the Drawings go into, in the root.
-const FOLDER: &str = "ExcalidrawNative";
+const FOLDER: &str = "pkm";
 
 /// Connects to iCloud Drive through the folder `granted` that the user picked:
-/// only iCloud Drive's root is accepted. Creates `ExcalidrawNative` in it if
+/// only iCloud Drive's root is accepted. Creates `pkm` in it if
 /// missing and returns its path, the directory to Sync with. Keeps nothing.
 pub fn connect(granted: &Path) -> Result<PathBuf, ConnectError> {
     if granted.file_name().is_none_or(|name| name != ROOT_NAME) {
@@ -50,7 +50,7 @@ mod tests {
 
         let folder = connect(&root).unwrap();
 
-        assert_eq!(folder, root.join("ExcalidrawNative"));
+        assert_eq!(folder, root.join("pkm"));
         assert!(folder.is_dir());
     }
 
@@ -77,7 +77,7 @@ mod tests {
             connect(&root(&scratch).join("Sub")),
             Err(ConnectError::WrongFolder)
         );
-        assert!(!other.join("ExcalidrawNative").exists());
+        assert!(!other.join("pkm").exists());
     }
 
     #[test]

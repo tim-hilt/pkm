@@ -1,5 +1,5 @@
 //! Google Drive as a Cloud Provider (ADR-0012): the Drawings are Synced with
-//! `My Drive/ExcalidrawNative`.
+//! `My Drive/pkm`.
 //!
 //! Signs in with OAuth and PKCE and asks only for `drive.file`, so the app
 //! sees nothing but the files it created itself. Blocking, no async runtime.
@@ -10,7 +10,7 @@ use std::fmt;
 use std::io::{self, Read};
 use std::sync::{Arc, Mutex};
 
-use excalidraw_native_core::json::{self, Object, Value};
+use pkm_core::json::{self, Object, Value};
 use ureq::Body;
 use ureq::http::Response;
 
@@ -20,7 +20,7 @@ use crate::percent::encode;
 use crate::storage::{Blob, ConnectError, Storage, check_name, unique_name};
 
 /// The folder in My Drive that holds everything the app stores.
-const FOLDER: &str = "ExcalidrawNative";
+const FOLDER: &str = "pkm";
 const FOLDER_TYPE: &str = "application/vnd.google-apps.folder";
 const SCOPE: &str = "https://www.googleapis.com/auth/drive.file";
 
@@ -120,7 +120,7 @@ impl SignIn {
     }
 
     /// Finishes with the `redirect` URL the page ended at: exchanges the code,
-    /// makes sure `My Drive/ExcalidrawNative` exists and tells the account.
+    /// makes sure `My Drive/pkm` exists and tells the account.
     /// Refusing consent is `AccessDenied`. Blocks while it talks to Google.
     pub fn finish(self, redirect: &str) -> Result<Account, ConnectError> {
         let agent = api_agent(self.hosts.https_only());
@@ -140,12 +140,12 @@ impl SignIn {
     }
 }
 
-/// `My Drive/ExcalidrawNative`. Tokens revoked are `PermissionDenied`, a full
+/// `My Drive/pkm`. Tokens revoked are `PermissionDenied`, a full
 /// Drive is `StorageFull`, anything else that fails is another kind.
 pub struct GoogleDriveStorage {
     session: Session,
     hosts: Hosts,
-    /// The ID of the `ExcalidrawNative` folder, once known.
+    /// The ID of the `pkm` folder, once known.
     folder: Mutex<Option<String>>,
 }
 
@@ -268,7 +268,7 @@ impl GoogleDriveStorage {
         }
     }
 
-    /// The ID of the `ExcalidrawNative` folder: found, or created now.
+    /// The ID of the `pkm` folder: found, or created now.
     fn folder_id(&self) -> io::Result<String> {
         let mut known = self.folder.lock().unwrap();
         if let Some(id) = &*known {
@@ -339,7 +339,7 @@ impl GoogleDriveStorage {
             "parents".into(),
             Value::Array(vec![Value::String(self.folder_id()?)]),
         );
-        let boundary = format!("excalidraw-native-{}", unique_name());
+        let boundary = format!("pkm-{}", unique_name());
         let mut body = format!(
             "--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{}\r\n--{boundary}\r\nContent-Type: {DRAWING_TYPE}\r\n\r\n",
             Value::Object(meta).to_json()
@@ -507,7 +507,7 @@ mod tests {
         assert!(!account.refresh_token.is_empty());
         let files = fake.files();
         assert_eq!(files.len(), 1);
-        assert_eq!(files[0].name, "ExcalidrawNative");
+        assert_eq!(files[0].name, "pkm");
         assert_eq!(files[0].parent, "root");
         assert_eq!(files[0].mime, FOLDER_TYPE);
     }

@@ -19,7 +19,7 @@ const font = new Excalifont(
 );
 let core: Core;
 beforeAll(async () => {
-  core = await loadCore(readFileSync(new URL("excalidraw_native_web_bg.wasm", generated)), font);
+  core = await loadCore(readFileSync(new URL("pkm_web_bg.wasm", generated)), font);
 });
 
 const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7]);

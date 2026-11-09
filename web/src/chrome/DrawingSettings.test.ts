@@ -7,7 +7,7 @@ import { DrawingSettings, type SettingsStorage } from "./DrawingSettings";
 const generated = new URL("../../generated/", import.meta.url);
 let core: Core;
 beforeAll(async () => {
-  core = await loadCore(readFileSync(new URL("excalidraw_native_web_bg.wasm", generated)));
+  core = await loadCore(readFileSync(new URL("pkm_web_bg.wasm", generated)));
 });
 
 const memory = (): SettingsStorage & { values: Map<string, string> } => {

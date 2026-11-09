@@ -1,5 +1,5 @@
 //! OneDrive as a Cloud Provider (ADR-0012): the Drawings are Synced with
-//! `Apps/ExcalidrawNative`, the app folder of a personal OneDrive.
+//! `Apps/pkm`, the app folder of a personal OneDrive.
 //!
 //! Signs in with OAuth and PKCE and asks only for
 //! `Files.ReadWrite.AppFolder` (and `offline_access`, for a refresh token).
@@ -11,7 +11,7 @@ use std::fmt;
 use std::io::{self, Read};
 use std::sync::Arc;
 
-use excalidraw_native_core::json::{self, Value};
+use pkm_core::json::{self, Value};
 use ureq::Body;
 use ureq::http::Response;
 
@@ -23,8 +23,8 @@ use crate::storage::{Blob, ConnectError, Storage, check_name};
 const SCOPE: &str = "Files.ReadWrite.AppFolder offline_access";
 
 /// Where the sign-in page redirects to: the scheme is the one of the app's
-/// registration in Azure ("ExcalidrawNative", for personal Microsoft accounts).
-pub(crate) const REDIRECT_URI: &str = "msauth.com.timhilt.excalidrawnative://auth";
+/// registration in Azure ("pkm", for personal Microsoft accounts).
+pub(crate) const REDIRECT_URI: &str = "msauth.com.timhilt.pkm://auth";
 
 /// Drawings up to this many bytes upload in one request, which Graph limits
 /// to 4 MB.
@@ -143,7 +143,7 @@ enum AccountError {
     Io(io::Error),
 }
 
-/// `Apps/ExcalidrawNative`. Tokens revoked are `PermissionDenied`, a full
+/// `Apps/pkm`. Tokens revoked are `PermissionDenied`, a full
 /// OneDrive is `StorageFull`, anything else that fails is another kind.
 pub struct OneDriveStorage {
     session: Session,
@@ -472,10 +472,7 @@ mod tests {
             encode("Files.ReadWrite.AppFolder offline_access")
         );
         assert!(sign_in.url().contains(&scope));
-        assert_eq!(
-            sign_in.callback_scheme(),
-            "msauth.com.timhilt.excalidrawnative"
-        );
+        assert_eq!(sign_in.callback_scheme(), "msauth.com.timhilt.pkm");
     }
 
     #[test]

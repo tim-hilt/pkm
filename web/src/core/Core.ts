@@ -22,7 +22,7 @@ import init, {
   SyncRun,
   SyncSchedule,
   WebDavProtocol,
-} from "../../generated/excalidraw_native_web.js";
+} from "../../generated/pkm_web.js";
 import { type TextMeasurer } from "../text/Excalifont";
 import {
   type GeometryBuffers,

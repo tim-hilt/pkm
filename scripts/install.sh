@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
 # Usage: scripts/install.sh <device-name|mac>
-# Builds Excalidraw Native (Release) and installs it on a connected device, or into
+# Builds pkm (Release) and installs it on a connected device, or into
 # /Applications for "mac".
 #
-# The bundle ID defaults to com.timhilt.excalidrawnative; BUNDLE_ID overrides it.
+# The bundle ID defaults to com.timhilt.pkm; BUNDLE_ID overrides it.
 set -euo pipefail
 
 config=Release
 target="${1:?usage: $0 <device-name|mac>}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 build="$root/apple/build"
-app=ExcalidrawNative
-product="Excalidraw Native.app"
+app=pkm
+product="pkm.app"
 
-bundle_id="${BUNDLE_ID:-com.timhilt.excalidrawnative}"
+bundle_id="${BUNDLE_ID:-com.timhilt.pkm}"
 # Apple registers an App ID on the first device build under a new bundle ID and
 # caps that at 10 per team every 7 days. When the cap is hit, the build fails
 # with "maximum App ID limit" until the window rolls over, so retry under an ID
 # that is already registered for this app: com.timhilt.workingtitle is its
-# pre-rebrand ID (see "Rebrand WORKING-TITLE to Excalidraw Native"). Installed
+# pre-rebrand ID (see "Rebrand WORKING-TITLE to pkm"). Installed
 # that way, the app keeps the container of that ID, not the canonical one.
 fallback_bundle_ids=(com.timhilt.workingtitle)
 

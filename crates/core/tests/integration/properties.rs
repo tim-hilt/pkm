@@ -3,9 +3,9 @@
 //! Element out. Option values are literals from Excalidraw's own panel
 //! (stroke widths 1, 2, 4; roughness 0, 1, 2; roundness types 2 and 3).
 
-use excalidraw_native_core::json::Value;
-use excalidraw_native_core::scene::{FillPattern, LineStyle};
-use excalidraw_native_core::{Edges, Editor, Property, Sections, Sloppiness, StrokeWidth, Tool};
+use pkm_core::json::Value;
+use pkm_core::scene::{FillPattern, LineStyle};
+use pkm_core::{Edges, Editor, Property, Sections, Sloppiness, StrokeWidth, Tool};
 
 use crate::common;
 use common::{editor_with, replay, saved_elements, tap};

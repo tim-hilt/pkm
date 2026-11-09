@@ -1,4 +1,4 @@
-import type { DavExchange } from "../../generated/excalidraw_native_web.js";
+import type { DavExchange } from "../../generated/pkm_web.js";
 
 /** Sends one request; `fetch`'s shape, so tests replace it. */
 export type Fetch = (input: string, init: RequestInit) => Promise<Response>;

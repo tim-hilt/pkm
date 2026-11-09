@@ -5,7 +5,7 @@ import { OpfsStorage } from "./storage/OpfsStorage";
 import { Excalifont } from "./text/Excalifont";
 import { loadExcalifontWebFont } from "./text/WebFont";
 import { acquireDevice, showUnsupportedPage } from "./WebGPUSupport";
-import wasmUrl from "../generated/excalidraw_native_web_bg.wasm";
+import wasmUrl from "../generated/pkm_web_bg.wasm";
 import fontUrl from "../generated/Excalifont-Regular.ttf";
 
 const root = document.getElementById("app")!;

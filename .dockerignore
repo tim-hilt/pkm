@@ -3,8 +3,8 @@
 !Cargo.lock
 !crates
 !scripts/build-web-wasm.sh
-!apple/ExcalidrawNative/Resources/sample.excalidraw
-!apple/ExcalidrawNative/Resources/Fonts/Excalifont-Regular.ttf
+!apple/pkm/Resources/sample.excalidraw
+!apple/pkm/Resources/Fonts/Excalifont-Regular.ttf
 !web
 web/node_modules
 web/dist

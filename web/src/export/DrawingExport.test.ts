@@ -11,7 +11,7 @@ const generated = new URL("../../generated/", import.meta.url);
 const sample = new Uint8Array(readFileSync(new URL("sample.excalidraw", generated)));
 let core: Core;
 beforeAll(async () => {
-  core = await loadCore(readFileSync(new URL("excalidraw_native_web_bg.wasm", generated)));
+  core = await loadCore(readFileSync(new URL("pkm_web_bg.wasm", generated)));
 });
 
 async function open() {

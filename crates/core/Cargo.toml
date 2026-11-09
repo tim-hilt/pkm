@@ -1,7 +1,7 @@
 # Platform-independent logic. Deliberately has no dependencies (ADR-0009);
 # FFI lives in the bindings crate.
 [package]
-name = "excalidraw-native-core"
+name = "pkm-core"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

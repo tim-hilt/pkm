@@ -8,7 +8,7 @@
 //! Expected viewports are worked out by hand in the comments, not computed
 //! with the formulas of the code under test.
 
-use excalidraw_native_core::{
+use pkm_core::{
     Editor, MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase, ScrollEvent,
 };
 
@@ -42,7 +42,7 @@ fn replay(editor: &mut Editor, recording: &str) {
                 "mouse" => PointerKind::Mouse,
                 _ => panic!("unknown kind in: {line}"),
             },
-            button: excalidraw_native_core::PointerButton::Primary,
+            button: pkm_core::PointerButton::Primary,
             pressure: 0.5,
             timestamp: n as f64 * 0.01,
             modifiers: Modifiers::default(),
@@ -473,7 +473,7 @@ fn after_three_fingers_none_navigate_until_all_have_lifted() {
 #[test]
 fn a_third_finger_ends_a_hand_tool_drag() {
     let mut editor = Editor::new();
-    editor.set_tool(excalidraw_native_core::Tool::Hand);
+    editor.set_tool(pkm_core::Tool::Hand);
     replay(
         &mut editor,
         "down 1 finger 100 100

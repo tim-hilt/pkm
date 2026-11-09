@@ -10,8 +10,8 @@
 //! mode the arrow stops short of the shape at a gap of 5 plus half the shape's
 //! stroke width, so a shape with a stroke width of 2 has a gap of 6.
 
-use excalidraw_native_core::json::Value;
-use excalidraw_native_core::{Editor, PartKind, Tool};
+use pkm_core::json::Value;
+use pkm_core::{Editor, PartKind, Tool};
 
 use crate::common;
 use common::{editor_with, ops, replay, saved_elements, saved_points, tap};
@@ -952,7 +952,7 @@ fn deleting_an_arrow_by_its_points_frees_the_shapes() {
 #[test]
 fn a_bound_arrow_follows_a_text_whose_font_size_changes() {
     struct FixedWidth;
-    impl excalidraw_native_core::TextMeasurer for FixedWidth {
+    impl pkm_core::TextMeasurer for FixedWidth {
         fn line_width(&self, text: &str, font_size: f64) -> f64 {
             text.chars().count() as f64 * font_size / 2.0
         }
@@ -969,9 +969,7 @@ fn a_bound_arrow_follows_a_text_whose_font_size_changes() {
     tap(&mut editor, "mouse", (120.0, 5.0), 0.0);
     assert_eq!(editor.selection(), ["t"]);
 
-    editor.set_property(excalidraw_native_core::Property::FontSize(
-        excalidraw_native_core::FontSize::Large,
-    ));
+    editor.set_property(pkm_core::Property::FontSize(pkm_core::FontSize::Large));
 
     // Five characters of 14, one line of 35: the corner is at (170, 35).
     assert_points(&shown(&editor), &[(0.0, 40.0), (170.0, 35.0)]);

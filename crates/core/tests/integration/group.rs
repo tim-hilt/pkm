@@ -8,8 +8,8 @@
 //! Elements of the next group down are the ones that are selected. The
 //! expected fractional indices are worked out with its `fractional-indexing`.
 
-use excalidraw_native_core::json::Value;
-use excalidraw_native_core::{ContextMenu, Editor, PartKind, PointerKind, ZOrder};
+use pkm_core::json::Value;
+use pkm_core::{ContextMenu, Editor, PartKind, PointerKind, ZOrder};
 
 use crate::common;
 use common::{editor_with, replay, saved_elements, tap};

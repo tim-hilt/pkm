@@ -7,7 +7,7 @@ import { type RenderedImage } from "../rendering/RenderedImage";
 import { Excalifont } from "../text/Excalifont";
 import { acquireDevice } from "../WebGPUSupport";
 import { TestScenes } from "./TestScenes";
-import wasmUrl from "../../generated/excalidraw_native_web_bg.wasm?url";
+import wasmUrl from "../../generated/pkm_web_bg.wasm?url";
 import fontUrl from "../../generated/Excalifont-Regular.ttf?url";
 
 /** The default viewport: the Scene's origin at the top left, no zoom. */

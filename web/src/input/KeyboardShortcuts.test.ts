@@ -11,7 +11,7 @@ const font = new Excalifont(
 );
 let core: Core;
 beforeAll(async () => {
-  core = await loadCore(readFileSync(new URL("excalidraw_native_web_bg.wasm", generated)), font);
+  core = await loadCore(readFileSync(new URL("pkm_web_bg.wasm", generated)), font);
 });
 
 const key = (key: string, extra: Partial<KeyLike> = {}): KeyLike => ({

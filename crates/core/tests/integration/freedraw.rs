@@ -13,8 +13,8 @@ use common::{
     Fixture, NON_ZERO, Shape, assert_part_matches_set, editor_with_element, editor_with_fixture,
     num, opaque, ops, parts_of, text,
 };
-use excalidraw_native_core::json::Value;
-use excalidraw_native_core::{Geometry, Part, PartKind, Verb};
+use pkm_core::json::Value;
+use pkm_core::{Geometry, Part, PartKind, Verb};
 
 /// Checks every freedraw Element of the `freedraw` fixture that `keep`
 /// accepts against Excalidraw's output. Returns how many were checked.
@@ -151,7 +151,7 @@ fn every_golden_stroke_is_checked() {
 const STROKE: &str = r#""id":"a","type":"freedraw","x":10,"y":20,"width":20,"height":0,
     "points":[[0,0],[10,0],[20,0]],"pressures":[],"simulatePressure":true"#;
 
-fn outline_coords(editor: &excalidraw_native_core::Editor) -> Vec<f32> {
+fn outline_coords(editor: &pkm_core::Editor) -> Vec<f32> {
     let geometry = editor.geometry();
     let [part] = geometry.parts() else {
         panic!("an open stroke is one part")

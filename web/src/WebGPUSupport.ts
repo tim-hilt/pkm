@@ -21,7 +21,7 @@ export function showUnsupportedPage(root: HTMLElement): void {
   heading.textContent = "This browser is not supported";
   const text = document.createElement("p");
   text.textContent =
-    "Excalidraw Native draws with WebGPU. Please use a recent Chrome, Edge, Safari (26 or newer) or Firefox (141 or newer, on Windows and macOS).";
+    "pkm draws with WebGPU. Please use a recent Chrome, Edge, Safari (26 or newer) or Firefox (141 or newer, on Windows and macOS).";
   page.append(heading, text);
   root.append(page);
 }

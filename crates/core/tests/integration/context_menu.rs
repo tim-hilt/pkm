@@ -4,7 +4,7 @@
 //!
 //! Coordinates are worked out by hand in the comments.
 
-use excalidraw_native_core::{ContextMenu, Editor, PointerKind, Tool, ZOrder};
+use pkm_core::{ContextMenu, Editor, PointerKind, Tool, ZOrder};
 
 use crate::common;
 use common::{editor_with, replay, saved_elements, tap};

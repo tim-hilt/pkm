@@ -1,10 +1,6 @@
 import type { Core } from "../core/Core";
 import type { DrawingStore } from "../gallery/DrawingStore";
-import type {
-  SyncRequest,
-  SyncRun,
-  WebDavProtocol,
-} from "../../generated/excalidraw_native_web.js";
+import type { SyncRequest, SyncRun, WebDavProtocol } from "../../generated/pkm_web.js";
 import type { SyncState } from "./SyncState";
 import { type Fetch, runExchange } from "./WebDavSender";
 

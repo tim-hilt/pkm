@@ -8,9 +8,9 @@
 
 use std::sync::Arc;
 
-use excalidraw_native_core::json::Value;
-use excalidraw_native_core::scene::LineStyle;
-use excalidraw_native_core::{Editor, FontSize, Property, TextAlign, TextEditor, Tool};
+use pkm_core::json::Value;
+use pkm_core::scene::LineStyle;
+use pkm_core::{Editor, FontSize, Property, TextAlign, TextEditor, Tool};
 
 use crate::common;
 use common::{FixedWidth, editor_with, replay, saved_elements, tap};
