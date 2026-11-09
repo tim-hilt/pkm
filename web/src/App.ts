@@ -70,13 +70,15 @@ export async function startApp(
       canvas = undefined;
     }
     shell.setFocused(drawing !== undefined);
+    // An opened Drawing (from the Gallery) gets its address.
+    if (drawing && gallery.openId) navigation.openItem(gallery.openId);
     if (drawing) {
       galleryView?.dispose();
       galleryView = undefined;
       if (!canvas) {
         const shown = showCanvas(pane, device, drawing.editor, font, {
           edited: () => drawing.editorDidChange(),
-          back: () => void gallery.close(),
+          back: () => navigation.closeItem(),
           settings,
           appearance,
           export: new DrawingExport(drawing, {
@@ -101,11 +103,18 @@ export async function startApp(
     galleryView?.appearanceChanged();
   });
   gallery.onChange = show;
-  // Leaving Drawings leaves the open Drawing (saved), as focused work ends there.
-  navigation.onChange = () => {
+  // The address decides what is open: no Item (or another Context) is the Gallery, and an
+  // Item ID the Device does not have is dropped from the address.
+  const followAddress = () => {
     shell.update();
-    if (navigation.selected !== "drawings") void gallery.close();
+    const { item } = navigation;
+    if (item === undefined) void gallery.close();
+    else if (gallery.openId === item) return;
+    else if (gallery.drawings.some((entry) => entry.id === item)) void gallery.openDrawing(item);
+    else navigation.closeItem();
   };
+  navigation.onChange = followAddress;
+  followAddress();
   show();
 
   // The page may be gone before the delay of an autosave is over.

@@ -14,6 +14,8 @@ export class Gallery {
   drawings: Entry[] = [];
   /** The Drawing shown in the Canvas, or `undefined` while the Gallery is shown. */
   open: OpenDrawing | undefined;
+  /** The Item ID of `open`, which stays through renames. */
+  openId: string | undefined;
   /** What went wrong with the last attempt to change a Drawing, to tell the user. */
   failure: string | undefined;
   /** Called after any change of what the properties above hold. */
@@ -92,6 +94,7 @@ export class Gallery {
     const drawing = this.open;
     if (!drawing) return;
     this.open = undefined;
+    this.openId = undefined;
     // Whoever shows the Drawing lets go of its editor before that is freed.
     this.onChange();
     await drawing.close();
@@ -106,6 +109,7 @@ export class Gallery {
 
   private async show(name: string): Promise<void> {
     this.open = await OpenDrawing.open(name, this.store, this.core, this.options);
+    this.openId = (await this.store.list()).find((entry) => entry.name === name)?.id;
     this.onChange();
   }
 

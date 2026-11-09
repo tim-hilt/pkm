@@ -107,6 +107,27 @@ describe("opening and leaving", () => {
     expect(gallery.open?.editor.elementCount()).toBe(8);
   });
 
+  it("knows the Item ID of the open Drawing, created or opened", async () => {
+    await store.save(sample, "sample");
+    const gallery = await start();
+    const id = gallery.drawings[0].id;
+    await gallery.openDrawing(id);
+    expect(gallery.openId).toBe(id);
+    await gallery.close();
+    expect(gallery.openId).toBeUndefined();
+    await gallery.createDrawing();
+    expect(await store.nameOf(gallery.openId!)).toBe(gallery.open?.name);
+  });
+
+  it("opens a Drawing by its Item ID after a rename", async () => {
+    await store.save(emptyDrawing(), "old");
+    const gallery = await start();
+    const id = gallery.drawings[0].id;
+    await gallery.renameDrawing("old", "new");
+    await gallery.openDrawing(id);
+    expect(gallery.open?.name).toBe("new");
+  });
+
   it("a Drawing that cannot be opened stays in the Gallery with a failure", async () => {
     await store.save(bytes("not json"), "broken");
     const gallery = await start();

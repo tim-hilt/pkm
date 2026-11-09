@@ -75,10 +75,80 @@ describe("Navigation", () => {
     expect(history.entries).toEqual(["/tasks"]);
   });
 
-  it("shows the Context of a path to an Item it does not know, at the Context's own path", () => {
+  it("opens the Item of a path, keeping the path", () => {
     const { navigation, history } = open("/drawings/abc123abc123");
     expect(navigation.selected).toBe("drawings");
+    expect(navigation.item).toBe("abc123abc123");
+    expect(history.entries).toEqual(["/drawings/abc123abc123"]);
+  });
+
+  it("replaces a path below a Context without an Item list, or with a deeper path, by the Context's own", () => {
+    expect(open("/tasks/abc").history.path).toBe("/tasks");
+    expect(open("/drawings/abc/def").history.path).toBe("/drawings");
+    expect(open("/drawings/").history.path).toBe("/drawings");
+  });
+
+  it("pushes an entry for an opened Item and tells its listener", () => {
+    const { navigation, history } = open("/drawings");
+    let changes = 0;
+    navigation.onChange = () => changes++;
+    navigation.openItem("abc123abc123");
+    expect(navigation.item).toBe("abc123abc123");
+    expect(history.entries).toEqual(["/drawings", "/drawings/abc123abc123"]);
+    expect(changes).toBe(1);
+    navigation.openItem("abc123abc123");
+    expect(history.entries.length).toBe(2);
+    expect(changes).toBe(1);
+  });
+
+  it("closes an Item it pushed by going back", () => {
+    const { navigation, history } = open("/drawings");
+    navigation.openItem("abc123abc123");
+    navigation.closeItem();
+    expect(navigation.item).toBeUndefined();
+    expect(history.path).toBe("/drawings");
+    expect(history.entries).toEqual(["/drawings", "/drawings/abc123abc123"]);
+    expect(history.at).toBe(0);
+  });
+
+  it("closes an Item opened by a link by replacing its entry", () => {
+    const { navigation, history } = open("/drawings/abc123abc123");
+    navigation.closeItem();
+    expect(navigation.item).toBeUndefined();
     expect(history.entries).toEqual(["/drawings"]);
+  });
+
+  it("replaces the entry of an unknown Item", () => {
+    const { navigation, history } = open("/drawings/abc123abc123");
+    let changes = 0;
+    navigation.onChange = () => changes++;
+    navigation.closeItem();
+    expect(history.entries).toEqual(["/drawings"]);
+    expect(changes).toBe(1);
+  });
+
+  it("opens and closes Items on back and forward", () => {
+    const { navigation, history } = open("/drawings");
+    navigation.openItem("abc123abc123");
+    history.back();
+    expect(navigation.item).toBeUndefined();
+    history.forward();
+    expect(navigation.item).toBe("abc123abc123");
+    expect(navigation.selected).toBe("drawings");
+  });
+
+  it("leaves no Item when another Context is selected", () => {
+    const { navigation, history } = open("/drawings/abc123abc123");
+    navigation.select("books");
+    expect(navigation.item).toBeUndefined();
+    expect(history.path).toBe("/books");
+  });
+
+  it("selects a Context other than the one with the Item shown, also the same", () => {
+    const { navigation, history } = open("/drawings/abc123abc123");
+    navigation.select("drawings");
+    expect(navigation.item).toBeUndefined();
+    expect(history.path).toBe("/drawings");
   });
 
   it("does not take a Context name for a prefix", () => {
