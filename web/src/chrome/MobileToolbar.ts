@@ -1,5 +1,7 @@
 import type { Editor, Tool } from "../core/Core";
 import {
+  type Glyph,
+  glyphSvg,
   insertImageItem,
   lockGlyph,
   mobileToolSlots,
@@ -8,8 +10,7 @@ import {
   toolLockLabel,
 } from "./ToolbarModel";
 
-const svg = (glyph: string) =>
-  `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${glyph}</svg>`;
+const svg = (glyph: Glyph) => glyphSvg(glyph, 20);
 const item = (tool: Tool) => toolItems.find((i) => i.tool === tool)!;
 
 /**

@@ -1,8 +1,15 @@
 import type { Editor } from "../core/Core";
-import { focusTarget, insertImageItem, lockGlyph, toolItems, toolLockLabel } from "./ToolbarModel";
+import {
+  type Glyph,
+  focusTarget,
+  glyphSvg,
+  insertImageItem,
+  lockGlyph,
+  toolItems,
+  toolLockLabel,
+} from "./ToolbarModel";
 
-const svg = (glyph: string) =>
-  `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${glyph}</svg>`;
+const svg = (glyph: Glyph) => glyphSvg(glyph, 16);
 
 /**
  * The desktop toolbar island, top centre: the Tool lock, then the Tools, as in
