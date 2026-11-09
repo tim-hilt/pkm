@@ -64,7 +64,7 @@ while ((progress)); do
     attempted+="$task_file "
 
     run_pi "Implementing $task_file" claude-sonnet-5-5 medium "loop-$name-$(basename "$task_file" .md)" \
-      "/skill:tdd implement the task described in @$task_file. This is a headless run: the seams named in the task and its spec are the confirmed seams. Apply software-design best practices during the implementation. Tick off all completed bullet points in $task_file and set its Status line to in-review when you're finished; edit it in place, since .scratch/ is untracked. Commit the implementation using the commit-message 'Implement $task_file'."
+      "/skill:tdd implement the task described in @$task_file. Apply software-design best practices during the implementation. Tick off all completed bullet points in $task_file and set its Status line to in-review when you're finished; edit it in place, since .scratch/ is untracked. Commit the implementation using the commit-message 'Implement $task_file'."
     log_section "$task_file implemented in $status_elapsed" "$pi_output"
     gate_on_tests "$task_file"
 
