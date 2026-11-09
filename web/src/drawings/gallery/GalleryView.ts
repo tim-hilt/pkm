@@ -56,7 +56,7 @@ class Card {
     this.thumb.append(this.image);
     this.open = make("button", "gallery-open", [this.thumb, this.name, this.date]);
     this.open.type = "button";
-    this.open.addEventListener("click", () => void gallery.openDrawing(this.shown!.name));
+    this.open.addEventListener("click", () => void gallery.openDrawing(this.shown!.id));
 
     this.more.type = "button";
     this.more.innerHTML = moreGlyph;
@@ -246,22 +246,22 @@ export class GalleryView {
 
   /** Shows the Drawings and failure of the Gallery as they are now. */
   update(): void {
-    const listed = new Set(this.gallery.drawings.map((entry) => entry.name));
-    for (const [name, card] of this.cards) {
-      if (listed.has(name)) continue;
+    const listed = new Set(this.gallery.drawings.map((entry) => entry.id));
+    for (const [id, card] of this.cards) {
+      if (listed.has(id)) continue;
       this.observer.unobserve(card.element);
       this.cardOf.delete(card.element);
       card.dispose();
       card.element.remove();
-      this.cards.delete(name);
+      this.cards.delete(id);
     }
     const ordered: HTMLElement[] = [];
     for (const entry of this.gallery.drawings) {
-      let card = this.cards.get(entry.name);
+      let card = this.cards.get(entry.id);
       if (card) card.update(entry);
       else {
         card = new Card(this.gallery, this.isDark, this.cardActions, entry);
-        this.cards.set(entry.name, card);
+        this.cards.set(entry.id, card);
         this.cardOf.set(card.element, card);
         this.observer.observe(card.element);
       }

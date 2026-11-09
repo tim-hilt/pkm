@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { type Core, loadCore } from "../../core/Core";
 import { type RenderHarness, makeRenderHarness } from "../testing/OffscreenRender";
 import { redAt } from "../rendering/RenderedImage";
 import { OpfsStorage } from "../../storage/OpfsStorage";
@@ -8,6 +9,7 @@ import { ThumbnailRenderer, thumbnailHeight, thumbnailWidth } from "./ThumbnailR
 import { Thumbnails } from "./Thumbnails";
 import { Excalifont } from "../text/Excalifont";
 import fontUrl from "../../../generated/Excalifont-Regular.ttf?url";
+import wasmUrl from "../../../generated/pkm_web_bg.wasm?url";
 import sampleUrl from "../../../generated/sample.excalidraw?url";
 
 /**
@@ -29,12 +31,16 @@ async function clearOpfs() {
 }
 
 /** A fresh handle on the file system, as after a reload: nothing is remembered but what is stored. */
-const reopened = () => new DrawingStore(OpfsStorage.open());
+const reopened = () => new DrawingStore(OpfsStorage.open(), core);
 
+let core: Core;
+beforeAll(async () => {
+  core = await loadCore(fetch(wasmUrl));
+});
 beforeEach(clearOpfs);
 
 describe("Drawings on the Origin Private File System", () => {
-  it("are plain .excalidraw files in a folder, with exactly the saved bytes", async () => {
+  it("are plain .excalidraw files in a folder, with the saved content and an Item ID", async () => {
     const store = reopened();
     const content = bytes('{"type":"excalidraw","version":2,"elements":[]}');
 
@@ -43,7 +49,12 @@ describe("Drawings on the Origin Private File System", () => {
     const root = await navigator.storage.getDirectory();
     const folder = await root.getDirectoryHandle("Drawings");
     const file = await (await folder.getFileHandle("My plan.excalidraw")).getFile();
-    expect(new Uint8Array(await file.arrayBuffer())).toEqual(content);
+    expect(JSON.parse(await file.text())).toEqual({
+      type: "excalidraw",
+      version: 2,
+      elements: [],
+      id: expect.stringMatching(/^[a-z2-7]{12}$/),
+    });
     expect(name).toBe("My plan");
     expect(await namesIn(folder.keys())).toEqual(["My plan.excalidraw"]);
   });

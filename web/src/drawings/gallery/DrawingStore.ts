@@ -1,11 +1,21 @@
-import type { Viewport } from "../../core/Core";
+import type { Core, Viewport } from "../../core/Core";
 import type { FileStorage } from "../../storage/FileStorage";
+
+/** The part of the core that makes and reads Item IDs. */
+export type ItemIds = Pick<
+  Core,
+  "drawingItemId" | "drawingWithItemId" | "newItemId" | "claimItemIds"
+>;
 
 /** A Drawing as listed in the Gallery. */
 export interface Entry {
+  /** `undefined` for a file that is not a Drawing, which cannot hold one. */
+  itemId: string | undefined;
   name: string;
   /** Milliseconds since the epoch. */
   modified: number;
+  /** The Item ID, or the name of a file that has none. */
+  id: string;
 }
 
 /** A Drawing's file as Cloud Backing lists it. */
@@ -51,6 +61,9 @@ const thumbnailFile = /^(thumbnail(?:-dark)?)-(\d+)\.png$/;
  * file name is the Drawing's name. All file I/O lives here; the core only
  * sees bytes. A port of the Swift `DrawingStore`.
  *
+ * A Drawing keeps its Item ID in its file (ADR-0019), so it survives renames,
+ * and `list` gives every Drawing one.
+ *
  * Whatever the app derives from a Drawing (viewport, thumbnail) is cached
  * beside the folder, in one subfolder per Drawing, so that the Drawings stay
  * plain files. A cache follows its Drawing when that is renamed and goes when
@@ -64,20 +77,85 @@ export class DrawingStore {
   /** Called after every change the app makes to a Drawing (not the ones Sync makes), so that Cloud Backing can Sync it. */
   onLocalChange?: () => void;
   private tail: Promise<unknown> = Promise.resolve();
+  /** The Item IDs read from the files, so that listing does not read every Drawing each time; valid while the modification time is the one it was read at. */
+  private readonly readItemIds = new Map<
+    string,
+    { modified: number; itemId: string | undefined }
+  >();
 
   /** `onSave` is called after every write of a Drawing (the first one asks the browser for persistent storage). */
   constructor(
     private readonly storage: FileStorage,
+    private readonly ids: ItemIds,
     private readonly onSave?: () => void,
   ) {}
 
-  /** The Drawings, last modified first. */
-  async list(): Promise<Entry[]> {
+  /**
+   * The Drawings, last modified first. Gives each Drawing that has no Item ID
+   * one (a Drawing saved by excalidraw.com or put into the folder by Sync),
+   * and each of several Drawings with the same one but the oldest a new one
+   * (a copy of a file); that rewrites their files.
+   */
+  list(): Promise<Entry[]> {
+    return this.exclusively(async () => {
+      const drawingFiles = (await this.entries()).reverse(); // oldest first
+      const held: (string | undefined)[] = [];
+      for (const { name, modified } of drawingFiles) held.push(await this.itemIdOf(name, modified));
+      const claimed = this.ids.claimItemIds(held.map((id) => id ?? ""));
+      let rewritten = false;
+      for (const [at, itemId] of claimed.entries()) {
+        if (itemId === "") continue;
+        const file = drawingFiles[at];
+        const modified = await this.give(itemId, file.name);
+        // Not a Drawing: it holds none, and is not read again until it changes.
+        this.readItemIds.set(file.name, {
+          modified: modified ?? file.modified,
+          itemId: modified === undefined ? undefined : itemId,
+        });
+        held[at] = modified === undefined ? undefined : itemId;
+        if (modified !== undefined) file.modified = modified;
+        rewritten ||= modified !== undefined;
+      }
+      if (rewritten) this.onLocalChange?.();
+      return drawingFiles
+        .map(({ name, modified }, at) => entry(name, modified, held[at]))
+        .sort(newestFirst);
+    });
+  }
+
+  /** The name of the Drawing with the Item ID `id` (an `Entry.id`), `undefined` if there is none. */
+  async nameOf(id: string): Promise<string | undefined> {
+    return (await this.list()).find((entry) => entry.id === id)?.name;
+  }
+
+  /** The Drawings' names and modification times, last modified first; no Item IDs. */
+  private async entries(): Promise<{ name: string; modified: number }[]> {
     const files = await this.storage.files(drawings);
     return files
       .filter(({ name }) => name.endsWith(fileExtension))
       .map(({ name, modified }) => ({ name: name.slice(0, -fileExtension.length), modified }))
       .sort((a, b) => b.modified - a.modified || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  }
+
+  private async itemIdOf(name: string, modified: number): Promise<string | undefined> {
+    const known = this.readItemIds.get(name);
+    if (known?.modified === modified) return known.itemId;
+    const bytes = await this.storage.read(path(name));
+    const itemId = bytes && this.ids.drawingItemId(bytes);
+    this.readItemIds.set(name, { modified, itemId });
+    return itemId;
+  }
+
+  /** Writes `itemId` into the Drawing's file and returns its new modification time, `undefined` if that cannot be done. */
+  private async give(itemId: string, name: string): Promise<number | undefined> {
+    try {
+      const bytes = await this.storage.read(path(name));
+      if (!bytes) return undefined;
+      await this.storage.write(path(name), this.ids.drawingWithItemId(bytes, itemId));
+      return (await this.entries()).find((entry) => entry.name === name)?.modified;
+    } catch {
+      return undefined; // not a Drawing
+    }
   }
 
   /**
@@ -91,10 +169,11 @@ export class DrawingStore {
   /**
    * Makes a new Drawing holding `contents` named `name`, or "<name> 2",
    * "<name> 3", … if that is taken, and returns the name. Never replaces
-   * another Drawing.
+   * another Drawing. It gets an Item ID if `contents` hold none.
    */
   add(contents: Uint8Array, name: string): Promise<string> {
     return this.exclusively(async () => {
+      contents = this.ids.drawingItemId(contents) ? contents : this.withNewItemId(contents);
       const distinct = await this.distinctName(name.trim());
       // Left by a Drawing of that name that went without the store knowing.
       await this.storage.remove(cacheFolder(distinct));
@@ -166,9 +245,18 @@ export class DrawingStore {
     });
   }
 
-  /** Copies the Drawing under a distinct name ("<name> copy", "<name> copy 2", …) and returns it. */
+  /** Copies the Drawing under a distinct name ("<name> copy", "<name> copy 2", …) with an Item ID of its own, and returns the name. */
   async duplicate(name: string): Promise<string> {
-    return this.add(await this.open(name), `${name} copy`);
+    return this.add(this.withNewItemId(await this.open(name)), `${name} copy`);
+  }
+
+  /** `contents` with a new Item ID; as they are if they are no Drawing. */
+  private withNewItemId(contents: Uint8Array): Uint8Array {
+    try {
+      return this.ids.drawingWithItemId(contents, this.ids.newItemId());
+    } catch {
+      return contents;
+    }
   }
 
   /** Removes the Drawing and its caches. There is no way back. */
@@ -327,7 +415,7 @@ export class DrawingStore {
   }
 
   private async names(): Promise<Set<string>> {
-    return new Set((await this.list()).map((entry) => entry.name));
+    return new Set((await this.entries()).map((entry) => entry.name));
   }
 
   /** Caches can be made again, so they are moved file by file; the thumbnails' stamps follow the new file. */
@@ -335,7 +423,7 @@ export class DrawingStore {
     const source = cacheFolder(name);
     const target = cacheFolder(newName);
     await this.storage.remove(target);
-    const modified = (await this.list()).find((entry) => entry.name === newName)?.modified;
+    const modified = (await this.entries()).find((entry) => entry.name === newName)?.modified;
     try {
       for (const { name: file } of await this.storage.files(source)) {
         const bytes = await this.storage.read(`${source}/${file}`);
@@ -349,6 +437,15 @@ export class DrawingStore {
     await this.storage.remove(source);
   }
 }
+
+const entry = (name: string, modified: number, itemId: string | undefined): Entry => ({
+  itemId,
+  name,
+  modified,
+  id: itemId ?? name,
+});
+const newestFirst = (a: Entry, b: Entry) =>
+  b.modified - a.modified || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
 
 const encode = (text: string) => new TextEncoder().encode(text);
 

@@ -9,6 +9,9 @@ import Foundation
 /// outside that folder, in one subfolder per Drawing (`cacheDirectory(for:)`),
 /// so that it is neither shown in Files nor synced. A cache follows its Drawing
 /// when that is renamed and goes when it is deleted; it is never copied.
+///
+/// A Drawing keeps its Item ID in its file (ADR-0019), so it survives renames,
+/// and `list` gives every Drawing one.
 struct DrawingStore: Sendable {
     static let fileExtension = "excalidraw"
 
@@ -17,11 +20,23 @@ struct DrawingStore: Sendable {
     /// whatever in it belongs to no Drawing there is removed.
     let cacheDirectory: URL
 
+    /// The Item IDs read from the files, so that listing does not read every
+    /// Drawing each time. Shared by the copies of the store.
+    private let readItemIDs = ReadItemIDs()
+
+    init(directory: URL, cacheDirectory: URL) {
+        self.directory = directory
+        self.cacheDirectory = cacheDirectory
+    }
+
     /// A Drawing as listed in the Gallery.
     struct Entry: Equatable, Identifiable, Sendable {
+        /// Nil for a file that is not a Drawing, which cannot hold one.
+        let itemID: String?
         let name: String
         let modified: Date
-        var id: String { name }
+        /// The Item ID, or the name of a file that has none.
+        var id: String { itemID ?? name }
     }
 
     /// A name that is empty or would put the file somewhere else than in the
@@ -31,20 +46,63 @@ struct DrawingStore: Sendable {
     /// Another Drawing already has the name.
     struct NameTaken: Error, Equatable { let name: String }
 
-    /// The Drawings, last modified first.
+    /// The Drawings, last modified first. Gives each Drawing that has no Item
+    /// ID one (a Drawing dropped into the folder, or saved by excalidraw.com),
+    /// and each of several Drawings with the same one but the oldest a new
+    /// one (a copy made in Finder); that rewrites their files.
     func list() throws -> [Entry] {
         let files = try FileManager.default.contentsOfDirectory(
             at: directory, includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey],
             options: .skipsHiddenFiles)
-        return files.compactMap { file -> Entry? in
+        var drawings = files.compactMap { file -> (name: String, modified: Date, itemID: String?)? in
             guard file.pathExtension == Self.fileExtension else { return nil }
             let values = try? file.resourceValues(forKeys: [.contentModificationDateKey, .isDirectoryKey])
             guard values?.isDirectory != true else { return nil }
-            return Entry(
-                name: file.deletingPathExtension().lastPathComponent,
-                modified: values?.contentModificationDate ?? .distantPast)
+            let name = file.deletingPathExtension().lastPathComponent
+            let modified = values?.contentModificationDate ?? .distantPast
+            return (name, modified, nil)
         }
-        .sorted { ($0.modified, $1.name) > ($1.modified, $0.name) }
+        .sorted { ($0.modified, $0.name) < ($1.modified, $1.name) }
+
+        for index in drawings.indices {
+            drawings[index].itemID = readItemIDs.itemID(named: drawings[index].name, modified: drawings[index].modified)
+            {
+                (try? Data(contentsOf: directory.appending(path: "\(drawings[index].name).\(Self.fileExtension)")))
+                    .flatMap { drawingItemId(bytes: $0) }
+            }
+        }
+        let claimed = claimItemIds(oldestFirst: drawings.map(\.itemID))
+        for (index, itemID) in claimed.enumerated() {
+            guard let itemID else { continue }
+            if let modified = giveItemID(itemID, toDrawingNamed: drawings[index].name) {
+                drawings[index].itemID = itemID
+                drawings[index].modified = modified
+                readItemIDs.remember(itemID, ofDrawingNamed: drawings[index].name, modified: modified)
+            } else {
+                // Not a Drawing (or not writable): it has none, and not reading it again until it changes.
+                drawings[index].itemID = nil
+                readItemIDs.remember(nil, ofDrawingNamed: drawings[index].name, modified: drawings[index].modified)
+            }
+        }
+        return
+            drawings
+            .map { Entry(itemID: $0.itemID, name: $0.name, modified: $0.modified) }
+            .sorted { ($0.modified, $1.name) > ($1.modified, $0.name) }
+    }
+
+    /// The name of the Drawing with the Item ID `id` (an `Entry.id`), if there is one.
+    func name(forItemID id: String) throws -> String? {
+        try list().first { $0.id == id }?.name
+    }
+
+    /// Writes `itemID` into the Drawing's file and returns its new modification
+    /// date, or nil if that cannot be done.
+    private func giveItemID(_ itemID: String, toDrawingNamed name: String) -> Date? {
+        guard let url = try? url(for: name), let bytes = try? Data(contentsOf: url),
+            let stamped = try? drawingWithItemId(bytes: bytes, itemId: itemID),
+            (try? stamped.write(to: url, options: .atomic)) != nil
+        else { return nil }
+        return try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
     }
 
     /// Reports (one `()` per burst) that Drawings were added, removed or
@@ -75,8 +133,11 @@ struct DrawingStore: Sendable {
 
     /// Makes a new Drawing holding `contents` named `name`, or "<name> 2",
     /// "<name> 3", … if that is taken, and returns the name. Never replaces
-    /// another Drawing.
+    /// another Drawing. It gets an Item ID if `contents` hold none.
     func add(_ contents: Data, named name: String) throws -> String {
+        // A file that is no Drawing stays as it is.
+        var contents = contents
+        if drawingItemId(bytes: contents) == nil { contents = Self.withNewItemID(contents) }
         let name = try distinctName(from: name.trimmingCharacters(in: .whitespacesAndNewlines))
         // Left by a Drawing of that name deleted in Files or Finder.
         try? FileManager.default.removeItem(at: cacheDirectory(for: name))
@@ -158,10 +219,15 @@ struct DrawingStore: Sendable {
     }
 
     /// Copies the Drawing under a distinct name ("<name> copy", "<name> copy
-    /// 2", …) and returns it. The copy is the newest Drawing.
+    /// 2", …) and returns it. The copy is the newest Drawing and has an Item
+    /// ID of its own.
     func duplicate(_ name: String) throws -> String {
-        let contents = try open(name)
+        let contents = Self.withNewItemID(try open(name))
         return try add(contents, named: "\(name) copy")
+    }
+
+    private static func withNewItemID(_ contents: Data) -> Data {
+        (try? drawingWithItemId(bytes: contents, itemId: newItemId())) ?? contents
     }
 
     /// `base`, or the first of "<base> 2", "<base> 3", … no Drawing has.
@@ -323,5 +389,29 @@ struct DrawingStore: Sendable {
         formatter.timeZone = timeZone
         formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
         return formatter.string(from: date)
+    }
+}
+
+/// The Item IDs found in the Drawings' files, by name, valid while the file's
+/// modification date is the one it was read at.
+private final class ReadItemIDs: @unchecked Sendable {
+    private let lock = NSLock()
+    private var known: [String: (modified: Date, itemID: String?)] = [:]
+
+    /// The remembered Item ID of the Drawing, or what `read` finds (and remembers).
+    func itemID(named name: String, modified: Date, read: () -> String?) -> String? {
+        lock.lock()
+        let remembered = known[name]
+        lock.unlock()
+        if let remembered, remembered.modified == modified { return remembered.itemID }
+        let itemID = read()
+        remember(itemID, ofDrawingNamed: name, modified: modified)
+        return itemID
+    }
+
+    func remember(_ itemID: String?, ofDrawingNamed name: String, modified: Date) {
+        lock.lock()
+        known[name] = (modified, itemID)
+        lock.unlock()
     }
 }

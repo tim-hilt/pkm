@@ -15,7 +15,7 @@ beforeAll(async () => {
 });
 
 async function open() {
-  const store = new DrawingStore(new MemoryStorage());
+  const store = new DrawingStore(new MemoryStorage(), core);
   const drawing = await OpenDrawing.open(await store.add(sample, "Sample plan"), store, core);
   const saved: DownloadedFile[] = [];
   const png = vi.fn(async () => new Uint8Array([1, 2, 3]) as Uint8Array | undefined);
@@ -30,7 +30,6 @@ describe("downloading the open Drawing", () => {
     expect(saved).toHaveLength(1);
     expect(saved[0].name).toBe("Sample plan.excalidraw");
     expect(saved[0].bytes).toEqual(await store.open("Sample plan"));
-    expect(saved[0].bytes).toEqual(sample);
   });
 
   it("holds changes not yet autosaved", async () => {

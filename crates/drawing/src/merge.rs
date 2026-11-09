@@ -133,9 +133,9 @@ pub fn are_same_drawing(a: &[u8], b: &[u8]) -> Result<bool, MergeError> {
 }
 
 /// A parsed Drawing.
-struct Doc {
+pub(crate) struct Doc {
     /// The whole document, as read.
-    root: Object,
+    pub(crate) root: Object,
 }
 
 impl Doc {
@@ -151,7 +151,7 @@ impl Doc {
     }
 }
 
-fn parse(bytes: &[u8]) -> Result<Doc, MergeError> {
+pub(crate) fn parse(bytes: &[u8]) -> Result<Doc, MergeError> {
     let err = |what: &str| MergeError(format!("not a Drawing: {what}"));
     let text = std::str::from_utf8(bytes).map_err(|_| err("not text"))?;
     let Value::Object(mut root) = json::parse(text).map_err(|e| err(&e.to_string()))? else {

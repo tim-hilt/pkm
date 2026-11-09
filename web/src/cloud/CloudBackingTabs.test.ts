@@ -56,7 +56,7 @@ interface Tab {
 
 /** A tab: its own module and store over the browser's one storage. */
 async function tab(storage: MemoryStorage, group: MemoryTabGroup): Promise<Tab> {
-  const store = new DrawingStore(storage);
+  const store = new DrawingStore(storage, core);
   const cloud = await CloudBacking.open(core, storage, slowFetch, store, group.tab());
   store.onLocalChange = () => cloud.localChange();
   const synced: string[][] = [];

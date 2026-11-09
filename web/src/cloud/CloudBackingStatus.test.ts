@@ -34,7 +34,7 @@ const drawing = (id: string) =>
 
 async function device() {
   const storage = new MemoryStorage();
-  const store = new DrawingStore(storage);
+  const store = new DrawingStore(storage, core);
   const cloud = await CloudBacking.open(core, storage, server.fetch, store);
   store.onLocalChange = () => cloud.localChange();
   const progress: string[] = [];
@@ -140,7 +140,7 @@ describe("offline", () => {
       return fetching(input, init);
     };
     const storage = new MemoryStorage();
-    const store = new DrawingStore(storage);
+    const store = new DrawingStore(storage, core);
     const other = await CloudBacking.open(core, storage, counting, store);
     await other.connect(url, "user", "secret");
     await advance(0);

@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { type Core, loadCore } from "../../core/Core";
 import type { RenderedImage } from "../rendering/RenderedImage";
 import { MemoryStorage } from "../../storage/MemoryStorage";
 import { DrawingStore, type Entry } from "./DrawingStore";
@@ -21,10 +23,16 @@ class FakePainter implements ThumbnailPainter {
   }
 }
 
+const generated = new URL("../../../generated/", import.meta.url);
+let core: Core;
+beforeAll(async () => {
+  core = await loadCore(readFileSync(new URL("pkm_web_bg.wasm", generated)));
+});
+
 let store: DrawingStore;
 let thumbnails: Thumbnails;
 beforeEach(() => {
-  store = new DrawingStore(new MemoryStorage());
+  store = new DrawingStore(new MemoryStorage(), core);
   thumbnails = new Thumbnails(store, new FakePainter());
 });
 

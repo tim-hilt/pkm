@@ -45,14 +45,15 @@ import Testing
 
     @Test func theThumbnailIsCachedOutsideTheDrawingsFolder() async throws {
         try store.save(sampleBytes(), as: "sample")
-        let before = try entry("sample")
+        let before = try entry("sample")  // lists, which gives the Drawing an Item ID
+        let stored = try store.open("sample")
 
         _ = await Thumbnails(store: store).thumbnail(for: before)
 
         let png = try #require(store.thumbnail(for: before))
         #expect(RenderedImage(pngData: png)?.width == ThumbnailRenderer.width)
         #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path) == ["sample.excalidraw"])
-        #expect(try store.open("sample") == sampleBytes())
+        #expect(try store.open("sample") == stored)
         #expect(try entry("sample") == before)
     }
 

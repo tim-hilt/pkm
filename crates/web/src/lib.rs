@@ -4,6 +4,8 @@
 //!
 //! Wasm is single-threaded, so unlike in the bindings the editor needs no lock.
 
+use pkm_base::item_id::ItemId;
+use pkm_base::random::Entropy;
 use std::cell::RefCell;
 use std::io;
 use std::sync::Arc;
@@ -22,6 +24,13 @@ extern "C" {
     /// `Date.now()`: milliseconds since 1970.
     #[wasm_bindgen(js_namespace = Date, js_name = now)]
     fn date_now() -> f64;
+}
+
+/// Runs when the module loads: the browser has no system time for the core to
+/// ask for, and anything that makes random ids needs it.
+#[wasm_bindgen(start)]
+fn start() {
+    pkm_drawing::set_clock(date_now);
 }
 
 /// Lets the core call a client's measurer.
@@ -158,8 +167,6 @@ pub struct Editor {
 impl Editor {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        // The browser has no system time for the core to ask for.
-        pkm_drawing::set_clock(date_now);
         Self {
             inner: RefCell::new(pkm_drawing::Editor::new()),
         }
@@ -869,6 +876,38 @@ pub struct Sections {
 #[wasm_bindgen(js_name = areSameDrawing)]
 pub fn are_same_drawing(a: &[u8], b: &[u8]) -> bool {
     matches!(pkm_drawing::are_same_drawing(a, b), Ok(true))
+}
+
+/// The Item ID of the Drawing `bytes`, `undefined` if they hold none (or are
+/// no Drawing).
+#[wasm_bindgen(js_name = drawingItemId)]
+pub fn drawing_item_id(bytes: &[u8]) -> Option<String> {
+    pkm_drawing::item_id::of(bytes).map(|id| id.to_string())
+}
+
+/// The Drawing `bytes` with `item_id` as its Item ID, everything else as it
+/// was. Throws if `bytes` are no Drawing or `item_id` is no Item ID.
+#[wasm_bindgen(js_name = drawingWithItemId)]
+pub fn drawing_with_item_id(bytes: &[u8], item_id: &str) -> Result<Vec<u8>, JsError> {
+    let id = ItemId::parse(item_id).ok_or_else(|| JsError::new("not an Item ID"))?;
+    pkm_drawing::item_id::with(bytes, &id).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// A new Item ID.
+#[wasm_bindgen(js_name = newItemId)]
+pub fn new_item_id() -> String {
+    ItemId::new(&mut Entropy::from_system()).to_string()
+}
+
+/// The new Item IDs that Items need, given the ones they hold now, oldest
+/// first (`""`: holds none): each entry is `""` where the Item keeps its own,
+/// and the new Item ID where it has none or the same as an older Item.
+#[wasm_bindgen(js_name = claimItemIds)]
+pub fn claim_item_ids(oldest_first: Vec<String>) -> Vec<String> {
+    pkm_base::item_id::claim(&oldest_first)
+        .into_iter()
+        .map(|id| id.map(|id| id.to_string()).unwrap_or_default())
+        .collect()
 }
 
 /// How Excalidraw shows a CSS colour in its dark theme, for swatches.

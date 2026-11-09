@@ -33,7 +33,7 @@ extension Gallery {
         let store = DrawingStore.appDrawings(temporary: true)
         let name = try? store.add(Data(contentsOf: SampleDrawing.url), named: "sample")
         let gallery = Gallery(store: store)
-        if let name { gallery.openDrawing(named: name) }
+        if let sample = gallery.drawings.first(where: { $0.name == name }) { gallery.openDrawing(itemID: sample.id) }
         return gallery
     }
 }

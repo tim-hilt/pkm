@@ -99,7 +99,7 @@ import Testing
         try store.save(Data(contentsOf: SampleDrawing.url), as: "sample")
         let gallery = Gallery(store: store)
 
-        gallery.openDrawing(named: "sample")
+        gallery.openDrawing(itemID: gallery.drawings[0].id)
 
         #expect(gallery.open?.name == "sample")
         #expect(gallery.open?.editor.elementCount() == 8)
@@ -109,7 +109,7 @@ import Testing
         try store.save(Data("not json".utf8), as: "broken")
         let gallery = Gallery(store: store)
 
-        gallery.openDrawing(named: "broken")
+        gallery.openDrawing(itemID: "broken")
 
         #expect(gallery.open == nil)
         #expect(gallery.failure != nil)
@@ -238,7 +238,7 @@ import Testing
             #expect(await eventually { gallery.drawings.map(\.name) == ["broken"] })
         }
 
-        gallery.openDrawing(named: "broken")
+        gallery.openDrawing(itemID: "broken")
         gallery.close()
         #expect(gallery.failure != nil)
         gallery.duplicateDrawing(named: "broken")
@@ -250,9 +250,9 @@ import Testing
     // MARK: Export
 
     @Test func anExportedDrawingIsItsFileWithTheSameBytes() throws {
-        let bytes = try Data(contentsOf: SampleDrawing.url)
-        try store.save(bytes, as: "Flowchart")
-        let gallery = Gallery(store: store)
+        try store.save(Data(contentsOf: SampleDrawing.url), as: "Flowchart")
+        let gallery = Gallery(store: store)  // lists, which gives the Drawing an Item ID
+        let bytes = try store.open("Flowchart")
 
         let url = try #require(gallery.exportFile(named: "Flowchart"))
 

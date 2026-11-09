@@ -17,6 +17,10 @@ import init, {
   ZOrder,
   darkModeColor,
   areSameDrawing,
+  claimItemIds,
+  drawingItemId,
+  drawingWithItemId,
+  newItemId,
   type InitInput,
   ViewportState,
   SyncRun,
@@ -200,6 +204,18 @@ export interface Core {
   makeEditor(): Editor;
   /** Whether the two Drawing files are the same Drawing: they share Elements, or both are empty. */
   areSameDrawing(a: Uint8Array, b: Uint8Array): boolean;
+  /** The Item ID of the Drawing file, `undefined` if it holds none (or is no Drawing). */
+  drawingItemId(bytes: Uint8Array): string | undefined;
+  /** The Drawing file with `itemId` as its Item ID; throws if it is no Drawing or `itemId` is no Item ID. */
+  drawingWithItemId(bytes: Uint8Array, itemId: string): Uint8Array;
+  /** A new Item ID. */
+  newItemId(): string;
+  /**
+   * The new Item IDs that Items need, given the ones they hold now, oldest
+   * first (`""`: holds none): `""` where the Item keeps its own, a new Item ID
+   * where it has none or the same as an older Item.
+   */
+  claimItemIds(oldestFirst: string[]): string[];
   /** The WebDAV protocol for a server; throws if the URL is not https. Free it when done. */
   webDav(url: string, username: string, password: string): WebDavProtocol;
   /** A Sync step starting at `nowMs` (milliseconds since the epoch). Free it when done. */
@@ -226,6 +242,10 @@ export async function loadCore(
       return new Editor(editor, views);
     },
     areSameDrawing: (a, b) => areSameDrawing(a, b),
+    drawingItemId: (bytes) => drawingItemId(bytes),
+    drawingWithItemId: (bytes, itemId) => drawingWithItemId(bytes, itemId),
+    newItemId: () => newItemId(),
+    claimItemIds: (oldestFirst) => claimItemIds(oldestFirst),
     webDav: (url, username, password) => new WebDavProtocol(url, username, password),
     syncRun: (nowMs) => new SyncRun(nowMs),
     syncSchedule: (now) => new SyncSchedule(now),

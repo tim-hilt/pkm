@@ -32,7 +32,7 @@ export async function startApp(
   font: Excalifont,
   storage: FileStorage,
 ): Promise<void> {
-  const store = new DrawingStore(storage, requestPersistenceOnFirstCall(navigator.storage));
+  const store = new DrawingStore(storage, core, requestPersistenceOnFirstCall(navigator.storage));
   const thumbnails = new Thumbnails(store, new ThumbnailRenderer(device, core, font));
   const gallery = await Gallery.start(store, core, thumbnails);
 

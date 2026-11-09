@@ -43,7 +43,7 @@ interface Device {
 
 async function device(connect = true): Promise<Device> {
   const storage = new MemoryStorage();
-  const store = new DrawingStore(storage);
+  const store = new DrawingStore(storage, core);
   const cloud = await CloudBacking.open(core, storage, server.fetch, store);
   store.onLocalChange = () => cloud.localChange();
   const synced: string[][] = [];
@@ -322,7 +322,7 @@ describe("Disconnect", () => {
     const first = await device();
     await first.store.save(bytes("one"), "A");
     await settle();
-    const store = new DrawingStore(first.storage);
+    const store = new DrawingStore(first.storage, core);
     const cloud = await CloudBacking.open(core, first.storage, server.fetch, store);
     store.onLocalChange = () => cloud.localChange();
     await store.save(bytes("two"), "A");

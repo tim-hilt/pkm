@@ -83,6 +83,81 @@ import Testing
         #expect(try store.list().map(\.name) == ["drawing"])
     }
 
+    // MARK: Item IDs
+
+    private func drawing(itemID: String? = nil) throws -> Data {
+        let bytes = Editor().save()
+        return try itemID.map { try drawingWithItemId(bytes: bytes, itemId: $0) } ?? bytes
+    }
+
+    private func itemID(of name: String) throws -> String? {
+        drawingItemId(bytes: try store.open(name))
+    }
+
+    @Test func aNewDrawingHasAnItemID() throws {
+        let name = try store.create(contents: try drawing())
+
+        let id = try #require(try itemID(of: name))
+
+        #expect(id.count == 12)
+        #expect(try store.list().map(\.itemID) == [id])
+    }
+
+    @Test func renamingKeepsTheItemID() throws {
+        let name = try store.create(contents: try drawing())
+        let id = try itemID(of: name)
+
+        _ = try store.rename(name, to: "Renamed")
+
+        #expect(try store.list().map(\.itemID) == [id])
+        #expect(try store.name(forItemID: try #require(id)) == "Renamed")
+    }
+
+    @Test func aDuplicateGetsAnItemIDOfItsOwn() throws {
+        let name = try store.create(contents: try drawing())
+
+        let copy = try store.duplicate(name)
+
+        let ids = try [name, copy].map { try #require(try itemID(of: $0)) }
+        #expect(Set(ids).count == 2)
+    }
+
+    @Test func listingGivesADrawingWithoutAnItemIDOne() throws {
+        try store.save(try drawing(), as: "dropped")
+
+        let listed = try store.list()
+
+        let id = try #require(listed.first?.itemID)
+        #expect(try itemID(of: "dropped") == id)
+        #expect(try store.list().map(\.itemID) == [id])
+    }
+
+    @Test func ofTwoDrawingsWithOneItemIDTheNewerGetsANewOne() throws {
+        try store.save(try drawing(itemID: "abcdefghijkl"), as: "original")
+        try store.save(try drawing(itemID: "abcdefghijkl"), as: "copy")
+        try setModified("original", Date(timeIntervalSince1970: 1000))
+        try setModified("copy", Date(timeIntervalSince1970: 2000))
+
+        let listed = try store.list()
+
+        #expect(listed.map(\.name) == ["copy", "original"])
+        #expect(listed.last?.itemID == "abcdefghijkl")
+        let copyID = try #require(listed.first?.itemID)
+        #expect(copyID != "abcdefghijkl")
+        #expect(try itemID(of: "copy") == copyID)
+        #expect(try itemID(of: "original") == "abcdefghijkl")
+    }
+
+    @Test func aFileThatIsNoDrawingStaysUntouchedAndIsFoundByName() throws {
+        try store.save(Data("not json".utf8), as: "broken")
+
+        let listed = try store.list()
+
+        #expect(listed.first?.itemID == nil)
+        #expect(listed.first?.id == "broken")
+        #expect(try store.open("broken") == Data("not json".utf8))
+    }
+
     // MARK: Create
 
     @Test func aNewDrawingIsNamedUntitledAndItsDateAndTime() throws {

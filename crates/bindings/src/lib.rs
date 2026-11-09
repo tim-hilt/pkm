@@ -4,6 +4,8 @@
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use pkm_base::item_id::ItemId;
+use pkm_base::random::Entropy;
 use pkm_cloud::{
     ConnectError, DirStorage, GoogleDriveStorage, Observer, OneDriveStorage, Progress, Status,
     SyncLoop, SyncState, Timing, WebDavStorage,
@@ -483,6 +485,44 @@ pub fn forget_sync_state(state_directory: String) {
 #[uniffi::export]
 pub fn are_same_drawing(a: Vec<u8>, b: Vec<u8>) -> bool {
     pkm_drawing::are_same_drawing(&a, &b).unwrap_or(false)
+}
+
+/// The Item ID of the Drawing `bytes`, or `nil` if they hold none (or are no
+/// Drawing).
+#[uniffi::export]
+pub fn drawing_item_id(bytes: Vec<u8>) -> Option<String> {
+    pkm_drawing::item_id::of(&bytes).map(|id| id.to_string())
+}
+
+/// The Drawing `bytes` with `item_id` as its Item ID, everything else as it
+/// was. Fails if `bytes` are no Drawing or `item_id` is no Item ID.
+#[uniffi::export]
+pub fn drawing_with_item_id(bytes: Vec<u8>, item_id: String) -> Result<Vec<u8>, LoadError> {
+    let invalid = |message: String| LoadError::Invalid { message };
+    let id =
+        ItemId::parse(&item_id).ok_or_else(|| invalid(format!("not an Item ID: {item_id}")))?;
+    pkm_drawing::item_id::with(&bytes, &id).map_err(|e| invalid(e.to_string()))
+}
+
+/// A new Item ID.
+#[uniffi::export]
+pub fn new_item_id() -> String {
+    ItemId::new(&mut Entropy::from_system()).to_string()
+}
+
+/// The new Item IDs that Items need, given the ones they hold now, oldest
+/// first (`nil`: holds none): each entry is `nil` where the Item keeps its
+/// own, and the new Item ID where it has none or the same as an older Item.
+#[uniffi::export]
+pub fn claim_item_ids(oldest_first: Vec<Option<String>>) -> Vec<Option<String>> {
+    let held: Vec<&str> = oldest_first
+        .iter()
+        .map(|id| id.as_deref().unwrap_or(""))
+        .collect();
+    pkm_base::item_id::claim(&held)
+        .into_iter()
+        .map(|id| id.map(|id| id.to_string()))
+        .collect()
 }
 
 /// Why a file could not be opened as a Drawing, in words fit for a user.

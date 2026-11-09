@@ -132,8 +132,10 @@ final class Gallery {
         }
     }
 
-    func openDrawing(named name: String) {
-        attempt("Could not open “\(name)”.") {
+    /// Opens the Drawing with the Item ID `id` (an `Entry.id`).
+    func openDrawing(itemID id: String) {
+        attempt("Could not open the Drawing.") {
+            guard let name = try store.name(forItemID: id) else { throw CocoaError(.fileNoSuchFile) }
             show(try OpenDrawing(name: name, store: store))
         }
     }

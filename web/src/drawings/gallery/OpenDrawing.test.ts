@@ -22,7 +22,7 @@ const delay = 150;
 let store: DrawingStore;
 beforeEach(() => {
   vi.useFakeTimers();
-  store = new DrawingStore(new MemoryStorage());
+  store = new DrawingStore(new MemoryStorage(), core);
 });
 afterEach(() => vi.useRealTimers());
 

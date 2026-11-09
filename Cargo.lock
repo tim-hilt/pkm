@@ -534,6 +534,7 @@ version = "0.1.0"
 name = "pkm-bindings"
 version = "0.1.0"
 dependencies = [
+ "pkm-base",
  "pkm-cloud",
  "pkm-drawing",
  "uniffi",
@@ -561,6 +562,7 @@ dependencies = [
 name = "pkm-web"
 version = "0.1.0"
 dependencies = [
+ "pkm-base",
  "pkm-cloud",
  "pkm-drawing",
  "wasm-bindgen",

@@ -31,7 +31,7 @@ let storage: MemoryStorage;
 let store: DrawingStore;
 beforeEach(() => {
   storage = new MemoryStorage();
-  store = new DrawingStore(storage);
+  store = new DrawingStore(storage, core);
 });
 
 const start = () =>
@@ -102,7 +102,7 @@ describe("opening and leaving", () => {
   it("opening a listed Drawing shows it", async () => {
     await store.save(sample, "sample");
     const gallery = await start();
-    await gallery.openDrawing("sample");
+    await gallery.openDrawing(gallery.drawings[0].id);
     expect(gallery.open?.name).toBe("sample");
     expect(gallery.open?.editor.elementCount()).toBe(8);
   });

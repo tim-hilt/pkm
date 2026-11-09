@@ -28,7 +28,7 @@ struct GalleryView: View {
                 LazyVGrid(columns: columns, spacing: 16) {
                     ForEach(gallery.drawings) { drawing in
                         Button {
-                            gallery.openDrawing(named: drawing.name)
+                            gallery.openDrawing(itemID: drawing.id)
                         } label: {
                             Card(drawing: drawing, thumbnails: gallery.thumbnails)
                         }

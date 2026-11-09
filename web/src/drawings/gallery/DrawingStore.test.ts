@@ -1,15 +1,23 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { type Core, loadCore } from "../../core/Core";
 import { MemoryStorage } from "../../storage/MemoryStorage";
 import { DrawingStore, InvalidName, NameTaken, NotFound } from "./DrawingStore";
 
 const bytes = (text: string) => new TextEncoder().encode(text);
 const text = (data: Uint8Array) => new TextDecoder().decode(data);
 
+const generated = new URL("../../../generated/", import.meta.url);
+let core: Core;
+beforeAll(async () => {
+  core = await loadCore(readFileSync(new URL("pkm_web_bg.wasm", generated)));
+});
+
 let storage: MemoryStorage;
 let store: DrawingStore;
 beforeEach(() => {
   storage = new MemoryStorage();
-  store = new DrawingStore(storage);
+  store = new DrawingStore(storage, core);
 });
 
 const names = async () => (await store.list()).map((entry) => entry.name);
@@ -96,6 +104,64 @@ describe("opening and saving", () => {
     await expect(store.open("a/b")).rejects.toBeInstanceOf(InvalidName);
     await expect(store.save(bytes(""), "")).rejects.toBeInstanceOf(InvalidName);
     await expect(store.save(bytes(""), ".hidden")).rejects.toBeInstanceOf(InvalidName);
+  });
+});
+
+describe("Item IDs", () => {
+  const drawing = (itemId?: string) => {
+    const editor = core.makeEditor();
+    const saved = editor.save();
+    editor.free();
+    return itemId ? core.drawingWithItemId(saved, itemId) : saved;
+  };
+  const itemIdOf = async (name: string) => core.drawingItemId(await store.open(name));
+
+  it("are given to new Drawings", async () => {
+    const name = await store.create(drawing());
+    expect(await itemIdOf(name)).toMatch(/^[a-z2-7]{12}$/);
+    expect((await store.list()).map((e) => e.itemId)).toEqual([await itemIdOf(name)]);
+  });
+
+  it("stay with a Drawing that is renamed", async () => {
+    const name = await store.create(drawing());
+    const id = await itemIdOf(name);
+    await store.rename(name, "Renamed");
+    expect((await store.list()).map((e) => e.itemId)).toEqual([id]);
+    expect(await store.nameOf(id!)).toBe("Renamed");
+  });
+
+  it("are not shared by a Drawing and its duplicate", async () => {
+    const name = await store.create(drawing());
+    const copy = await store.duplicate(name);
+    expect(await itemIdOf(copy)).not.toBe(await itemIdOf(name));
+    expect(await itemIdOf(copy)).toBeDefined();
+  });
+
+  it("are given when listing to a Drawing that has none", async () => {
+    await store.save(drawing(), "dropped");
+    const [listed] = await store.list();
+    expect(listed.itemId).toMatch(/^[a-z2-7]{12}$/);
+    expect(await itemIdOf("dropped")).toBe(listed.itemId);
+    expect((await store.list())[0].itemId).toBe(listed.itemId);
+  });
+
+  it("are new for the newer of two Drawings that have the same one", async () => {
+    await store.save(drawing("abcdefghijkl"), "original");
+    await store.save(drawing("abcdefghijkl"), "copy");
+    const listed = await store.list();
+    expect(listed.map((e) => e.name)).toEqual(["copy", "original"]);
+    expect(listed[1].itemId).toBe("abcdefghijkl");
+    expect(listed[0].itemId).toMatch(/^[a-z2-7]{12}$/);
+    expect(listed[0].itemId).not.toBe("abcdefghijkl");
+    expect(await itemIdOf("copy")).toBe(listed[0].itemId);
+  });
+
+  it("leave a file that is no Drawing as it is, found by its name", async () => {
+    await store.save(bytes("not json"), "broken");
+    const [listed] = await store.list();
+    expect(listed.itemId).toBeUndefined();
+    expect(listed.id).toBe("broken");
+    expect(text(await store.open("broken"))).toBe("not json");
   });
 });
 
@@ -340,7 +406,7 @@ describe("a Drawing under the name of one that was removed behind the store's ba
 describe("saving", () => {
   it("tells whoever listens after every write of a Drawing, and only then", async () => {
     const saved = vi.fn();
-    const listened = new DrawingStore(storage, saved);
+    const listened = new DrawingStore(storage, core, saved);
     await listened.add(bytes("a"), "a");
     await listened.save(bytes("b"), "a");
     await listened.saveViewport({ originX: 0, originY: 0, zoom: 1 }, "a");

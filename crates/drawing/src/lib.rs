@@ -30,6 +30,7 @@ mod image;
 mod index_sync;
 pub mod input;
 mod insert_image;
+pub mod item_id;
 mod laser;
 mod linear;
 mod merge;

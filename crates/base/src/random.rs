@@ -1,4 +1,4 @@
-//! Randomness for new Elements: their ids, their seeds (which fix how
+//! Randomness for new Elements and Items: their ids, their seeds (which fix how
 //! hand-drawn they look, ADR-0004) and their version nonces.
 //!
 //! Nothing here needs to be unpredictable, only different from one Element
@@ -35,6 +35,11 @@ impl Entropy {
         Self {
             state: hasher.finish(),
         }
+    }
+
+    /// 64 random bits.
+    pub(crate) fn bits(&mut self) -> u64 {
+        self.next_u64()
     }
 
     fn next_u64(&mut self) -> u64 {

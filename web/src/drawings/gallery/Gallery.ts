@@ -1,5 +1,5 @@
 import type { Core } from "../../core/Core";
-import { DrawingStore, type Entry, InvalidName, NameTaken } from "./DrawingStore";
+import { DrawingStore, type Entry, InvalidName, NameTaken, NotFound } from "./DrawingStore";
 import { OpenDrawing, type OpenDrawingOptions } from "./OpenDrawing";
 import type { Thumbnails } from "./Thumbnails";
 
@@ -78,8 +78,13 @@ export class Gallery {
     });
   }
 
-  openDrawing(name: string): Promise<void> {
-    return this.attempt(`Could not open “${name}”.`, () => this.show(name));
+  /** Opens the Drawing with the Item ID `id` (an `Entry.id`). */
+  openDrawing(id: string): Promise<void> {
+    return this.attempt("Could not open the Drawing.", async () => {
+      const name = await this.store.nameOf(id);
+      if (name === undefined) throw new NotFound(id);
+      await this.show(name);
+    });
   }
 
   /** Saves the open Drawing and returns to the Gallery. */

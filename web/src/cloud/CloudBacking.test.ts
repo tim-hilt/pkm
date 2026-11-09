@@ -20,7 +20,7 @@ beforeEach(() => {
   storage = new MemoryStorage();
 });
 
-const open = () => CloudBacking.open(core, storage, server.fetch, new DrawingStore(storage));
+const open = () => CloudBacking.open(core, storage, server.fetch, new DrawingStore(storage, core));
 
 const failure = async (promise: Promise<unknown>) => {
   const error = await promise.then(
