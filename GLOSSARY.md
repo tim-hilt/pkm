@@ -1,113 +1,73 @@
 # pkm
 
-A native, touch-first re-implementation of Excalidraw for Apple devices (later Android and Linux), with a web app for everywhere else, storing everything locally.
+A personal knowledge management app combining Tasks, Notes, Drawings, Bookmarks and Books, native on Apple devices (later Android and Linux), with a web app for everywhere else, storing everything locally.
 
 ## Language
 
-### Content
+### App
 
-**Drawing**:
-One saved, named piece of work as listed in the Gallery; corresponds to one `.excalidraw` file.
-_Avoid_: Board, document, canvas, file, sketch
+**Context**:
+One of the app's five areas (Tasks, Notes, Drawings, Bookmarks, Books), each with its own items and its own language.
+_Avoid_: Section, space, area, module, concern
 
-**Scene**:
-The Elements (and their attached files such as images) making up the open Drawing.
-_Avoid_: Page, board
+**Item**:
+One Task, Note, Drawing, Bookmark or Book: what a Context holds, and what a Link points to.
+_Avoid_: Entry, object, document
 
-**Benchmark Scene**:
-A generated Scene committed under `benchmarks/` that is used to measure the performance targets.
-_Avoid_: Stress test, test drawing
+**Item ID**:
+The random identifier an Item gets when it is created and keeps for life, through renames and edits; what links and Links use.
+_Avoid_: Name, hash, key
 
-**Element**:
-A single shape, line, arrow, freedraw stroke, text or image within a Scene.
-_Avoid_: Object, item, node, shape (when meaning any Element)
+**Delete**:
+Taking an Item out of its Context, with its file and everything recorded about it, on every Device; it wins over edits made elsewhere at the same time.
+_Avoid_: Remove, trash
 
-**Gallery**:
-The overview of all Drawings on the device, from which a Drawing is opened, created or deleted.
-_Avoid_: Library (Excalidraw uses that for reusable Element collections, which this app does not have), file browser
+**Task**:
+One thing to do, as listed in the Tasks Context.
+_Avoid_: Todo
 
-### Editing
+**Note**:
+One written Markdown text in the Notes Context.
+_Avoid_: Page, document
 
-**Canvas**:
-The on-screen view in which the open Scene is displayed and edited.
-_Avoid_: Using it for the Drawing or Scene itself
+**Bookmark**:
+One saved web page in the Bookmarks Context.
+_Avoid_: Link (that is a reference between items), favourite
 
-**Tool**:
-The active mode that determines what the next input creates or does (e.g. rectangle, freedraw, eraser, selection, hand).
-_Avoid_: Mode, brush
+**Book**:
+One PDF or EPUB to read in the Books Context, including papers and other non-book texts.
+_Avoid_: E-book, document, paper, bookmark (when meaning a saved position in a Book)
 
-**Selection**:
-The set of Elements currently selected for editing.
-_Avoid_: Focus, highlight
+**Link**:
+A reference from one item to another, possibly in another Context.
+_Avoid_: Bookmark, relation
 
-**Box-select**:
-Selecting by dragging a rectangle over empty Canvas with the selection Tool: the Selection becomes the Elements the rectangle fully encloses (shift: adds them to it).
-_Avoid_: Marquee, lasso, rubber band
-
-**Group**:
-Elements that are selected, moved, duplicated and erased together: tapping one selects the outermost group it is in, and groups can be nested. A double-tap on an Element of a selected group goes into the group, where the Elements of the next group down (or single Elements) are selected on their own, until a tap outside it or on empty Canvas. Saved as Excalidraw's `groupIds`.
-_Avoid_: Cluster, set
-
-**Point handle**:
-The grip on a point of a selected line or arrow (and a smaller one in the middle of each long segment) that is dragged to move the point or, from a middle, to add one; touch-sized for fingers. A tapped point handle selects the point, so that it can be deleted.
-_Avoid_: Vertex, node, anchor
-
-**Binding**:
-The attachment of an arrow's end to a shape: the arrow stops short of the shape and follows it when it moves, resizes or turns. Made by putting an arrow's end on the shape, undone by putting it elsewhere or by moving the arrow without the shape. The shape an end is over is shown with a binding highlight.
-_Avoid_: Connection, glue, snap
-
-**Stroke**:
-What the freedraw Tool draws from pointer down to pointer up: a freedraw Element that grows with the pointer and is drawn while it grows. A Pencil's stroke keeps its pressure; the stroke of a finger or mouse gets pressure made up from the speed of the pointer (simulated pressure). The Tool returns to selection after each stroke, unless the Tool lock is on.
-_Avoid_: Scribble (that is handwriting recognition), path, line (a different Element)
-
-**Erase**:
-What the eraser Tool does from pointer down to pointer up: the Elements the pointer's path touches are previewed faded while it is down and deleted together, as one undo step, when it lifts; a tap erases what is under it. An Element's group, label or container goes with it. The Tool returns to selection after each erase, unless the Tool lock is on.
-_Avoid_: Delete (that is the command for the Selection), rub out
-
-**Text view**:
-The native text view shown over the Canvas while a text is created or edited (like Excalidraw's textarea), at the position, size, zoom and style the core reports, so that the system keyboard, autocorrect, dictation and Scribble work. A tap with the text Tool opens it on empty Canvas (or on the text there), a double-tap (double-click) with the selection Tool on empty Canvas or on a freedraw stroke or line (other than a line selected alone) makes a new text there, as on excalidraw.com, a double-tap on a text opens it on that text; committing keeps the text as one undo step, empty text is not kept, and a tap elsewhere commits.
-_Avoid_: Text editor (that is the core's description of the view), textarea, input field
-
-**Label**:
-The text bound to a rectangle, diamond or ellipse (its container), as Excalidraw's bound text: made and edited in the Text view by a double-tap on the shape (or Enter on a selected shape on Mac), wrapped to the width the shape leaves it, centred in it, growing the shape when it does not fit, and moving, resizing, turning and erasing with it. Saved as a text Element with `containerId`, listed in the shape's `boundElements`.
-_Avoid_: Caption, bound text (Excalidraw's name for it)
-
-**Context menu**:
-The platform's menu (on the web, the app's own) opened by a long-press with a finger (or a secondary click) with the selection Tool, never by itself: on an Element (selecting it first, unless it is already selected) it offers cut, copy, paste, duplicate, group, ungroup, arrange (z-order) and delete; on empty Canvas, paste and select all, and the Selection stays. Paste puts the Elements where it was opened. VoiceOver and Switch Control reach the Element menu's actions as custom actions on the Canvas while there is a Selection. Offered on iPhone and iPad and in the web app, where it replaces the browser's own menu on the Canvas; the Mac has the Edit and Arrange menus.
-_Avoid_: Action Bar (the removed floating bar), popover, popup, long-press menu
+### Look
 
 **Dark mode**:
-The dark look of the app's screens (Canvas, chrome and Gallery), on when the Appearance is Dark, or System while the system's appearance is dark; the Canvas shows each colour as excalidraw.com's dark theme does. It only changes what is shown: never the Drawing, never an export.
+The dark look of the app, on when the Appearance is Dark, or System while the system's appearance is dark. It only changes what is shown: never an item, never an export.
 _Avoid_: Theme, dark theme, night mode
 
 **Appearance**:
-The user's setting for Dark mode: System (follow the system's appearance, the default), Light or Dark. Picked in Settings (the Gallery's gear on iPhone and iPad, ⌘, on the Mac) and in the Mac's View menu; it applies to the whole app at once and is kept per Device.
+The user's setting for Dark mode: System (follow the system's appearance, the default), Light or Dark. Picked in Settings and in the Mac's View menu; it applies to the whole app at once and is kept per Device.
 _Avoid_: Theme, colour scheme
-
-**Properties panel**:
-The panel that sets stroke colour, background colour, fill style, stroke width, stroke style, sloppiness, edges and opacity (and, for text, font size and text alignment) on the Selection, and, with an empty Selection, as the style of the next Element. It shows the Selection's current values, or none chosen where they are mixed. Shown as a panel beside the Canvas on wide screens; on a phone it is split by concern into popovers opened from the Action row.
-_Avoid_: Inspector, style bar, sidebar, property popover
-
-**Action row**:
-The row above the phone toolbar holding the Properties panel's triggers and the Selection's actions.
-_Avoid_: Style bar, bottom bar (that is the Action row and toolbar together)
 
 ### Cloud
 
 **Device**:
-One installation of the app; for the web app, one browser profile on its site (clearing the site's data removes that Device's Drawings).
+One installation of the app; for the web app, one browser profile on its site (clearing the site's data removes that Device's items).
 _Avoid_: Client, installation
 
 **Cloud Backing**:
-Keeping the Drawings in the user's cloud storage as well, so that all their Devices share them.
+Keeping the items of every Context in the user's cloud storage as well, so that all their Devices share them.
 _Avoid_: Cloud sync, backup
 
 **Cloud Provider**:
-The service that holds the Drawings for Cloud Backing: WebDAV, iCloud Drive, Google Drive or OneDrive. Only one is Connected at a time.
+The service that holds the items for Cloud Backing: WebDAV, iCloud Drive, Google Drive or OneDrive. Only one is Connected at a time.
 _Avoid_: Backend, storage, service
 
 **Connect**:
-Starting Cloud Backing with a Cloud Provider. Its opposite is **Disconnect**, which stops it and keeps every Drawing on the Device.
+Starting Cloud Backing with a Cloud Provider. Its opposite is **Disconnect**, which stops it and keeps every item on the Device.
 _Avoid_: Sign in, link, log out
 
 **Reconnect**:
@@ -115,5 +75,5 @@ Giving a Connected Cloud Provider access again after it lost it, e.g. a revoked 
 _Avoid_: Sign in again, re-authenticate
 
 **Sync**:
-Exchanging changes to the Drawings with the Cloud Provider.
+Exchanging changes to the items with the Cloud Provider.
 _Avoid_: Backup, upload

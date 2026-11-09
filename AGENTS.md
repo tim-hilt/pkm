@@ -32,6 +32,13 @@ Personal Knowledge Management and organization application that combines the fol
 - Use native UI functionality wherever possible
 - Keep documentation very lean and precise. No walls of text in this project
 - Apply the boy scouts rule: Leave the code cleaner than you found it
+- Strive for zero dependencies
+- A test failing without your change is a finding: fix it, or file an issue in `.scratch/` before going on
+- Commit messages are short and to the point, so that they can appear directly in a changelog. They drive the release version and notes (`cliff.toml`); prefix them with
+    - `feature: ` for a new capability
+    - `feature!: ` for a breaking change
+    - `fix: ` for fixing wrong behavior
+    - `chore: ` for everything else
 
 ## Rust
 
@@ -49,7 +56,7 @@ Default five-role vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `
 
 ### Domain docs
 
-Single-context: one root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`.
+Multi-context: `GLOSSARY-MAP.md` points at one `GLOSSARY.md` per Context; system-wide ADRs in `docs/adr/`. See `docs/agents/domain.md`.
 
 ## Checking
 
