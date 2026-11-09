@@ -10,7 +10,7 @@ use std::fmt;
 use std::io::{self, Read};
 use std::sync::{Arc, Mutex};
 
-use pkm_core::json::{self, Object, Value};
+use pkm_drawing::json::{self, Object, Value};
 use ureq::Body;
 use ureq::http::Response;
 

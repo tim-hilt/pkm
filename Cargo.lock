@@ -268,7 +268,7 @@ name = "pkm-bindings"
 version = "0.1.0"
 dependencies = [
  "pkm-cloud",
- "pkm-core",
+ "pkm-drawing",
  "uniffi",
 ]
 
@@ -277,14 +277,14 @@ name = "pkm-cloud"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "pkm-core",
+ "pkm-drawing",
  "libc",
  "quick-xml",
  "ureq",
 ]
 
 [[package]]
-name = "pkm-core"
+name = "pkm-drawing"
 version = "0.1.0"
 
 [[package]]
@@ -292,7 +292,7 @@ name = "pkm-web"
 version = "0.1.0"
 dependencies = [
  "pkm-cloud",
- "pkm-core",
+ "pkm-drawing",
  "wasm-bindgen",
 ]
 

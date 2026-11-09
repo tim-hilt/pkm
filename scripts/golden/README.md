@@ -1,6 +1,6 @@
 # Golden fixture generator
 
-Generates the golden fixtures in `crates/core/tests/fixtures/golden` (ADR-0004):
+Generates the golden fixtures in `crates/drawing/tests/fixtures/golden` (ADR-0004):
 for a fixed set of Elements and seeds, the exact drawing ops and outline points
 that Excalidraw produces. `cargo test` only reads the committed output, so Node
 is needed solely to (re)generate it.
@@ -44,4 +44,4 @@ Every golden file records the versions it was generated from.
 - `upstream.mjs`: loads the checkout, builds Elements with Excalidraw's own
   constructors and asks Excalidraw's `ShapeCache` / freedraw code what to draw.
 
-Fixture format: `crates/core/tests/fixtures/golden/README.md`.
+Fixture format: `crates/drawing/tests/fixtures/golden/README.md`.

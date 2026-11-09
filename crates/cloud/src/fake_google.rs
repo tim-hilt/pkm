@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
-use pkm_core::json::{self, Value};
+use pkm_drawing::json::{self, Value};
 
 use crate::fake_http::{Answer, FakeServer, Request, parse_query};
 use crate::gdrive::Hosts;

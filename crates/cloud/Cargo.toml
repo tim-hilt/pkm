@@ -9,7 +9,7 @@ publish.workspace = true
 
 [dependencies]
 # The merge of concurrent changes.
-pkm-core = { path = "../core" }
+pkm-drawing = { path = "../drawing" }
 # Basic auth.
 base64 = "0.22"
 # The PROPFIND answers of a WebDAV server.

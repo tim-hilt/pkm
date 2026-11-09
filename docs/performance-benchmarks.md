@@ -13,7 +13,7 @@ deterministically; regenerate them with `node benchmarks/generate.mjs` (Node is
 needed only for this, not for `cargo test`).
 
 `cargo test` checks that both Scenes load with their Element counts
-(`crates/core/tests/integration/benchmarks.rs`).
+(`crates/drawing/tests/integration/benchmarks.rs`).
 
 ## Procedure
 

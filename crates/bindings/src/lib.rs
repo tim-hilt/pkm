@@ -1,5 +1,5 @@
 //! UniFFI surface of the core (ADR-0007). Foreign clients see exactly what is
-//! exported here; the logic itself lives in `pkm-core`.
+//! exported here; the logic itself lives in `pkm-drawing`.
 
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -8,8 +8,8 @@ use pkm_cloud::{
     ConnectError, DirStorage, GoogleDriveStorage, Observer, OneDriveStorage, Progress, Status,
     SyncLoop, SyncState, Timing, WebDavStorage,
 };
-use pkm_core::scene::{FillPattern, LineStyle};
-use pkm_core::{
+use pkm_drawing::scene::{FillPattern, LineStyle};
+use pkm_drawing::{
     Command, ContextMenu, Cursor, Edges, ExportScope, FontSize, ImageFile, MagnifyEvent, Modifiers,
     PencilDoubleTap, PointerButton, PointerEvent, PointerKind, PointerPhase, Properties, Property,
     ScrollEvent, Sections, Shortcut, Sloppiness, StrokeWidth, TextAlign, TextEditor, Tool, ZOrder,
@@ -482,7 +482,7 @@ pub fn forget_sync_state(state_directory: String) {
 /// none. Bytes that are not a Drawing are no Drawing's.
 #[uniffi::export]
 pub fn are_same_drawing(a: Vec<u8>, b: Vec<u8>) -> bool {
-    pkm_core::are_same_drawing(&a, &b).unwrap_or(false)
+    pkm_drawing::are_same_drawing(&a, &b).unwrap_or(false)
 }
 
 /// Why a file could not be opened as a Drawing, in words fit for a user.
@@ -498,8 +498,8 @@ impl fmt::Display for LoadError {
     }
 }
 
-impl From<pkm_core::LoadError> for LoadError {
-    fn from(error: pkm_core::LoadError) -> Self {
+impl From<pkm_drawing::LoadError> for LoadError {
+    fn from(error: pkm_drawing::LoadError) -> Self {
         LoadError::Invalid {
             message: error.to_string(),
         }
@@ -524,7 +524,7 @@ pub enum ExportScope {
 }
 
 /// An image export for the client to rasterise; see
-/// [`pkm_core::Export`].
+/// [`pkm_drawing::Export`].
 #[derive(uniffi::Record)]
 pub struct Export {
     pub geometry: Arc<Geometry>,
@@ -632,7 +632,7 @@ pub enum ZOrder {
 }
 
 // The properties panel's options and values; see
-// [`pkm_core::Property`].
+// [`pkm_drawing::Property`].
 
 #[uniffi::remote(Enum)]
 pub enum FillPattern {
@@ -726,16 +726,16 @@ pub struct Shortcut {
 }
 
 /// How Excalidraw shows a CSS colour in its dark theme, for swatches; see
-/// [`pkm_core::dark_mode_color`].
+/// [`pkm_drawing::dark_mode_color`].
 #[uniffi::export]
 pub fn dark_mode_color(css: String) -> String {
-    pkm_core::dark_mode_color(&css)
+    pkm_drawing::dark_mode_color(&css)
 }
 
-/// Every keyboard shortcut; see [`pkm_core::shortcuts`].
+/// Every keyboard shortcut; see [`pkm_drawing::shortcuts`].
 #[uniffi::export]
 pub fn shortcuts() -> Vec<Shortcut> {
-    pkm_core::shortcuts()
+    pkm_drawing::shortcuts()
 }
 
 #[uniffi::remote(Record)]
@@ -767,7 +767,7 @@ pub struct Sections {
 }
 
 /// The text view to show over the Canvas while a text is edited, in view
-/// coordinates; see [`pkm_core::TextEditor`].
+/// coordinates; see [`pkm_drawing::TextEditor`].
 #[uniffi::remote(Record)]
 pub struct TextEditor {
     pub text: String,
@@ -786,14 +786,14 @@ pub struct TextEditor {
     pub fixed_width: bool,
 }
 
-/// Which menu a long-press opens; see [`pkm_core::ContextMenu`].
+/// Which menu a long-press opens; see [`pkm_drawing::ContextMenu`].
 #[uniffi::remote(Enum)]
 pub enum ContextMenu {
     Element { can_group: bool, can_ungroup: bool },
     Canvas,
 }
 
-/// An image to paste or drop; see [`pkm_core::ImageFile`].
+/// An image to paste or drop; see [`pkm_drawing::ImageFile`].
 #[uniffi::remote(Record)]
 pub struct ImageFile {
     pub file_id: String,
@@ -803,7 +803,7 @@ pub struct ImageFile {
     pub height: u32,
 }
 
-/// What the Canvas shows; see [`pkm_core::Viewport`]. Small and
+/// What the Canvas shows; see [`pkm_drawing::Viewport`]. Small and
 /// cheap enough to read after every input event.
 #[derive(uniffi::Record)]
 pub struct ViewportState {
@@ -814,8 +814,8 @@ pub struct ViewportState {
     pub zoom: f64,
 }
 
-impl From<pkm_core::Viewport> for ViewportState {
-    fn from(viewport: pkm_core::Viewport) -> Self {
+impl From<pkm_drawing::Viewport> for ViewportState {
+    fn from(viewport: pkm_drawing::Viewport) -> Self {
         let (origin_x, origin_y) = viewport.origin();
         Self {
             origin_x,
@@ -826,7 +826,7 @@ impl From<pkm_core::Viewport> for ViewportState {
 }
 
 /// Measures text for the core; implemented by clients with their font
-/// machinery. See [`pkm_core::TextMeasurer`].
+/// machinery. See [`pkm_drawing::TextMeasurer`].
 #[uniffi::export(with_foreign)]
 pub trait TextMeasurer: Send + Sync {
     /// The advance width in Scene units of `text`, a single line, set in
@@ -837,23 +837,23 @@ pub trait TextMeasurer: Send + Sync {
 /// Lets the core call a client's measurer.
 struct Measurer(Arc<dyn TextMeasurer>);
 
-impl pkm_core::TextMeasurer for Measurer {
+impl pkm_drawing::TextMeasurer for Measurer {
     fn line_width(&self, text: &str, font_size: f64) -> f64 {
         self.0.line_width(text.to_owned(), font_size)
     }
 }
 
-/// Handle to the core's editor; see [`pkm_core::Editor`].
+/// Handle to the core's editor; see [`pkm_drawing::Editor`].
 ///
 /// UniFFI objects are shared, so the editor sits behind a lock; clients drive
 /// it from one thread and never contend for it.
 #[derive(uniffi::Object)]
 pub struct Editor {
-    inner: Mutex<pkm_core::Editor>,
+    inner: Mutex<pkm_drawing::Editor>,
 }
 
 impl Editor {
-    fn editor(&self) -> MutexGuard<'_, pkm_core::Editor> {
+    fn editor(&self) -> MutexGuard<'_, pkm_drawing::Editor> {
         // A panic while holding the lock cannot leave the editor half-edited
         // in a way that matters more than carrying on does.
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
@@ -865,12 +865,12 @@ impl Editor {
     #[uniffi::constructor]
     pub fn new() -> Self {
         Self {
-            inner: Mutex::new(pkm_core::Editor::new()),
+            inner: Mutex::new(pkm_drawing::Editor::new()),
         }
     }
 
     /// Replaces the Scene with the Drawing in `bytes` (a `.excalidraw` file's
-    /// content); see [`pkm_core::Editor::load`].
+    /// content); see [`pkm_drawing::Editor::load`].
     pub fn load(&self, bytes: Vec<u8>) -> Result<(), LoadError> {
         Ok(self.editor().load(&bytes)?)
     }
@@ -882,7 +882,7 @@ impl Editor {
 
     /// Merges `bytes`, the Drawing as Sync rewrote its file, into the open
     /// Scene without reloading; see
-    /// [`pkm_core::Editor::merge_synced`].
+    /// [`pkm_drawing::Editor::merge_synced`].
     pub fn merge_synced(&self, bytes: Vec<u8>) -> Result<(), LoadError> {
         self.editor()
             .merge_synced(&bytes)
@@ -897,7 +897,7 @@ impl Editor {
     }
 
     /// Hands the core the client's way to measure text; see
-    /// [`pkm_core::Editor::set_text_measurer`]. Call it before
+    /// [`pkm_drawing::Editor::set_text_measurer`]. Call it before
     /// reading geometry that has labels in it.
     pub fn set_text_measurer(&self, measurer: Arc<dyn TextMeasurer>) {
         self.editor()
@@ -911,7 +911,7 @@ impl Editor {
     }
 
     /// Shows the Scene from the given viewport, e.g. the one a Drawing was
-    /// left at; see [`pkm_core::Editor::set_viewport`]. Not a change
+    /// left at; see [`pkm_drawing::Editor::set_viewport`]. Not a change
     /// of the Scene.
     pub fn set_viewport(&self, viewport: ViewportState) {
         self.editor()
@@ -965,7 +965,7 @@ impl Editor {
     }
 
     /// Shows colours dark (the system appearance); see
-    /// [`pkm_core::Editor::set_dark_mode`]. It does not change
+    /// [`pkm_drawing::Editor::set_dark_mode`]. It does not change
     /// `revision`: redraw after calling it.
     pub fn set_dark_mode(&self, on: bool) {
         self.editor().set_dark_mode(on);
@@ -977,7 +977,7 @@ impl Editor {
     }
 
     /// The colour of the Canvas as `0xRRGGBBAA`, as displayed; see
-    /// [`pkm_core::Editor::canvas_color`].
+    /// [`pkm_drawing::Editor::canvas_color`].
     pub fn canvas_color(&self) -> u32 {
         self.editor().canvas_color()
     }
@@ -1020,7 +1020,7 @@ impl Editor {
     }
 
     /// Takes back the latest change to the Scene; see
-    /// [`pkm_core::Editor::undo`].
+    /// [`pkm_drawing::Editor::undo`].
     pub fn undo(&self) {
         self.editor().undo();
     }
@@ -1048,124 +1048,124 @@ impl Editor {
     }
 
     /// What the properties panel shows; see
-    /// [`pkm_core::Editor::properties`]. Read it after forwarding
+    /// [`pkm_drawing::Editor::properties`]. Read it after forwarding
     /// input or a command.
     pub fn properties(&self) -> Properties {
         self.editor().properties()
     }
 
     /// Whether the properties panel is shown; see
-    /// [`pkm_core::Editor::shows_properties`]. Read it with
+    /// [`pkm_drawing::Editor::shows_properties`]. Read it with
     /// [`Editor::properties`].
     pub fn shows_properties(&self) -> bool {
         self.editor().shows_properties()
     }
 
     /// Sets a property on the Selection and as the style of the next Element;
-    /// see [`pkm_core::Editor::set_property`].
+    /// see [`pkm_drawing::Editor::set_property`].
     pub fn set_property(&self, property: Property) {
         self.editor().set_property(property);
     }
 
     /// The text view to show over the Canvas, `None` if no text is being
-    /// edited; see [`pkm_core::Editor::text_editor`]. Read it with
+    /// edited; see [`pkm_drawing::Editor::text_editor`]. Read it with
     /// the viewport after forwarding input or a command.
     pub fn text_editor(&self) -> Option<TextEditor> {
         self.editor().text_editor()
     }
 
     /// Tells the core what the text view says now; see
-    /// [`pkm_core::Editor::set_editing_text`].
+    /// [`pkm_drawing::Editor::set_editing_text`].
     pub fn set_editing_text(&self, text: String) {
         self.editor().set_editing_text(&text);
     }
 
     /// Ends the editing of the text and keeps it; see
-    /// [`pkm_core::Editor::commit_text`].
+    /// [`pkm_drawing::Editor::commit_text`].
     pub fn commit_text(&self) {
         self.editor().commit_text();
     }
 
     /// Opens the text view on the text of the Selection (Enter on a Mac):
     /// the label of a selected shape, which is made if it has none, or a
-    /// selected text; see [`pkm_core::Editor::edit_selected_text`].
+    /// selected text; see [`pkm_drawing::Editor::edit_selected_text`].
     pub fn edit_selected_text(&self) {
         self.editor().edit_selected_text();
     }
 
     /// Ends the editing of the text and keeps it as it was; see
-    /// [`pkm_core::Editor::cancel_text`].
+    /// [`pkm_drawing::Editor::cancel_text`].
     pub fn cancel_text(&self) {
         self.editor().cancel_text();
     }
 
     /// Duplicates the Selection and selects the copies; see
-    /// [`pkm_core::Editor::duplicate`].
+    /// [`pkm_drawing::Editor::duplicate`].
     pub fn duplicate(&self) {
         self.editor().duplicate();
     }
 
     /// The text to put on the clipboard for copying the Selection, `None`
     /// with nothing selected; see
-    /// [`pkm_core::Editor::copy_selection`].
+    /// [`pkm_drawing::Editor::copy_selection`].
     pub fn copy_selection(&self) -> Option<String> {
         self.editor().copy_selection()
     }
 
     /// Copies the Selection and deletes it; see
-    /// [`pkm_core::Editor::cut_selection`].
+    /// [`pkm_drawing::Editor::cut_selection`].
     pub fn cut_selection(&self) -> Option<String> {
         self.editor().cut_selection()
     }
 
     /// Pastes Excalidraw clipboard JSON in the middle of the view, returns
-    /// whether `text` was one; see [`pkm_core::Editor::paste`].
+    /// whether `text` was one; see [`pkm_drawing::Editor::paste`].
     pub fn paste(&self, text: String) -> bool {
         self.editor().paste(&text)
     }
 
     /// Pastes Excalidraw clipboard JSON around the point `(x, y)` of the
-    /// view; see [`pkm_core::Editor::paste_at`].
+    /// view; see [`pkm_drawing::Editor::paste_at`].
     pub fn paste_at(&self, text: String, x: f64, y: f64) -> bool {
         self.editor().paste_at(&text, x, y)
     }
 
     /// Puts pasted images in the middle of the view; see
-    /// [`pkm_core::Editor::insert_images`].
+    /// [`pkm_drawing::Editor::insert_images`].
     pub fn insert_images(&self, images: Vec<ImageFile>) {
         self.editor().insert_images(images);
     }
 
     /// Puts dropped images around the point `(x, y)` of the view; see
-    /// [`pkm_core::Editor::insert_images_at`].
+    /// [`pkm_drawing::Editor::insert_images_at`].
     pub fn insert_images_at(&self, images: Vec<ImageFile>, x: f64, y: f64) {
         self.editor().insert_images_at(images, x, y);
     }
 
     /// Deletes the Selection; see
-    /// [`pkm_core::Editor::delete_selection`].
+    /// [`pkm_drawing::Editor::delete_selection`].
     pub fn delete_selection(&self) {
         self.editor().delete_selection();
     }
 
-    /// Groups the Selection; see [`pkm_core::Editor::group`].
+    /// Groups the Selection; see [`pkm_drawing::Editor::group`].
     pub fn group(&self) {
         self.editor().group();
     }
 
     /// Dissolves the groups that are selected; see
-    /// [`pkm_core::Editor::ungroup`].
+    /// [`pkm_drawing::Editor::ungroup`].
     pub fn ungroup(&self) {
         self.editor().ungroup();
     }
 
-    /// Carries out `command`; see [`pkm_core::Editor::perform`].
+    /// Carries out `command`; see [`pkm_drawing::Editor::perform`].
     pub fn perform(&self, command: Command) {
         self.editor().perform(command);
     }
 
     /// Moves the Selection in z-order; see
-    /// [`pkm_core::Editor::move_in_z_order`].
+    /// [`pkm_drawing::Editor::move_in_z_order`].
     pub fn move_in_z_order(&self, how: ZOrder) {
         self.editor().move_in_z_order(how);
     }
@@ -1177,7 +1177,7 @@ impl Editor {
     }
 
     /// The selection frames to draw over the Scene, in Scene coordinates and
-    /// for the current zoom; see [`pkm_core::Editor::overlay`].
+    /// for the current zoom; see [`pkm_drawing::Editor::overlay`].
     pub fn overlay(&self) -> Arc<Geometry> {
         Arc::new(Geometry {
             inner: self.editor().overlay(),
@@ -1185,26 +1185,26 @@ impl Editor {
     }
 
     /// A step of a finger, Pencil or mouse; see
-    /// [`pkm_core::Editor::pointer`].
+    /// [`pkm_drawing::Editor::pointer`].
     pub fn pointer(&self, event: PointerEvent) {
         self.editor().pointer(event);
     }
 
     /// A finger or mouse held at a view point; see
-    /// [`pkm_core::Editor::long_press`]. `None` if the press
+    /// [`pkm_drawing::Editor::long_press`]. `None` if the press
     /// means nothing.
     pub fn long_press(&self, x: f64, y: f64, kind: PointerKind) -> Option<ContextMenu> {
         self.editor().long_press(x, y, kind)
     }
 
     /// The mouse cursor at the view point `(x, y)`; see
-    /// [`pkm_core::Editor::cursor`].
+    /// [`pkm_drawing::Editor::cursor`].
     pub fn cursor(&self, x: f64, y: f64) -> Cursor {
         self.editor().cursor(x, y)
     }
 
     /// The space bar went down (`true`) or up; see
-    /// [`pkm_core::Editor::set_pan_key`].
+    /// [`pkm_drawing::Editor::set_pan_key`].
     pub fn set_pan_key(&self, held: bool) {
         self.editor().set_pan_key(held);
     }
@@ -1227,7 +1227,7 @@ impl Editor {
     }
 
     /// What a PNG export of `scope` shows, `None` if nothing; see
-    /// [`pkm_core::Editor::export`].
+    /// [`pkm_drawing::Editor::export`].
     pub fn export(&self, scope: ExportScope) -> Option<Export> {
         let export = self.editor().export(scope)?;
         Some(Export {
@@ -1241,7 +1241,7 @@ impl Editor {
         })
     }
 
-    /// The paths to draw for the Scene; see [`pkm_core::Editor::geometry`].
+    /// The paths to draw for the Scene; see [`pkm_drawing::Editor::geometry`].
     pub fn geometry(&self) -> Arc<Geometry> {
         Arc::new(Geometry {
             inner: self.editor().geometry(),
@@ -1250,25 +1250,25 @@ impl Editor {
 }
 
 /// Zero-copy geometry (ADR-0007): the format is documented in
-/// [`pkm_core::geometry`].
+/// [`pkm_drawing::geometry`].
 ///
 /// Only sizes and buffer addresses cross UniFFI; the data itself stays where
 /// it is and the client reads it in place. An address is valid exactly as long
 /// as the client holds this object, and the buffers never change.
 #[derive(uniffi::Object)]
 pub struct Geometry {
-    inner: pkm_core::Geometry,
+    inner: pkm_drawing::Geometry,
 }
 
 #[uniffi::export]
 impl Geometry {
     /// Tells whether cached per-Element results are still valid; see
-    /// [`pkm_core::Geometry::generation`].
+    /// [`pkm_drawing::Geometry::generation`].
     pub fn generation(&self) -> u64 {
         self.inner.generation()
     }
 
-    /// Number of [`pkm_core::Part`] records at `parts_address`.
+    /// Number of [`pkm_drawing::Part`] records at `parts_address`.
     pub fn part_count(&self) -> u64 {
         self.inner.parts().len() as u64
     }
@@ -1276,7 +1276,7 @@ impl Geometry {
     /// Size in bytes of one part record, so clients can check that their
     /// mirror of the record has the same layout.
     pub fn part_stride(&self) -> u64 {
-        size_of::<pkm_core::Part>() as u64
+        size_of::<pkm_drawing::Part>() as u64
     }
 
     pub fn parts_address(&self) -> u64 {
@@ -1301,7 +1301,7 @@ impl Geometry {
         self.inner.coords().as_ptr() as u64
     }
 
-    /// Number of [`pkm_core::TextLine`] records at
+    /// Number of [`pkm_drawing::TextLine`] records at
     /// `text_lines_address`.
     pub fn text_line_count(&self) -> u64 {
         self.inner.text_lines().len() as u64
@@ -1309,7 +1309,7 @@ impl Geometry {
 
     /// Size in bytes of one text line record; see `part_stride`.
     pub fn text_line_stride(&self) -> u64 {
-        size_of::<pkm_core::TextLine>() as u64
+        size_of::<pkm_drawing::TextLine>() as u64
     }
 
     pub fn text_lines_address(&self) -> u64 {
@@ -1325,14 +1325,14 @@ impl Geometry {
         self.inner.text().as_ptr() as u64
     }
 
-    /// Number of [`pkm_core::Image`] records at `images_address`.
+    /// Number of [`pkm_drawing::Image`] records at `images_address`.
     pub fn image_count(&self) -> u64 {
         self.inner.images().len() as u64
     }
 
     /// Size in bytes of one image record; see `part_stride`.
     pub fn image_stride(&self) -> u64 {
-        size_of::<pkm_core::Image>() as u64
+        size_of::<pkm_drawing::Image>() as u64
     }
 
     pub fn images_address(&self) -> u64 {
@@ -1380,10 +1380,10 @@ mod tests {
         // SAFETY: the addresses come from `geometry`, which is alive and
         // whose buffers hold at least the counts reported above.
         unsafe {
-            let parts = geometry.parts_address() as *const pkm_core::Part;
+            let parts = geometry.parts_address() as *const pkm_drawing::Part;
             assert_eq!((*parts).width, 2.0);
             let verbs = geometry.verbs_address() as *const u8;
-            assert_eq!(*verbs, pkm_core::Verb::Move as u8);
+            assert_eq!(*verbs, pkm_drawing::Verb::Move as u8);
             let coords = geometry.coords_address() as *const f32;
             assert_eq!(*coords, 10.0);
         }
@@ -1420,7 +1420,7 @@ mod tests {
         // SAFETY: the addresses come from `geometry`, which is alive and
         // whose buffers hold at least the counts reported above.
         unsafe {
-            let lines = geometry.text_lines_address() as *const pkm_core::TextLine;
+            let lines = geometry.text_lines_address() as *const pkm_drawing::TextLine;
             let second = *lines.add(1);
             let text = std::slice::from_raw_parts(
                 (geometry.text_address() as *const u8).add(second.text_start as usize),
@@ -1450,7 +1450,7 @@ mod tests {
         // SAFETY: the addresses come from `geometry`, which is alive and
         // whose buffers hold at least the counts reported above.
         unsafe {
-            let image = *(geometry.images_address() as *const pkm_core::Image);
+            let image = *(geometry.images_address() as *const pkm_drawing::Image);
             assert_eq!((image.x, image.width), (1.0, 30.0));
             let id = std::slice::from_raw_parts(
                 (geometry.file_ids_address() as *const u8).add(image.file_id_start as usize),

@@ -41,7 +41,7 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
-use pkm_core::{are_same_drawing, is_drawing, merge_drawings};
+use pkm_drawing::{are_same_drawing, is_drawing, merge_drawings};
 
 use crate::storage::Blob;
 

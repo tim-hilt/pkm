@@ -19,5 +19,5 @@ bindgen = ["uniffi/cli"]
 
 [dependencies]
 uniffi = "0.32"
-pkm-core = { path = "../core" }
+pkm-drawing = { path = "../drawing" }
 pkm-cloud = { path = "../cloud" }

@@ -56,11 +56,11 @@ Default five-role vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `
 
 ### Domain docs
 
-Multi-context: `GLOSSARY-MAP.md` points at one `GLOSSARY.md` per Context; system-wide ADRs in `docs/adr/`. See `docs/agents/domain.md`.
+Multi-context: `GLOSSARY-MAP.md` points at one `GLOSSARY.md` per Context; system-wide ADRs in `docs/adr/`, Drawings ADRs in `crates/drawing/docs/adr/`. See `docs/agents/domain.md`.
 
 ## Checking
 
-`make check` formats, lints, then runs the Rust tests, failing at the cheapest step; run it before committing. Rust integration tests are modules of `crates/core/tests/integration/main.rs`.
+`make check` formats, lints, then runs the Rust tests, failing at the cheapest step; run it before committing. Rust integration tests are modules of `crates/drawing/tests/integration/main.rs`.
 
 ## Seeing the app
 

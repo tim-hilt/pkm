@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
 use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
-use pkm_core::json::Value;
+use pkm_drawing::json::Value;
 
 use crate::fake_http::{Answer, FakeServer, Request, parse_query};
 use crate::onedrive::{Hosts, REDIRECT_URI};

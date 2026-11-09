@@ -12,6 +12,6 @@ publish.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-pkm-core = { path = "../core" }
+pkm-drawing = { path = "../drawing" }
 pkm-cloud = { path = "../cloud", default-features = false }
 wasm-bindgen = "0.2"

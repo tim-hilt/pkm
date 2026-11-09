@@ -1,4 +1,4 @@
-// Generates the golden fixtures in crates/core/tests/fixtures/golden.
+// Generates the golden fixtures in crates/drawing/tests/fixtures/golden.
 // See README.md in this directory.
 //
 //   npm ci && node generate.mjs [path/to/excalidraw/checkout]
@@ -9,7 +9,7 @@ import { scenes } from "./cases.mjs";
 import { loadUpstream } from "./upstream.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const OUTPUT_DIR = resolve(here, "../../crates/core/tests/fixtures/golden");
+const OUTPUT_DIR = resolve(here, "../../crates/drawing/tests/fixtures/golden");
 const DEFAULT_CHECKOUT = resolve(here, "../../../../excalidraw/excalidraw");
 
 const upstream = await loadUpstream(process.argv[2] ?? process.env.EXCALIDRAW_DIR ?? DEFAULT_CHECKOUT);

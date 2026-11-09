@@ -11,7 +11,7 @@ use std::fmt;
 use std::io::{self, Read};
 use std::sync::Arc;
 
-use pkm_core::json::{self, Value};
+use pkm_drawing::json::{self, Value};
 use ureq::Body;
 use ureq::http::Response;
 

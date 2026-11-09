@@ -3,7 +3,7 @@
 ## Contexts
 
 - [App](./GLOSSARY.md): the Contexts, their items, Links between them, Settings and Cloud Backing
-- [Drawings](./crates/core/GLOSSARY.md): Excalidraw-compatible Drawings, edited on the Canvas
+- [Drawings](./crates/drawing/GLOSSARY.md): Excalidraw-compatible Drawings, edited on the Canvas
 
 ## Relationships
 
