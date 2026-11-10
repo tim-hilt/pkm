@@ -7,6 +7,10 @@
 //! character counts of an EPUB's spine items, comma-separated), the title and the author, an empty line for one
 //! the File lacks. Anything else reads as no details, which are then read again.
 
+use std::fs::File;
+use std::io::{self, Read};
+use std::path::Path;
+
 /// Which kind of File a Book is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
@@ -41,6 +45,25 @@ impl Details {
             Size::Characters(_) => Format::Epub,
         }
     }
+}
+
+/// The Format of the File at `path`, or none if it can be Imported as neither.
+/// A PDF has `%PDF-` within its first 1024 bytes, as PDF readers accept. Else
+/// an EPUB starts with a zip signature or is named `.epub`.
+pub fn format_of(path: &Path) -> io::Result<Option<Format>> {
+    let mut head = Vec::with_capacity(1024);
+    File::open(path)?.take(1024).read_to_end(&mut head)?;
+    Ok(if head.windows(5).any(|w| w == b"%PDF-") {
+        Some(Format::Pdf)
+    } else if head.starts_with(b"PK\x03\x04")
+        || path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("epub"))
+    {
+        Some(Format::Epub)
+    } else {
+        None
+    })
 }
 
 /// `details` as stored. A blank title or author is stored as none, and line

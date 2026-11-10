@@ -1,9 +1,10 @@
-//! Writing files so a crash never leaves a torn one.
+//! Writing files so a crash never leaves a torn one, and their times.
 
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Makes the bytes written to `file` reach the disk before any later write
 /// does, e.g. the rename that puts it in place: a crash then leaves the old
@@ -23,6 +24,12 @@ pub(crate) fn flush_ordered(file: &File) -> io::Result<()> {
     }
     #[cfg(not(target_vendor = "apple"))]
     file.sync_data()
+}
+
+/// `time` in milliseconds since the Unix epoch.
+pub(crate) fn millis(time: SystemTime) -> u64 {
+    time.duration_since(UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
 }
 
 /// A name no other call in this process, or an earlier one, has used for a

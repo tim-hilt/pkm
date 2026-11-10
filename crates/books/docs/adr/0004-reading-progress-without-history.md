@@ -1,6 +1,6 @@
 # Reading Progress is a plain value with no history
 
-Reading Progress is saved whenever the Reader rests, so any store that keeps history grows with every save and slows every read. Only the latest Reading Progress matters, so the core keeps it as one plain line in a small file of its own next to the File, replacing the previous one, and never in the Book's state, which Markup changes rarely. When Devices disagree, the newest Last Read wins.
+Reading Progress is saved whenever the Reader rests, so any store that keeps history grows with every save and slows every read. Only the latest Reading Progress matters, so the core keeps it as one plain line in the Book's state file, replacing the previous one. When Devices disagree, the newest Last Read wins.
 
 ## Considered Options
 

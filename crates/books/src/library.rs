@@ -1,56 +1,46 @@
 //! The Library: the Books a user has imported.
 //!
-//! Layout: `<root>/<sha256>/<original file name>`. The
-//! hash is the Book's ID. Imports are staged under `<root>/.staging` and renamed
-//! into place, so a Book is either fully there or not at all.
+//! Layout: see `store`. Files sit in the Books folder under their own names,
+//! the state of each Book hidden beside them, found by file name, else by
+//! SHA-256. A Book's ID is its Item ID, random at Import. Imports are staged
+//! and renamed into place, so a Book is either fully there or not at all.
 //!
-//! Next to its File, a Book's folder holds hidden files: its state (`STATE`, see
-//! `state`: Date Imported and Markup), its Reading Progress (`PROGRESS`, see
-//! `progress`) and its details (`DETAILS`, see `details`). The File is the
-//! folder's only non-hidden entry. Each is written like an Import: to staging,
-//! then renamed into place. The Preferences (`PREFERENCES`, see `preferences`)
-//! are a hidden file at the root.
-//!
-//! The Books are found once, when the Library is opened, and kept in memory:
-//! Imports and Deletes change that and the folders together.
+//! The Books are found when the Library is opened and by each listing
+//! (`books`), and kept in memory: Imports, Deletes and edits change that and
+//! the files together.
 //!
 //! A `DetailsPass` reads in the background the details PDFs lack, one PDF at
 //! a time, telling the Gallery when to list again.
 
 use crate::book_cache::BookCache;
+pub use crate::details::format_of;
 use crate::details::{self, Details, Format, Size};
 use crate::epub::{self, Epub};
-use crate::files::{flush_ordered, ignore_not_found, unique_name, write_atomically};
+use crate::files::{self, flush_ordered, unique_name, write_atomically};
 use crate::listing::{Listing, Sort, SortKey, progress_changes_gallery};
 use crate::markup::{Anchor, Highlight, Markup, PageComment, Rgb};
 use crate::preferences::{HighlightColor, HighlightColors, Preferences};
-use crate::progress::{self, Place, ReadingProgress};
+use crate::progress::{Place, ReadingProgress};
 use crate::state::{self, BookState};
+use crate::store::Folder;
+use pkm_base::item_id::ItemId;
 use pkm_base::sha256::Sha256;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime};
 
-const STAGING: &str = ".staging";
-const PREFERENCES: &str = ".preferences.json";
-/// A Book's state, in its folder.
-const STATE: &str = ".state.json";
-/// A Book's Reading Progress, in its folder.
-const PROGRESS: &str = ".progress";
-/// A Book's details, in its folder.
-const DETAILS: &str = ".details";
 /// The fewest Books `books` lists on a thread of their own.
 const MIN_PER_THREAD: usize = 32;
 
 /// A Book in the Library.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Book {
-    /// SHA-256 of the File, lowercase hex.
+    /// The Item ID.
     pub id: String,
     /// The stored File.
     pub path: PathBuf,
@@ -295,69 +285,49 @@ pub enum ImportResult {
     AlreadyImported(Book),
 }
 
-/// The Library folder.
+/// The Library: the Books folder, with its Books kept in memory.
 #[derive(Debug)]
 pub struct Library {
-    root: PathBuf,
-    /// The Books by ID. Imports and Deletes change it and the folders under
-    /// this lock, so they never interleave.
-    books: Mutex<HashMap<String, Entry>>,
-    /// Held while a state, a Reading Progress, details or the Preferences are
-    /// read, changed and written, so concurrent edits never overwrite each
-    /// other. Never held while taking `books`.
+    folder: Folder,
+    /// The state of each Book, by Item ID. Found by `refresh` and changed by
+    /// Imports, Deletes and edits, which write the files under this lock, so
+    /// they never interleave.
+    books: Mutex<HashMap<String, BookState>>,
+    /// Held while details or the Preferences are read, changed and written, so
+    /// concurrent edits never overwrite each other. Taken before `books`, if
+    /// both are.
     writing: Mutex<()>,
-    /// The Reading Progress of each Book read so far, by ID, see `progress_of`.
-    /// Changed under `writing`, along with the file.
-    progress: BookCache<ReadingProgress>,
     /// The details of each Book read so far, by ID, see `details_of`. Changed
-    /// under `writing` by `set_details`, the only writer of the file.
+    /// under `writing` by `set_details`, the only writer of the files.
     details: BookCache<Details>,
 }
 
-/// What `books` needs of one Book, found when the Library was opened.
-#[derive(Debug, Clone)]
-struct Entry {
-    /// The name of the File in the Book's folder.
-    name: String,
-    /// Date Imported, in milliseconds since the Unix epoch.
-    imported: u64,
-}
-
 impl Library {
-    /// Opens the Library at `root`, creating it if needed and discarding
-    /// leftovers of Imports and Deletes that never finished. Folders without a
-    /// File are no Books.
+    /// Opens the Library in the Books folder `root`, creating it if needed and
+    /// discarding leftovers of Imports that never finished. Files in it that
+    /// are Books but have no state yet get one: see `Folder::scan`.
     pub fn open(root: impl Into<PathBuf>) -> io::Result<Self> {
-        let root = root.into();
-        let staging = root.join(STAGING);
-        ignore_not_found(fs::remove_dir_all(&staging))?;
-        fs::create_dir_all(&staging)?;
-        let mut books = HashMap::new();
-        for folder in fs::read_dir(&root)? {
-            let folder = folder?;
-            let id = folder.file_name().to_string_lossy().into_owned();
-            if id.starts_with('.') || !folder.file_type()?.is_dir() {
-                continue;
-            }
-            if let Some((name, created)) = stored_file(&folder.path())? {
-                let imported = fs::read(folder.path().join(STATE))
-                    .ok()
-                    .and_then(|bytes| BookState::decode(&bytes))
-                    .map_or(created, |state| state.imported);
-                books.insert(id, Entry { name, imported });
-            }
-        }
+        let folder = Folder::open(root)?;
+        let books = index(folder.scan()?);
         Ok(Library {
-            root,
+            folder,
             books: Mutex::new(books),
             writing: Mutex::new(()),
-            progress: BookCache::new(),
             details: BookCache::new(),
         })
     }
 
-    /// Copies the File at `source` into the Library, unchanged. Importing a
-    /// File that is already there copies nothing and returns its Book as
+    /// Finds the Books in the folder again, so Files added, renamed or deleted
+    /// outside the app, and states changed by Sync, are seen.
+    fn refresh(&self) -> io::Result<()> {
+        let mut books = self.catalog();
+        *books = index(self.folder.scan()?);
+        Ok(())
+    }
+
+    /// Copies the File at `source` into the Library, unchanged and under its
+    /// own name, or with " 2", " 3"... if that is taken. Importing a File that
+    /// is already there copies nothing and returns its Book as
     /// `AlreadyImported`.
     ///
     /// A File that is neither a PDF nor an EPUB (see [`format_of`]) is
@@ -385,15 +355,13 @@ impl Library {
             Format::Epub => read_epub_details(source)?,
         };
 
-        let staged = self.staging().join(unique_name());
-        fs::create_dir(&staged)?;
-
-        let result = self.import_staged(source, &staged, &name, &details, progress);
+        let staged = self.folder.staging().join(unique_name());
+        let result = self.import_staged(source, &staged, &name, progress);
         // Nothing left to remove after a successful rename.
-        let _ = fs::remove_dir_all(&staged);
+        let _ = fs::remove_file(&staged);
 
         let (id, is_new) = result?;
-        // A duplicate keeps the name it was first imported under.
+        self.set_details(&id, &details)?;
         let book = self
             .book(&id)?
             .ok_or_else(|| io::Error::other("imported Book is empty"))?;
@@ -404,74 +372,68 @@ impl Library {
         })
     }
 
-    /// Copies `source` into the `staged` folder as `name` and moves it into the
-    /// Library, keeping its `details`. Returns the Book's ID, and whether it is new.
+    /// Copies `source` into the `staged` file and moves it into the Library as
+    /// a Book called `name`, unless the Library has the File already. Returns
+    /// the Book's ID, and whether it is new.
     fn import_staged(
         &self,
         source: &Path,
         staged: &Path,
         name: &str,
-        details: &Details,
         progress: impl FnMut(u64, u64),
-    ) -> Result<(String, bool), ImportError> {
-        let id = copy_hashed(source, &staged.join(name), progress)?;
-        let imported = now();
-        let state = BookState {
-            imported,
-            ..BookState::default()
-        };
-        write_atomically(&self.staging(), &staged.join(STATE), &state.encode())?;
-        let entry = Entry {
-            name: name.to_owned(),
-            imported,
-        };
-        let is_new = self.admit(staged, &id, entry)?;
-        self.set_details(&id, details)?;
-        Ok((id, is_new))
-    }
-
-    /// Moves the staged Import of the File `id` into the Library as a Book,
-    /// unless it is there already. True if it moved.
-    fn admit(&self, staged: &Path, id: &str, entry: Entry) -> io::Result<bool> {
+    ) -> io::Result<(String, bool)> {
+        let sha256 = copy_hashed(source, staged, progress)?;
         let mut books = self.catalog();
-        if books.contains_key(id) {
-            return Ok(false);
+        // Outside changes first, so a File added there is not imported twice.
+        *books = index(self.folder.scan()?);
+        // A duplicate keeps the name it was first imported under.
+        if let Some(book) = books.values().find(|book| book.sha256 == sha256) {
+            return Ok((book.id.clone(), false));
         }
-        let folder = self.root.join(id);
-        // A folder without a File is a leftover, no Book.
-        ignore_not_found(fs::remove_dir_all(&folder))?;
-        fs::rename(staged, folder)?;
-        books.insert(id.to_owned(), entry);
-        Ok(true)
+        let mut id = state::new_id();
+        while books.contains_key(&id) {
+            id = state::new_id();
+        }
+        let book = BookState {
+            id,
+            file_name: self.folder.free_name(name),
+            sha256,
+            imported: now(),
+            markup: Markup::default(),
+            progress: None,
+        };
+        fs::rename(staged, self.folder.file(&book.file_name))?;
+        self.folder.write_state(&book)?;
+        let id = book.id.clone();
+        books.insert(id.clone(), book);
+        Ok((id, true))
     }
 
-    /// All Books, newest Import first.
+    /// All Books, newest Import first. Sees what changed in the folder
+    /// outside the app.
     pub fn books(&self) -> io::Result<Vec<Book>> {
-        let mut entries = self.entries();
-        entries.sort_by(|a, b| b.1.imported.cmp(&a.1.imported).then_with(|| a.0.cmp(&b.0)));
-        // Reading each Book's progress and details dominates, so a large
-        // Library is spread over the cores: 1,000 Books list in half the time.
-        // A small one lists on this thread.
+        self.refresh()?;
+        let mut books = self.books_without_details();
+        // Reading each Book's details dominates, so a large Library is spread
+        // over the cores: 1,000 Books list in half the time. A small one lists
+        // on this thread.
         let threads = std::thread::available_parallelism().map_or(1, usize::from);
-        let per_thread = chunk_size(entries.len(), threads);
-        let list = |chunk: &[(String, Entry)]| -> Vec<_> {
-            chunk.iter().map(|(id, e)| self.book_of(id, e)).collect()
+        let per_thread = chunk_size(books.len(), threads);
+        let read = |chunk: &mut [Book]| {
+            for book in chunk {
+                book.details = self.details_of(&book.id);
+            }
         };
-        let per_chunk = if entries.len() <= per_thread {
-            vec![list(&entries)]
+        if books.len() <= per_thread {
+            read(&mut books);
         } else {
             std::thread::scope(|scope| {
-                let workers: Vec<_> = entries
-                    .chunks(per_thread)
-                    .map(|chunk| scope.spawn(move || list(chunk)))
-                    .collect();
-                workers
-                    .into_iter()
-                    .map(|worker| worker.join().expect("listing a Book doesn't panic"))
-                    .collect()
-            })
-        };
-        Ok(per_chunk.into_iter().flatten().collect())
+                for chunk in books.chunks_mut(per_thread) {
+                    scope.spawn(move || read(chunk));
+                }
+            });
+        }
+        Ok(books)
     }
 
     /// The Books, newest Import first, and their `Listing` in the order of
@@ -484,30 +446,35 @@ impl Library {
         Ok((books, listing))
     }
 
-    /// The Books in no order, with their IDs.
-    fn entries(&self) -> Vec<(String, Entry)> {
-        self.catalog()
-            .iter()
-            .map(|(id, entry)| (id.clone(), entry.clone()))
-            .collect()
-    }
-
-    /// The Book `id`, if it is in the Library.
-    fn entry(&self, id: &str) -> Option<Entry> {
-        self.catalog().get(id).cloned()
+    /// The Books as they are known, newest Import first, without their details.
+    fn books_without_details(&self) -> Vec<Book> {
+        let mut books: Vec<Book> = self
+            .catalog()
+            .values()
+            .map(|state| self.book_of(state, None))
+            .collect();
+        books.sort_by(|a, b| b.imported.cmp(&a.imported).then_with(|| a.id.cmp(&b.id)));
+        books
     }
 
     /// Book `id`, as `books` lists it; none if it isn't in the Library. An `id`
-    /// that isn't a Book ID is `InvalidInput`.
+    /// that isn't an Item ID is `InvalidInput`.
     pub fn book(&self, id: &str) -> io::Result<Option<Book>> {
-        self.folder(id)?;
-        Ok(self.entry(id).map(|entry| self.book_of(id, &entry)))
+        check_id(id)?;
+        let book = self
+            .catalog()
+            .get(id)
+            .map(|state| self.book_of(state, None));
+        Ok(book.map(|book| Book {
+            details: self.details_of(id),
+            ..book
+        }))
     }
 
     /// EPUB `id`, opened for reading, with the character counts stored at Import
     /// so that they need no scan; none for a PDF, a Book that isn't in the
-    /// Library, or an EPUB that can't be opened anymore. An `id` that isn't a
-    /// Book ID is `InvalidInput`.
+    /// Library, or an EPUB that can't be opened anymore. An `id` that isn't an
+    /// Item ID is `InvalidInput`.
     pub fn open_epub(&self, id: &str) -> io::Result<Option<Epub>> {
         let Some(book) = self.book(id)? else {
             return Ok(None);
@@ -529,8 +496,8 @@ impl Library {
     }
 
     /// The bytes of the Cover image of EPUB `id`; none for a PDF, a Book that
-    /// isn't in the Library, or an EPUB without images. An `id` that isn't a
-    /// Book ID is `InvalidInput`.
+    /// isn't in the Library, or an EPUB without images. An `id` that isn't an
+    /// Item ID is `InvalidInput`.
     pub fn epub_cover(&self, id: &str) -> io::Result<Option<Vec<u8>>> {
         Ok(self.open_epub(id)?.and_then(|epub| epub.cover()))
     }
@@ -538,86 +505,74 @@ impl Library {
     /// The IDs of the Books whose File is a PDF without details, newest Import
     /// first: those the details pass reads.
     pub(crate) fn pdfs_without_details(&self) -> Vec<String> {
-        let mut entries = self.entries();
-        entries.sort_by(|a, b| b.1.imported.cmp(&a.1.imported).then_with(|| a.0.cmp(&b.0)));
-        entries
+        self.books_without_details()
             .into_iter()
-            .filter(|(id, entry)| self.pdf_lacking_details(id, entry).is_some())
-            .map(|(id, _)| id)
+            .filter(|book| self.is_pdf_lacking_details(book))
+            .map(|book| book.id)
             .collect()
     }
 
     /// Reads the details of Book `id`, if it is a PDF without details, with
     /// `reader`, and keeps them; a PDF `reader` refuses keeps none. Returns
-    /// whether they were kept. An `id` that isn't a Book ID is `InvalidInput`.
+    /// whether they were kept. An `id` that isn't an Item ID is `InvalidInput`.
     pub(crate) fn read_details(&self, id: &str, reader: &dyn PdfReader) -> io::Result<bool> {
-        self.folder(id)?;
-        let Some(entry) = self.entry(id) else {
+        check_id(id)?;
+        let book = self
+            .catalog()
+            .get(id)
+            .map(|state| self.book_of(state, None));
+        let Some(book) = book.filter(|book| self.is_pdf_lacking_details(book)) else {
             return Ok(false);
         };
-        let Some(path) = self.pdf_lacking_details(id, &entry) else {
-            return Ok(false);
-        };
-        let Ok(details) = reader.read(&path) else {
+        let Ok(details) = reader.read(&book.path) else {
             return Ok(false);
         };
         self.set_details(id, &details)?;
         Ok(true)
     }
 
-    /// The File of Book `id`, if it is a PDF the Library has no details of.
-    fn pdf_lacking_details(&self, id: &str, entry: &Entry) -> Option<PathBuf> {
-        if self.details_of(id).is_some() {
-            return None;
-        }
-        let path = self.file_path(id, entry);
-        (format_of(&path).ok()? == Some(Format::Pdf)).then_some(path)
+    /// Whether the File of `book` is a PDF the Library has no details of.
+    fn is_pdf_lacking_details(&self, book: &Book) -> bool {
+        self.details_of(&book.id).is_none() && format_of(&book.path).ok() == Some(Some(Format::Pdf))
     }
 
     /// Keeps `details`, read from the File of Book `id`, on this Device,
     /// replacing any before; `Book::details` returns them as `details` stores
     /// them. Does nothing for a Book that isn't in the Library. An `id` that
-    /// isn't a Book ID is `InvalidInput`.
+    /// isn't an Item ID is `InvalidInput`.
     fn set_details(&self, id: &str, details: &Details) -> io::Result<()> {
-        let path = self.folder(id)?.join(DETAILS);
-        if self.entry(id).is_none() {
+        check_id(id)?;
+        let bytes = details::encode(details);
+        // Under `writing`, so the cache ends as the last write left the file,
+        // and a Delete in between leaves no details behind.
+        let _writing = self.writing();
+        if !self.catalog().contains_key(id) {
             return Ok(());
         }
-        let bytes = details::encode(details);
-        // Under `writing`, so the cache ends as the last write left the file.
-        let _writing = self.writing();
-        let written = write_atomically(&self.staging(), &path, &bytes);
-        if written.is_ok() {
-            // As stored, i.e. normalized.
-            self.details.set(id, details::decode(&bytes));
-        }
-        // The folder may be gone: the Book was Deleted.
-        ignore_not_found(written)
+        write_atomically(&self.folder.staging(), &self.folder.details(id), &bytes)?;
+        // As stored, i.e. normalized.
+        self.details.set(id, details::decode(&bytes));
+        Ok(())
     }
 
     /// The details of Book `id`. Read once, then kept in memory.
     fn details_of(&self, id: &str) -> Option<Details> {
         self.details.get_or_read(id, || {
-            fs::read(self.root.join(id).join(DETAILS))
+            fs::read(self.folder.details(id))
                 .ok()
                 .and_then(|bytes| details::decode(&bytes))
         })
     }
 
-    /// The Book `id` of `entry`.
-    fn book_of(&self, id: &str, entry: &Entry) -> Book {
+    /// The Book of `state`, with `details`.
+    fn book_of(&self, state: &BookState, details: Option<Details>) -> Book {
         Book {
-            id: id.to_owned(),
-            path: self.file_path(id, entry),
-            imported: entry.imported,
-            progress: self.progress_of(id),
-            details: self.details_of(id),
+            id: state.id.clone(),
+            path: self.folder.file(&state.file_name),
+            imported: state.imported,
+            progress: state.progress,
+            details,
         }
-    }
-
-    /// Where the File of Book `id` is stored.
-    fn file_path(&self, id: &str, entry: &Entry) -> PathBuf {
-        self.root.join(id).join(&entry.name)
     }
 
     /// Stores `progress` as the Reading Progress of Book `id`, replacing the
@@ -625,68 +580,47 @@ impl Library {
     /// Gallery for `sort` shows: see `listing::progress_changes_gallery`.
     /// Saving for a Book that isn't in the Library (never imported, or
     /// Deleted, even just now) does nothing and says no change. An `id` that
-    /// isn't a Book ID is `InvalidInput`.
+    /// isn't an Item ID is `InvalidInput`.
     pub fn save_progress(
         &self,
         id: &str,
         progress: &ReadingProgress,
         sort: Sort,
     ) -> io::Result<bool> {
-        let folder = self.folder(id)?;
-        let Some(entry) = self.entry(id) else {
+        check_id(id)?;
+        let mut books = self.catalog();
+        let Some(state) = books.get(id) else {
             return Ok(false);
         };
-        let _writing = self.writing();
-        let before = self.book_of(id, &entry);
+        let before = self.book_of(state, self.details_of(id));
         let after = Book {
             progress: Some(*progress),
             ..before.clone()
         };
         let last_reads = match sort.key {
-            SortKey::RecentlyRead => self.last_reads_except(id),
+            SortKey::RecentlyRead => books
+                .values()
+                .filter(|other| other.id != id)
+                .filter_map(|other| other.progress)
+                .map(|p| p.last_read)
+                .collect(),
             _ => Vec::new(),
         };
         let changes = progress_changes_gallery(sort, &before, &after, last_reads);
-        // The folder may be gone: the Book was Deleted.
-        let written = write_atomically(
-            &self.staging(),
-            &folder.join(PROGRESS),
-            &progress::encode(progress),
-        );
-        if written.is_ok() {
-            self.progress.set(id, Some(*progress));
-        }
-        ignore_not_found(written)?;
+        self.store(&mut books, id, |state| state.progress = Some(*progress))?;
         Ok(changes)
     }
 
-    /// The Last Read of each Book but `id` that has one.
-    fn last_reads_except(&self, id: &str) -> Vec<u64> {
-        let others = self.entries().into_iter().filter(|(other, _)| other != id);
-        others
-            .filter_map(|(other, _)| self.progress_of(&other))
-            .map(|p| p.last_read)
-            .collect()
-    }
-
-    /// The Reading Progress of Book `id`. Read once, then kept in memory.
-    fn progress_of(&self, id: &str) -> Option<ReadingProgress> {
-        self.progress.get_or_read(id, || {
-            fs::read(self.root.join(id).join(PROGRESS))
-                .ok()
-                .and_then(|bytes| progress::decode(&bytes))
-        })
-    }
-
     /// The Markup of Book `id`, oldest first: empty if it has none, or the
-    /// Book isn't in the Library, or its state is unreadable. An `id` that
-    /// isn't a Book ID is `InvalidInput`.
+    /// Book isn't in the Library. An `id` that isn't an Item ID is
+    /// `InvalidInput`.
     pub fn markup(&self, id: &str) -> io::Result<Markup> {
-        let folder = self.folder(id)?;
-        let state = fs::read(folder.join(STATE))
-            .ok()
-            .and_then(|bytes| BookState::decode(&bytes));
-        Ok(state.map(|s| s.markup.listed()).unwrap_or_default())
+        check_id(id)?;
+        Ok(self
+            .catalog()
+            .get(id)
+            .map(|state| state.markup.listed())
+            .unwrap_or_default())
     }
 
     /// Adds a Highlight of `quoted_text` at `anchor` in `color`, `created` in
@@ -818,38 +752,45 @@ impl Library {
     }
 
     fn read_preferences(&self) -> Preferences {
-        Preferences::decode(fs::read(self.preferences()).ok().as_deref())
+        Preferences::decode(fs::read(self.folder.preferences()).ok().as_deref())
     }
 
     fn edit_preferences(&self, change: impl FnOnce(&mut Preferences)) -> io::Result<()> {
         let _writing = self.writing();
         let mut preferences = self.read_preferences();
         change(&mut preferences);
-        write_atomically(&self.staging(), &self.preferences(), &preferences.encode())
+        write_atomically(
+            &self.folder.staging(),
+            &self.folder.preferences(),
+            &preferences.encode(),
+        )
     }
 
-    /// Makes `change` to the state of Book `id`, writing it if it changed. A
-    /// missing or corrupt state starts anew. Returns whether the Book is in the
-    /// Library, i.e. whether `change` ran.
+    /// Makes `change` to the state of Book `id`, writing it if it changed.
+    /// Returns whether the Book is in the Library, i.e. whether `change` ran.
     fn edit_state(&self, id: &str, change: impl FnOnce(&mut BookState)) -> io::Result<bool> {
-        let folder = self.folder(id)?;
-        let Some(entry) = self.entry(id) else {
+        check_id(id)?;
+        let mut books = self.catalog();
+        self.store(&mut books, id, change)
+    }
+
+    /// Makes `change` to the state of Book `id` among `books`, and writes it
+    /// if it changed; memory changes only if the write succeeds. Returns
+    /// whether the Book is there.
+    fn store(
+        &self,
+        books: &mut HashMap<String, BookState>,
+        id: &str,
+        change: impl FnOnce(&mut BookState),
+    ) -> io::Result<bool> {
+        let Some(state) = books.get_mut(id) else {
             return Ok(false);
         };
-        let _writing = self.writing();
-        let path = folder.join(STATE);
-        let mut state = fs::read(&path)
-            .ok()
-            .and_then(|bytes| BookState::decode(&bytes))
-            .unwrap_or_else(|| BookState {
-                imported: entry.imported,
-                ..BookState::default()
-            });
-        let before = state.clone();
-        change(&mut state);
-        if state != before {
-            // The folder may be gone: the Book was Deleted.
-            ignore_not_found(write_atomically(&self.staging(), &path, &state.encode()))?;
+        let mut changed = state.clone();
+        change(&mut changed);
+        if changed != *state {
+            self.folder.write_state(&changed)?;
+            *state = changed;
         }
         Ok(true)
     }
@@ -859,57 +800,42 @@ impl Library {
     }
 
     /// The Books, locked.
-    fn catalog(&self) -> MutexGuard<'_, HashMap<String, Entry>> {
+    fn catalog(&self) -> MutexGuard<'_, HashMap<String, BookState>> {
         self.books.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Deletes the Book `id` and its File. Deleting a Book that isn't there
-    /// does nothing. An `id` that isn't a Book ID (e.g. a path) is
-    /// `InvalidInput`.
+    /// Deletes the Book `id` and its File, state and details. Deleting a Book
+    /// that isn't there does nothing. An `id` that isn't an Item ID (e.g. a
+    /// path) is `InvalidInput`.
     ///
-    /// The folder leaves the Library in one rename, so a crash mid-delete never
-    /// leaves a half-deleted Book listed; `open` finishes the job.
+    /// The File goes first, so a crash mid-delete leaves a state without a
+    /// File, which is a deleted Book: `open` finishes the job.
     pub fn delete(&self, id: &str) -> io::Result<()> {
-        let folder = self.folder(id)?;
-        let doomed = self.staging().join(unique_name());
-        {
-            let mut books = self.catalog();
-            if books.remove(id).is_none() {
-                return Ok(());
-            }
-            self.progress.forget(id);
-            self.details.forget(id);
-            match fs::rename(folder, &doomed) {
-                Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
-                result => result?,
-            }
-        }
-        fs::remove_dir_all(doomed)
+        check_id(id)?;
+        let _writing = self.writing();
+        let mut books = self.catalog();
+        let Some(state) = books.remove(id) else {
+            return Ok(());
+        };
+        self.details.forget(id);
+        self.folder.remove(&state)
     }
+}
 
-    /// The folder of Book `id`, which may not exist. `id` must be a plain
-    /// name, so it can't point outside the Library.
-    fn folder(&self, id: &str) -> io::Result<PathBuf> {
-        let mut parts = Path::new(id).components();
-        let is_plain_name = matches!(
-            (parts.next(), parts.next()),
-            (Some(Component::Normal(name)), None) if !name.to_string_lossy().starts_with('.')
-        );
-        if !is_plain_name {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("{id:?} is not a Book ID"),
-            ));
-        }
-        Ok(self.root.join(id))
-    }
+/// The states of Books by Item ID.
+fn index(states: Vec<BookState>) -> HashMap<String, BookState> {
+    states.into_iter().map(|s| (s.id.clone(), s)).collect()
+}
 
-    fn staging(&self) -> PathBuf {
-        self.root.join(STAGING)
-    }
-
-    fn preferences(&self) -> PathBuf {
-        self.root.join(PREFERENCES)
+/// `id` itself, if it is an Item ID. Anything else, e.g. a path, is
+/// `InvalidInput`, so an ID can't point outside the Books folder.
+fn check_id(id: &str) -> io::Result<()> {
+    match ItemId::parse(id) {
+        Some(_) => Ok(()),
+        None => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{id:?} is not a Book ID"),
+        )),
     }
 }
 
@@ -917,25 +843,6 @@ impl Library {
 /// isn't worth starting for fewer than `MIN_PER_THREAD`.
 fn chunk_size(len: usize, threads: usize) -> usize {
     len.div_ceil(threads).max(MIN_PER_THREAD)
-}
-
-/// The Format of the File at `path`, or none if it can be Imported as neither.
-/// A PDF has `%PDF-` within its first 1024 bytes, as PDF readers accept. Else
-/// an EPUB starts with a zip signature or is named `.epub`.
-pub fn format_of(path: &Path) -> io::Result<Option<Format>> {
-    let mut head = Vec::with_capacity(1024);
-    File::open(path)?.take(1024).read_to_end(&mut head)?;
-    Ok(if head.windows(5).any(|w| w == b"%PDF-") {
-        Some(Format::Pdf)
-    } else if head.starts_with(b"PK\x03\x04")
-        || path
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("epub"))
-    {
-        Some(Format::Epub)
-    } else {
-        None
-    })
 }
 
 /// The details of the EPUB `file`.
@@ -950,12 +857,7 @@ fn read_epub_details(file: &Path) -> Result<Details, epub::Error> {
 
 /// Milliseconds since the Unix epoch.
 pub(crate) fn now() -> u64 {
-    millis(SystemTime::now())
-}
-
-fn millis(time: SystemTime) -> u64 {
-    time.duration_since(UNIX_EPOCH)
-        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+    files::millis(SystemTime::now())
 }
 
 /// Streams the file `from` into a new file at `to`, returning the SHA-256 of
@@ -994,20 +896,6 @@ fn stream_hashed(
     }
     flush_ordered(&output)?;
     Ok(hasher.finalize_hex())
-}
-
-/// The name of the File in the Book folder `dir`, and when the folder was
-/// created in milliseconds since the Unix epoch. None if it holds no File.
-fn stored_file(dir: &Path) -> io::Result<Option<(String, u64)>> {
-    let meta = fs::metadata(dir)?;
-    let created = meta.created().or_else(|_| meta.modified())?;
-    for entry in fs::read_dir(dir)? {
-        let name = entry?.file_name().to_string_lossy().into_owned();
-        if !name.starts_with('.') {
-            return Ok(Some((name, millis(created))));
-        }
-    }
-    Ok(None)
 }
 
 /// Test doubles for `PdfReader` and `GalleryObserver`, and what tests of the
@@ -1205,8 +1093,7 @@ mod tests {
         move |_: &Path| -> Result<Details, PdfProblem> { Err(problem) }
     }
 
-    /// How many entries of `folder` aren't hidden: of a Library, its Books;
-    /// of a Book's folder, its File.
+    /// How many entries of `folder` aren't hidden: of a Library, its Books.
     fn visible_entries(folder: &Path) -> usize {
         fs::read_dir(folder)
             .unwrap()
@@ -1225,7 +1112,7 @@ mod tests {
     fn forget_details(scratch: &Scratch, library: Library, ids: &[&String]) -> Library {
         drop(library);
         for id in ids {
-            let _ = fs::remove_file(scratch.0.join("library").join(id).join(DETAILS));
+            let _ = fs::remove_file(scratch.0.join("library/.details").join(id));
         }
         scratch.library()
     }
@@ -1234,22 +1121,26 @@ mod tests {
     const PDF: &[u8] = b"%PDF-abc";
     // Its SHA-256.
     const PDF_SHA256: &str = "1e8a7587529cc956d46dea481f38c623395a879a1179c277f476a9cdb88a540d";
+    /// The Item ID of no Book.
+    const NO_BOOK: &str = "zzzzzzzzzzzz";
 
     #[test]
-    fn import_stores_a_byte_identical_file_under_its_hash_and_original_name() {
+    fn import_stores_a_byte_identical_file_under_its_original_name_and_a_state_beside_it() {
         let scratch = Scratch::new();
         let library = scratch.library();
         let source = scratch.file("Paper.pdf", PDF);
 
         let book = import_new(&library, &source);
 
-        assert_eq!(book.id, PDF_SHA256);
-        assert_eq!(
-            book.path,
-            scratch.0.join("library").join(PDF_SHA256).join("Paper.pdf")
-        );
+        assert!(ItemId::parse(&book.id).is_some());
+        assert_eq!(book.path, scratch.0.join("library/Paper.pdf"));
         assert_eq!(fs::read(&book.path).unwrap(), PDF);
         assert_eq!(fs::read(&source).unwrap(), PDF);
+        let state = fs::read(library.folder.state_file(&book.id)).unwrap();
+        let state = BookState::decode(&state).unwrap();
+        assert_eq!(state.sha256, PDF_SHA256);
+        assert_eq!(state.file_name, "Paper.pdf");
+        assert_eq!(state.imported, book.imported);
     }
 
     #[test]
@@ -1458,7 +1349,7 @@ mod tests {
     fn the_cover_of_a_missing_book_is_none_and_of_a_bad_id_an_error() {
         let scratch = Scratch::new();
         let library = scratch.library();
-        assert_eq!(library.epub_cover(PDF_SHA256).unwrap(), None);
+        assert_eq!(library.epub_cover(NO_BOOK).unwrap(), None);
         assert!(library.epub_cover("../x").is_err());
     }
 
@@ -1510,7 +1401,7 @@ mod tests {
                 .starts_with('.')
         });
         assert_eq!(stored.count(), 0);
-        let staged = fs::read_dir(scratch.0.join("library").join(STAGING)).unwrap();
+        let staged = fs::read_dir(scratch.0.join("library/.staging")).unwrap();
         assert_eq!(staged.count(), 0);
     }
 
@@ -1567,7 +1458,7 @@ mod tests {
         let pdf = import_new(&library, &scratch.file("a.pdf", PDF));
 
         assert!(library.open_epub(&pdf.id).unwrap().is_none());
-        assert!(library.open_epub(PDF_SHA256).unwrap().is_none());
+        assert!(library.open_epub(NO_BOOK).unwrap().is_none());
         assert!(library.open_epub("../x").is_err());
     }
 
@@ -1598,12 +1489,7 @@ mod tests {
         );
 
         assert_eq!(library.books().unwrap().len(), 1);
-        let folders = fs::read_dir(scratch.0.join("library"))
-            .unwrap()
-            .filter(|e| e.as_ref().unwrap().file_type().unwrap().is_dir())
-            .count();
-        // The Book plus the (empty) staging folder.
-        assert_eq!(folders, 2);
+        assert_eq!(visible_entries(&scratch.0.join("library")), 1);
         assert_eq!(
             fs::read_dir(scratch.0.join("library/.staging"))
                 .unwrap()
@@ -1683,7 +1569,7 @@ mod tests {
         let library = scratch.library();
         let kept = import_new(&library, &scratch.file("a.pdf", PDF));
 
-        library.delete("0123").unwrap();
+        library.delete(NO_BOOK).unwrap();
 
         assert_eq!(library.books().unwrap(), vec![kept]);
     }
@@ -1713,18 +1599,13 @@ mod tests {
 
         let again = import_new(&library, &source);
 
-        assert_eq!((&again.id, &again.path), (&first.id, &first.path));
+        assert_eq!(again.path, first.path);
         assert_eq!(library.books().unwrap(), vec![again]);
     }
 
     /// The path of the state of `book`.
     fn state_path(library: &Library, book: &Book) -> PathBuf {
-        library.folder(&book.id).unwrap().join(STATE)
-    }
-
-    /// The path of the Reading Progress of Book `id`.
-    fn progress_path(library: &Library, id: &str) -> PathBuf {
-        library.folder(id).unwrap().join(PROGRESS)
+        library.folder.state_file(&book.id)
     }
 
     fn progress(page_index: u32, last_read: u64) -> ReadingProgress {
@@ -1815,7 +1696,7 @@ mod tests {
 
         assert_eq!(state.imported, book.imported);
         assert_eq!(state.markup.highlights, vec![added]);
-        assert!(STATE.starts_with('.'));
+        assert!(state_path(&library, &book).starts_with(scratch.0.join("library/.state")));
     }
 
     #[test]
@@ -1833,16 +1714,192 @@ mod tests {
     }
 
     #[test]
-    fn saving_for_an_unknown_book_does_nothing_and_creates_no_folder() {
+    fn saving_for_an_unknown_book_does_nothing_and_creates_no_state() {
         let scratch = Scratch::new();
         let library = scratch.library();
 
         library
-            .save_progress("0123", &progress(1, 1), by_date())
+            .save_progress(NO_BOOK, &progress(1, 1), by_date())
             .unwrap();
 
-        assert!(!scratch.0.join("library/0123").exists());
+        assert!(!library.folder.state_file(NO_BOOK).exists());
         assert_eq!(library.books().unwrap(), vec![]);
+    }
+
+    /// The names of the Files in the Library, sorted.
+    fn file_names(scratch: &Scratch) -> Vec<String> {
+        let mut names: Vec<_> = fs::read_dir(scratch.0.join("library"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| !name.starts_with('.'))
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn the_library_folder_shows_only_the_books_and_hides_state_and_details() {
+        let scratch = Scratch::new();
+        let library = scratch.library();
+        let book = import_new(&library, &scratch.file("a.pdf", PDF));
+        library
+            .save_progress(&book.id, &progress(1, 1), by_date())
+            .unwrap();
+        highlight(&library, &book.id, "the passage", 1);
+        library.set_default_highlight_color("Blue").unwrap();
+
+        assert_eq!(file_names(&scratch), ["a.pdf"]);
+    }
+
+    #[test]
+    fn a_taken_name_gets_2_then_3() {
+        let scratch = Scratch::new();
+        let library = scratch.library();
+        let names: Vec<_> = ["one", "two", "three"]
+            .map(|text| {
+                let bytes = [PDF, text.as_bytes()].concat();
+                let source = scratch.file("same.pdf", &bytes);
+                import_new(&library, &source).path
+            })
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+
+        assert_eq!(names, ["same.pdf", "same 2.pdf", "same 3.pdf"]);
+        assert_eq!(
+            fs::read(scratch.0.join("library/same 2.pdf")).unwrap(),
+            [PDF, b"two"].concat()
+        );
+    }
+
+    #[test]
+    fn a_book_renamed_outside_the_app_keeps_its_id_markup_and_progress() {
+        let scratch = Scratch::new();
+        let library = scratch.library();
+        let book = import_new(&library, &scratch.file("old.pdf", PDF));
+        let added = highlight(&library, &book.id, "the passage", 1);
+        library
+            .save_progress(&book.id, &progress(3, 9), by_date())
+            .unwrap();
+
+        fs::rename(&book.path, scratch.0.join("library/new.pdf")).unwrap();
+
+        let listed = library.books().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, book.id);
+        assert_eq!(listed[0].path, scratch.0.join("library/new.pdf"));
+        assert_eq!(listed[0].progress, Some(progress(3, 9)));
+        assert_eq!(library.markup(&book.id).unwrap().highlights, vec![added]);
+        // Also after reopening, and the File can be Imported as the same Book.
+        let library = scratch.library();
+        assert_eq!(library.books().unwrap(), listed);
+        let again = import(&library, &scratch.file("elsewhere.pdf", PDF)).unwrap();
+        assert!(matches!(again, ImportResult::AlreadyImported(b) if b.id == book.id));
+    }
+
+    #[test]
+    fn a_book_renamed_and_edited_outside_the_app_is_a_new_book() {
+        let scratch = Scratch::new();
+        let library = scratch.library();
+        let book = import_new(&library, &scratch.file("old.pdf", PDF));
+        highlight(&library, &book.id, "the passage", 1);
+
+        fs::remove_file(&book.path).unwrap();
+        fs::write(
+            scratch.0.join("library/new.pdf"),
+            [PDF, b" edited"].concat(),
+        )
+        .unwrap();
+
+        let listed = library.books().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_ne!(listed[0].id, book.id);
+        assert_eq!(library.markup(&listed[0].id).unwrap(), Markup::default());
+        assert_eq!(library.markup(&book.id).unwrap(), Markup::default());
+    }
+
+    #[test]
+    fn a_book_edited_outside_the_app_under_its_name_stays_the_book() {
+        let scratch = Scratch::new();
+        let library = scratch.library();
+        let book = import_new(&library, &scratch.file("a.pdf", PDF));
+        fs::write(&book.path, [PDF, b" edited"].concat()).unwrap();
+
+        let listed = library.books().unwrap();
+
+        assert_eq!(listed.iter().map(|b| &b.id).collect::<Vec<_>>(), [&book.id]);
+    }
+
+    #[test]
+    fn a_file_put_in_the_folder_outside_the_app_is_a_new_book_and_a_file_taken_out_is_deleted() {
+        let scratch = Scratch::new();
+        let library = scratch.library();
+        let book = import_new(&library, &scratch.file("a.pdf", PDF));
+        fs::write(scratch.0.join("library/b.pdf"), b"%PDF-b").unwrap();
+        fs::write(scratch.0.join("library/notes.txt"), b"no book").unwrap();
+
+        let listed = library.books().unwrap();
+        assert_eq!(listed.len(), 2);
+        assert!(listed.iter().any(|b| b.id == book.id));
+
+        fs::remove_file(&book.path).unwrap();
+        let listed = library.books().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].path, scratch.0.join("library/b.pdf"));
+        assert!(library.book(&book.id).unwrap().is_none());
+        assert!(!library.folder.state_file(&book.id).exists());
+    }
+
+    #[test]
+    fn importing_a_file_that_was_put_in_the_folder_outside_the_app_gives_that_book() {
+        let scratch = Scratch::new();
+        let library = scratch.library();
+        fs::write(scratch.0.join("library/put.pdf"), PDF).unwrap();
+
+        let result = import(&library, &scratch.file("a.pdf", PDF)).unwrap();
+
+        let ImportResult::AlreadyImported(book) = result else {
+            panic!("{result:?}");
+        };
+        assert_eq!(book.path, scratch.0.join("library/put.pdf"));
+        assert_eq!(library.books().unwrap(), vec![book]);
+    }
+
+    #[test]
+    fn two_states_of_one_file_merge_into_the_lower_item_id() {
+        let scratch = Scratch::new();
+        let library = scratch.library();
+        let book = import_new(&library, &scratch.file("a.pdf", PDF));
+        let added = highlight(&library, &book.id, "the passage", 1);
+        // The same File, imported on another Device before they synced.
+        let sha256 = BookState::decode(&fs::read(state_path(&library, &book)).unwrap())
+            .unwrap()
+            .sha256;
+        fs::write(scratch.0.join("library/a 2.pdf"), PDF).unwrap();
+        let twin = |id: &str| BookState {
+            id: id.into(),
+            file_name: "a 2.pdf".into(),
+            sha256: sha256.clone(),
+            imported: book.imported + 1,
+            markup: Markup::default(),
+            progress: None,
+        };
+        let (low, high) = ("aaaaaaaaaaaa", "zzzzzzzzzzzy");
+        // The twin has the lower ID, the Book a higher one: they swap.
+        let mut kept = BookState::decode(&fs::read(state_path(&library, &book)).unwrap()).unwrap();
+        fs::remove_file(state_path(&library, &book)).unwrap();
+        kept.id = high.into();
+        library.folder.write_state(&kept).unwrap();
+        library.folder.write_state(&twin(low)).unwrap();
+
+        let listed = library.books().unwrap();
+
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, low);
+        assert_eq!(library.markup(low).unwrap().highlights, vec![added]);
+        // The lower Item ID's File stays, the spare copy goes.
+        assert_eq!(file_names(&scratch), ["a 2.pdf"]);
+        assert!(!library.folder.state_file(high).exists());
     }
 
     fn details(title: Option<&str>, author: Option<&str>, page_count: u32) -> Details {
@@ -1905,7 +1962,7 @@ mod tests {
 
         assert_eq!(library.books().unwrap(), []);
         assert_eq!(visible_entries(&scratch.0.join("library")), 0);
-        let staged = fs::read_dir(scratch.0.join("library").join(STAGING)).unwrap();
+        let staged = fs::read_dir(scratch.0.join("library/.staging")).unwrap();
         assert_eq!(staged.count(), 0);
     }
 
@@ -2007,7 +2064,7 @@ mod tests {
         let read = reading(details(None, None, 1));
 
         assert!(!library.read_details(&epub.id, &never).unwrap());
-        assert!(!library.read_details(PDF_SHA256, &read).unwrap());
+        assert!(!library.read_details(NO_BOOK, &read).unwrap());
         assert!(library.read_details("../x", &read).is_err());
         assert_eq!(library.book(&epub.id).unwrap().unwrap().details, None);
     }
@@ -2169,7 +2226,8 @@ mod tests {
 
         library.set_details(&book.id, &moby).unwrap();
 
-        assert!(!scratch.0.join("library").join(&book.id).exists());
+        assert!(!library.folder.state_file(&book.id).exists());
+        assert!(!library.folder.details(&book.id).exists());
         assert_eq!(
             import_new(&library, &source).details,
             Some(details(None, None, 1))
@@ -2358,7 +2416,8 @@ mod tests {
             .save_progress(&book.id, &progress(1, 1), by_date())
             .unwrap();
 
-        assert!(!scratch.0.join("library").join(&book.id).exists());
+        assert!(!library.folder.state_file(&book.id).exists());
+        assert!(!library.folder.details(&book.id).exists());
     }
 
     #[test]
@@ -2392,14 +2451,16 @@ mod tests {
     }
 
     #[test]
-    fn a_corrupt_progress_file_lists_as_never_opened_and_is_replaced_by_the_next_save() {
+    fn unreadable_reading_progress_lists_as_never_opened_and_is_replaced_by_the_next_save() {
         let scratch = Scratch::new();
         let library = scratch.library();
         let book = import_new(&library, &scratch.file("a.pdf", PDF));
         library
             .save_progress(&book.id, &progress(3, 5), by_date())
             .unwrap();
-        fs::write(progress_path(&library, &book.id), b"garbage").unwrap();
+        let state = state_path(&library, &book);
+        let stored = String::from_utf8(fs::read(&state).unwrap()).unwrap();
+        fs::write(&state, stored.replace("3 12.5 700.25 5", "garbage")).unwrap();
 
         assert_eq!(listed_progress(&scratch.library(), &book.id), None);
 
@@ -3035,10 +3096,10 @@ mod tests {
     fn editing_highlights_of_a_book_that_is_not_there_does_nothing() {
         let scratch = Scratch::new();
         let library = scratch.library();
-        library.set_highlight_color("0123", "a", GREEN).unwrap();
-        library.set_highlight_comment("0123", "a", "x").unwrap();
-        library.remove_highlight("0123", "a").unwrap();
-        assert!(!scratch.0.join("library/0123").exists());
+        library.set_highlight_color(NO_BOOK, "a", GREEN).unwrap();
+        library.set_highlight_comment(NO_BOOK, "a", "x").unwrap();
+        library.remove_highlight(NO_BOOK, "a").unwrap();
+        assert!(!library.folder.state_file(NO_BOOK).exists());
     }
 
     #[test]
@@ -3060,11 +3121,11 @@ mod tests {
         let scratch = Scratch::new();
         let library = scratch.library();
         let added = library
-            .add_highlight("0123", anchor(), "x", YELLOW, 1)
+            .add_highlight(NO_BOOK, anchor(), "x", YELLOW, 1)
             .unwrap();
         assert_eq!(added, None);
-        assert_eq!(library.markup("0123").unwrap(), Markup::default());
-        assert!(!scratch.0.join("library/0123").exists());
+        assert_eq!(library.markup(NO_BOOK).unwrap(), Markup::default());
+        assert!(!library.folder.state_file(NO_BOOK).exists());
     }
 
     #[test]
@@ -3079,7 +3140,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(added, None);
-        assert!(!scratch.0.join("library").join(&book.id).exists());
+        assert!(!library.folder.state_file(&book.id).exists());
+        assert!(!library.folder.details(&book.id).exists());
     }
 
     #[test]
@@ -3097,17 +3159,20 @@ mod tests {
     }
 
     #[test]
-    fn a_corrupt_state_has_no_markup_and_is_replaced_by_the_next_highlight() {
+    fn a_corrupt_state_makes_its_file_a_new_book_without_markup() {
         let scratch = Scratch::new();
         let library = scratch.library();
         let book = import_new(&library, &scratch.file("a.pdf", PDF));
-        let state = state_path(&library, &book);
-        fs::write(&state, b"garbage").unwrap();
+        highlight(&library, &book.id, "the passage", 1_000);
+        fs::write(state_path(&library, &book), b"garbage").unwrap();
+
+        let listed = library.books().unwrap();
+
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].path, book.path);
+        assert_ne!(listed[0].id, book.id);
         assert_eq!(library.markup(&book.id).unwrap(), Markup::default());
-
-        let added = highlight(&library, &book.id, "the passage", 1_000);
-
-        assert_eq!(library.markup(&book.id).unwrap().highlights, vec![added]);
+        assert_eq!(library.markup(&listed[0].id).unwrap(), Markup::default());
     }
 
     #[test]
@@ -3266,7 +3331,7 @@ mod tests {
     fn corrupt_preferences_read_as_yellow_and_are_replaced_by_the_next_choice() {
         let scratch = Scratch::new();
         let library = scratch.library();
-        fs::write(scratch.0.join("library").join(PREFERENCES), b"garbage").unwrap();
+        fs::write(library.folder.preferences(), b"garbage").unwrap();
         let corrupt = library.highlight_colors();
         assert_eq!(corrupt.default_color.id, "Yellow");
         assert_eq!(corrupt.colors.len(), 6);
@@ -3295,14 +3360,14 @@ mod tests {
     }
 
     #[test]
-    fn preferences_are_a_hidden_file_at_the_library_root_and_no_book() {
+    fn preferences_are_a_hidden_file_in_the_state_folder_and_no_book() {
         let scratch = Scratch::new();
         let library = scratch.library();
         let book = import_new(&library, &scratch.file("a.pdf", PDF));
 
         library.set_default_highlight_color("Blue").unwrap();
 
-        assert!(scratch.0.join("library/.preferences.json").is_file());
+        assert!(scratch.0.join("library/.state/preferences.json").is_file());
         assert_eq!(library.books().unwrap(), vec![book]);
         assert_eq!(
             fs::read_dir(scratch.0.join("library/.staging"))
@@ -3371,8 +3436,8 @@ mod tests {
                 .unwrap();
         }
 
-        let stored = fs::read(progress_path(&library, &book.id)).unwrap();
-        assert!(stored.len() < 64, "progress is {} bytes", stored.len());
+        let stored = fs::read(state_path(&library, &book)).unwrap();
+        assert!(stored.len() < 400, "state is {} bytes", stored.len());
         assert_eq!(
             listed_progress(&library, &book.id),
             Some(progress(999 % 300, 1_000))

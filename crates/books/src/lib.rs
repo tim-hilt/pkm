@@ -25,3 +25,4 @@ pub mod preferences;
 pub mod progress;
 pub mod search;
 pub(crate) mod state;
+pub(crate) mod store;
