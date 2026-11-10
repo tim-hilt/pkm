@@ -19,6 +19,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 const STAGING: &str = ".staging";
 const STATE: &str = ".state";
@@ -117,6 +118,9 @@ impl Folder {
 
     /// The Books in the folder, each with its state, matched like this:
     ///
+    /// 0. A File modified since its state was written, e.g. edited outside the
+    ///    app, is hashed again: the state keeps the SHA-256 the File has now,
+    ///    and its details, which may have changed with it, go.
     /// 1. States of the same File (same SHA-256), made by Imports on two
     ///    Devices before they synced, become the one of the lowest Item ID.
     ///    The others' states go, and their Files too, unless they are the
@@ -132,11 +136,17 @@ impl Folder {
     /// Changes to state are written before this returns.
     pub(crate) fn scan(&self) -> io::Result<Vec<BookState>> {
         let mut files = self.files()?;
-        let states = self.merge_duplicates(self.read_states()?, &mut files)?;
+        let mut states = self.read_states()?;
+        for state in &mut states {
+            if let Some(file) = files.get(&state.file_name) {
+                self.follow_edit(state, file.modified)?;
+            }
+        }
+        let states = self.merge_duplicates(states, &mut files)?;
         let (mut books, mut lost): (Vec<_>, Vec<_>) = states
             .into_iter()
             .partition(|state| files.remove(&state.file_name).is_some());
-        for (name, created) in files {
+        for (name, FileTimes { created, .. }) in files {
             let path = self.file(&name);
             if !matches!(format_of(&path), Ok(Some(_))) {
                 continue;
@@ -168,8 +178,28 @@ impl Folder {
         Ok(books)
     }
 
-    /// The names of the Files in the folder, with when they were created.
-    fn files(&self) -> io::Result<BTreeMap<String, u64>> {
+    /// Gives `state` the SHA-256 its File has now, if the File was modified
+    /// at `modified`, after the state was written, and then drops the
+    /// details. The state is written again either way, so the File is hashed
+    /// again only after its next change.
+    fn follow_edit(&self, state: &mut BookState, modified: SystemTime) -> io::Result<()> {
+        let written = fs::metadata(self.state_file(&state.id))?.modified()?;
+        if modified <= written {
+            return Ok(());
+        }
+        // A File that can't be read now is looked at again by the next scan.
+        let Ok(sha256) = hash_file(&self.file(&state.file_name)) else {
+            return Ok(());
+        };
+        if sha256 != state.sha256 {
+            state.sha256 = sha256;
+            ignore_not_found(fs::remove_file(self.details(&state.id)))?;
+        }
+        self.write_state(state)
+    }
+
+    /// The names of the Files in the folder, with their times.
+    fn files(&self) -> io::Result<BTreeMap<String, FileTimes>> {
         let mut files = BTreeMap::new();
         for entry in fs::read_dir(&self.root)? {
             let entry = entry?;
@@ -178,8 +208,9 @@ impl Folder {
                 continue;
             }
             let meta = entry.metadata()?;
-            let created = meta.created().or_else(|_| meta.modified())?;
-            files.insert(name, millis(created));
+            let modified = meta.modified()?;
+            let created = millis(meta.created().unwrap_or(modified));
+            files.insert(name, FileTimes { created, modified });
         }
         Ok(files)
     }
@@ -208,7 +239,7 @@ impl Folder {
     fn merge_duplicates(
         &self,
         mut states: Vec<BookState>,
-        files: &mut BTreeMap<String, u64>,
+        files: &mut BTreeMap<String, FileTimes>,
     ) -> io::Result<Vec<BookState>> {
         states.sort_by(|a, b| a.id.cmp(&b.id));
         let mut kept: Vec<BookState> = Vec::new();
@@ -236,6 +267,13 @@ impl Folder {
         }
         Ok(kept)
     }
+}
+
+/// When a File in the folder was created, in milliseconds since the Unix
+/// epoch, and last modified.
+struct FileTimes {
+    created: u64,
+    modified: SystemTime,
 }
 
 /// The SHA-256 of the file at `path`, lowercase hex.
@@ -332,6 +370,66 @@ mod tests {
         scratch.put("a.pdf", B);
         let books = folder.scan().unwrap();
         assert_eq!(names(&books), [("aaaaaaaaaaaa", "a.pdf")]);
+    }
+
+    /// Makes the File `name` look modified a second after now, as an edit
+    /// made after its state was written.
+    fn edit_later(scratch: &Scratch, name: &str, bytes: &[u8]) {
+        scratch.put(name, bytes);
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(1);
+        File::options()
+            .write(true)
+            .open(scratch.0.join(name))
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+    }
+
+    #[test]
+    fn an_edited_file_keeps_its_state_whose_sha256_follows_it_and_loses_its_details() {
+        let scratch = Scratch::new();
+        let folder = scratch.folder();
+        scratch.put("a.pdf", A);
+        folder
+            .write_state(&state("aaaaaaaaaaaa", "a.pdf", A))
+            .unwrap();
+        fs::write(folder.details("aaaaaaaaaaaa"), "1\n\n").unwrap();
+        edit_later(&scratch, "a.pdf", B);
+
+        let books = folder.scan().unwrap();
+
+        assert_eq!(names(&books), [("aaaaaaaaaaaa", "a.pdf")]);
+        assert_eq!(books[0].sha256, sha(B));
+        let stored = fs::read(folder.state_file("aaaaaaaaaaaa")).unwrap();
+        assert_eq!(BookState::decode(&stored).unwrap().sha256, sha(B));
+        assert!(!folder.details("aaaaaaaaaaaa").exists());
+        // Renamed afterwards, it is still found by its SHA-256.
+        fs::rename(scratch.0.join("a.pdf"), scratch.0.join("b.pdf")).unwrap();
+        assert_eq!(names(&folder.scan().unwrap()), [("aaaaaaaaaaaa", "b.pdf")]);
+    }
+
+    #[test]
+    fn an_edited_file_is_never_taken_for_a_copy_of_what_it_was() {
+        let scratch = Scratch::new();
+        let folder = scratch.folder();
+        scratch.put("a.pdf", A);
+        folder
+            .write_state(&state("aaaaaaaaaaaa", "a.pdf", A))
+            .unwrap();
+        edit_later(&scratch, "a.pdf", B);
+        // The File as it was before the edit, imported on another Device.
+        scratch.put("a 2.pdf", A);
+        folder
+            .write_state(&state("bbbbbbbbbbbb", "a 2.pdf", A))
+            .unwrap();
+
+        let books = folder.scan().unwrap();
+
+        assert_eq!(
+            names(&books),
+            [("aaaaaaaaaaaa", "a.pdf"), ("bbbbbbbbbbbb", "a 2.pdf")]
+        );
+        assert_eq!(visible(&scratch), ["a 2.pdf", "a.pdf"]);
     }
 
     #[test]

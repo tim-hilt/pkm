@@ -16,7 +16,8 @@ pub(crate) struct BookState {
     pub id: String,
     /// The name of the File in the Books folder.
     pub file_name: String,
-    /// SHA-256 of the File, lowercase hex, as of Import.
+    /// SHA-256 of the File, lowercase hex, as of Import or the last change
+    /// `Folder::scan` found.
     pub sha256: String,
     /// Date Imported, in milliseconds since the Unix epoch.
     pub imported: u64,

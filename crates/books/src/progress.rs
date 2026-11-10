@@ -4,7 +4,7 @@
 
 use std::cmp::Ordering;
 
-/// A spot in a Document, in the terms of its Format.
+/// A spot in a Book, in the terms of its Format.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Place {
     /// A point on a page of a PDF.
@@ -110,11 +110,11 @@ impl Place {
     }
 }
 
-/// Where in a Document the user last left off, and when.
+/// Where in a Book the user last left off, and when.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ReadingProgress {
     pub place: Place,
-    /// Last Read: when the Reader showed the Document, in milliseconds since
+    /// Last Read: when the Reader showed the Book, in milliseconds since
     /// the Unix epoch.
     pub last_read: u64,
 }

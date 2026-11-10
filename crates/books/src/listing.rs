@@ -209,6 +209,7 @@ mod tests {
         Book {
             id: imported.to_string(),
             path: format!("/library/{imported}/{imported}.pdf").into(),
+            sha256: String::new(),
             imported,
             progress: last_read.map(|at| ReadingProgress::pdf(0, 0.0, 0.0, at)),
             details: Some(Details {
@@ -351,6 +352,7 @@ mod tests {
         let book = Book {
             id: "abc".to_owned(),
             path: "/library/abc/scan0042.pdf".into(),
+            sha256: String::new(),
             imported: 7,
             progress: Some(crate::progress::ReadingProgress::pdf(0, 0.0, 0.0, 9)),
             details: Some(crate::details::Details {
@@ -391,6 +393,7 @@ mod tests {
         Book {
             id: String::new(),
             path: "/library/a/a.pdf".into(),
+            sha256: String::new(),
             imported: 1,
             progress: last_read.map(|at| ReadingProgress::pdf(page, 0.0, 0.0, at)),
             details: Some(Details {

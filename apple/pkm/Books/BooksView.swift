@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The Books Context's first screen, the Gallery: the Library as a grid of
-/// Covers after a "+" cell, sorted by Date Imported or Title and narrowed by
+/// Covers after a "+" cell, sorted by Date Imported, Title or Recently Read and narrowed by
 /// Library Search. Import by the "+" cell, File > Import… or dropping Files
 /// onto the grid; a single File opens its Book, new or already in the Library.
 /// A cell's context menu (long-press, right-click) shows the Book's
@@ -318,6 +318,7 @@ private struct SortMenu: View {
             Picker("Sort By", selection: $sort.key) {
                 Text("Date Imported").tag(LibrarySort.Key.dateImported)
                 Text("Title").tag(LibrarySort.Key.title)
+                Text("Recently Read").tag(LibrarySort.Key.recentlyRead)
             }
             Toggle("Reverse Order", isOn: $sort.isReversed)
         }

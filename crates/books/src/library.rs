@@ -9,8 +9,8 @@
 //! (`books`), and kept in memory: Imports, Deletes and edits change that and
 //! the files together.
 //!
-//! A `DetailsPass` reads in the background the details PDFs lack, one PDF at
-//! a time, telling the Gallery when to list again.
+//! A `DetailsPass` reads in the background the details Books lack, one Book
+//! at a time, telling the Gallery when to list again.
 
 use crate::book_cache::BookCache;
 pub use crate::details::format_of;
@@ -44,6 +44,9 @@ pub struct Book {
     pub id: String,
     /// The stored File.
     pub path: PathBuf,
+    /// The SHA-256 of the File, lowercase hex: what is made from its content,
+    /// e.g. a Cover, is the same for the same value.
+    pub sha256: String,
     /// Date Imported, in milliseconds since the Unix epoch.
     pub imported: u64,
     /// Where the user left off; none if the Book was never opened, or its
@@ -192,7 +195,7 @@ const BATCH: usize = 16;
 const BATCH_SPAN: Duration = Duration::from_millis(500);
 
 /// The background pass that reads missing details, started by
-/// `DetailsPass::start`. Dropping it stops the pass once the PDF it is
+/// `DetailsPass::start`. Dropping it stops the pass once the Book it is
 /// reading is done.
 pub struct DetailsPass {
     cancelled: Arc<AtomicBool>,
@@ -201,10 +204,11 @@ pub struct DetailsPass {
 
 impl DetailsPass {
     /// Starts the pass on a background thread: it reads the details the
-    /// Library lacks for PDFs, one PDF at a time, and tells `observer` when
-    /// the Gallery should list again — coalesced, so a burst of reads lists
-    /// once. A PDF `reader` refuses is skipped, and a later pass tries it
-    /// again. Details stay on this Device.
+    /// Library lacks, one Book at a time (PDFs with `reader`), and tells
+    /// `observer` when the Gallery should list again — coalesced, so a burst
+    /// of reads lists once. A File that can't be read, e.g. a PDF `reader`
+    /// refuses, is skipped, and a later pass tries it again. Details stay on
+    /// this Device.
     pub fn start(
         library: Arc<Library>,
         reader: Arc<dyn PdfReader>,
@@ -236,7 +240,7 @@ impl DetailsPass {
 }
 
 impl Drop for DetailsPass {
-    /// Stops the thread, waiting for the PDF it may be reading.
+    /// Stops the thread, waiting for the Book it may be reading.
     fn drop(&mut self) {
         self.cancelled.store(true, Relaxed);
         if let Some(thread) = self.thread.take() {
@@ -245,10 +249,10 @@ impl Drop for DetailsPass {
     }
 }
 
-/// One pass: reads the PDFs without details, newest Import first, and tells
+/// One pass: reads the Books without details, newest Import first, and tells
 /// `observer` when the Gallery should list again — at most once per `BATCH`
 /// details read or `BATCH_SPAN` elapsed, and once more after the last read.
-/// The Gallery lists every Book again, so not one PDF at a time.
+/// The Gallery lists every Book again, so not one Book at a time.
 fn run_pass(
     library: &Library,
     reader: &dyn PdfReader,
@@ -257,7 +261,7 @@ fn run_pass(
 ) {
     let mut read = 0;
     let mut told = Instant::now();
-    for id in library.pdfs_without_details() {
+    for id in library.books_lacking_details() {
         if cancelled.load(Relaxed) {
             break;
         }
@@ -320,8 +324,19 @@ impl Library {
     /// Finds the Books in the folder again, so Files added, renamed or deleted
     /// outside the app, and states changed by Sync, are seen.
     fn refresh(&self) -> io::Result<()> {
-        let mut books = self.catalog();
-        *books = index(self.folder.scan()?);
+        self.rescan(&mut self.catalog())
+    }
+
+    /// Replaces `books` with the Books the folder holds now (`Folder::scan`),
+    /// forgetting the details of those whose File changed.
+    fn rescan(&self, books: &mut HashMap<String, BookState>) -> io::Result<()> {
+        let found = index(self.folder.scan()?);
+        for (id, state) in &found {
+            if books.get(id).is_some_and(|old| old.sha256 != state.sha256) {
+                self.details.forget(id);
+            }
+        }
+        *books = found;
         Ok(())
     }
 
@@ -385,7 +400,7 @@ impl Library {
         let sha256 = copy_hashed(source, staged, progress)?;
         let mut books = self.catalog();
         // Outside changes first, so a File added there is not imported twice.
-        *books = index(self.folder.scan()?);
+        self.rescan(&mut books)?;
         // A duplicate keeps the name it was first imported under.
         if let Some(book) = books.values().find(|book| book.sha256 == sha256) {
             return Ok((book.id.clone(), false));
@@ -502,38 +517,40 @@ impl Library {
         Ok(self.open_epub(id)?.and_then(|epub| epub.cover()))
     }
 
-    /// The IDs of the Books whose File is a PDF without details, newest Import
-    /// first: those the details pass reads.
-    pub(crate) fn pdfs_without_details(&self) -> Vec<String> {
+    /// The IDs of the Books without details, newest Import first: those the
+    /// details pass reads. A Book gets details at Import; it lacks them if its
+    /// File arrived otherwise (put in the folder, Synced) or was edited since.
+    pub(crate) fn books_lacking_details(&self) -> Vec<String> {
         self.books_without_details()
             .into_iter()
-            .filter(|book| self.is_pdf_lacking_details(book))
+            .filter(|book| self.details_of(&book.id).is_none())
             .map(|book| book.id)
             .collect()
     }
 
-    /// Reads the details of Book `id`, if it is a PDF without details, with
-    /// `reader`, and keeps them; a PDF `reader` refuses keeps none. Returns
-    /// whether they were kept. An `id` that isn't an Item ID is `InvalidInput`.
+    /// Reads the details of Book `id`, if it has none, and keeps them: a PDF's
+    /// with `reader`, an EPUB's in the core. A File that can't be read keeps
+    /// none. Returns whether they were kept. An `id` that isn't an Item ID is
+    /// `InvalidInput`.
     pub(crate) fn read_details(&self, id: &str, reader: &dyn PdfReader) -> io::Result<bool> {
         check_id(id)?;
         let book = self
             .catalog()
             .get(id)
             .map(|state| self.book_of(state, None));
-        let Some(book) = book.filter(|book| self.is_pdf_lacking_details(book)) else {
+        let Some(book) = book.filter(|book| self.details_of(&book.id).is_none()) else {
             return Ok(false);
         };
-        let Ok(details) = reader.read(&book.path) else {
+        let details = match format_of(&book.path) {
+            Ok(Some(Format::Pdf)) => reader.read(&book.path).ok(),
+            Ok(Some(Format::Epub)) => read_epub_details(&book.path).ok(),
+            _ => None,
+        };
+        let Some(details) = details else {
             return Ok(false);
         };
         self.set_details(id, &details)?;
         Ok(true)
-    }
-
-    /// Whether the File of `book` is a PDF the Library has no details of.
-    fn is_pdf_lacking_details(&self, book: &Book) -> bool {
-        self.details_of(&book.id).is_none() && format_of(&book.path).ok() == Some(Some(Format::Pdf))
     }
 
     /// Keeps `details`, read from the File of Book `id`, on this Device,
@@ -569,6 +586,7 @@ impl Library {
         Book {
             id: state.id.clone(),
             path: self.folder.file(&state.file_name),
+            sha256: state.sha256.clone(),
             imported: state.imported,
             progress: state.progress,
             details,
@@ -1982,21 +2000,22 @@ mod tests {
     }
 
     #[test]
-    fn pdfs_without_details_are_listed_newest_first_and_only_those() {
+    fn books_without_details_are_listed_newest_first_and_only_those() {
         let scratch = Scratch::new();
         let library = scratch.library();
         let old = import_new(&library, &scratch.file("old.pdf", b"%PDF-old"));
         a_millisecond_later();
         let new = import_new(&library, &scratch.file("new.pdf", b"%PDF-new"));
+        a_millisecond_later();
         let epub = import_new(&library, &scratch.file("book.epub", &emma().bytes()));
         let kept = import_new(&library, &scratch.file("kept.pdf", b"%PDF-kept"));
         let library = forget_details(&scratch, library, &[&old.id, &new.id, &epub.id]);
 
         assert_eq!(
-            library.pdfs_without_details(),
-            vec![new.id.clone(), old.id.clone()]
+            library.books_lacking_details(),
+            vec![epub.id.clone(), new.id.clone(), old.id.clone()]
         );
-        assert!(!library.pdfs_without_details().contains(&kept.id));
+        assert!(!library.books_lacking_details().contains(&kept.id));
     }
 
     #[test]
@@ -2017,7 +2036,7 @@ mod tests {
         assert_eq!(read.details, Some(moby.clone()));
         let reopened = scratch.library().book(&book.id).unwrap().unwrap();
         assert_eq!(reopened.details, Some(moby));
-        assert!(library.pdfs_without_details().is_empty());
+        assert!(library.books_lacking_details().is_empty());
     }
 
     #[test]
@@ -2033,7 +2052,7 @@ mod tests {
 
         assert!(!kept);
         assert_eq!(library.book(&book.id).unwrap().unwrap().details, None);
-        assert_eq!(library.pdfs_without_details(), vec![book.id.clone()]);
+        assert_eq!(library.books_lacking_details(), vec![book.id.clone()]);
     }
 
     #[test]
@@ -2055,18 +2074,50 @@ mod tests {
     }
 
     #[test]
-    fn read_details_reads_nothing_but_a_pdf_of_the_library() {
+    fn read_details_reads_nothing_outside_the_library() {
         let scratch = Scratch::new();
         let library = scratch.library();
-        let epub = import_new(&library, &scratch.file("book.epub", &emma().bytes()));
-        let library = forget_details(&scratch, library, &[&epub.id]);
-        let never = |_: &Path| -> Result<Details, PdfProblem> { panic!("an EPUB is not a PDF") };
         let read = reading(details(None, None, 1));
 
-        assert!(!library.read_details(&epub.id, &never).unwrap());
         assert!(!library.read_details(NO_BOOK, &read).unwrap());
         assert!(library.read_details("../x", &read).is_err());
-        assert_eq!(library.book(&epub.id).unwrap().unwrap().details, None);
+    }
+
+    #[test]
+    fn a_book_edited_outside_the_app_keeps_its_id_and_has_its_details_read_again() {
+        let scratch = Scratch::new();
+        let library = scratch.library();
+        let moby = details(Some("Moby-Dick"), None, 1);
+        let book = import_with(&library, &scratch.file("a.pdf", PDF), &reading(moby));
+        assert!(library.books_lacking_details().is_empty());
+
+        fs::write(&book.path, b"%PDF-edited").unwrap();
+        let later = SystemTime::now() + Duration::from_secs(1);
+        let file = File::options().write(true).open(&book.path).unwrap();
+        file.set_modified(later).unwrap();
+
+        let listed = library.books().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, book.id);
+        assert_eq!(listed[0].details, None);
+        assert_eq!(library.books_lacking_details(), vec![book.id.clone()]);
+    }
+
+    #[test]
+    fn an_epub_put_in_the_folder_is_read_by_the_core_and_listed_as_an_epub() {
+        let scratch = Scratch::new();
+        let library = scratch.library();
+        fs::write(scratch.0.join("library/emma.epub"), emma().bytes()).unwrap();
+        let book = library.books().unwrap().remove(0);
+        let never = |_: &Path| -> Result<Details, PdfProblem> { panic!("an EPUB is not a PDF") };
+
+        assert_eq!(library.books_lacking_details(), vec![book.id.clone()]);
+        assert!(library.read_details(&book.id, &never).unwrap());
+
+        let read = library.book(&book.id).unwrap().unwrap();
+        assert_eq!(read.format(), Format::Epub);
+        assert_eq!(read.title(), "Emma");
+        assert!(library.books_lacking_details().is_empty());
     }
 
     #[test]
@@ -2296,6 +2347,7 @@ mod tests {
         let book = |page_index, page_count| Book {
             id: String::new(),
             path: PathBuf::from("a.pdf"),
+            sha256: String::new(),
             imported: 0,
             progress: Some(progress(page_index, 1)),
             details: Some(details(None, None, page_count)),
@@ -2348,6 +2400,7 @@ mod tests {
         let book = |spine_index, offset| Book {
             id: String::new(),
             path: PathBuf::from("a.epub"),
+            sha256: String::new(),
             imported: 0,
             progress: Some(ReadingProgress::epub(spine_index, offset, 1)),
             details: Some(Details {

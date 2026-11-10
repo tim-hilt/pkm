@@ -152,7 +152,7 @@ final class LibraryModel {
     @ObservationIgnored private var lastImportFiles: Task<Void, Never>?
     /// The latest access to the core; the next one waits for it.
     @ObservationIgnored private var lastCoreAccess: Task<Void, Never>?
-    /// Covers decoded lately, by Book ID; the system evicts them as memory gets tight.
+    /// Covers decoded lately, by the Book's SHA-256; the system evicts them as memory gets tight.
     @ObservationIgnored private let decodedCovers = {
         let cache = NSCache<NSString, CGImage>()
         cache.totalCostLimit = 64 << 20
@@ -161,7 +161,7 @@ final class LibraryModel {
 
     /// Shows the Library of `core`, with Covers in `coversFolder` and the sort
     /// choice in `defaults`. Books whose details the core lacks are listed by
-    /// file name; the core's background pass then reads them from the PDFs, one
+    /// file name; the core's background pass then reads them from the Files, one
     /// at a time, and tells this model to list again as they arrive.
     init(core: Library, coversFolder: URL, defaults: UserDefaults) {
         self.core = core
@@ -202,21 +202,21 @@ final class LibraryModel {
     /// nil if there is none. Cheap, so safe to call while scrolling; never renders.
     func savedCover(for book: Book) async -> CGImage? {
         let covers = covers
-        let id = book.id
-        if let decoded = decodedCovers.object(forKey: id as NSString) { return decoded }
-        return keepDecoded(await Task.detached { covers.saved(id) }.value, id: id)
+        let key = book.sha256
+        if let decoded = decodedCovers.object(forKey: key as NSString) { return decoded }
+        return keepDecoded(await Task.detached { covers.saved(key) }.value, key: key)
     }
 
-    /// Keeps `cover` of Book `id` in memory, so cells scrolled back into view
+    /// Keeps `cover`, under `key`, in memory, so cells scrolled back into view
     /// don't decode it again.
-    private func keepDecoded(_ cover: CGImage?, id: String) -> CGImage? {
-        if let cover { decodedCovers.setObject(cover, forKey: id as NSString, cost: cover.bytesPerRow * cover.height) }
+    private func keepDecoded(_ cover: CGImage?, key: String) -> CGImage? {
+        if let cover { decodedCovers.setObject(cover, forKey: key as NSString, cost: cover.bytesPerRow * cover.height) }
         return cover
     }
 
-    private func removeCover(_ id: String) {
-        decodedCovers.removeObject(forKey: id as NSString)
-        covers.remove(id)
+    private func removeCover(_ key: String) {
+        decodedCovers.removeObject(forKey: key as NSString)
+        covers.remove(key)
     }
 
     /// The Cover of `book`: the saved one, or else made off the main thread (a
@@ -227,17 +227,17 @@ final class LibraryModel {
     func cover(for book: Book) async -> CGImage? {
         guard !Task.isCancelled else { return nil }
         let covers = covers
-        let id = book.id
+        let key = book.sha256
         let source = book.coverSource(core: core)
         let loading = Task.detached(priority: .utility) {
-            Task.isCancelled ? nil : covers.cover(id: id, source: source)
+            Task.isCancelled ? nil : covers.cover(key: key, source: source)
         }
         let cover = await withTaskCancellationHandler {
             await loading.value
         } onCancel: {
             loading.cancel()
         }
-        return keepDecoded(cover, id: id)
+        return keepDecoded(cover, key: key)
     }
 
     /// Copies the File at `url` into the Library without blocking the main
@@ -268,7 +268,7 @@ final class LibraryModel {
                     case .alreadyImported(let stored): (stored, false)
                     }
                 // The Cover is made from the File in the Library, PDF or EPUB.
-                _ = covers.cover(id: stored.id, source: stored.coverSource(core: core))
+                _ = covers.cover(key: stored.sha256, source: stored.coverSource(core: core))
                 return (stored, isNew)
             }.value
             let id = stored.id
@@ -329,9 +329,9 @@ final class LibraryModel {
 
     /// Saves `place` as Reading Progress of `book`, read `lastRead`. The
     /// core writes off the main thread, in order; this returns when it has, with
-    /// the Document updated in every window. The Library is listed again only if
+    /// the Book updated in every window. The Library is listed again only if
     /// the core says the Gallery shows something new. Does nothing for a
-    /// Document that was Deleted. A failed write is ignored: the next save
+    /// Book that was Deleted. A failed write is ignored: the next save
     /// replaces it.
     func saveProgress(_ place: Place, of book: Book, at lastRead: Date = .now) async {
         let progress = ReadingProgress(place: place, lastRead: lastRead.millisecondsSince1970)
@@ -346,7 +346,7 @@ final class LibraryModel {
     }
 
     /// The Highlights and page Comments of `book`, each oldest first, read at
-    /// once. Empty if there are none or the Document was Deleted.
+    /// once. Empty if there are none or the Book was Deleted.
     func markup(of book: Book) async -> (highlights: [Highlight], pageComments: [PageComment]) {
         let id = book.id
         let markup = await inOrder { try? $0.markup(id: id) }
@@ -355,7 +355,7 @@ final class LibraryModel {
 
     /// Adds a Highlight over `anchor` in the Default Highlight Color to `book`,
     /// `created` now. The core writes off the main thread, in order, and this
-    /// returns the stored Highlight when it has. Nil for a Document that was
+    /// returns the stored Highlight when it has. Nil for a Book that was
     /// Deleted, or if the write failed.
     func addHighlight(
         _ anchor: Anchor, quotedText: String, to book: Book, at created: Date = .now
@@ -370,7 +370,7 @@ final class LibraryModel {
 
     /// Sets the color of `highlight` of `book`. The core writes off the
     /// main thread, in order, and this returns when it has. Does nothing for a
-    /// Document that was Deleted.
+    /// Book that was Deleted.
     func setHighlightColor(_ color: RGB, of highlight: Highlight, in book: Book) async {
         let id = book.id
         let highlightID = highlight.id
@@ -380,7 +380,7 @@ final class LibraryModel {
 
     /// Sets the Comment of `highlight` of `book` to `comment`; empty removes it. The
     /// core writes off the main thread, in order, and this returns when it has.
-    /// Does nothing for a Document that was Deleted.
+    /// Does nothing for a Book that was Deleted.
     func setComment(_ comment: String, of highlight: Highlight, in book: Book) async {
         let id = book.id
         let highlightID = highlight.id
@@ -389,7 +389,7 @@ final class LibraryModel {
 
     /// Deletes `highlight` from `book`. The core writes off the main
     /// thread, in order, and this returns when it has. Does nothing for a
-    /// Document that was Deleted.
+    /// Book that was Deleted.
     func removeHighlight(_ highlight: Highlight, from book: Book) async {
         let id = book.id
         let highlightID = highlight.id
@@ -399,7 +399,7 @@ final class LibraryModel {
     /// Adds a page Comment without text at `place` to `book`, `created` now. The
     /// core writes off the main thread, in order, and this returns the stored
     /// page Comment when it has. It isn't listed by `markup(of:)` until it has
-    /// text (`setText`). Nil for a Document that was Deleted, or if the write failed.
+    /// text (`setText`). Nil for a Book that was Deleted, or if the write failed.
     func addPageComment(at place: Place, to book: Book, at created: Date = .now) async -> PageComment? {
         let id = book.id
         let milliseconds = created.millisecondsSince1970
@@ -408,7 +408,7 @@ final class LibraryModel {
 
     /// Sets the text of `comment` of `book` to `text`; empty removes the page
     /// Comment. The core writes off the main thread, in order, and this returns when
-    /// it has. Does nothing for a Document that was Deleted.
+    /// it has. Does nothing for a Book that was Deleted.
     func setText(_ text: String, of comment: PageComment, in book: Book) async {
         let id = book.id
         let commentID = comment.id
@@ -417,7 +417,7 @@ final class LibraryModel {
 
     /// Deletes the page Comment `comment` from `book`. The core writes off the main
     /// thread, in order, and this returns when it has. Does nothing for a
-    /// Document that was Deleted.
+    /// Book that was Deleted.
     func removePageComment(_ comment: PageComment, from book: Book) async {
         let id = book.id
         let commentID = comment.id
@@ -458,8 +458,6 @@ final class LibraryModel {
         await inOrder { try? $0.removeCustomColor(id: id) }
     }
 
-    /// Runs `access` on the core off the main thread, after every earlier access
-
     /// Runs `access` on the core off the main thread, after every earlier
     /// access has finished, so reads and writes never overlap.
     private func inOrder<T: Sendable>(_ access: @escaping @Sendable (Library) -> T) async -> T {
@@ -482,9 +480,9 @@ final class LibraryModel {
         let sort = sort.core
         let (result, listed) = await inOrder { core in (change(core), LibraryListing(core, sort: sort)) }
         guard let listed else { return result }
-        // Gone from the Library: so is its Cover.
-        let listedIDs = Set(listed.books.map(\.id))
-        for gone in books where !listedIDs.contains(gone.id) { removeCover(gone.id) }
+        // A File gone from the Library, or changed: so is its Cover.
+        let listedFiles = Set(listed.books.map(\.sha256))
+        for gone in books where !listedFiles.contains(gone.sha256) { removeCover(gone.sha256) }
         listing = listed
         return result
     }

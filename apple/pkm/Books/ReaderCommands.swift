@@ -25,13 +25,10 @@
                 if reader != nil {
                     Button("Zoom In") { reader?.view?.zoomIn() }
                         .keyboardShortcut("+", modifiers: .command)
-                        .disabled(reader == nil)
                     Button("Zoom Out") { reader?.view?.zoomOut() }
                         .keyboardShortcut("-", modifiers: .command)
-                        .disabled(reader == nil)
                     Button("Fit to Width") { reader?.view?.zoomToFitWidth() }
                         .keyboardShortcut("0", modifiers: .command)
-                        .disabled(reader == nil)
                     Divider()
                     ForEach(PageStyle.allCases) { style in
                         Toggle(
@@ -50,7 +47,6 @@
                 if reader != nil {
                     Button("Highlight") { reader?.view?.highlightSelection() }
                         .keyboardShortcut("h", modifiers: [.control, .command])
-                        .disabled(reader == nil)
                     Menu("Find") {
                         Button("Find…") { reader?.view?.presentFind() }
                             .keyboardShortcut("f", modifiers: .command)
@@ -59,7 +55,6 @@
                         Button("Find Previous") { reader?.view?.findPrevious() }
                             .keyboardShortcut("g", modifiers: [.shift, .command])
                     }
-                    .disabled(reader == nil)
                 }
             }
         }

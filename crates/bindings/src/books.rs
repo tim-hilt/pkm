@@ -204,6 +204,9 @@ pub struct Sort {
 pub struct Book {
     pub id: String,
     pub path: String,
+    /// The SHA-256 of the File, lowercase hex: a Cover made from the File
+    /// holds as long as it does.
+    pub sha256: String,
     pub format: Format,
     /// Date Imported, in milliseconds since the Unix epoch.
     pub imported: u64,
@@ -222,6 +225,7 @@ impl From<CoreBook> for Book {
             format: d.format(),
             id: d.id,
             path: d.path.to_string_lossy().into_owned(),
+            sha256: d.sha256,
             imported: d.imported,
             progress: d.progress,
             author: d.details.as_ref().and_then(|x| x.author.clone()),
@@ -758,10 +762,11 @@ impl Library {
         Ok(result?)
     }
 
-    /// Reads the details of the PDFs that lack them on a background thread,
-    /// one at a time, and tells `observer` when the Gallery should list again;
-    /// the core coalesces the callbacks. A PDF `reader` refuses is retried by a
-    /// later pass. Details are kept on this Device only.
+    /// Reads the details of the Books that lack them on a background thread,
+    /// one at a time (PDFs with `reader`), and tells `observer` when the
+    /// Gallery should list again; the core coalesces the callbacks. A File that
+    /// can't be read is retried by a later pass. Details are kept on this
+    /// Device only.
     pub fn read_missing_details(
         &self,
         reader: Arc<dyn PdfReader>,

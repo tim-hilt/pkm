@@ -861,11 +861,61 @@ import UniformTypeIdentifiers
         #expect(!FileManager.default.fileExists(atPath: book.file.path))
     }
 
+    // MARK: Recently Read sort
+
+    /// `libraryForSorting()` with "apple" read at 100 s, "Zebra" at 200 s and
+    /// "Resume 2" at 300 s; "résumé 10" is never opened. Date Imported order
+    /// (newest first) is Zebra, résumé 10, Resume 2, apple.
+    func libraryForRecentlyRead() async throws -> LibraryModel {
+        let library = try await libraryForSorting()
+        for (title, seconds) in [("apple", 100.0), ("Zebra", 200), ("Resume 2", 300)] {
+            let book = try #require(library.books.first { $0.title == title })
+            await library.saveProgress(
+                .pdf(pageIndex: 0, x: 0, y: 0), of: book, at: Date(timeIntervalSince1970: seconds))
+        }
+        return library
+    }
+
+    @Test func recentlyReadListsTheLastReadFirstAndNeverOpenedBooksLast() async throws {
+        let library = try await libraryForRecentlyRead()
+
+        library.sort.key = .recentlyRead
+
+        try await expectListed(["Resume 2", "Zebra", "apple", "résumé 10"], in: library)
+    }
+
+    @Test func reversingRecentlyReadFlipsOnlyTheOpenedBooks() async throws {
+        let library = try await libraryForRecentlyRead()
+
+        library.sort = LibrarySort(key: .recentlyRead, isReversed: true)
+
+        try await expectListed(["apple", "Zebra", "Resume 2", "résumé 10"], in: library)
+    }
+
+    @Test func openingABookMovesItToTheTopOfRecentlyRead() async throws {
+        let library = try await libraryForRecentlyRead()
+        library.sort.key = .recentlyRead
+        try await expectListed(["Resume 2", "Zebra", "apple", "résumé 10"], in: library)
+        let never = try #require(library.books.first { $0.title == "résumé 10" })
+
+        await library.saveProgress(.pdf(pageIndex: 0, x: 0, y: 0), of: never, at: Date(timeIntervalSince1970: 400))
+
+        #expect(library.visibleBooks(matching: "").map(\.title) == ["résumé 10", "Resume 2", "Zebra", "apple"])
+    }
+
+    @Test func theRecentlyReadChoiceIsRememberedOnThisDevice() throws {
+        let library = try openLibrary()
+
+        library.sort = LibrarySort(key: .recentlyRead, isReversed: true)
+
+        #expect(try openLibrary().sort == LibrarySort(key: .recentlyRead, isReversed: true))
+    }
+
     // MARK: Sort choice
 
     @Test func aSortChoiceNoLongerOfferedFallsBackToTheStandardOne() {
         let defaults = UserDefaults.isolated()
-        defaults.set("recentlyRead", forKey: "books.sort.key")
+        defaults.set("lastOpened", forKey: "books.sort.key")
 
         #expect(LibrarySort(from: defaults) == .standard)
     }

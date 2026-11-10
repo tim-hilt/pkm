@@ -1332,6 +1332,17 @@
         }
       }
     },
+    "Recently Read": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recently Read"
+          }
+        }
+      }
+    },
     "Rectangle": {
       "extractionState": "manual",
       "localizations": {

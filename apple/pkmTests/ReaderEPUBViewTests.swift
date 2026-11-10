@@ -1505,7 +1505,7 @@ extension ReaderEPUBView {
         return value as? String ?? ""
     }
 
-    /// The result of `script` in the Reader's own content world, where `leaf` is, as text.
+    /// The result of `script` in the Reader's own content world, where `pkm` is, as text.
     fileprivate func evaluateClient(_ script: String) async throws -> String {
         let value = try await evaluateJavaScript("String(\(script))", in: nil, contentWorld: .defaultClient)
         return value as? String ?? ""
