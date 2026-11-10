@@ -1,6 +1,8 @@
 //! UniFFI surface of the core (ADR-0007). Foreign clients see exactly what is
 //! exported here; the logic itself lives in `pkm-drawing` and `pkm-cloud`.
 
+mod books;
+
 use std::fmt;
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};

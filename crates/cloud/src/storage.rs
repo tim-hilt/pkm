@@ -23,7 +23,7 @@ pub struct Blob {
     pub name: String,
     /// Differs from what it was before once the blob is overwritten: the
     /// ETag, or modified time and size where the storage has none. Drawings,
-    /// unlike Leaf's files, are overwritten, so a name alone says nothing.
+    /// unlike Book Files, are overwritten, so a name alone says nothing.
     pub marker: String,
 }
 

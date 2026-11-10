@@ -21,4 +21,5 @@ bindgen = ["uniffi/cli"]
 uniffi = "0.32"
 pkm-base = { path = "../base" }
 pkm-drawing = { path = "../drawing" }
+pkm-books = { path = "../books" }
 pkm-cloud = { path = "../cloud" }

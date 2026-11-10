@@ -2,7 +2,7 @@
 
 Amends ADR-0001 (one Rust core) and ADR-0009 (no dependencies).
 
-Each Context's logic is its own crate (`pkm-drawing`, later `pkm-books`). What they and `pkm-cloud` share lives once in `pkm-base`: the JSON reader and writer, base64, SHA-256, the clock and the random generator. `pkm-base` has no dependencies, and `pkm-drawing` depends only on it, so ADR-0009 holds for both (the Makefile checks it). `pkm-bindings` stays the only UniFFI library and XCFramework, since two Rust static libraries can't be linked into one app.
+Each Context's logic is its own crate (`pkm-drawing`, `pkm-books`). What they and `pkm-cloud` share lives once in `pkm-base`: the JSON reader and writer, base64, SHA-256, the clock and the random generator. `pkm-base` has no dependencies, and `pkm-drawing` depends only on it, so ADR-0009 holds for both (the Makefile checks it). `pkm-bindings` stays the only UniFFI library and XCFramework, since two Rust static libraries can't be linked into one app.
 
 ## Considered Options
 

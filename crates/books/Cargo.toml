@@ -1,0 +1,24 @@
+# The Books Context: PDFs and EPUBs, their Library, Markup and Reading Progress.
+[package]
+name = "pkm-books"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+# JSON, SHA-256 and the random generator.
+pkm-base = { path = "../base" }
+# The state files' JSON, until `pkm-base` replaces it.
+serde_json = "1"
+sha2 = "0.11"
+hex = "0.4"
+# Inflate only: reads the zip of an EPUB.
+miniz_oxide = { version = "0.9", default-features = false, features = ["with-alloc"] }
+# Reads the XML of an EPUB.
+quick-xml = "0.42"
+# Normalizes the text Book Search matches.
+unicode-normalization = "0.1"
+
+[target.'cfg(target_vendor = "apple")'.dependencies]
+# Orders file writes (`F_BARRIERFSYNC`) and lowers the details pass's priority.
+libc = "0.2"

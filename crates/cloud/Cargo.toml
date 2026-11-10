@@ -1,5 +1,5 @@
 # Cloud Providers: the storage interface, directory and WebDAV storages and
-# the HTTP client (ADR-0012). Copied from Leaf and adapted. Kept out of the
+# the HTTP client (ADR-0012). Adapted from an earlier reader app. Kept out of the
 # core, which has no dependencies (ADR-0009).
 [package]
 name = "pkm-cloud"

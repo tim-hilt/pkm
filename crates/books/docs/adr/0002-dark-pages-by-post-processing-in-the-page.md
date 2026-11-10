@@ -1,0 +1,24 @@
+# Dark Pages are drawn by post-processing each page in a PDFPage subclass
+
+A `PDFDocument` subclass makes PDFKit create `PDFPage` subclasses (`classForPage`). In Dark Pages, a page renders itself into a bitmap, and Core Image inverts it, rotates the hue by 180° (so colors come back and grays stay gray), and maps black to the Page color and white to the Text color with one color matrix. Light Pages draw the page unchanged. PDFKit draws the selection and search highlights on top of the page, outside the page's `draw`, so they keep their colors. Changing the style redraws a `PDFView`, keeping the scroll position: with `layoutDocumentView()` on macOS; on iOS, which keeps drawn tiles through that, with `setNeedsDisplay()` on the `PDFView`, under a picture of the old pages that fades out once every shown tile is redrawn. Opening likewise shows plain paper until every shown tile is drawn, never a blank page or (on iOS) PDFKit's blurry preview. Marking PDFKit's layers as needing display instead leaves tiles without their bleed edge: seams then show as lines.
+
+Measured on a generated 300-page Book (text, vector lines, a gradient image on half the pages), mean of 40 pages on an Apple M1 Mac, drawing to a bitmap:
+
+| | Light Pages | Core Image | Blend modes |
+| --- | --- | --- | --- |
+| Fit-to-width, 2×, whole page | 3.7 ms | 10.7 ms | 47 ms |
+| 5× zoom, 1024 px tile | 3.9 ms | 7.1 ms | 29 ms |
+
+## Considered Options
+
+- **Blend modes in Core Graphics** (difference with white, then the original on top in `.color` mode, multiply, add): keeps exact luminance reversal and needs no bitmap, but is 7–12× slower than Light Pages in software and draws the page twice. Rejected for scroll smoothness.
+- **Layer filters on the PDFView** (`compositingFilter`, `contentFilters`): cheapest, but macOS-only and also reverses the selection and highlights.
+- **Pre-rendered page images**: memory-heavy and re-rendered on every zoom.
+
+## Consequences
+
+- Invert plus hue rotation reverses brightness approximately, not exactly: strongly colored areas come out lighter and less saturated than their original. Images are reversed too.
+- Drawing off-screen costs one bitmap per tile; Core Image runs on the GPU.
+- `PDFPage` subclasses must hold no Swift state: PDFKit creates them without Swift initializers. The appearance lives in the document behind a lock, as PDFKit draws on background threads.
+- Not measured: the iOS Simulator and devices.
+- Knowing when the tiles are drawn relies on PDFKit's layer tree (a new surface per drawn tile); should that change, the picture or paper fades out after a second. `ReaderRedrawTests` catch redrawing breaking.

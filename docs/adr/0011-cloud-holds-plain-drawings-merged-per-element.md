@@ -4,7 +4,7 @@ Cloud Backing keeps each Drawing as a plain `.excalidraw` file in the Cloud Prov
 
 ## Considered Options
 
-- **Leaf's design (Device-owned Automerge chunks, immutable content-hashed files)**: no write can be lost, but the cloud would hold unreadable chunks, the core would gain a CRDT dependency, and the model would duplicate the one the file format already has.
+- **The earlier reader app's design (Device-owned Automerge chunks, immutable content-hashed files)**: no write can be lost, but the cloud would hold unreadable chunks, the core would gain a CRDT dependency, and the model would duplicate the one the file format already has.
 
 ## Consequences
 
