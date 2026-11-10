@@ -15,6 +15,7 @@ pub mod contents;
 pub mod details;
 pub mod epub;
 pub(crate) mod files;
+pub(crate) mod json;
 pub mod jump;
 pub mod library;
 pub mod listing;

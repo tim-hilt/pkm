@@ -62,6 +62,12 @@ impl Value {
         }
     }
 
+    /// The number if it is a whole one `f64` holds exactly (0 to 2^53).
+    pub fn as_u64(&self) -> Option<u64> {
+        let n = self.as_f64()?;
+        (n.fract() == 0.0 && (0.0..=9_007_199_254_740_992.0).contains(&n)).then_some(n as u64)
+    }
+
     pub fn as_bool(&self) -> Option<bool> {
         match self {
             Value::Bool(b) => Some(*b),
@@ -706,6 +712,18 @@ mod tests {
     //! JavaScript's `JSON.stringify`, never recomputed by the code.
 
     use super::{Value, parse};
+
+    #[test]
+    fn as_u64_takes_only_whole_numbers_that_are_exact() {
+        let u64_of = |text: &str| parse(text).unwrap().as_u64();
+        assert_eq!(u64_of("0"), Some(0));
+        assert_eq!(u64_of("1700000000000"), Some(1_700_000_000_000));
+        assert_eq!(u64_of("2.0"), Some(2));
+        assert_eq!(u64_of("9007199254740992"), Some(1 << 53));
+        for text in ["1.5", "-1", "1e300", "\"1\"", "null"] {
+            assert_eq!(u64_of(text), None, "{text}");
+        }
+    }
 
     /// Parses `input` and serializes it compactly again.
     fn round_trip(input: &str) -> String {

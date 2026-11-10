@@ -7,13 +7,12 @@ pub(crate) fn decode(text: &str) -> String {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        let mut byte = [0];
-        let escaped = bytes[i] == b'%'
-            && bytes
-                .get(i + 1..i + 3)
-                .is_some_and(|digits| hex::decode_to_slice(digits, &mut byte).is_ok());
-        if escaped {
-            out.push(byte[0]);
+        let escaped = (bytes[i] == b'%')
+            .then(|| bytes.get(i + 1..i + 3))
+            .flatten()
+            .and_then(|digits| Some(hex_digit(digits[0])? << 4 | hex_digit(digits[1])?));
+        if let Some(byte) = escaped {
+            out.push(byte);
             i += 3;
         } else {
             out.push(bytes[i]);
@@ -21,6 +20,10 @@ pub(crate) fn decode(text: &str) -> String {
         }
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex_digit(digit: u8) -> Option<u8> {
+    Some(char::from(digit).to_digit(16)? as u8)
 }
 
 #[cfg(test)]

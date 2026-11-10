@@ -26,7 +26,7 @@ use crate::markup::{Anchor, Highlight, Markup, PageComment, Rgb};
 use crate::preferences::{HighlightColor, HighlightColors, Preferences};
 use crate::progress::{self, Place, ReadingProgress};
 use crate::state::{self, BookState};
-use sha2::{Digest, Sha256};
+use pkm_base::sha256::Sha256;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
@@ -993,7 +993,7 @@ fn stream_hashed(
         progress(copied, total);
     }
     flush_ordered(&output)?;
-    Ok(hex::encode(hasher.finalize()))
+    Ok(hasher.finalize_hex())
 }
 
 /// The name of the File in the Book folder `dir`, and when the folder was
@@ -1301,6 +1301,28 @@ mod tests {
     fn emma() -> Fixture {
         Fixture::new("<dc:title>Emma</dc:title><dc:creator>Jane Austen</dc:creator>")
             .chapters(&["<p>Hello</p>", "<p>world</p>"])
+    }
+
+    #[test]
+    fn a_files_id_is_its_sha256_whatever_its_size_and_format() {
+        let scratch = Scratch::new();
+        // The first is several read buffers long; the second is an EPUB.
+        let cases = [
+            (
+                vec![7; 600 * 1024],
+                "2e43196f0b263f8ad3a912056cc166a1a44d49baabca1e17b21034bd6202345f",
+            ),
+            (
+                emma().bytes(),
+                "31bd61dce2a109ce47ebc71e22bed63375d09269899d7b643cd032efed58ace0",
+            ),
+        ];
+        for (i, (bytes, sha256)) in cases.iter().enumerate() {
+            let source = scratch.file(&format!("{i}"), bytes);
+            let copy = scratch.0.join(format!("copy{i}"));
+            assert_eq!(copy_hashed(&source, &copy, |_, _| {}).unwrap(), *sha256);
+            assert_eq!(fs::read(copy).unwrap(), *bytes);
+        }
     }
 
     #[test]

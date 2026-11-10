@@ -5,9 +5,9 @@
 //! `0xRRGGBB`). An ID starts with the time it was added, so sorting IDs gives
 //! the order added.
 
+use crate::json::{self, number, object, string};
 use crate::markup::Rgb;
-use serde_json::{Value, json};
-
+use pkm_base::json::Value;
 /// One of the Highlight Colors that always exist.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BuiltInColor {
@@ -72,15 +72,13 @@ pub(crate) struct Preferences {
 impl Preferences {
     /// The Preferences stored as `bytes`; the defaults if they are missing or unreadable.
     pub(crate) fn decode(bytes: Option<&[u8]>) -> Self {
-        let json: Value = bytes
-            .and_then(|b| serde_json::from_slice(b).ok())
-            .unwrap_or_default();
+        let json = bytes.and_then(json::parse).unwrap_or(Value::Null);
         let mut custom: Vec<_> = json
             .get("custom_colors")
             .and_then(Value::as_object)
             .into_iter()
-            .flatten()
-            .filter_map(|(id, rgb)| Some((id.clone(), Rgb::unpacked(rgb.as_u64()?)?)))
+            .flat_map(|colors| colors.iter())
+            .filter_map(|(id, rgb)| Some((id.to_owned(), Rgb::unpacked(rgb.as_u64()?)?)))
             .collect();
         custom.sort_by(|a, b| a.0.cmp(&b.0));
         Self {
@@ -93,13 +91,14 @@ impl Preferences {
     }
 
     pub(crate) fn encode(&self) -> Vec<u8> {
-        let custom: serde_json::Map<_, _> = self
-            .custom
-            .iter()
-            .map(|(id, rgb)| (id.clone(), json!(rgb.packed())))
-            .collect();
-        json!({ "default_color": self.default_color, "custom_colors": custom })
-            .to_string()
+        let custom = object(
+            self.custom
+                .iter()
+                .map(|(id, rgb)| (id.as_str(), number(rgb.packed()))),
+        );
+        let default_color = self.default_color.as_deref().map_or(Value::Null, string);
+        object([("default_color", default_color), ("custom_colors", custom)])
+            .to_json()
             .into_bytes()
     }
 
@@ -272,5 +271,37 @@ mod tests {
         assert_eq!(reloaded(&prefs).highlight_colors().default_color, teal);
         prefs.remove_custom_color(&teal.id);
         assert_eq!(prefs.highlight_colors().default_color, built_in("Yellow"));
+    }
+
+    /// The bytes written before `pkm-base` replaced serde_json: keys sorted,
+    /// compact. Saved Libraries carry them.
+    const SAVED: &str = r#"{"custom_colors":{"0000000000001-x":32896,"0000000000002-y":9849600},"default_color":"Green"}"#;
+    const SAVED_DEFAULTS: &str = r#"{"custom_colors":{},"default_color":null}"#;
+
+    #[test]
+    fn preferences_are_written_as_the_bytes_saved_libraries_hold() {
+        let mut prefs = Preferences::default();
+        assert_eq!(prefs.encode(), SAVED_DEFAULTS.as_bytes());
+        prefs.set_default_color("Green");
+        prefs.custom = vec![
+            ("0000000000001-x".into(), TEAL),
+            ("0000000000002-y".into(), BROWN),
+        ];
+        assert_eq!(prefs.encode(), SAVED.as_bytes());
+    }
+
+    #[test]
+    fn preferences_are_read_from_the_bytes_saved_libraries_hold() {
+        let prefs = Preferences::decode(Some(SAVED.as_bytes()));
+        assert_eq!(prefs.default_color.as_deref(), Some("Green"));
+        assert_eq!(
+            prefs.custom,
+            [
+                ("0000000000001-x".to_owned(), TEAL),
+                ("0000000000002-y".to_owned(), BROWN)
+            ]
+        );
+        let defaults = Preferences::decode(Some(SAVED_DEFAULTS.as_bytes()));
+        assert_eq!((defaults.default_color, defaults.custom), (None, vec![]));
     }
 }

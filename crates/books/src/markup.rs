@@ -10,8 +10,9 @@
 //! Comment is its text: emptying it deletes the page Comment, and one without
 //! text, which only exists between adding it and typing, isn't listed.
 
+use crate::json::{number, object, string};
 use crate::progress::Place;
-use serde_json::{Value, json};
+use pkm_base::json::Value;
 
 /// A rectangle in PDF page space.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -164,10 +165,16 @@ impl Markup {
 
     /// The Markup as JSON, as `from_json` reads it.
     pub(crate) fn to_json(&self) -> Value {
-        json!({
-            "highlights": self.highlights.iter().map(highlight_json).collect::<Vec<_>>(),
-            "page_comments": self.page_comments.iter().map(page_comment_json).collect::<Vec<_>>(),
-        })
+        object([
+            (
+                "highlights",
+                Value::Array(self.highlights.iter().map(highlight_json).collect()),
+            ),
+            (
+                "page_comments",
+                Value::Array(self.page_comments.iter().map(page_comment_json).collect()),
+            ),
+        ])
     }
 
     /// The Markup in `json`; entries that are incomplete are skipped.
@@ -189,36 +196,68 @@ impl Markup {
 
 fn highlight_json(h: &Highlight) -> Value {
     let anchor = match &h.anchor {
-        Anchor::Pdf(pages) => json!({ "pdf": pages.iter().map(|p| json!({
-            "page_index": p.page_index,
-            "rects": p.rects.iter().flat_map(|r| [r.x, r.y, r.width, r.height]).collect::<Vec<_>>(),
-        })).collect::<Vec<_>>() }),
-        Anchor::Epub { start, end } => json!({ "epub": {
-            "start_spine": start.spine_index, "start_offset": start.offset,
-            "end_spine": end.spine_index, "end_offset": end.offset,
-        }}),
+        Anchor::Pdf(pages) => object([(
+            "pdf",
+            Value::Array(
+                pages
+                    .iter()
+                    .map(|p| {
+                        let rects = p.rects.iter().flat_map(|r| [r.x, r.y, r.width, r.height]);
+                        object([
+                            ("page_index", number(p.page_index)),
+                            ("rects", Value::Array(rects.map(Value::Number).collect())),
+                        ])
+                    })
+                    .collect(),
+            ),
+        )]),
+        Anchor::Epub { start, end } => object([(
+            "epub",
+            object([
+                ("start_spine", number(start.spine_index)),
+                ("start_offset", number(start.offset)),
+                ("end_spine", number(end.spine_index)),
+                ("end_offset", number(end.offset)),
+            ]),
+        )]),
     };
-    let mut json = json!({
-        "id": h.id, "anchor": anchor, "quoted_text": h.quoted_text,
-        "color": h.color.packed(), "created": h.created,
-    });
+    let mut members = vec![
+        ("id", string(&h.id)),
+        ("anchor", anchor),
+        ("quoted_text", string(&h.quoted_text)),
+        ("color", number(h.color.packed())),
+        ("created", number(h.created)),
+    ];
     if let Some(comment) = &h.comment {
-        json["comment"] = comment.as_str().into();
+        members.push(("comment", string(comment)));
     }
-    json
+    object(members)
 }
 
 fn page_comment_json(c: &PageComment) -> Value {
     let place = match c.place {
-        Place::Pdf { page_index, x, y } => {
-            json!({ "pdf": { "page_index": page_index, "x": x, "y": y } })
-        }
+        Place::Pdf { page_index, x, y } => object([(
+            "pdf",
+            object([
+                ("page_index", number(page_index)),
+                ("x", Value::Number(x)),
+                ("y", Value::Number(y)),
+            ]),
+        )]),
         Place::Epub {
             spine_index,
             offset,
-        } => json!({ "epub": { "spine": spine_index, "offset": offset } }),
+        } => object([(
+            "epub",
+            object([("spine", number(spine_index)), ("offset", number(offset))]),
+        )]),
     };
-    json!({ "id": c.id, "place": place, "created": c.created, "text": c.text })
+    object([
+        ("id", string(&c.id)),
+        ("place", place),
+        ("created", number(c.created)),
+        ("text", string(&c.text)),
+    ])
 }
 
 fn u32_at(json: &Value, key: &str) -> Option<u32> {
@@ -364,8 +403,16 @@ mod tests {
         }
     }
 
+    fn written(markup: &Markup) -> String {
+        markup.to_json().to_json()
+    }
+
+    fn read(json: &str) -> Markup {
+        Markup::from_json(&pkm_base::json::parse(json).unwrap())
+    }
+
     fn round_trip(markup: &Markup) -> Markup {
-        Markup::from_json(&serde_json::from_str(&markup.to_json().to_string()).unwrap())
+        read(&written(markup))
     }
 
     #[test]
@@ -405,20 +452,21 @@ mod tests {
 
     #[test]
     fn incomplete_entries_are_skipped_and_unknown_fields_ignored() {
-        let json = json!({
+        let markup = read(
+            r#"{
             "highlights": [
                 { "id": "no-color", "anchor": { "epub": {} }, "quoted_text": "x", "created": 1 },
                 { "id": "ok", "anchor": { "epub": {
                     "start_spine": 0, "start_offset": 0, "end_spine": 0, "end_offset": 4 } },
-                  "quoted_text": "x", "color": 16777215, "created": 1, "future": true },
+                  "quoted_text": "x", "color": 16777215, "created": 1, "future": true }
             ],
-            "page_comments": [{ "id": "no-place", "created": 1, "text": "t" }],
-        });
-        let markup = Markup::from_json(&json);
+            "page_comments": [{ "id": "no-place", "created": 1, "text": "t" }]
+        }"#,
+        );
         assert_eq!(markup.highlights.len(), 1);
         assert_eq!(markup.highlights[0].id, "ok");
         assert!(markup.page_comments.is_empty());
-        assert_eq!(Markup::from_json(&json!(7)), Markup::default());
+        assert_eq!(read("7"), Markup::default());
     }
 
     #[test]
@@ -506,5 +554,64 @@ mod tests {
         markup.remove_page_comment("b");
         markup.remove_page_comment("unknown");
         assert!(markup.page_comments.is_empty());
+    }
+
+    /// What `to_json` wrote before `pkm-base` replaced serde_json: keys sorted,
+    /// compact. Saved Books carry it, so it must keep reading and writing.
+    const MARKUP_JSON: &str = r#"{"highlights":[{"anchor":{"pdf":[{"page_index":2,"rects":[1.5,2.5,30.25,4.75]}]},"color":16771900,"comment":"why \"not\"\né","created":1,"id":"a","quoted_text":"quoted — “text”"},{"anchor":{"epub":{"end_offset":3,"end_spine":2,"start_offset":10,"start_spine":1}},"color":16771900,"created":2,"id":"b","quoted_text":"quoted — “text”"}],"page_comments":[{"created":3,"id":"c","place":{"pdf":{"page_index":4,"x":10.5,"y":20.25}},"text":"spot"},{"created":4,"id":"d","place":{"epub":{"offset":99,"spine":3}},"text":"epub spot"}]}"#;
+
+    fn fixture_markup() -> Markup {
+        let mut pdf = pdf_highlight("a", 1);
+        pdf.comment = Some("why \"not\"\n\u{e9}".into());
+        let Anchor::Pdf(pages) = &mut pdf.anchor else {
+            unreachable!()
+        };
+        pages[0].rects[0].y = 2.5;
+        pages[0].rects[0].height = 4.75;
+        let mut spot = page_comment("c", 3, "spot");
+        spot.place = Place::Pdf {
+            page_index: 4,
+            x: 10.5,
+            y: 20.25,
+        };
+        Markup {
+            highlights: vec![pdf, epub_highlight("b", 2)],
+            page_comments: vec![
+                spot,
+                PageComment {
+                    place: Place::Epub {
+                        spine_index: 3,
+                        offset: 99,
+                    },
+                    ..page_comment("d", 4, "epub spot")
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn markup_is_written_as_the_bytes_saved_books_hold() {
+        assert_eq!(written(&fixture_markup()), MARKUP_JSON);
+    }
+
+    #[test]
+    fn markup_is_read_from_the_bytes_saved_books_hold() {
+        assert_eq!(read(MARKUP_JSON), fixture_markup());
+    }
+
+    #[test]
+    fn whole_numbers_read_the_same_however_they_are_spelled() {
+        let spelled = MARKUP_JSON.replace("2.5,", "2.0,").replace("20.25", "20.0");
+        let mut expected = fixture_markup();
+        expected.page_comments[0].place = Place::Pdf {
+            page_index: 4,
+            x: 10.5,
+            y: 20.0,
+        };
+        let Anchor::Pdf(pages) = &mut expected.highlights[0].anchor else {
+            unreachable!()
+        };
+        pages[0].rects[0].y = 2.0;
+        assert_eq!(read(&spelled), expected);
     }
 }
