@@ -2,7 +2,8 @@ import type { SyncSchedule } from "../../generated/pkm_web.js";
 import type { Core } from "../core/Core";
 import type { DrawingStore } from "../drawings/gallery/DrawingStore";
 import type { FileStorage } from "../storage/FileStorage";
-import { type SyncStatus, runSyncStep } from "./SyncRunner";
+import { FileFolder } from "./FileFolder";
+import { type StepResult, type SyncStatus, runSyncStep } from "./SyncRunner";
 import { SyncState } from "./SyncState";
 import { type TabMessage, type Tabs, browserTabs } from "./Tabs";
 import { type Fetch, runExchange } from "./WebDavSender";
@@ -95,6 +96,10 @@ export class CloudBacking {
   private readonly listeners = new Set<(connection: Connection | undefined) => void>();
   private readonly syncedListeners = new Set<(names: string[]) => void>();
   private readonly state: SyncState;
+  private readonly books: FileFolder;
+  private readonly bookStates: FileFolder;
+  private readonly booksState: SyncState;
+  private readonly bookStateStates: SyncState;
   private report: SyncReport = {};
   private readonly reportListeners = new Set<(report: SyncReport) => void>();
   private visible = true;
@@ -105,6 +110,7 @@ export class CloudBacking {
   /** The step under way. */
   private step: Promise<void> | undefined;
   private readonly incoming = { known: false };
+  private readonly booksIncoming = { known: false };
 
   private constructor(
     private readonly core: Core,
@@ -113,7 +119,11 @@ export class CloudBacking {
     private readonly drawings: DrawingStore,
     private readonly tabs: Tabs,
   ) {
-    this.state = new SyncState(storage);
+    this.state = new SyncState(storage, "Drawings");
+    this.books = new FileFolder(storage, "Books");
+    this.bookStates = new FileFolder(storage, "Books/.state");
+    this.booksState = new SyncState(storage, "Books");
+    this.bookStateStates = new SyncState(storage, "BooksState");
     tabs.listen((message) => void this.heard(message));
   }
 
@@ -136,17 +146,25 @@ export class CloudBacking {
     return data && JSON.parse(new TextDecoder().decode(data));
   }
 
-  /** Throws `ConnectFailed` unless the server takes `credentials` and has (or now has) its `pkm/Drawings` folder. */
+  /** Throws `ConnectFailed` unless the server takes `credentials` and has (or now has) its `pkm/Drawings` and `pkm/Books` folders. */
   private async check({ url, username, password }: Credentials): Promise<void> {
-    let protocol;
+    let drawings;
+    let books;
     try {
-      protocol = this.core.webDav(url, username, password);
+      drawings = this.core.webDav(url, username, password);
+      books = this.core.webDavForBooks(url, username, password);
     } catch {
       throw new ConnectFailed("notHttps");
     }
-    const result = await runExchange(protocol.connect(), this.send);
-    protocol.free();
-    if (result.error) throw new ConnectFailed(result.error as ConnectReason);
+    try {
+      for (const protocol of [drawings, books]) {
+        const result = await runExchange(protocol.connect(), this.send);
+        if (result.error) throw new ConnectFailed(result.error as ConnectReason);
+      }
+    } finally {
+      drawings.free();
+      books.free();
+    }
   }
 
   /** Uses `credentials` from now on, here and on the next visit. */
@@ -223,6 +241,7 @@ export class CloudBacking {
     // Under the lock: no step of another tab writes Sync state after it is gone.
     await this.tabs.exclusive(() => this.storage.remove("Cloud"));
     this.incoming.known = false;
+    this.booksIncoming.known = false;
     this.setReport({});
     this.changed();
     this.tabs.post({ kind: "disconnected" });
@@ -267,6 +286,7 @@ export class CloudBacking {
     await this.stopLoop();
     this.current = saved;
     this.incoming.known = false;
+    this.booksIncoming.known = false;
     this.setReport({});
     if (saved) this.startLoop();
     this.changed();
@@ -313,46 +333,110 @@ export class CloudBacking {
     // Another tab may have Disconnected or Connected elsewhere while this one waited for the lock.
     const saved = await this.saved();
     if (!saved || saved.url !== credentials.url || saved.password !== credentials.password) return;
-    const protocol = this.core.webDav(credentials.url, credentials.username, credentials.password);
-    let result;
-    try {
-      result = await runSyncStep({
-        core: this.core,
-        protocol,
-        send: this.send,
-        drawings: this.drawings,
+    const drawingsProtocol = this.core.webDav(
+      credentials.url,
+      credentials.username,
+      credentials.password,
+    );
+    const booksProtocol = this.core.webDavForBooks(
+      credentials.url,
+      credentials.username,
+      credentials.password,
+    );
+    const now = Date.now();
+    // One step per folder, in order, all against the same server: Drawings,
+    // the Book Files, then their state, which the core's Books merge merges.
+    const plans = [
+      {
+        run: this.core.syncRun(now),
+        protocol: drawingsProtocol,
+        files: this.drawings,
         state: this.state,
         incoming: this.incoming,
-        cancelled: () => this.schedule !== schedule,
-        onProgress: (done, total) => {
-          if (this.schedule === schedule && total > 0)
-            this.setReport({ ...this.report, status: "syncing", progress: { done, total } });
-        },
-      });
+        drawings: true,
+      },
+      {
+        run: this.core.syncRunForBooks(now),
+        protocol: booksProtocol,
+        files: this.books,
+        state: this.booksState,
+        incoming: this.booksIncoming,
+        drawings: false,
+      },
+      {
+        run: this.core.syncRunForBookStates(now),
+        protocol: booksProtocol,
+        files: this.bookStates,
+        state: this.bookStateStates,
+        incoming: this.booksIncoming,
+        drawings: false,
+      },
+    ];
+    const results: StepResult[] = [];
+    const changed: string[] = [];
+    let finished = 0;
+    let planned = 0;
+    try {
+      for (const { drawings, ...plan } of plans) {
+        const latest = { done: 0, total: 0, seen: false };
+        const result = await runSyncStep({
+          ...plan,
+          send: this.send,
+          cancelled: () => this.schedule !== schedule,
+          onProgress: (done, total) => {
+            latest.done = done;
+            latest.total = total;
+            latest.seen = true;
+            if (this.schedule === schedule && total > 0)
+              this.setReport({
+                ...this.report,
+                status: "syncing",
+                progress: { done: finished + done, total: planned + total },
+              });
+          },
+        });
+        if (!result) return;
+        results.push(result);
+        if (drawings) changed.push(...result.changed);
+        if (latest.seen) {
+          finished += latest.done;
+          planned += latest.total;
+        }
+        if (result.accessLost) break;
+      }
     } catch {
       // Whatever broke is no reason to stop Syncing: the step counts as failed.
-      result = {
+      results.push({
         changed: [],
         error: "failed",
         accessLost: false,
         storageFull: false,
-        status: "offline" as const,
-      };
+        status: "offline",
+      });
     } finally {
-      protocol.free();
+      for (const { run } of plans) run.free();
+      drawingsProtocol.free();
+      booksProtocol.free();
     }
-    if (!result || this.schedule !== schedule) return;
-    schedule.stepEnded(Date.now(), result.error === undefined);
-    if (result.accessLost) schedule.accessLost();
-    const wentThrough = result.status === "upToDate" || result.status === "full";
+    if (this.schedule !== schedule) return;
+    const status: SyncStatus = results.some((r) => r.accessLost)
+      ? "accessLost"
+      : results.some((r) => r.error !== undefined)
+        ? "offline"
+        : results.some((r) => r.storageFull)
+          ? "full"
+          : "upToDate";
+    schedule.stepEnded(Date.now(), !results.some((r) => r.error !== undefined));
+    if (status === "accessLost") schedule.accessLost();
+    const wentThrough = status === "upToDate" || status === "full";
     this.setReport({
-      status: result.status,
+      status,
       progress: undefined,
       lastSync: wentThrough ? Date.now() : this.report.lastSync,
     });
-    if (result.changed.length > 0) {
-      for (const listener of this.syncedListeners) listener(result.changed);
-      this.tabs.post({ kind: "changed", names: result.changed });
+    if (changed.length > 0) {
+      for (const listener of this.syncedListeners) listener(changed);
+      this.tabs.post({ kind: "changed", names: changed });
     }
   }
 

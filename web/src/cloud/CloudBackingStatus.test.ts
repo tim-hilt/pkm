@@ -153,8 +153,9 @@ describe("offline", () => {
     await advance(60_000);
     const failing = tries;
     expect(other.syncReport.status).toBe("offline");
-    // Polling every 10 s would have tried 13 times in 130 s; back-off tries far fewer.
-    expect(failing).toBeLessThanOrEqual(5);
+    // Polling every 10 s would have tried 13 times in 130 s, one listing per
+    // folder each; back-off tries far fewer.
+    expect(failing).toBeLessThanOrEqual(15);
     server.offline = false;
     other.setOnline(false);
     other.setOnline(true);

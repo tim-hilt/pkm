@@ -1,6 +1,5 @@
-import type { Core } from "../core/Core";
-import type { DrawingStore } from "../drawings/gallery/DrawingStore";
 import type { SyncRequest, SyncRun, WebDavProtocol } from "../../generated/pkm_web.js";
+import type { SyncFolder } from "./FileFolder";
 import type { SyncState } from "./SyncState";
 import { type Fetch, runExchange } from "./WebDavSender";
 
@@ -21,12 +20,14 @@ export interface StepResult {
 
 /** What a step needs to answer its requests. */
 export interface StepContext {
-  core: Core;
+  /** The step to run, made for the folder's merge rule. */
+  run: SyncRun;
   protocol: WebDavProtocol;
   send: Fetch;
-  drawings: DrawingStore;
+  /** The folder's files: Drawings, Book Files or the Books' state. */
+  files: SyncFolder;
   state: SyncState;
-  /** Set once a put has found the folder for uploads there; shared by the steps of one connection. */
+  /** Set once a put has found the folder for uploads there; shared by the steps of one cloud folder. */
   incoming: { known: boolean };
   /** Ask before every request: a step whose connection was dropped stops. */
   cancelled: () => boolean;
@@ -38,37 +39,33 @@ export interface StepContext {
  * Runs one Sync step: answers the step machine's requests with the Drawing
  * store, the Sync state and the WebDAV protocol over `fetch`, until it is
  * done. The stamp of a local Drawing is its modification time and size.
- * Returns `undefined` if the step was cancelled.
+ * Returns `undefined` if the step was cancelled. The caller frees `run`.
  */
 export async function runSyncStep(context: StepContext): Promise<StepResult | undefined> {
-  const run = context.core.syncRun(Date.now());
-  try {
-    let request = run.start();
-    while (request) {
-      if (context.cancelled()) return undefined;
-      const current = request;
-      try {
-        request = await answer(run, current, context).catch((error) =>
-          run.fail("failed", String(error)),
-        );
-      } finally {
-        current.free();
-      }
-      reportProgress(run, context);
+  const { run } = context;
+  let request = run.start();
+  while (request) {
+    if (context.cancelled()) return undefined;
+    const current = request;
+    try {
+      request = await answer(run, current, context).catch((error) =>
+        run.fail("failed", String(error)),
+      );
+    } finally {
+      current.free();
     }
-    const outcome = run.outcome();
-    const result: StepResult = {
-      changed: outcome.changed,
-      error: outcome.error,
-      accessLost: outcome.accessLost,
-      storageFull: outcome.storageFull,
-      status: outcome.status as SyncStatus,
-    };
-    outcome.free();
-    return result;
-  } finally {
-    run.free();
+    reportProgress(run, context);
   }
+  const outcome = run.outcome();
+  const result: StepResult = {
+    changed: outcome.changed,
+    error: outcome.error,
+    accessLost: outcome.accessLost,
+    storageFull: outcome.storageFull,
+    status: outcome.status as SyncStatus,
+  };
+  outcome.free();
+  return result;
 }
 
 function reportProgress(run: SyncRun, { onProgress }: StepContext): void {
@@ -83,7 +80,7 @@ function reportProgress(run: SyncRun, { onProgress }: StepContext): void {
 async function answer(
   run: SyncRun,
   request: SyncRequest,
-  { protocol, send, drawings, state, incoming }: StepContext,
+  { protocol, send, files, state, incoming }: StepContext,
 ): Promise<SyncRequest | undefined> {
   const { kind, file } = request;
   switch (kind) {
@@ -96,15 +93,15 @@ async function answer(
       );
     }
     case "listLocal": {
-      const files = await drawings.files();
+      const listed = await files.files();
       return run.answerLocal(
-        files.map((f) => f.file),
-        files.map((f) => `${f.modified} ${f.size}`),
-        Float64Array.from(files, (f) => f.modified),
+        listed.map((f) => f.file),
+        listed.map((f) => `${f.modified} ${f.size}`),
+        Float64Array.from(listed, (f) => f.modified),
       );
     }
     case "readLocal":
-      return run.answerBytes(await drawings.read(file));
+      return run.answerBytes(await files.read(file));
     case "readMarks": {
       const { marker, stamp } = await state.marks(file);
       return run.answerMarks(marker, stamp);
@@ -145,14 +142,12 @@ async function answer(
     }
     case "writeLocal":
       return run.answerHappened(
-        await drawings.writeIfHolding(file, request.bytes, request.expected ?? undefined),
+        await files.writeIfHolding(file, request.bytes, request.expected ?? undefined),
       );
     case "renameLocal":
-      return run.answerHappened(
-        await drawings.renameIfHolding(file, request.to, request.expected!),
-      );
+      return run.answerHappened(await files.renameIfHolding(file, request.to, request.expected!));
     case "deleteLocal":
-      return run.answerHappened(await drawings.deleteIfHolding(file, request.expected!));
+      return run.answerHappened(await files.deleteIfHolding(file, request.expected!));
     default:
       return run.fail("failed", `unknown request ${kind}`);
   }

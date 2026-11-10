@@ -8,6 +8,7 @@
 use crate::json::{self, number, object, string};
 use crate::markup::Rgb;
 use pkm_base::json::Value;
+use std::collections::BTreeMap;
 /// One of the Highlight Colors that always exist.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BuiltInColor {
@@ -62,11 +63,16 @@ impl From<BuiltInColor> for HighlightColor {
 }
 
 /// The choices stored in the Preferences.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq)]
 pub(crate) struct Preferences {
     default_color: Option<String>,
+    /// When `default_color` was last set; 0 if before this Device recorded it.
+    default_color_at: u64,
     /// Custom Colors by ID, which sorts them in the order added.
     custom: Vec<(String, Rgb)>,
+    /// Custom Colors that were removed, and when. A removal beats a concurrent
+    /// use of the color on another Device, wherever it was added.
+    removed: BTreeMap<String, u64>,
 }
 
 impl Preferences {
@@ -81,13 +87,30 @@ impl Preferences {
             .filter_map(|(id, rgb)| Some((id.to_owned(), Rgb::unpacked(rgb.as_u64()?)?)))
             .collect();
         custom.sort_by(|a, b| a.0.cmp(&b.0));
-        Self {
+        let removed: BTreeMap<String, u64> = json
+            .get("removed_colors")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flat_map(|times| times.iter())
+            .filter_map(|(id, at)| Some((id.to_owned(), at.as_u64()?)))
+            .collect();
+        let mut prefs = Self {
             default_color: json
                 .get("default_color")
                 .and_then(Value::as_str)
                 .map(str::to_owned),
+            default_color_at: json
+                .get("default_color_at")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
             custom,
-        }
+            removed,
+        };
+        // A color removed on another Device is gone here too.
+        prefs
+            .custom
+            .retain(|(id, _)| !prefs.removed.contains_key(id));
+        prefs
     }
 
     pub(crate) fn encode(&self) -> Vec<u8> {
@@ -97,9 +120,55 @@ impl Preferences {
                 .map(|(id, rgb)| (id.as_str(), number(rgb.packed()))),
         );
         let default_color = self.default_color.as_deref().map_or(Value::Null, string);
-        object([("default_color", default_color), ("custom_colors", custom)])
-            .to_json()
-            .into_bytes()
+        let mut members = vec![("default_color", default_color), ("custom_colors", custom)];
+        if self.default_color_at > 0 {
+            members.push(("default_color_at", number(self.default_color_at)));
+        }
+        if !self.removed.is_empty() {
+            members.push((
+                "removed_colors",
+                object(
+                    self.removed
+                        .iter()
+                        .map(|(id, at)| (id.as_str(), number(*at))),
+                ),
+            ));
+        }
+        object(members).to_json().into_bytes()
+    }
+
+    /// These Preferences and another Device's, as one: Custom Colors united,
+    /// a removal kept, and the latest Default Highlight Color. Commutative and
+    /// idempotent.
+    pub(crate) fn merged(&self, other: &Preferences) -> Preferences {
+        let mut custom: BTreeMap<String, Rgb> = self.custom.iter().cloned().collect();
+        for (id, rgb) in &other.custom {
+            custom
+                .entry(id.clone())
+                .and_modify(|known| *known = later_color(*known, *rgb))
+                .or_insert(*rgb);
+        }
+        let mut removed = self.removed.clone();
+        for (id, at) in &other.removed {
+            removed
+                .entry(id.clone())
+                .and_modify(|known| *known = (*known).max(*at))
+                .or_insert(*at);
+        }
+        custom.retain(|id, _| !removed.contains_key(id));
+        let default_color = if self.default_color_at > other.default_color_at {
+            self.default_color.clone()
+        } else if self.default_color_at < other.default_color_at {
+            other.default_color.clone()
+        } else {
+            min_default(&self.default_color, &other.default_color)
+        };
+        Preferences {
+            default_color,
+            default_color_at: self.default_color_at.max(other.default_color_at),
+            custom: custom.into_iter().collect(),
+            removed,
+        }
     }
 
     /// The Highlight Colors to choose from and the one new Highlights get. The
@@ -131,7 +200,13 @@ impl Preferences {
     /// Makes the color `id` the Default Highlight Color. It doesn't check that
     /// `id` is a color.
     pub(crate) fn set_default_color(&mut self, id: &str) {
+        self.set_default_color_at(id, 0);
+    }
+
+    /// Makes the color `id` the Default Highlight Color, set at `at`.
+    pub(crate) fn set_default_color_at(&mut self, id: &str, at: u64) {
         self.default_color = Some(id.to_owned());
+        self.default_color_at = at;
     }
 
     /// Adds a new Custom Color `rgb`, added at `now` in milliseconds since the
@@ -149,9 +224,26 @@ impl Preferences {
         }
     }
 
-    /// Removes Custom Color `id`. Built-in colors and unknown IDs are left alone.
-    pub(crate) fn remove_custom_color(&mut self, id: &str) {
-        self.custom.retain(|(custom, _)| custom != id);
+    /// Removes Custom Color `id`, removed at `at`.
+    pub(crate) fn remove_custom_color_at(&mut self, id: &str, at: u64) {
+        if self.custom.iter().any(|(custom, _)| custom == id) {
+            self.custom.retain(|(custom, _)| custom != id);
+            self.removed.insert(id.to_owned(), at);
+        }
+    }
+}
+
+/// Two colors of the same Custom Color ID, if Devices disagree: the smaller,
+/// so both sides of a merge pick the same one.
+fn later_color(a: Rgb, b: Rgb) -> Rgb {
+    if a.packed() <= b.packed() { a } else { b }
+}
+
+fn min_default(a: &Option<String>, b: &Option<String>) -> Option<String> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.min(b).clone()),
+        (Some(a), None) => Some(a.clone()),
+        (None, b) => b.clone(),
     }
 }
 
@@ -251,15 +343,15 @@ mod tests {
         let mut prefs = Preferences::default();
         let teal = prefs.add_custom_color(TEAL, 1);
         let brown = prefs.add_custom_color(BROWN, 2);
-        prefs.remove_custom_color(&teal.id);
+        prefs.remove_custom_color_at(&teal.id, 0);
         assert_eq!(reloaded(&prefs).highlight_colors().colors[6..], [brown]);
     }
 
     #[test]
     fn built_in_colors_and_unknown_ids_cannot_be_removed() {
         let mut prefs = Preferences::default();
-        prefs.remove_custom_color("Yellow");
-        prefs.remove_custom_color("nope");
+        prefs.remove_custom_color_at("Yellow", 0);
+        prefs.remove_custom_color_at("nope", 0);
         assert_eq!(prefs.highlight_colors().colors.len(), 6);
     }
 
@@ -269,7 +361,7 @@ mod tests {
         let teal = prefs.add_custom_color(TEAL, 1);
         prefs.set_default_color(&teal.id);
         assert_eq!(reloaded(&prefs).highlight_colors().default_color, teal);
-        prefs.remove_custom_color(&teal.id);
+        prefs.remove_custom_color_at(&teal.id, 0);
         assert_eq!(prefs.highlight_colors().default_color, built_in("Yellow"));
     }
 
@@ -288,6 +380,44 @@ mod tests {
             ("0000000000002-y".into(), BROWN),
         ];
         assert_eq!(prefs.encode(), SAVED.as_bytes());
+    }
+
+    #[test]
+    fn merging_unites_custom_colors_and_the_latest_default_wins() {
+        let mut left = Preferences::default();
+        let teal = left.add_custom_color(TEAL, 10);
+        left.set_default_color_at("Green", 20);
+        let mut right = Preferences::default();
+        let brown = right.add_custom_color(BROWN, 11);
+        right.set_default_color_at("Blue", 21);
+
+        let merged = left.merged(&right);
+        assert_eq!(merged.merged(&right), merged.merged(&left));
+        assert_eq!(merged.merged(&merged), merged);
+        assert_eq!(merged.highlight_colors().colors[6..], [teal, brown]);
+        assert_eq!(merged.highlight_colors().default_color, built_in("Blue"));
+    }
+
+    #[test]
+    fn a_removed_custom_color_stays_removed_even_if_the_other_side_added_it() {
+        let mut left = Preferences::default();
+        let teal = left.add_custom_color(TEAL, 10);
+        left.remove_custom_color_at(&teal.id, 20);
+        let mut right = Preferences::default();
+        right.custom.push((teal.id.clone(), TEAL));
+        right.set_default_color_at(&teal.id, 15);
+
+        for merged in [left.merged(&right), right.merged(&left)] {
+            assert!(
+                merged
+                    .highlight_colors()
+                    .colors
+                    .iter()
+                    .all(|c| c.id != teal.id)
+            );
+            assert_eq!(merged.highlight_colors().default_color, built_in("Yellow"));
+            assert_eq!(merged.merged(&merged), merged);
+        }
     }
 
     #[test]

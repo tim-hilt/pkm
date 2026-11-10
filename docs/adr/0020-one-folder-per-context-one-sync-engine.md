@@ -17,3 +17,4 @@ Each Context keeps its Items as plain files in a folder of its own: `Drawings/` 
 - Progress counts the transfers of the folders that have run, so its total grows while later folders come up.
 - A Delete wins over edits made elsewhere, in every Context folder alike (ADR-0011); a file never Synced is uploaded, never deleted.
 - A rename on another Device arrives as a delete and an add. A step deletes local files last, so the new file is there before the old one goes, and an open Drawing follows it by its Item ID (ADR-0019) instead of closing.
+- Books is two Context folders over the same cloud folder: the Book Files (transferred, never merged) and their hidden `.state` files (merged by the Books merge hook). A storage holds one flat folder, so the state files sit at the root of `pkm/Books` in the cloud, not in a `.state` folder; their names end in `.json`, so they never meet a Book File. Each has its own Sync history.

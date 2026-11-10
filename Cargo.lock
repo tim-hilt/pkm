@@ -558,6 +558,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "pkm-base",
+ "pkm-books",
  "pkm-drawing",
  "quick-xml",
  "ureq",

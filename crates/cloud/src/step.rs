@@ -569,12 +569,41 @@ impl Engine {
                 self.write_merged(file, marker, &local, &remote, merged)
                     .await
             }
+            None if local_changed && self.merge.keeps_both_versions() => {
+                self.keep_both(file, marker, local, remote).await
+            }
             // Not a Drawing on one side. The cloud's file replaces the local
             // one only if that is unchanged and no Drawing either. Until then
             // every step downloads it again.
             None if local_changed || self.merge.is_item(&local) => Ok(()),
             None => self.write_local(file, &remote, marker, Some(&local)).await,
         }
+    }
+
+    /// Both sides changed `file` too differently to merge, and this Context
+    /// keeps both: the local one gets the next free name, then the cloud's
+    /// takes the name they shared.
+    async fn keep_both(
+        &mut self,
+        file: &str,
+        marker: &str,
+        local: Vec<u8>,
+        remote: Vec<u8>,
+    ) -> io::Result<()> {
+        let renamed = self.next_free_name(file).await?;
+        let happened = self
+            .guarded(Request::RenameLocal {
+                from: file.into(),
+                to: renamed.clone(),
+                expected: local.clone(),
+            })
+            .await?;
+        if !happened {
+            return Ok(()); // the app wrote it meanwhile
+        }
+        self.outcome().changed.push(self.merge.name_of(&renamed));
+        self.write_local(file, &remote, marker, None).await?;
+        self.upload(&renamed, local).await
     }
 
     /// The local Drawing changed, the cloud's did not: it still holds
@@ -669,6 +698,9 @@ impl Engine {
     }
 
     async fn upload(&mut self, file: &str, bytes: Vec<u8>) -> io::Result<()> {
+        if !self.merge.transfers_unparseable() && !self.merge.is_item(&bytes) {
+            return Ok(()); // e.g. a state file Sync can't parse: leave it alone
+        }
         if self.outcome().storage_full {
             // Another upload just found the cloud full: don't ask again.
             return Err(io::Error::from(io::ErrorKind::StorageFull));
@@ -694,6 +726,9 @@ impl Engine {
         let Some(bytes) = self.fetch(file).await? else {
             return Ok(()); // deleted since the listing
         };
+        if !self.merge.transfers_unparseable() && !self.merge.is_item(&bytes) {
+            return Ok(()); // e.g. a state file Sync can't parse: leave it alone
+        }
         self.write_local(file, &bytes, marker, expected).await
     }
 

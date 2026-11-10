@@ -9,4 +9,4 @@
 ## Relationships
 
 - **App → Drawings**: Cloud Backing Syncs the Drawings with the Drawings Context's own merge.
-- **App → Books**: Delete, Appearance and Cloud Backing are the app's; Page Style "Match Appearance" follows the app's Appearance.
+- **App → Books**: Delete, Appearance and Cloud Backing are the app's; Page Style "Match Appearance" follows the app's Appearance. Cloud Backing Syncs Book Files unchanged and merges their state files.

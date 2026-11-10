@@ -188,6 +188,17 @@ final class LibraryModel {
         return listing.sorted.matching(search: searchText).map { listing.books[Int($0)] }
     }
 
+    /// Sync wrote or deleted Book Files or their state: lists again, and reads
+    /// the details of Books that arrived without them.
+    func syncDidChange() {
+        core.readMissingDetails(
+            reader: PDFKitReader(),
+            observer: GalleryRelay { [weak self] in
+                Task { await self?.relist { _ in } }
+            })
+        Task { await relist { _ in } }
+    }
+
     /// The Book with `id`, if it is in the Library.
     func book(id: String) -> Book? { books.first { $0.id == id } }
 

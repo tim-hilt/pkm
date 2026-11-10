@@ -416,6 +416,7 @@ impl Library {
             imported: now(),
             markup: Markup::default(),
             progress: None,
+            changes: Default::default(),
         };
         fs::rename(staged, self.folder.file(&book.file_name))?;
         self.folder.write_state(&book)?;
@@ -669,7 +670,7 @@ impl Library {
     /// Sets the color of Highlight `highlight` of Book `id`. Does nothing for a
     /// Highlight that isn't there, or a Book that isn't in the Library.
     pub fn set_highlight_color(&self, id: &str, highlight: &str, color: Rgb) -> io::Result<()> {
-        self.edit_state(id, |s| s.markup.set_highlight_color(highlight, color))
+        self.edit_state(id, |s| s.set_highlight_color(highlight, color, now()))
             .map(drop)
     }
 
@@ -682,7 +683,7 @@ impl Library {
         highlight: &str,
         comment: &str,
     ) -> io::Result<()> {
-        self.edit_state(id, |s| s.markup.set_highlight_comment(highlight, comment))
+        self.edit_state(id, |s| s.set_highlight_comment(highlight, comment, now()))
             .map(drop)
     }
 
@@ -690,7 +691,7 @@ impl Library {
     /// nothing for a Highlight that isn't there, or a Book that isn't in the
     /// Library.
     pub fn remove_highlight(&self, id: &str, highlight: &str) -> io::Result<()> {
-        self.edit_state(id, |s| s.markup.remove_highlight(highlight))
+        self.edit_state(id, |s| s.remove_highlight(highlight, now()))
             .map(drop)
     }
 
@@ -719,7 +720,7 @@ impl Library {
     /// `text` deletes the page Comment. Does nothing for a page Comment that
     /// isn't there, or a Book that isn't in the Library.
     pub fn set_page_comment_text(&self, id: &str, comment: &str, text: &str) -> io::Result<()> {
-        self.edit_state(id, |s| s.markup.set_page_comment_text(comment, text))
+        self.edit_state(id, |s| s.set_page_comment_text(comment, text, now()))
             .map(drop)
     }
 
@@ -727,7 +728,7 @@ impl Library {
     /// nothing for a page Comment that isn't there, or a Book that isn't in
     /// the Library.
     pub fn remove_page_comment(&self, id: &str, comment: &str) -> io::Result<()> {
-        self.edit_state(id, |s| s.markup.remove_page_comment(comment))
+        self.edit_state(id, |s| s.remove_page_comment(comment, now()))
             .map(drop)
     }
 
@@ -766,7 +767,7 @@ impl Library {
     /// the Default Highlight Color, that is yellow again. Does nothing for a
     /// built-in color, which can't be removed, or an unknown `id`.
     pub fn remove_custom_color(&self, id: &str) -> io::Result<()> {
-        self.edit_preferences(|p| p.remove_custom_color(id))
+        self.edit_preferences(|p| p.remove_custom_color_at(id, now()))
     }
 
     fn read_preferences(&self) -> Preferences {
@@ -1901,6 +1902,7 @@ mod tests {
             imported: book.imported + 1,
             markup: Markup::default(),
             progress: None,
+            changes: Default::default(),
         };
         let (low, high) = ("aaaaaaaaaaaa", "zzzzzzzzzzzy");
         // The twin has the lower ID, the Book a higher one: they swap.

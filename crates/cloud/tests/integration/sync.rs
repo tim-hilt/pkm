@@ -8,9 +8,10 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
 
 use pkm_base::json;
+use pkm_books::library::Library;
 use pkm_cloud::{
-    Blob, DirStorage, Drawings, Folder, Merge, Progress, Storage, SyncState, sync_folders,
-    sync_step,
+    Blob, BookStates, Books as BookFiles, DirStorage, Drawings, Folder, Merge, Progress, Storage,
+    SyncState, sync_folders, sync_step,
 };
 
 struct Scratch(PathBuf);
@@ -128,14 +129,19 @@ struct Device {
     state: Scratch,
     /// A second Context folder, for the tests of several (`sync_both`).
     notes: Notes,
+    /// The Books Context: Book Files, with their state hidden in `.state`.
+    books: Scratch,
 }
 
 impl Device {
     fn new() -> Self {
+        let books = Scratch::new("books");
+        fs::create_dir_all(books.0.join(".state")).unwrap();
         Device {
             drawings: Scratch::new("drawings"),
             state: Scratch::new("state"),
             notes: Notes::new(),
+            books,
         }
     }
 
@@ -168,6 +174,69 @@ impl Device {
 
     fn files(&self) -> Vec<String> {
         listing(&self.drawings.0)
+    }
+
+    /// Writes a Book File into the Books folder.
+    fn write_book(&self, file: &str, bytes: &[u8]) {
+        fs::write(self.books.0.join(file), bytes).unwrap();
+    }
+
+    fn read_book(&self, file: &str) -> Option<Vec<u8>> {
+        fs::read(self.books.0.join(file)).ok()
+    }
+
+    fn remove_book(&self, file: &str) {
+        fs::remove_file(self.books.0.join(file)).unwrap();
+    }
+
+    /// Writes a state file into the hidden `.state` beside the Book Files.
+    fn write_book_state(&self, file: &str, bytes: &[u8]) {
+        fs::write(self.books.0.join(".state").join(file), bytes).unwrap();
+    }
+
+    fn read_book_state(&self, file: &str) -> Option<Vec<u8>> {
+        fs::read(self.books.0.join(".state").join(file)).ok()
+    }
+
+    fn remove_book_state(&self, file: &str) {
+        fs::remove_file(self.books.0.join(".state").join(file)).unwrap();
+    }
+
+    fn book_files(&self) -> Vec<String> {
+        listing(&self.books.0)
+            .into_iter()
+            .filter(|name| !name.starts_with('.'))
+            .collect()
+    }
+
+    /// One Sync step over the Books Context: the Book Files and their state
+    /// files, each with its own history. Returns the names it changed here.
+    fn sync_books(&self, cloud: &Cloud) -> Vec<String> {
+        let files_state = SyncState::open(self.state.0.join("Books")).unwrap();
+        let states_state = SyncState::open(self.state.0.join("BooksState")).unwrap();
+        let folders = [
+            Folder {
+                dir: &self.books.0,
+                state: &files_state,
+                storage: &cloud.storage,
+                merge: Arc::new(BookFiles),
+            },
+            Folder {
+                dir: &self.books.0.join(".state"),
+                state: &states_state,
+                storage: &cloud.storage,
+                merge: Arc::new(BookStates),
+            },
+        ];
+        let outcomes = sync_folders(&folders, &AtomicBool::new(false), &|_| {});
+        assert_eq!(outcomes.len(), 2);
+        for outcome in &outcomes {
+            assert!(outcome.error.is_none(), "{:?}", outcome.error);
+            assert!(!outcome.access_lost && !outcome.storage_full);
+        }
+        let mut changed: Vec<String> = outcomes.into_iter().flat_map(|o| o.changed).collect();
+        changed.sort();
+        changed
     }
 
     /// One Sync step; returns the names it changed here.
@@ -1595,4 +1664,410 @@ fn a_folder_that_fails_does_not_stop_the_others_from_reporting() {
     assert!(outcomes[0].error.is_some());
     assert!(outcomes[1].error.is_none());
     assert_eq!(cloud.read("A.excalidraw").unwrap(), b"a");
+}
+
+// ---- Books (ADR-0020, the Books merge hook) ----
+
+const BOOK_ID: &str = "aaaaaaaaaaaa";
+const OTHER_ID: &str = "bbbbbbbbbbbb";
+
+fn state_with(
+    id: &str,
+    name: &str,
+    sha256: &str,
+    highlights: &str,
+    progress: &str,
+    changes: &str,
+) -> Vec<u8> {
+    format!(
+        r#"{{"id":"{id}","file_name":"{name}","sha256":"{sha256}","imported":1,"markup":{{"highlights":[{highlights}],"page_comments":[]}},"progress":{progress}{changes}}}"#
+    )
+    .into_bytes()
+}
+
+fn json(bytes: &[u8]) -> pkm_base::json::Value {
+    pkm_base::json::parse(std::str::from_utf8(bytes).unwrap()).unwrap()
+}
+
+fn highlight_json(id: &str, color: u64, comment: Option<&str>) -> String {
+    let comment = comment.map_or_else(String::new, |c| format!(r#","comment":"{c}""#));
+    format!(
+        r#"{{"id":"{id}","anchor":{{"epub":{{"start_spine":0,"start_offset":1,"end_spine":0,"end_offset":2}}}},"quoted_text":"text","color":{color},"created":1{comment}}}"#
+    )
+}
+
+#[test]
+fn book_files_transfer_unchanged_and_a_name_clash_keeps_both() {
+    let cloud = Cloud::new();
+    let (phone, tablet) = (Device::new(), Device::new());
+    phone.write_book("Emma.epub", b"PK\x03\x04phone");
+    tablet.write_book("Emma.epub", b"PK\x03\x04tablet");
+
+    phone.sync_books(&cloud);
+    tablet.sync_books(&cloud);
+    phone.sync_books(&cloud);
+
+    assert_eq!(cloud.read("Emma.epub").unwrap(), b"PK\x03\x04phone");
+    assert_eq!(cloud.read("Emma 2.epub").unwrap(), b"PK\x03\x04tablet");
+    assert_eq!(tablet.book_files(), ["Emma 2.epub", "Emma.epub"]);
+    assert_eq!(
+        tablet.read_book("Emma 2.epub").unwrap(),
+        b"PK\x03\x04tablet"
+    );
+    assert_eq!(phone.read_book("Emma.epub").unwrap(), b"PK\x03\x04phone");
+}
+
+#[test]
+fn a_book_file_changed_after_a_sync_reaches_the_other_devices() {
+    let cloud = Cloud::new();
+    let (phone, tablet) = (Device::new(), Device::new());
+    phone.write_book("Book.pdf", b"%PDF-one");
+    phone.sync_books(&cloud);
+    tablet.sync_books(&cloud);
+
+    phone.write_book("Book.pdf", b"%PDF-two");
+    phone.sync_books(&cloud);
+    assert_eq!(cloud.read("Book.pdf").unwrap(), b"%PDF-two");
+
+    tablet.sync_books(&cloud);
+    assert_eq!(tablet.read_book("Book.pdf").unwrap(), b"%PDF-two");
+}
+
+#[test]
+fn book_files_changed_on_both_sides_are_both_kept_under_different_names() {
+    let cloud = Cloud::new();
+    let (phone, tablet) = (Device::new(), Device::new());
+    phone.write_book("Book.pdf", b"%PDF-one");
+    phone.sync_books(&cloud);
+    tablet.sync_books(&cloud);
+
+    phone.write_book("Book.pdf", b"%PDF-phone");
+    tablet.write_book("Book.pdf", b"%PDF-tablet");
+    phone.sync_books(&cloud);
+    tablet.sync_books(&cloud);
+    phone.sync_books(&cloud);
+
+    for device in [&phone, &tablet] {
+        assert_eq!(device.book_files(), ["Book 2.pdf", "Book.pdf"]);
+        assert_eq!(device.read_book("Book.pdf").unwrap(), b"%PDF-phone");
+        assert_eq!(device.read_book("Book 2.pdf").unwrap(), b"%PDF-tablet");
+    }
+    assert_eq!(cloud.read("Book.pdf").unwrap(), b"%PDF-phone");
+    assert_eq!(cloud.read("Book 2.pdf").unwrap(), b"%PDF-tablet");
+}
+
+#[test]
+fn two_books_that_shared_a_name_stay_two_books_with_their_own_markup() {
+    let cloud = Cloud::new();
+    let (phone, tablet) = (Device::new(), Device::new());
+    phone.write_book("Same.pdf", b"%PDF-phone");
+    tablet.write_book("Same.pdf", b"%PDF-tablet");
+    phone.write_book_state(
+        &format!("{BOOK_ID}.json"),
+        &state_with(
+            BOOK_ID,
+            "Same.pdf",
+            &sha(b"%PDF-phone"),
+            &highlight_json("phone", 1, None),
+            "null",
+            "",
+        ),
+    );
+    tablet.write_book_state(
+        &format!("{OTHER_ID}.json"),
+        &state_with(
+            OTHER_ID,
+            "Same.pdf",
+            &sha(b"%PDF-tablet"),
+            &highlight_json("tablet", 1, None),
+            "null",
+            "",
+        ),
+    );
+
+    phone.sync_books(&cloud);
+    tablet.sync_books(&cloud);
+    phone.sync_books(&cloud);
+
+    for device in [&phone, &tablet] {
+        let library = Library::open(&device.books.0).unwrap();
+        assert_eq!(library.books().unwrap().len(), 2);
+        for (id, highlight) in [(BOOK_ID, "phone"), (OTHER_ID, "tablet")] {
+            let book = library.book(id).unwrap().unwrap();
+            assert_eq!(
+                book.sha256,
+                sha(if id == BOOK_ID {
+                    b"%PDF-phone"
+                } else {
+                    b"%PDF-tablet"
+                })
+            );
+            let markup = library.markup(id).unwrap();
+            assert_eq!(markup.highlights[0].id, highlight);
+        }
+    }
+}
+
+#[test]
+fn highlights_and_comments_merge_by_id_with_the_later_change_winning() {
+    let cloud = Cloud::new();
+    let (phone, tablet) = (Device::new(), Device::new());
+    let sha = "aa";
+    phone.write_book("Book.pdf", b"%PDF-one");
+    tablet.write_book("Book.pdf", b"%PDF-one");
+    let left = state_with(
+        BOOK_ID,
+        "Book.pdf",
+        sha,
+        &highlight_json("h", 1, Some("old")),
+        "null",
+        r#","changes":{"highlight_colors":{"h":10},"highlight_comments":{"h":10}}"#,
+    );
+    let right = state_with(
+        BOOK_ID,
+        "Book.pdf",
+        sha,
+        &highlight_json("h", 2, Some("new")),
+        "null",
+        r#","changes":{"highlight_colors":{"h":11},"highlight_comments":{"h":11}}"#,
+    );
+    phone.write_book_state(&format!("{BOOK_ID}.json"), &left);
+    tablet.write_book_state(&format!("{BOOK_ID}.json"), &right);
+
+    phone.sync_books(&cloud);
+    tablet.sync_books(&cloud);
+    phone.sync_books(&cloud);
+
+    assert_eq!(
+        phone.read_book_state(&format!("{BOOK_ID}.json")),
+        tablet.read_book_state(&format!("{BOOK_ID}.json"))
+    );
+    let merged = json(&cloud.read(&format!("{BOOK_ID}.json")).unwrap());
+    let highlight = &merged
+        .get("markup")
+        .unwrap()
+        .get("highlights")
+        .unwrap()
+        .as_array()
+        .unwrap()[0];
+    assert_eq!(highlight.get("color").unwrap().as_u64(), Some(2));
+    assert_eq!(highlight.get("comment").unwrap().as_str(), Some("new"));
+}
+
+#[test]
+fn reading_progress_goes_to_the_newest_last_read() {
+    let cloud = Cloud::new();
+    let (phone, tablet) = (Device::new(), Device::new());
+    phone.write_book("Book.pdf", b"%PDF-one");
+    tablet.write_book("Book.pdf", b"%PDF-one");
+    phone.write_book_state(
+        &format!("{BOOK_ID}.json"),
+        &state_with(BOOK_ID, "Book.pdf", "aa", "", r#""e 1 5 100""#, ""),
+    );
+    tablet.write_book_state(
+        &format!("{BOOK_ID}.json"),
+        &state_with(BOOK_ID, "Book.pdf", "aa", "", r#"null"#, ""),
+    );
+    // The tablet read later.
+    tablet.write_book_state(
+        &format!("{BOOK_ID}.json"),
+        &state_with(BOOK_ID, "Book.pdf", "aa", "", r#""e 2 1 200""#, ""),
+    );
+
+    phone.sync_books(&cloud);
+    tablet.sync_books(&cloud);
+    phone.sync_books(&cloud);
+
+    let merged = json(&phone.read_book_state(&format!("{BOOK_ID}.json")).unwrap());
+    assert_eq!(merged.get("progress").unwrap().as_str(), Some("e 2 1 200"));
+}
+
+#[test]
+fn custom_colors_are_united_and_a_removal_beats_a_concurrent_use() {
+    let cloud = Cloud::new();
+    let (phone, tablet) = (Device::new(), Device::new());
+    phone.write_book("Book.pdf", b"%PDF-one");
+    tablet.write_book("Book.pdf", b"%PDF-one");
+    phone.write_book_state(
+        "preferences.json",
+        br#"{"custom_colors":{"0000000000001-a":32896,"0000000000002-b":9849600},"default_color":"Green","default_color_at":10,"removed_colors":{"0000000000001-a":9}}"#,
+    );
+    tablet.write_book_state(
+        "preferences.json",
+        br#"{"custom_colors":{"0000000000001-a":32896,"0000000000003-c":255},"default_color":"Blue","default_color_at":11}"#,
+    );
+
+    phone.sync_books(&cloud);
+    tablet.sync_books(&cloud);
+    phone.sync_books(&cloud);
+
+    let merged = json(&phone.read_book_state("preferences.json").unwrap());
+    let colors = merged.get("custom_colors").unwrap().as_object().unwrap();
+    assert!(colors.get("0000000000001-a").is_none());
+    assert!(colors.get("0000000000002-b").is_some());
+    assert!(colors.get("0000000000003-c").is_some());
+    assert_eq!(merged.get("default_color").unwrap().as_str(), Some("Blue"));
+}
+
+#[test]
+fn double_imports_while_apart_become_one_book_with_the_markup_of_both() {
+    let cloud = Cloud::new();
+    let (phone, tablet) = (Device::new(), Device::new());
+    for device in [&phone, &tablet] {
+        device.write_book("Emma.epub", b"PK\x03\x04same");
+    }
+    phone.write_book_state(
+        &format!("{BOOK_ID}.json"),
+        &state_with(
+            BOOK_ID,
+            "Emma.epub",
+            sha(b"PK\x03\x04same").as_str(),
+            &highlight_json("one", 1, None),
+            "null",
+            "",
+        ),
+    );
+    tablet.write_book_state(
+        &format!("{OTHER_ID}.json"),
+        &state_with(
+            OTHER_ID,
+            "Emma.epub",
+            sha(b"PK\x03\x04same").as_str(),
+            &highlight_json("two", 2, None),
+            "null",
+            "",
+        ),
+    );
+
+    phone.sync_books(&cloud);
+    tablet.sync_books(&cloud);
+    phone.sync_books(&cloud);
+
+    for device in [&phone, &tablet] {
+        let library = Library::open(&device.books.0).unwrap();
+        let books = library.books().unwrap();
+        assert_eq!(books.len(), 1);
+        let markup = library.markup(&books[0].id).unwrap();
+        assert_eq!(markup.highlights.len(), 2);
+    }
+}
+
+#[test]
+fn deleting_a_book_beats_a_highlight_made_meanwhile() {
+    let cloud = Cloud::new();
+    let (phone, tablet) = (Device::new(), Device::new());
+    phone.write_book("Book.pdf", b"%PDF-one");
+    phone.write_book_state(
+        &format!("{BOOK_ID}.json"),
+        &state_with(BOOK_ID, "Book.pdf", "aa", "", "null", ""),
+    );
+    phone.sync_books(&cloud);
+    tablet.sync_books(&cloud);
+
+    phone.remove_book("Book.pdf");
+    phone.remove_book_state(&format!("{BOOK_ID}.json"));
+    tablet.write_book_state(
+        &format!("{BOOK_ID}.json"),
+        &state_with(
+            BOOK_ID,
+            "Book.pdf",
+            "aa",
+            &highlight_json("h", 1, None),
+            "null",
+            "",
+        ),
+    );
+    phone.sync_books(&cloud);
+    tablet.sync_books(&cloud);
+
+    assert_eq!(cloud.read("Book.pdf"), None);
+    assert!(cloud.read(&format!("{BOOK_ID}.json")).is_none());
+    assert!(tablet.read_book("Book.pdf").is_none());
+    assert!(tablet.read_book_state(&format!("{BOOK_ID}.json")).is_none());
+}
+
+#[test]
+fn an_unparseable_state_file_is_left_alone() {
+    let cloud = Cloud::new();
+    let (phone, tablet) = (Device::new(), Device::new());
+    phone.write_book("Book.pdf", b"%PDF-one");
+    let good = state_with(BOOK_ID, "Book.pdf", "aa", "", "null", "");
+    phone.write_book_state(&format!("{BOOK_ID}.json"), &good);
+    let corrupt = b"{\"id\": ".to_vec();
+    tablet.write_book_state(&format!("{BOOK_ID}.json"), &corrupt);
+
+    phone.sync_books(&cloud);
+    tablet.sync_books(&cloud);
+    phone.sync_books(&cloud);
+
+    assert_eq!(cloud.read(&format!("{BOOK_ID}.json")).unwrap(), good);
+    assert_eq!(
+        tablet.read_book_state(&format!("{BOOK_ID}.json")).unwrap(),
+        corrupt
+    );
+}
+
+fn sha(bytes: &[u8]) -> String {
+    let mut hasher = pkm_base::sha256::Sha256::new();
+    hasher.update(bytes);
+    hasher.finalize_hex()
+}
+
+#[test]
+fn three_devices_converge_on_one_state_with_every_highlight_and_the_latest_fields() {
+    let cloud = Cloud::new();
+    let devices = [Device::new(), Device::new(), Device::new()];
+    let marks = [("a", 10, "first"), ("b", 20, "second"), ("c", 30, "third")];
+    for (device, (own, at, comment)) in devices.iter().zip(marks) {
+        device.write_book("Book.pdf", b"%PDF-one");
+        let highlights = format!(
+            "{},{}",
+            highlight_json("h", 1, Some(comment)),
+            highlight_json(own, 2, None)
+        );
+        let changes = format!(
+            r#","changes":{{"highlight_comments":{{"h":{at}}},"highlight_colors":{{"h":{at}}}}}"#
+        );
+        device.write_book_state(
+            &format!("{BOOK_ID}.json"),
+            &state_with(BOOK_ID, "Book.pdf", "aa", &highlights, "null", &changes),
+        );
+    }
+
+    for _ in 0..3 {
+        for device in &devices {
+            device.sync_books(&cloud);
+        }
+    }
+
+    let merged = cloud.read(&format!("{BOOK_ID}.json")).unwrap();
+    for device in &devices {
+        assert_eq!(
+            device.read_book_state(&format!("{BOOK_ID}.json")).unwrap(),
+            merged
+        );
+    }
+    let state = json(&merged);
+    assert_eq!(
+        state
+            .get("markup")
+            .unwrap()
+            .get("highlights")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
+    let common = state
+        .get("markup")
+        .unwrap()
+        .get("highlights")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|h| h.get("id").unwrap().as_str() == Some("h"))
+        .unwrap();
+    assert_eq!(common.get("comment").unwrap().as_str(), Some("third"));
 }

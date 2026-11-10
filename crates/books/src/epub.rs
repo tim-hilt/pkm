@@ -844,8 +844,18 @@ fn u32_at(bytes: &[u8], at: usize) -> Option<u32> {
 /// Fills `buf` from `file` at `offset`, leaving no cursor to share between
 /// threads. None if the file ends first.
 fn read_at(file: &File, buf: &mut [u8], offset: u64) -> Option<()> {
-    use std::os::unix::fs::FileExt;
-    file.read_exact_at(buf, offset).ok()
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileExt;
+        file.read_exact_at(buf, offset).ok()
+    }
+    #[cfg(not(unix))]
+    {
+        use std::io::{Read, Seek, SeekFrom};
+        let mut file = file.try_clone().ok()?;
+        file.seek(SeekFrom::Start(offset)).ok()?;
+        file.read_exact(buf).ok()
+    }
 }
 
 impl Zip {

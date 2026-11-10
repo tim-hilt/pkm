@@ -10,8 +10,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use pkm_base::item_id::ItemId;
 use pkm_base::random::Entropy;
 use pkm_cloud::{
-    ConnectError, DirStorage, Drawings, GoogleDriveStorage, Observer, OneDriveStorage, Progress,
-    Status, Storage, SyncFolder, SyncLoop, SyncState, Timing, WebDavStorage,
+    BookStates, Books, ConnectError, DirStorage, Drawings, GoogleDriveStorage, Observer,
+    OneDriveStorage, Progress, Status, Storage, SyncFolder, SyncLoop, SyncState, Timing,
+    WebDavStorage,
 };
 use pkm_drawing::scene::{FillPattern, LineStyle};
 use pkm_drawing::{
@@ -44,7 +45,8 @@ pub enum ConnectError {
 /// thread. Keeps nothing: the client keeps the credentials.
 #[uniffi::export]
 pub fn connect_webdav(url: String, username: String, password: String) -> Result<(), ConnectError> {
-    WebDavStorage::connect(&url, &username, &password, Drawings::FOLDER).map(drop)
+    WebDavStorage::connect(&url, &username, &password, Drawings::FOLDER)?;
+    WebDavStorage::connect(&url, &username, &password, Books::FOLDER).map(drop)
 }
 
 /// Connects to iCloud Drive through `granted_directory`, the folder the user
@@ -192,12 +194,13 @@ pub trait TokenObserver: Send + Sync {
 fn google_drive_storage(
     client_id: &str,
     refresh_token: &str,
+    context: &str,
     tokens: Arc<dyn TokenObserver>,
 ) -> Arc<GoogleDriveStorage> {
     Arc::new(GoogleDriveStorage::resume(
         client_id,
         refresh_token,
-        Drawings::FOLDER,
+        context,
         move |token| tokens.refresh_token_rotated(token.to_owned()),
     ))
 }
@@ -205,12 +208,13 @@ fn google_drive_storage(
 fn one_drive_storage(
     client_id: &str,
     refresh_token: &str,
+    context: &str,
     tokens: Arc<dyn TokenObserver>,
 ) -> Arc<OneDriveStorage> {
     Arc::new(OneDriveStorage::resume(
         client_id,
         refresh_token,
-        Drawings::FOLDER,
+        context,
         move |token| tokens.refresh_token_rotated(token.to_owned()),
     ))
 }
@@ -225,9 +229,10 @@ pub trait Downloader: Send + Sync {
 
 fn icloud_storage(
     folder: &str,
+    context: &str,
     downloader: Arc<dyn Downloader>,
 ) -> Result<Arc<DirStorage>, SyncStartError> {
-    DirStorage::open_downloading(Path::new(folder).join(Drawings::FOLDER), move |path| {
+    DirStorage::open_downloading(Path::new(folder).join(context), move |path| {
         downloader.download(path.to_string_lossy().into_owned());
     })
     .map(Arc::new)
@@ -235,8 +240,7 @@ fn icloud_storage(
     .map_err(|_| SyncStartError::AccessLost)
 }
 
-/// Hears what Sync did to the Drawings folder (the only Context folder the
-/// bindings Sync so far).
+/// Hears what Sync did to the Context folders.
 #[uniffi::export(with_foreign)]
 pub trait SyncObserver: Send + Sync {
     /// Sync wrote or deleted the files of these Drawings (names without
@@ -244,7 +248,12 @@ pub trait SyncObserver: Send + Sync {
     /// thread of the Sync loop, not the main thread.
     fn changed(&self, names: Vec<String>);
 
-    /// Drawings are being transferred: `done` of `total`. `total` is 0 once
+    /// Sync wrote or deleted these Book Files or their state (names with
+    /// their extension; a rename is the old name and the new one). The Books
+    /// Gallery should list again. Also on the Sync loop's thread.
+    fn books_changed(&self, names: Vec<String>);
+
+    /// Items are being transferred: `done` of `total`. `total` is 0 once
     /// the step is over. Also on the Sync loop's thread.
     fn progress(&self, done: u32, total: u32);
 
@@ -283,6 +292,8 @@ impl Observer for ForeignObserver {
     fn changed(&self, folder: &str, names: Vec<String>) {
         if folder == Drawings::FOLDER {
             self.0.changed(names);
+        } else if folder == Books::FOLDER {
+            self.0.books_changed(names);
         }
     }
     fn progress(&self, progress: Option<Progress>) {
@@ -331,15 +342,20 @@ impl CloudSync {
         username: String,
         password: String,
         drawings_directory: String,
+        books_directory: String,
         state_directory: String,
         observer: Arc<dyn SyncObserver>,
     ) -> Result<Arc<Self>, SyncStartError> {
-        let storage = WebDavStorage::resume(&url, &username, &password, Drawings::FOLDER)
+        let drawings = WebDavStorage::resume(&url, &username, &password, Drawings::FOLDER)
             .map_err(|_| SyncStartError::NotHttps)?;
-        Self::start_drawings(
+        let books = WebDavStorage::resume(&url, &username, &password, Books::FOLDER)
+            .map_err(|_| SyncStartError::NotHttps)?;
+        Self::start_contexts(
             drawings_directory,
+            books_directory,
             state_directory,
-            Arc::new(storage),
+            Arc::new(drawings),
+            Arc::new(books),
             observer,
         )
     }
@@ -352,11 +368,20 @@ impl CloudSync {
         folder: String,
         downloader: Arc<dyn Downloader>,
         drawings_directory: String,
+        books_directory: String,
         state_directory: String,
         observer: Arc<dyn SyncObserver>,
     ) -> Result<Arc<Self>, SyncStartError> {
-        let storage = icloud_storage(&folder, downloader)?;
-        Self::start_drawings(drawings_directory, state_directory, storage, observer)
+        let drawings = icloud_storage(&folder, Drawings::FOLDER, downloader.clone())?;
+        let books = icloud_storage(&folder, Books::FOLDER, downloader)?;
+        Self::start_contexts(
+            drawings_directory,
+            books_directory,
+            state_directory,
+            drawings,
+            books,
+            observer,
+        )
     }
 
     /// Starts Syncing like `start_webdav`, with `My Drive/pkm` of
@@ -368,11 +393,25 @@ impl CloudSync {
         refresh_token: String,
         tokens: Arc<dyn TokenObserver>,
         drawings_directory: String,
+        books_directory: String,
         state_directory: String,
         observer: Arc<dyn SyncObserver>,
     ) -> Result<Arc<Self>, SyncStartError> {
-        let storage = google_drive_storage(&client_id, &refresh_token, tokens);
-        Self::start_drawings(drawings_directory, state_directory, storage, observer)
+        let drawings = google_drive_storage(
+            &client_id,
+            &refresh_token,
+            Drawings::FOLDER,
+            Arc::clone(&tokens),
+        );
+        let books = google_drive_storage(&client_id, &refresh_token, Books::FOLDER, tokens);
+        Self::start_contexts(
+            drawings_directory,
+            books_directory,
+            state_directory,
+            drawings,
+            books,
+            observer,
+        )
     }
 
     /// Starts Syncing like `start_webdav`, with `Apps/pkm` of the
@@ -384,11 +423,25 @@ impl CloudSync {
         refresh_token: String,
         tokens: Arc<dyn TokenObserver>,
         drawings_directory: String,
+        books_directory: String,
         state_directory: String,
         observer: Arc<dyn SyncObserver>,
     ) -> Result<Arc<Self>, SyncStartError> {
-        let storage = one_drive_storage(&client_id, &refresh_token, tokens);
-        Self::start_drawings(drawings_directory, state_directory, storage, observer)
+        let drawings = one_drive_storage(
+            &client_id,
+            &refresh_token,
+            Drawings::FOLDER,
+            Arc::clone(&tokens),
+        );
+        let books = one_drive_storage(&client_id, &refresh_token, Books::FOLDER, tokens);
+        Self::start_contexts(
+            drawings_directory,
+            books_directory,
+            state_directory,
+            drawings,
+            books,
+            observer,
+        )
     }
 
     /// The app came to the front: Sync at once.
@@ -422,8 +475,16 @@ impl CloudSync {
         refresh_token: String,
         tokens: Arc<dyn TokenObserver>,
     ) {
-        let storage = one_drive_storage(&client_id, &refresh_token, tokens);
-        self.sync_loop.reconnect(vec![storage]);
+        let drawings = one_drive_storage(
+            &client_id,
+            &refresh_token,
+            Drawings::FOLDER,
+            Arc::clone(&tokens),
+        );
+        let books: Arc<dyn Storage> =
+            one_drive_storage(&client_id, &refresh_token, Books::FOLDER, tokens);
+        self.sync_loop
+            .reconnect(vec![drawings, books.clone(), books]);
     }
 
     /// Like `reconnect_one_drive`, for Google Drive.
@@ -433,8 +494,16 @@ impl CloudSync {
         refresh_token: String,
         tokens: Arc<dyn TokenObserver>,
     ) {
-        let storage = google_drive_storage(&client_id, &refresh_token, tokens);
-        self.sync_loop.reconnect(vec![storage]);
+        let drawings = google_drive_storage(
+            &client_id,
+            &refresh_token,
+            Drawings::FOLDER,
+            Arc::clone(&tokens),
+        );
+        let books: Arc<dyn Storage> =
+            google_drive_storage(&client_id, &refresh_token, Books::FOLDER, tokens);
+        self.sync_loop
+            .reconnect(vec![drawings, books.clone(), books]);
     }
 
     /// Like `reconnect_one_drive`, for WebDAV.
@@ -444,33 +513,64 @@ impl CloudSync {
         username: String,
         password: String,
     ) -> Result<(), SyncStartError> {
-        let storage = WebDavStorage::resume(&url, &username, &password, Drawings::FOLDER)
+        let drawings = WebDavStorage::resume(&url, &username, &password, Drawings::FOLDER)
             .map_err(|_| SyncStartError::NotHttps)?;
-        self.sync_loop.reconnect(vec![Arc::new(storage)]);
+        let books = WebDavStorage::resume(&url, &username, &password, Books::FOLDER)
+            .map_err(|_| SyncStartError::NotHttps)?;
+        let books: Arc<dyn Storage> = Arc::new(books);
+        self.sync_loop
+            .reconnect(vec![Arc::new(drawings), books.clone(), books]);
         Ok(())
     }
 }
 
 impl CloudSync {
-    /// Syncs the Drawings Context: its folder on this Device, its state in a
-    /// folder of its own in `state_directory`, and `storage`, its cloud folder.
-    fn start_drawings(
+    /// Syncs the Context folders: Drawings, and both halves of Books (the
+    /// Files and their hidden state), each with its state in a folder of its
+    /// own in `state_directory` and its cloud folder.
+    fn start_contexts(
         drawings_directory: String,
+        books_directory: String,
         state_directory: String,
-        storage: Arc<dyn Storage>,
+        drawings_storage: Arc<dyn Storage>,
+        books_storage: Arc<dyn Storage>,
         observer: Arc<dyn SyncObserver>,
     ) -> Result<Arc<Self>, SyncStartError> {
-        let state = SyncState::open(Path::new(&state_directory).join(Drawings::FOLDER))
+        let state_root = Path::new(&state_directory);
+        let drawings_state = SyncState::open(state_root.join(Drawings::FOLDER))
             .map_err(|_| SyncStartError::StateUnavailable)?;
-        let folder = SyncFolder {
-            name: Drawings::FOLDER.into(),
-            dir: drawings_directory.into(),
-            state,
-            storage,
-            merge: Arc::new(Drawings),
-        };
+        let books_state = SyncState::open(state_root.join(Books::FOLDER))
+            .map_err(|_| SyncStartError::StateUnavailable)?;
+        let book_states_state = SyncState::open(state_root.join("BooksState"))
+            .map_err(|_| SyncStartError::StateUnavailable)?;
+        let books = Path::new(&books_directory);
+        std::fs::create_dir_all(books.join(".state"))
+            .map_err(|_| SyncStartError::StateUnavailable)?;
+        let folders = vec![
+            SyncFolder {
+                name: Drawings::FOLDER.into(),
+                dir: drawings_directory.into(),
+                state: drawings_state,
+                storage: drawings_storage,
+                merge: Arc::new(Drawings),
+            },
+            SyncFolder {
+                name: Books::FOLDER.into(),
+                dir: books.to_path_buf(),
+                state: books_state,
+                storage: Arc::clone(&books_storage),
+                merge: Arc::new(Books),
+            },
+            SyncFolder {
+                name: Books::FOLDER.into(),
+                dir: books.join(".state"),
+                state: book_states_state,
+                storage: books_storage,
+                merge: Arc::new(BookStates),
+            },
+        ];
         let sync_loop = SyncLoop::start(
-            vec![folder],
+            folders,
             Timing::default(),
             Arc::new(ForeignObserver(observer)),
         );

@@ -216,10 +216,16 @@ export interface Core {
    * where it has none or the same as an older Item.
    */
   claimItemIds(oldestFirst: string[]): string[];
-  /** The WebDAV protocol for a server; throws if the URL is not https. Free it when done. */
+  /** The WebDAV protocol for a server's Drawings folder; throws if the URL is not https. Free it when done. */
   webDav(url: string, username: string, password: string): WebDavProtocol;
-  /** A Sync step starting at `nowMs` (milliseconds since the epoch). Free it when done. */
+  /** The WebDAV protocol for the server's Books folder; throws if the URL is not https. Free it when done. */
+  webDavForBooks(url: string, username: string, password: string): WebDavProtocol;
+  /** A Sync step over the Drawings, starting at `nowMs` (milliseconds since the epoch). Free it when done. */
   syncRun(nowMs: number): SyncRun;
+  /** A Sync step over the Book Files, which are transferred but never merged. Free it when done. */
+  syncRunForBooks(nowMs: number): SyncRun;
+  /** A Sync step over the Books' state files, merged by the Books merge hook. Free it when done. */
+  syncRunForBookStates(nowMs: number): SyncRun;
   /** When Sync steps run, in front with a step due at `now` (milliseconds on any clock). Free it when done. */
   syncSchedule(now: number): SyncSchedule;
 }
@@ -247,7 +253,11 @@ export async function loadCore(
     newItemId: () => newItemId(),
     claimItemIds: (oldestFirst) => claimItemIds(oldestFirst),
     webDav: (url, username, password) => new WebDavProtocol(url, username, password),
+    webDavForBooks: (url, username, password) =>
+      WebDavProtocol.newForBooks(url, username, password),
     syncRun: (nowMs) => new SyncRun(nowMs),
+    syncRunForBooks: (nowMs) => SyncRun.newForBooks(nowMs),
+    syncRunForBookStates: (nowMs) => SyncRun.newForBookStates(nowMs),
     syncSchedule: (now) => new SyncSchedule(now),
   };
 }

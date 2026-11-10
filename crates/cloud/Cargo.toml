@@ -12,6 +12,8 @@ publish.workspace = true
 pkm-base = { path = "../base" }
 # The merge of concurrent changes.
 pkm-drawing = { path = "../drawing" }
+# The merge of Book state files.
+pkm-books = { path = "../books" }
 # The PROPFIND answers of a WebDAV server.
 quick-xml = "0.42"
 

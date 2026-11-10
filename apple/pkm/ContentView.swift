@@ -66,8 +66,11 @@ extension ContentView {
         guard let stateDirectory = gallery.syncStateDirectory else { return }
         gallery.onLocalChange = { [cloud] in cloud.drawingsChanged() }
         cloud.startSyncing(
-            drawings: gallery.drawingsDirectory, stateDirectory: stateDirectory,
-            onChanged: { [gallery] names in gallery.syncDidChange(names) })
+            drawings: gallery.drawingsDirectory,
+            books: LibraryModel.documentsFolder,
+            stateDirectory: stateDirectory,
+            onChanged: { [gallery] names in gallery.syncDidChange(names) },
+            onBooksChanged: { [library] _ in library.syncDidChange() })
     }
 }
 

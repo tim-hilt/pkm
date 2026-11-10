@@ -26,3 +26,4 @@ pub mod progress;
 pub mod search;
 pub(crate) mod state;
 pub(crate) mod store;
+pub mod sync;

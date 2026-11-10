@@ -1242,6 +1242,19 @@ impl WebDavProtocol {
             .map_err(|_| JsError::new("notHttps"))
     }
 
+    /// The requests for the folder of Books. Throws `notHttps` for a URL that
+    /// is not https.
+    #[wasm_bindgen(js_name = newForBooks)]
+    pub fn new_for_books(
+        url: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<WebDavProtocol, JsError> {
+        WebDav::new(url, username, password, Books::FOLDER)
+            .map(Self)
+            .map_err(|_| JsError::new("notHttps"))
+    }
+
     /// Checks the server and makes its `pkm/Drawings` folder.
     pub fn connect(&self) -> DavExchange {
         DavExchange::new(self.0.connect(), DavOutcome::connect)
@@ -1281,7 +1294,8 @@ impl WebDavProtocol {
 
 use pkm_cloud::step::{LocalFile, Marks, Synced};
 use pkm_cloud::{
-    Blob, Drawings, Next, Request, Response, Schedule, Status, StepOutcome, SyncStep, Timing,
+    Blob, BookStates, Books, Drawings, Next, Request, Response, Schedule, Status, StepOutcome,
+    SyncStep, Timing,
 };
 use std::time::Duration;
 
@@ -1441,10 +1455,19 @@ impl SyncRun {
     /// `nowMs`: milliseconds since the epoch.
     #[wasm_bindgen(constructor)]
     pub fn new(now_ms: f64) -> SyncRun {
-        SyncRun {
-            step: SyncStep::new(now_ms as u64, Arc::new(Drawings)),
-            outcome: None,
-        }
+        SyncRun::with_merge(now_ms, Arc::new(Drawings))
+    }
+
+    /// A step over the Book Files: transferred, never merged.
+    #[wasm_bindgen(js_name = newForBooks)]
+    pub fn new_for_books(now_ms: f64) -> SyncRun {
+        SyncRun::with_merge(now_ms, Arc::new(Books))
+    }
+
+    /// A step over the Books' state files, merged by the Books merge hook.
+    #[wasm_bindgen(js_name = newForBookStates)]
+    pub fn new_for_book_states(now_ms: f64) -> SyncRun {
+        SyncRun::with_merge(now_ms, Arc::new(BookStates))
     }
 
     pub fn start(&mut self) -> Option<SyncRequest> {
@@ -1565,6 +1588,13 @@ impl SyncRun {
 }
 
 impl SyncRun {
+    fn with_merge(now_ms: f64, merge: Arc<dyn pkm_cloud::Merge>) -> SyncRun {
+        SyncRun {
+            step: SyncStep::new(now_ms as u64, merge),
+            outcome: None,
+        }
+    }
+
     fn advance(&mut self, reply: Option<io::Result<Response>>) -> Option<SyncRequest> {
         match self.step.resume(reply) {
             Next::Request(request) => Some(SyncRequest::from(request)),

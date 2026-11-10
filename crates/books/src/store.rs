@@ -137,8 +137,16 @@ impl Folder {
     pub(crate) fn scan(&self) -> io::Result<Vec<BookState>> {
         let mut files = self.files()?;
         let mut states = self.read_states()?;
+        // Lowest Item ID first, so which of several states naming one File
+        // follows that File's changes does not depend on the folder's order.
+        states.sort_by(|a, b| a.id.cmp(&b.id));
+        // Two states may name one File after a name clash. Only one of them is
+        // that File's; the others find their renamed File by SHA-256 below.
+        let mut followed = std::collections::BTreeSet::new();
         for state in &mut states {
-            if let Some(file) = files.get(&state.file_name) {
+            if let Some(file) = files.get(&state.file_name)
+                && followed.insert(state.file_name.clone())
+            {
                 self.follow_edit(state, file.modified)?;
             }
         }
@@ -155,7 +163,7 @@ impl Folder {
             let Ok(sha256) = hash_file(&path) else {
                 continue;
             };
-            let state = match lost.iter().position(|state| state.sha256 == sha256) {
+            let mut state = match lost.iter().position(|state| state.sha256 == sha256) {
                 Some(i) => BookState {
                     file_name: name,
                     ..lost.swap_remove(i)
@@ -163,12 +171,14 @@ impl Folder {
                 None => BookState {
                     id: new_id(),
                     file_name: name,
-                    sha256,
+                    sha256: sha256.clone(),
                     imported: created,
                     markup: Default::default(),
                     progress: None,
+                    changes: Default::default(),
                 },
             };
+            state.set_file(&state.file_name.clone(), &sha256, millis(SystemTime::now()));
             self.write_state(&state)?;
             books.push(state);
         }
@@ -192,7 +202,8 @@ impl Folder {
             return Ok(());
         };
         if sha256 != state.sha256 {
-            state.sha256 = sha256;
+            let name = state.file_name.clone();
+            state.set_file(&name, &sha256, millis(SystemTime::now()));
             ignore_not_found(fs::remove_file(self.details(&state.id)))?;
         }
         self.write_state(state)
@@ -254,7 +265,8 @@ impl Folder {
             let name = state.file_name.clone();
             if name != winner.file_name && files.contains_key(&name) {
                 if !files.contains_key(&winner.file_name) {
-                    winner.file_name = name;
+                    let sha256 = winner.sha256.clone();
+                    winner.set_file(&name, &sha256, millis(SystemTime::now()));
                 } else if hash_file(&self.file(&name))? == winner.sha256 {
                     fs::remove_file(self.file(&name))?;
                     files.remove(&name);
@@ -337,6 +349,7 @@ mod tests {
             imported: 5,
             markup: Markup::default(),
             progress: None,
+            changes: Default::default(),
         }
     }
 
