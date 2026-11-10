@@ -1,0 +1,40 @@
+import Foundation
+
+/// How the Gallery orders its Books, as chosen on this Device: by Date
+/// Imported (newest first) or by Title. The core does the ordering (`Listing`).
+struct LibrarySort: Equatable {
+    enum Key: String, CaseIterable {
+        case dateImported
+        case title
+    }
+
+    var key: Key
+    /// Flips the order of `key`: oldest Import first, or Z–A.
+    var isReversed: Bool
+
+    static let standard = LibrarySort(key: .dateImported, isReversed: false)
+
+    /// This choice as the core takes it.
+    var core: Sort {
+        Sort(key: key == .title ? .title : .dateImported, reversed: isReversed)
+    }
+
+    private static let keyName = "books.sort.key"
+    private static let reversedName = "books.sort.reversed"
+
+    /// The choice saved in `defaults`, or `standard` if there is none.
+    init(from defaults: UserDefaults) {
+        key = defaults.string(forKey: Self.keyName).flatMap(Key.init) ?? Self.standard.key
+        isReversed = defaults.bool(forKey: Self.reversedName)
+    }
+
+    init(key: Key, isReversed: Bool) {
+        self.key = key
+        self.isReversed = isReversed
+    }
+
+    func save(to defaults: UserDefaults) {
+        defaults.set(key.rawValue, forKey: Self.keyName)
+        defaults.set(isReversed, forKey: Self.reversedName)
+    }
+}

@@ -1,9 +1,10 @@
 import SwiftUI
 
 /// The single window: the five Contexts as tabs (a sidebar on a Mac, and on an
-/// iPad when expanded), or, while a Drawing is open, the Canvas alone.
+/// iPad when expanded), or, while a Drawing or a Book is open, that alone.
 struct ContentView: View {
     @State private var gallery = Gallery.forLaunch()
+    @State private var library = LibraryModel.forLaunch()
     @Environment(AppNavigation.self) private var navigation
     @Environment(CloudBackingModel.self) private var cloud
     @Environment(\.scenePhase) private var scenePhase
@@ -21,14 +22,16 @@ struct ContentView: View {
                 )
                 // A fresh view per Drawing: its geometry is requested once.
                 .id(drawing.name)
+            } else if let book = library.open {
+                BookStubView(book: book, onBack: library.closeBook)
             } else {
                 TabView(selection: $navigation.selected) {
                     ForEach(AppContext.allCases) { context in
                         Tab(value: context) {
-                            if context == .drawings {
-                                GalleryView(gallery: gallery)
-                            } else {
-                                ComingSoonView(context: context)
+                            switch context {
+                            case .drawings: GalleryView(gallery: gallery)
+                            case .books: BooksView()
+                            default: ComingSoonView(context: context)
                             }
                         } label: {
                             context.label
@@ -38,12 +41,15 @@ struct ContentView: View {
                 .tabViewStyle(.sidebarAdaptable)
             }
         }
+        .environment(library)
         #if os(iOS)
             .sheet(isPresented: $navigation.isShowingSettings) { SettingsSheet() }
         #endif
         .onOpenURL { follow($0) }
         .task { attachCloudBacking() }
-        .onChange(of: gallery.open != nil, initial: true) { navigation.isItemOpen = gallery.open != nil }
+        .onChange(of: gallery.open != nil || library.open != nil, initial: true) {
+            navigation.isItemOpen = gallery.open != nil || library.open != nil
+        }
         .onChange(of: cloud.progress, initial: true) { gallery.syncProgress = cloud.progress }
         .onChange(of: cloud.status, initial: true) { gallery.syncStatus = cloud.status }
         .onChange(of: scenePhase) { cloud.appBecame(inFront: scenePhase == .active) }
@@ -59,6 +65,7 @@ extension ContentView {
     private func follow(_ url: URL) {
         guard let link = navigation.follow(url) else { return }
         gallery.close()
+        library.closeBook()
         guard link.context == .drawings, let id = link.itemID else { return }
         gallery.openDrawing(linkedItemID: id)
     }
@@ -82,16 +89,19 @@ extension AppNavigation {
     }
 
     /// The navigation for this launch. The `-UITesting…` launch arguments
-    /// (temporary stores, `make screenshot`) start on Drawings and leave the
-    /// Device's last AppContext alone.
+    /// (temporary stores, `make screenshot`) start on Drawings (Books for
+    /// `-UITestingOpenBooks`) and leave the Device's last AppContext alone.
     @MainActor
     static func forLaunch() -> AppNavigation {
         guard ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("-UITesting") }) else {
             return AppNavigation()
         }
         let navigation = AppNavigation(remembering: nil)
-        if opensSettingsAtLaunch || ProcessInfo.processInfo.arguments.contains("-UITestingOpenSampleDrawing") {
+        let arguments = ProcessInfo.processInfo.arguments
+        if opensSettingsAtLaunch || arguments.contains("-UITestingOpenSampleDrawing") {
             navigation.selected = .drawings
+        } else if arguments.contains("-UITestingOpenBooks") {
+            navigation.selected = .books
         }
         navigation.isShowingSettings = opensSettingsAtLaunch
         return navigation

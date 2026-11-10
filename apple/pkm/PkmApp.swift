@@ -21,6 +21,7 @@ struct PkmApp: App {
             .commands {
                 GoCommands(navigation: navigation)
                 CanvasCommands()
+                ImportCommands()
                 AppearanceCommands()
             }
             // ⌘, opens it.

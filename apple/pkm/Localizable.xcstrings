@@ -1,6 +1,17 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@, %lld %% read": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@, %lld %% read"
+          }
+        }
+      }
+    },
     "%@, shade %lld": {
       "extractionState": "manual",
       "localizations": {
@@ -8,6 +19,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@, shade %lld"
+          }
+        }
+      }
+    },
+    "%lld %%": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld %%"
           }
         }
       }
@@ -85,6 +107,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Artist"
+          }
+        }
+      }
+    },
+    "Author": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Author"
+          }
+        }
+      }
+    },
+    "Back": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back"
           }
         }
       }
@@ -430,6 +474,17 @@
         }
       }
     },
+    "Date Imported": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Date Imported"
+          }
+        }
+      }
+    },
     "Delete": {
       "extractionState": "manual",
       "localizations": {
@@ -639,6 +694,17 @@
         }
       }
     },
+    "File Size": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "File Size"
+          }
+        }
+      }
+    },
     "Fill": {
       "extractionState": "manual",
       "localizations": {
@@ -679,6 +745,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Font size"
+          }
+        }
+      }
+    },
+    "Format": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Format"
           }
         }
       }
@@ -789,6 +866,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Hex code"
+          }
+        }
+      }
+    },
+    "Imported": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Imported"
+          }
+        }
+      }
+    },
+    "Import…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import…"
           }
         }
       }
@@ -1013,6 +1112,17 @@
         }
       }
     },
+    "No Results for “%@”": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Results for “%@”"
+          }
+        }
+      }
+    },
     "No shades available for this color": {
       "extractionState": "manual",
       "localizations": {
@@ -1189,6 +1299,17 @@
         }
       }
     },
+    "Reverse Order": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reverse Order"
+          }
+        }
+      }
+    },
     "Right": {
       "extractionState": "manual",
       "localizations": {
@@ -1343,6 +1464,28 @@
         }
       }
     },
+    "Sort": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sort"
+          }
+        }
+      }
+    },
+    "Sort By": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sort By"
+          }
+        }
+      }
+    },
     "Stroke": {
       "extractionState": "manual",
       "localizations": {
@@ -1453,6 +1596,28 @@
         }
       }
     },
+    "The Reader is coming soon": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Reader is coming soon"
+          }
+        }
+      }
+    },
+    "The file, its Markup and your Reading Progress are deleted.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The file, its Markup and your Reading Progress are deleted."
+          }
+        }
+      }
+    },
     "Thin": {
       "extractionState": "manual",
       "localizations": {
@@ -1471,6 +1636,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "This Drawing will be deleted for good."
+          }
+        }
+      }
+    },
+    "Title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Title"
           }
         }
       }
