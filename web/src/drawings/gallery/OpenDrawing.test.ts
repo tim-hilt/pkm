@@ -422,21 +422,24 @@ describe("Synced changes", () => {
     expect(drawing.editor.elementCount()).toBe(2);
   });
 
-  it("stays open when Sync deletes it, and its next save writes it again", async () => {
+  it("is deleted when Sync deletes it, and is never written again", async () => {
     const drawing = await openNew();
     drawRectangle(drawing);
     await drawing.saveNow();
     const name = drawing.name;
+    let deleted = 0;
+    drawing.onDeleted = () => deleted++;
     expect(await store.deleteIfHolding(`${name}.excalidraw`, await store.open(name))).toBe(true);
+    drawRectangle(drawing, 200); // edited here, not yet saved
 
     await drawing.syncDidChange([name]);
-    expect(drawing.name).toBe(name);
-    expect(drawing.editor.elementCount()).toBe(1);
-    expect(await store.list()).toEqual([]);
-
-    drawRectangle(drawing, 200);
+    expect(deleted).toBe(1);
     await wait(delay);
-    expect(await savedElementCount(name)).toBe(2);
+    await drawing.saveNow();
+    await drawing.close();
+    expect(await store.list()).toEqual([]);
+    await drawing.syncDidChange([name]);
+    expect(deleted).toBe(1);
   });
 
   it("does nothing after the Drawing was left", async () => {

@@ -108,7 +108,16 @@ export class Gallery {
   }
 
   private async show(name: string): Promise<void> {
-    this.open = await OpenDrawing.open(name, this.store, this.core, this.options);
+    const drawing = await OpenDrawing.open(name, this.store, this.core, this.options);
+    // Deleted by Sync: back to the Gallery, without saving.
+    drawing.onDeleted = () => {
+      if (this.open !== drawing) return;
+      this.open = undefined;
+      this.openId = undefined;
+      this.onChange();
+      drawing.editor.free();
+    };
+    this.open = drawing;
     this.openId = (await this.store.list()).find((entry) => entry.name === name)?.id;
     this.onChange();
   }

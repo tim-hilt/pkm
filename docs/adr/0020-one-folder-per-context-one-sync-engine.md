@@ -15,3 +15,4 @@ Each Context keeps its Items as plain files in a folder of its own: `Drawings/` 
 - A Cloud Provider storage is scoped to one Context folder; Reconnect hands the loop one storage per folder.
 - The web app Syncs its one Context folder with the same step machine; several are a loop over steps, as natively.
 - Progress counts the transfers of the folders that have run, so its total grows while later folders come up.
+- A Delete wins over edits made elsewhere, in every Context folder alike (ADR-0011); a file never Synced is uploaded, never deleted.

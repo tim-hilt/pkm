@@ -736,9 +736,10 @@ impl Engine {
                 expected,
             })
             .await?;
-        if happened {
-            self.outcome().changed.push(self.merge.name_of(file));
+        if !happened {
+            return Ok(()); // the app wrote it meanwhile; the next step decides again
         }
+        self.outcome().changed.push(self.merge.name_of(file));
         self.forget(file).await
     }
 
@@ -798,7 +799,9 @@ impl Action {
 }
 
 /// The rules of the spec for one name, with L the local file, R the cloud blob
-/// (its marker) and B the last-Synced state.
+/// (its marker) and B the last-Synced state. A file missing on one side is
+/// deleted on the other only if B says it was Synced; one without B is new
+/// and is copied.
 fn decide(local: Option<&[u8]>, remote: Option<&str>, base: Option<&Synced>) -> Action {
     match (local, remote, base) {
         (None, None, _) => Action::Forget,
@@ -815,11 +818,8 @@ fn decide(local: Option<&[u8]>, remote: Option<&str>, base: Option<&Synced>) -> 
                     (_, true) => Action::Reconcile { local_changed },
                     (false, false) => Action::Idle,
                 },
-                // Deleted here: reaches the cloud, unless it was edited there.
-                (None, Some(_)) if remote_changed => Action::Download,
+                // A Delete wins over edits made elsewhere meanwhile.
                 (None, Some(_)) => Action::DeleteRemote,
-                // Deleted there: reaches here, unless it was edited here.
-                (Some(_), None) if local_changed => Action::Upload,
                 (Some(_), None) => Action::DeleteLocal,
                 (None, None) => unreachable!("handled above"),
             }

@@ -25,8 +25,8 @@ const sameViewport = (a: Viewport, b: Viewport) =>
  * Whatever it wrote is merged into the Editor instead of reopening, live when
  * told (`syncDidChange`) and in any case before every save, so that neither
  * the user's unsaved edits nor Sync's changes are lost; a rename is followed;
- * a delete leaves the Drawing open, and its next save writes it again (the
- * user's edit wins over a delete).
+ * a delete closes the Drawing (`onDeleted`), and nothing is written again: a
+ * Delete wins over edits made here.
  *
  * Writes run one after the other, so that a save never overtakes the one
  * before it or the removal of an emptied Drawing.
@@ -35,6 +35,8 @@ export class OpenDrawing {
   readonly editor: Editor;
   /** Called after a Synced change reached the Editor, so that whatever shows it can show it again. */
   onMerged?: () => void;
+  /** Called once when Sync deleted the Drawing: unsaved edits are dropped and nothing is saved any more. */
+  onDeleted?: () => void;
   private currentName: string;
   private readonly delay: number;
   /** The `Editor.revision` of what the file holds. */
@@ -46,6 +48,7 @@ export class OpenDrawing {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private writes: Promise<void> = Promise.resolve();
   private closed = false;
+  private deleted = false;
 
   /**
    * Opens `name`. Throws if the Drawing cannot be read or is not a valid
@@ -93,7 +96,7 @@ export class OpenDrawing {
 
   /** Call after input or a command reached the editor. Cheap when the Scene did not change (panning, zooming). */
   editorDidChange(): void {
-    if (this.closed || !this.hasUnsavedChanges) return;
+    if (this.closed || this.deleted || !this.hasUnsavedChanges) return;
     clearTimeout(this.timer);
     this.timer = setTimeout(() => void this.saveNow(), this.delay);
   }
@@ -101,28 +104,35 @@ export class OpenDrawing {
   /** Saves unsaved changes and the viewport now and drops the delayed save. */
   saveNow(): Promise<void> {
     this.stopTimer();
-    return this.closed ? this.writes : this.enqueue(this.saveViewport(), () => this.saveScene());
+    return this.closed || this.deleted
+      ? this.writes
+      : this.enqueue(this.saveViewport(), () => this.saveScene());
   }
 
   /**
    * Sync wrote or deleted the files of the Drawings `names` (a rename as the
    * old and the new name). Takes in what Sync did to this Drawing: the changed
    * file is merged into the Editor (no undo step; Selection, Text view and
-   * viewport stay), a rename is followed, a delete leaves the Drawing open.
+   * viewport stay), a rename is followed, a delete ends the Drawing (`onDeleted`).
    * Runs after the saves asked for before.
    */
   syncDidChange(names: string[]): Promise<void> {
-    if (this.closed) return this.writes;
+    if (this.closed || this.deleted) return this.writes;
     return this.enqueue(() => this.followSync(names));
   }
 
   private async followSync(names: string[]): Promise<void> {
-    if (this.closed || !names.includes(this.name)) return;
+    if (this.closed || this.deleted || !names.includes(this.name)) return;
     let bytes = await this.store.read(fileOf(this.name));
     if (!bytes) {
-      // Renamed if exactly one of the other files Sync wrote is this Drawing; otherwise deleted.
+      // Renamed if exactly one of the other files Sync wrote is this Drawing; otherwise a Delete won.
       const renamed = await this.renamedTo(names);
-      if (!renamed) return;
+      if (!renamed) {
+        this.deleted = true;
+        this.stopTimer();
+        this.onDeleted?.();
+        return;
+      }
       this.currentName = renamed.name;
       bytes = renamed.bytes;
     }
@@ -172,7 +182,7 @@ export class OpenDrawing {
    * Drawing was emptied just now. Nothing is written after that.
    */
   close(): Promise<void> {
-    if (this.closed) return this.writes;
+    if (this.closed || this.deleted) return this.writes;
     this.editor.commitText();
     this.stopTimer();
     const writes = this.enqueue(this.saveViewport(), () => this.saveScene());

@@ -15,9 +15,8 @@ import Observation
 /// outside (by Sync, Files, Finder) is merged into the Scene live, without
 /// undo steps and keeping Selection, Text view and viewport, so that unsaved
 /// edits and the changes outside both survive; a file renamed outside is
-/// followed, and a file deleted outside is never written again, unless
-/// Cloud Backing is on (`keepsDeletedDrawingOpen`): then the Drawing stays
-/// open and the next edit brings it back, as an edit wins over a delete.
+/// followed, and a file deleted outside (also by Sync: a Delete wins over
+/// edits made here) is never written again.
 @MainActor @Observable
 final class OpenDrawing {
     /// Follows a rename outside the app.
@@ -28,9 +27,6 @@ final class OpenDrawing {
     @ObservationIgnored var onDeleted: (() -> Void)?
     /// Called after every save of the Drawing's file.
     @ObservationIgnored var onSaved: (() -> Void)?
-    /// Whether a file deleted outside leaves the Drawing open (Cloud Backing
-    /// deletes files when another Device did) instead of closing it.
-    @ObservationIgnored var keepsDeletedDrawingOpen = false
 
     @ObservationIgnored private let store: DrawingStore
     @ObservationIgnored private let autosaveDelay: Duration
@@ -50,8 +46,6 @@ final class OpenDrawing {
         case merged
         case renamed(to: String)
         case deleted
-        /// The file is gone but the Drawing stays open (`keepsDeletedDrawingOpen`).
-        case removed
     }
 
     /// Throws if the Drawing cannot be read or is not a valid Drawing; it is
@@ -127,7 +121,6 @@ final class OpenDrawing {
             return .renamed(to: newName)
         }
         savedStamp = nil
-        if keepsDeletedDrawingOpen { return .removed }
         isDeleted = true
         pendingSave?.cancel()
         pendingSave = nil

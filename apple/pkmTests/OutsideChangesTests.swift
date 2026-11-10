@@ -128,34 +128,33 @@ import Testing
         #expect(store.viewport(for: drawing.name) == nil)
     }
 
-    @Test func aDeletedFileLeavesTheDrawingOpenWhenCloudBackingIsOnAndEditingBringsItBack() throws {
+    @Test func aDeletedFileWinsOverUnsavedEditsAndNothingBringsItBack() throws {
         let drawing = try openNewDrawing()
-        drawing.keepsDeletedDrawingOpen = true
         var deleted = 0
         drawing.onDeleted = { deleted += 1 }
         try FileManager.default.removeItem(at: file(drawing.name))
-
-        #expect(drawing.syncWithFile() == .removed)
-        #expect(deleted == 0)
         drawRectangle(in: drawing)
-        drawing.saveNow()
 
-        #expect(try savedElementCount(drawing.name) == 1)
-        #expect(drawing.syncWithFile() == .unchanged)
+        #expect(drawing.syncWithFile() == .deleted)
+        drawRectangle(in: drawing)
+        drawing.editorDidChange()
+        drawing.saveNow()
+        drawing.close()
+
+        #expect(deleted == 1)
+        #expect(!FileManager.default.fileExists(atPath: file(drawing.name).path))
     }
 
     // MARK: Renamed
 
     @Test func aRenameBySyncIsFollowedAndTheNewFileMerged() throws {
         let drawing = try openNewDrawing()
-        drawing.keepsDeletedDrawingOpen = true
         try store.save(sample(), as: drawing.name)
         drawing.syncWithFile()
         let old = drawing.name
         // Sync writes the file elsewhere under the new name and deletes the old.
         try FileManager.default.removeItem(at: file(old))
         try store.save(sample(), as: "Renamed")
-        #expect(drawing.syncWithFile() == .removed)
 
         drawing.syncDidChange([old, "Renamed"])
 

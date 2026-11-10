@@ -44,7 +44,6 @@ struct ContentView: View {
         .onOpenURL { follow($0) }
         .task { attachCloudBacking() }
         .onChange(of: gallery.open != nil, initial: true) { navigation.isItemOpen = gallery.open != nil }
-        .onChange(of: cloud.connection != nil, initial: true) { gallery.isCloudBacked = cloud.connection != nil }
         .onChange(of: cloud.progress, initial: true) { gallery.syncProgress = cloud.progress }
         .onChange(of: cloud.status, initial: true) { gallery.syncStatus = cloud.status }
         .onChange(of: scenePhase) { cloud.appBecame(inFront: scenePhase == .active) }

@@ -4,7 +4,7 @@ Cloud Backing in the web app (WebDAV only) reuses `crates/cloud` instead of port
 
 ## Considered Options
 
-- **Port the Sync engine, loop and WebDAV storage to TypeScript, calling the core's merge through wasm**: the quickest start, but the rules that decide whether work is kept (edit wins over delete, healing lost writes, "Sketch 2") would exist twice and drift, and the Sync tests would have to be written again.
+- **Port the Sync engine, loop and WebDAV storage to TypeScript, calling the core's merge through wasm**: the quickest start, but the rules that decide whether work is kept (Delete wins over edit, healing lost writes, "Sketch 2") would exist twice and drift, and the Sync tests would have to be written again.
 - **Move only the per-Drawing rules into the core**: keeps ADR-0014 intact, but leaves the orchestration around them (when to read, what to check before writing, progress) to be written twice.
 - **Run the blocking crate in wasm through JavaScript Promise Integration or synchronous requests in a worker**: JSPI is not in Safari, and OPFS directory access is async even in workers.
 

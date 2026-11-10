@@ -484,7 +484,7 @@ describe("first Connect", () => {
 });
 
 describe("edit against delete", () => {
-  it("an edit wins over a delete, either way round", async () => {
+  it("a delete wins over an edit, either way round", async () => {
     const browser = await device();
     const tablet = await device();
     await browser.store.save(drawing(element("a", 1, "a0", 0)), "S");
@@ -503,11 +503,8 @@ describe("edit against delete", () => {
     browser.cloud.setOnline(true);
     await advance(0);
     await sync(tablet, browser, tablet);
-    for (const d of [browser, tablet]) {
-      expect(await names(d)).toEqual(["S", "T"]);
-      expect(elementsOf(await d.store.open("S"))).toEqual(["a@2"]);
-      expect(elementsOf(await d.store.open("T"))).toEqual(["a@2"]);
-    }
+    for (const d of [browser, tablet]) expect(await names(d)).toEqual([]);
+    expect([...server.contents("pkm/Drawings").keys()]).toEqual([]);
   });
 });
 
