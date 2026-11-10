@@ -1,12 +1,14 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The Settings: Appearance and Cloud Backing. A window on the Mac (⌘,), a
-/// sheet from the Gallery's gear on iPhone and iPad.
+/// The Settings: Appearance, the Books' Page Style, Page Colors and Highlight
+/// Colors, and Cloud Backing. A window on the Mac (⌘,), a sheet from a
+/// Context's gear on iPhone and iPad.
 struct SettingsView: View {
     var body: some View {
         Form {
             Section { AppearancePicker() }
+            BooksSettingsSection()
             CloudBackingSection()
         }
         .formStyle(.grouped)

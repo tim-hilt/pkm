@@ -79,3 +79,54 @@ import Testing
         #expect(navigation.selected == .tasks)
     }
 }
+
+// MARK: Links
+
+extension AppNavigationTests {
+    /// A window's link handling over a temporary Drawings folder and Library.
+    private func makeLinks() throws -> (links: AppLinks, gallery: Gallery, library: LibraryModel) {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "AppNavigationTests-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let drawings = root.appending(path: "Drawings", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: drawings, withIntermediateDirectories: true)
+        let store = DrawingStore(directory: drawings, cacheDirectory: root.appending(path: "Caches"))
+        try store.save(Editor().save(), as: "sample")
+        let gallery = Gallery(store: store)
+        let library = LibraryModel(
+            core: try Library.open(root: root.appending(path: "Books").path),
+            coversFolder: root.appending(path: "Covers"),
+            defaults: UserDefaults(suiteName: root.lastPathComponent)!)
+        let links = AppLinks(navigation: AppNavigation(remembering: device()), gallery: gallery, library: library)
+        return (links, gallery, library)
+    }
+
+    @Test func aDrawingLinkOpensTheDrawingAndAnUnknownOneShowsTheGallery() throws {
+        let (links, gallery, _) = try makeLinks()
+        let id = try #require(gallery.drawings.first?.id)
+
+        links.follow(URL(string: "pkm://drawings/\(id)")!)
+        #expect(links.navigation.selected == .drawings)
+        #expect(gallery.open != nil)
+
+        links.follow(URL(string: "pkm://drawings/unknown")!)
+        #expect(links.navigation.selected == .drawings)
+        #expect(gallery.open == nil)
+    }
+
+    @Test func aBookLinkOpensTheBookAndAnUnknownOneShowsTheGallery() async throws {
+        let (links, gallery, library) = try makeLinks()
+        guard case .imported(let book) = await library.import(try writePDF(named: "book.pdf")) else {
+            Issue.record("expected the Book to be imported")
+            return
+        }
+
+        links.follow(URL(string: "pkm://books/\(book.id)")!)
+        #expect(links.navigation.selected == .books)
+        #expect(library.open == book)
+
+        links.follow(URL(string: "pkm://books/unknown")!)
+        #expect(links.navigation.selected == .books)
+        #expect(library.open == nil)
+        #expect(gallery.open == nil)
+    }
+}

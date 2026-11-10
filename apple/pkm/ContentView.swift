@@ -4,8 +4,8 @@ import SwiftUI
 /// iPad when expanded), or, while a Drawing or a Book is open, that alone.
 struct ContentView: View {
     @State private var gallery = Gallery.forLaunch()
-    @State private var library = LibraryModel.forLaunch()
     @Environment(AppNavigation.self) private var navigation
+    @Environment(LibraryModel.self) private var library
     @Environment(CloudBackingModel.self) private var cloud
     @Environment(\.scenePhase) private var scenePhase
     #if os(macOS)
@@ -42,11 +42,10 @@ struct ContentView: View {
                 .tabViewStyle(.sidebarAdaptable)
             }
         }
-        .environment(library)
         #if os(iOS)
             .sheet(isPresented: $navigation.isShowingSettings) { SettingsSheet() }
         #endif
-        .onOpenURL { follow($0) }
+        .onOpenURL { AppLinks(navigation: navigation, gallery: gallery, library: library).follow($0) }
         .task { attachCloudBacking() }
         .onChange(of: gallery.open != nil || library.open != nil, initial: true) {
             navigation.isItemOpen = gallery.open != nil || library.open != nil
@@ -61,16 +60,6 @@ struct ContentView: View {
 }
 
 extension ContentView {
-    /// Shows what a `pkm://` link names, leaving any open Drawing; a link
-    /// that names no Context changes nothing.
-    private func follow(_ url: URL) {
-        guard let link = navigation.follow(url) else { return }
-        gallery.close()
-        library.closeBook()
-        guard link.context == .drawings, let id = link.itemID else { return }
-        gallery.openDrawing(linkedItemID: id)
-    }
-
     /// Lets Cloud Backing Sync the Gallery's Drawings, and the Gallery tell it
     /// of changes. Not for the temporary stores of UI tests and screenshots.
     private func attachCloudBacking() {

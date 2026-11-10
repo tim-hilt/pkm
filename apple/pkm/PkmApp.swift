@@ -9,6 +9,7 @@ struct PkmApp: App {
     @State private var cloud = CloudBackingModel()
     @State private var navigation = AppNavigation.forLaunch()
     @State private var readerSettings = ReaderSettings.forLaunch()
+    @State private var library = LibraryModel.forLaunch()
 
     var body: some Scene {
         // One window (spec: Gallery → Canvas → back). A second window would
@@ -18,7 +19,7 @@ struct PkmApp: App {
         #if os(macOS)
             Window(Text(verbatim: "pkm"), id: "main") {
                 ContentView().firstLaunchWindowSize().environment(cloud).environment(navigation)
-                    .environment(readerSettings).appliesAppearance()
+                    .environment(readerSettings).environment(library).appliesAppearance()
             }
             .commands {
                 GoCommands(navigation: navigation)
@@ -28,11 +29,13 @@ struct PkmApp: App {
                 AppearanceCommands()
             }
             // ⌘, opens it.
-            Settings { SettingsView().environment(cloud) }
+            Settings {
+                SettingsView().environment(cloud).environment(readerSettings).environment(library)
+            }
         #else
             WindowGroup {
                 ContentView().environment(cloud).environment(navigation).environment(readerSettings)
-                    .appliesAppearance()
+                    .environment(library).appliesAppearance()
             }
             .commands { CanvasCommands() }
         #endif
