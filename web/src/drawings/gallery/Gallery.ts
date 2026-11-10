@@ -85,7 +85,7 @@ export class Gallery {
     return this.attempt("Could not open the Drawing.", async () => {
       const name = await this.store.nameOf(id);
       if (name === undefined) throw new NotFound(id);
-      await this.show(name);
+      await this.show(name, id);
     });
   }
 
@@ -107,7 +107,8 @@ export class Gallery {
     this.onChange();
   }
 
-  private async show(name: string): Promise<void> {
+  /** Opens the Drawing `name`, whose Item ID is `id` (looked up if not given). */
+  private async show(name: string, id?: string): Promise<void> {
     const drawing = await OpenDrawing.open(name, this.store, this.core, this.options);
     // Deleted by Sync: back to the Gallery, without saving.
     drawing.onDeleted = () => {
@@ -117,8 +118,8 @@ export class Gallery {
       this.onChange();
       drawing.editor.free();
     };
+    this.openId = id ?? (await this.store.list()).find((entry) => entry.name === name)?.id;
     this.open = drawing;
-    this.openId = (await this.store.list()).find((entry) => entry.name === name)?.id;
     this.onChange();
   }
 

@@ -1,6 +1,8 @@
 import type { FileStorage } from "../storage/FileStorage";
 
-const folder = "Cloud/state";
+// One folder per Context folder (ADR-0020); never the `Cloud/state` that held
+// the state of the whole `pkm` folder before, whose names would delete Drawings.
+const folder = "Cloud/state/Drawings";
 const text = new TextDecoder();
 const encode = (value: string) => new TextEncoder().encode(value);
 

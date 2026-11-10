@@ -290,6 +290,21 @@ describe("the schedule", () => {
   });
 });
 
+describe("Sync state", () => {
+  it("is kept per Context folder, so that state from before the folders deletes nothing", async () => {
+    const browser = await device(false);
+    await browser.store.save(bytes("one"), "A");
+    // What the Device remembered of the `pkm` folder, which held the Drawings then.
+    await browser.storage.write("Cloud/state/bytes/A.excalidraw", bytes("one"));
+    await browser.storage.write("Cloud/state/markers/A.excalidraw", bytes("etag"));
+    await browser.cloud.connect(url, "user", "secret");
+    await settle();
+    expect(await names(browser)).toEqual(["A"]);
+    expect(text(cloudFile("A"))).toBe("one");
+    expect(await browser.storage.files("Cloud/state/Drawings/markers")).toHaveLength(1);
+  });
+});
+
 describe("Disconnect", () => {
   it("keeps the Drawings, stops Syncing and forgets the state", async () => {
     const browser = await device();
@@ -297,7 +312,7 @@ describe("Disconnect", () => {
     await settle();
     await browser.cloud.disconnect();
     expect(await names(browser)).toEqual(["A"]);
-    expect(await browser.storage.files("Cloud/state/markers")).toEqual([]);
+    expect(await browser.storage.files("Cloud/state/Drawings/markers")).toEqual([]);
     expect(await browser.storage.read("Cloud/connection.json")).toBeUndefined();
 
     server.requests.length = 0;

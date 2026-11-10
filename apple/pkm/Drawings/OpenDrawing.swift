@@ -113,11 +113,23 @@ final class OpenDrawing {
     }
 
     /// The file is gone from `name`: renamed if it is in the folder under
-    /// another name, otherwise deleted.
+    /// another name, otherwise deleted. Found as the same file (Files,
+    /// Finder), or as the file that holds its Item ID: a rename on another
+    /// Device, which Sync writes before it deletes the old file. That one is
+    /// merged in.
     private func followRename() -> Outcome {
         if let stamp = savedStamp, let newName = store.name(matching: stamp), newName != name {
             store.moveCaches(of: name, to: newName)
             name = newName
+            return .renamed(to: newName)
+        }
+        if let itemID = drawingItemId(bytes: editor.save()),
+            let newName = try? store.name(forItemID: itemID), newName != name
+        {
+            store.moveCaches(of: name, to: newName)
+            name = newName
+            savedStamp = nil
+            syncWithFile()
             return .renamed(to: newName)
         }
         savedStamp = nil

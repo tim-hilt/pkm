@@ -1125,7 +1125,7 @@ fn a_delete_reaches_three_devices_whatever_they_did_meanwhile() {
 }
 
 #[test]
-fn a_delete_made_while_disconnected_is_a_delete_once_connected_if_synced_before() {
+fn a_delete_made_while_offline_wins_once_back_online() {
     // Offline is no Disconnect: the history stays, and the delete wins.
     let (cloud, phone, tablet) = two_devices_apart();
     phone.remove("Sketch.excalidraw");
@@ -1171,10 +1171,13 @@ fn a_file_created_independently_under_the_name_of_a_deleted_one_is_uploaded() {
     laptop.write("Sketch.excalidraw", &drawing(&[element("z", 1, "a0", 0)]));
     laptop.sync(&cloud);
     assert!(cloud.read("Sketch.excalidraw").is_some());
-    // The tablet still had the old one; it is deleted, as it is the same file.
+    // The tablet, with the old one unchanged, and the phone, with none, take the new one.
     tablet.sync(&cloud);
     phone.sync(&cloud);
-    assert_eq!(phone.files(), ["Sketch.excalidraw"]);
+    let new = cloud.read("Sketch.excalidraw").unwrap();
+    for device in [&phone, &tablet] {
+        assert_eq!(device.read("Sketch.excalidraw").unwrap(), new);
+    }
 }
 
 #[test]

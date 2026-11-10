@@ -166,6 +166,23 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: file(old).path))
     }
 
+    @Test func aRenameBySyncSeenBeforeSyncTellsIsFollowedByItemIDKeepingUnsavedEdits() throws {
+        let drawing = try openNewDrawing()
+        let old = drawing.name
+        let itemID = try #require(drawingItemId(bytes: try store.open(old)))
+        drawRectangle(in: drawing)
+        // Sync writes the Drawing, renamed and edited on another Device, under its new name, then deletes the old file.
+        try store.save(try drawingWithItemId(bytes: sample(), itemId: itemID), as: "Renamed")
+        try FileManager.default.removeItem(at: file(old))
+
+        #expect(drawing.syncWithFile() == .renamed(to: "Renamed"))
+
+        #expect(drawing.editor.elementCount() == 9)
+        drawing.saveNow()
+        #expect(try savedElementCount("Renamed") == 9)
+        #expect(!FileManager.default.fileExists(atPath: file(old).path))
+    }
+
     @Test func aRenamedFileIsFollowedAndSavesGoToTheNewName() throws {
         let drawing = try openNewDrawing()
         let old = drawing.name

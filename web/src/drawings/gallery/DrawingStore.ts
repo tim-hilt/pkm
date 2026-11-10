@@ -107,7 +107,7 @@ export class DrawingStore {
         if (itemId === "") continue;
         const file = drawingFiles[at];
         const modified = await this.give(itemId, file.name);
-        // Not a Drawing: it holds none, and is not read again until it changes.
+        // Not a Drawing: it holds none; each listing tries again, as it may have become one.
         this.readItemIds.set(file.name, {
           modified: modified ?? file.modified,
           itemId: modified === undefined ? undefined : itemId,

@@ -87,15 +87,16 @@ export class Navigation {
     this.onChange();
   }
 
-  /** Leaves the open Item: back to the entry it was opened from, or, for one opened by a link, the Context's own path in its place. */
+  /**
+   * Leaves the open Item at once: back to the entry it was opened from, or,
+   * for one opened by a link, the Context's own path in its place.
+   */
   closeItem(): void {
     if (this.item === undefined) return;
-    if (this.pushedItem) {
-      // `onTraverse` follows.
-      this.history.back();
-      return;
-    }
-    this.history.replace(`/${this.selected}`);
+    // The browser goes back later; `onTraverse` then finds the state as it is now.
+    if (this.pushedItem) this.history.back();
+    else this.history.replace(`/${this.selected}`);
+    this.pushedItem = false;
     this.item = undefined;
     this.onChange();
   }

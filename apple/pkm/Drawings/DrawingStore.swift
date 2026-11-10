@@ -79,7 +79,7 @@ struct DrawingStore: Sendable {
                 drawings[index].modified = modified
                 readItemIDs.remember(itemID, ofDrawingNamed: drawings[index].name, modified: modified)
             } else {
-                // Not a Drawing (or not writable): it has none, and not reading it again until it changes.
+                // Not a Drawing (or not writable): it has none; each listing tries again.
                 drawings[index].itemID = nil
                 readItemIDs.remember(nil, ofDrawingNamed: drawings[index].name, modified: drawings[index].modified)
             }

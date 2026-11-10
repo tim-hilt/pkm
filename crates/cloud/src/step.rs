@@ -361,13 +361,17 @@ impl Engine {
                     .await?;
                 }
             } else {
-                pending.push(file);
+                pending.push((file, action));
             }
         }
         self.report();
+        // Local deletes last: a Drawing renamed elsewhere (a delete and an
+        // add here) is in its new file before its old one goes, so that the
+        // app, seeing the old one go, finds it and follows it.
+        pending.sort_by_key(|(_, action)| *action == Action::DeleteLocal);
 
         // Read again: the app may have written a Drawing meanwhile.
-        for file in pending {
+        for (file, _) in pending {
             if let Err(error) = self.sync_drawing(&file).await {
                 self.record(error);
                 if self.outcome().access_lost {
@@ -995,6 +999,28 @@ mod tests {
                 .iter()
                 .any(|r| matches!(r, Request::ReadLocal { .. }))
         );
+    }
+
+    #[test]
+    fn a_rename_from_elsewhere_writes_the_new_file_before_deleting_the_old() {
+        let mut device = Memory::default();
+        device.local.insert("A.excalidraw".into(), b"x".to_vec());
+        device.step(10_000);
+        let bytes = device.cloud.remove("A.excalidraw").unwrap();
+        device.cloud.insert("B.excalidraw".into(), bytes);
+
+        device.step(10_000);
+
+        let local_writes: Vec<_> = device
+            .requests
+            .iter()
+            .filter_map(|r| match r {
+                Request::WriteLocal { file, .. } => Some(format!("write {file}")),
+                Request::DeleteLocal { file, .. } => Some(format!("delete {file}")),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(local_writes, ["write B.excalidraw", "delete A.excalidraw"]);
     }
 
     #[test]

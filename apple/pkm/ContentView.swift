@@ -54,10 +54,12 @@ struct ContentView: View {
 }
 
 extension ContentView {
-    /// Leaves any open Drawing, then shows what a `pkm://` link names.
+    /// Shows what a `pkm://` link names, leaving any open Drawing; a link
+    /// that names no Context changes nothing.
     private func follow(_ url: URL) {
+        guard let link = navigation.follow(url) else { return }
         gallery.close()
-        guard let link = navigation.follow(url), link.context == .drawings, let id = link.itemID else { return }
+        guard link.context == .drawings, let id = link.itemID else { return }
         gallery.openDrawing(linkedItemID: id)
     }
 

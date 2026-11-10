@@ -18,7 +18,7 @@ pub struct ItemId(String);
 impl ItemId {
     /// A new, random Item ID.
     pub fn new(entropy: &mut Entropy) -> Self {
-        let mut bits = entropy.bits();
+        let mut bits = entropy.next_u64();
         let text = (0..LENGTH)
             .map(|_| {
                 let character = ALPHABET[(bits & 31) as usize];

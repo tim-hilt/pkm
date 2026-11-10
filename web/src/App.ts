@@ -68,6 +68,8 @@ export async function startApp(
     if (canvas && canvas.drawing !== drawing) {
       canvas.stop();
       canvas = undefined;
+      // Gone without the address asking (deleted by Sync): its address goes too.
+      if (!drawing) navigation.closeItem();
     }
     shell.setFocused(drawing !== undefined);
     // An opened Drawing (from the Gallery) gets its address.

@@ -111,6 +111,23 @@ describe("Navigation", () => {
     expect(history.at).toBe(0);
   });
 
+  it("leaves a pushed Item at once, and goes back only once, before the browser has gone back", () => {
+    const { navigation, history } = open("/drawings");
+    navigation.openItem("abc123abc123");
+    let changes = 0;
+    navigation.onChange = () => changes++;
+    const goingBack: (() => void)[] = [];
+    history.back = () => void goingBack.push(() => FakeHistory.prototype.back.call(history));
+    navigation.closeItem();
+    navigation.closeItem();
+    expect(navigation.item).toBeUndefined();
+    expect(changes).toBe(1);
+    expect(goingBack).toHaveLength(1);
+    goingBack[0]();
+    expect(history.path).toBe("/drawings");
+    expect(navigation.item).toBeUndefined();
+  });
+
   it("closes an Item opened by a link by replacing its entry", () => {
     const { navigation, history } = open("/drawings/abc123abc123");
     navigation.closeItem();
