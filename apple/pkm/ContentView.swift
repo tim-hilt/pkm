@@ -23,7 +23,8 @@ struct ContentView: View {
                 // A fresh view per Drawing: its geometry is requested once.
                 .id(drawing.name)
             } else if let book = library.open {
-                BookStubView(book: book, onBack: library.closeBook)
+                // A new Reader per Book, so that nothing of the previous one carries over.
+                OpenBookView(book: book, onGoToGallery: library.closeBook).id(book.id)
             } else {
                 TabView(selection: $navigation.selected) {
                     ForEach(AppContext.allCases) { context in
@@ -90,7 +91,7 @@ extension AppNavigation {
 
     /// The navigation for this launch. The `-UITesting…` launch arguments
     /// (temporary stores, `make screenshot`) start on Drawings (Books for
-    /// `-UITestingOpenBooks`) and leave the Device's last AppContext alone.
+    /// `-UITestingOpenBooks` and `-UITestingOpenReader`) and leave the Device's last AppContext alone.
     @MainActor
     static func forLaunch() -> AppNavigation {
         guard ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("-UITesting") }) else {
@@ -100,7 +101,7 @@ extension AppNavigation {
         let arguments = ProcessInfo.processInfo.arguments
         if opensSettingsAtLaunch || arguments.contains("-UITestingOpenSampleDrawing") {
             navigation.selected = .drawings
-        } else if arguments.contains("-UITestingOpenBooks") {
+        } else if arguments.contains("-UITestingOpenBooks") || arguments.contains("-UITestingOpenReader") {
             navigation.selected = .books
         }
         navigation.isShowingSettings = opensSettingsAtLaunch

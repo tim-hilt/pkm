@@ -1,0 +1,66 @@
+import Foundation
+
+/// Saves the Reading Progress of the Book in a Reader: the Place at the
+/// top of the viewport, with the current time as Last Read. Saving is cheap
+/// for the caller: the Library writes off the main thread.
+///
+/// Only opening saves an unmoved Place. So when several windows show the
+/// Book, leaving or backgrounding the ones not in use never overrides the
+/// Place of the one used last.
+@MainActor
+final class ReadingProgressSaver {
+    private let library: LibraryModel
+    private let book: Book
+    private let handle: ReaderHandle
+    private let quietPeriod: Duration
+    private var settling: Task<Void, Never>?
+    /// When the viewport last moved.
+    private var lastScroll = ContinuousClock.now
+    /// The Place saved last; nil before the first save.
+    private var saved: Place?
+    /// `quietPeriod` is how long scrolling must stop before `scrolled()` saves.
+    init(library: LibraryModel, book: Book, handle: ReaderHandle, quietPeriod: Duration = .seconds(1)) {
+        self.library = library
+        self.book = book
+        self.handle = handle
+        self.quietPeriod = quietPeriod
+    }
+
+    /// The Reader opened the Book: saves now, which counts as reading it.
+    func opened() { save(unlessUnmoved: false) }
+
+    /// The viewport moved: saves once it has stopped for `quietPeriod`. Called on
+    /// every frame of a scroll, so it only comments the time while a wait runs.
+    func scrolled() {
+        lastScroll = .now
+        guard settling == nil else { return }
+        settling = Task {
+            var due = lastScroll + quietPeriod
+            while (try? await Task.sleep(until: due)) != nil {
+                // Moved again meanwhile: wait for the rest.
+                guard lastScroll + quietPeriod <= .now else {
+                    due = lastScroll + quietPeriod
+                    continue
+                }
+                settling = nil
+                saveIfMoved()
+                return
+            }
+        }
+    }
+
+    /// Saves now if the Place moved since the last save, e.g. when leaving.
+    func saveIfMoved() { save(unlessUnmoved: true) }
+
+    /// Saves the Place at the top of the viewport; nothing if the Reader has none.
+    private func save(unlessUnmoved: Bool) {
+        settling?.cancel()
+        settling = nil
+        guard let place = handle.view?.topOfViewport, !(unlessUnmoved && place == saved) else { return }
+        let now = Date.now
+        saved = place
+        let library = library
+        let book = book
+        Task { await library.saveProgress(place, of: book, at: now) }
+    }
+}

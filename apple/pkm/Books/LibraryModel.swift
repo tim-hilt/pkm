@@ -10,6 +10,10 @@ extension Book {
     var file: URL { URL(fileURLWithPath: path, isDirectory: false) }
     /// When the Book was first Imported.
     var importedDate: Date { Date(milliseconds: imported) }
+    /// Where the user left off, to reopen the Book there; nil if never opened.
+    var place: Place? { progress?.place }
+    /// When the Reader last showed the Book; nil if never.
+    var lastRead: Date? { progress.map { Date(milliseconds: $0.lastRead) } }
 
     /// Where the Cover of this Book comes from.
     fileprivate func coverSource(core: Library) -> CoverSource {
@@ -81,13 +85,16 @@ private final class ProgressRelay: ImportProgress {
 extension Date {
     /// The core's time: milliseconds since the Unix epoch.
     init(milliseconds: UInt64) { self.init(timeIntervalSince1970: Double(milliseconds) / 1000) }
+
+    /// This time as the core takes it: whole milliseconds since the Unix epoch, none before.
+    var millisecondsSince1970: UInt64 { UInt64(max(0, timeIntervalSince1970 * 1000).rounded()) }
 }
 
 /// The Library as the core listed it at one change: the Books, newest Import
 /// first, and the core's `Listing` that orders and searches those same Books.
 /// One core call makes both, so they can't disagree.
 private struct LibraryListing: Sendable {
-    let books: [Book]
+    private(set) var books: [Book]
     /// Library Search over `books`: positions in them, in Sort order.
     let sorted: Listing
 
@@ -96,6 +103,13 @@ private struct LibraryListing: Sendable {
         guard let listed = try? core.listing(sort: sort) else { return nil }
         sorted = listed.listing
         books = listed.books
+    }
+
+    /// Gives Book `id` the saved `progress`, for a save that the core says
+    /// changes nothing the Gallery shows, so nothing is listed again.
+    mutating func keep(_ progress: ReadingProgress, of id: String) {
+        guard let index = books.firstIndex(where: { $0.id == id }) else { return }
+        books[index].progress = progress
     }
 }
 
@@ -121,6 +135,11 @@ final class LibraryModel {
     /// disabled meanwhile.
     private(set) var runningImport: RunningImport?
     private var openID: String?
+    /// The Highlight Colors to choose from: the built-in ones, yellow first, then
+    /// the Custom Colors in the order added.
+    private(set) var highlightColors: [HighlightColor]
+    /// The color of new Highlights; one of `highlightColors`. Yellow until chosen.
+    private(set) var defaultHighlightColor: HighlightColor
     /// The Library as the core last listed it, in `sort` order: what the Gallery
     /// shows. Nil only if the core couldn't list it.
     private var listing: LibraryListing?
@@ -149,6 +168,9 @@ final class LibraryModel {
         self.coversFolder = coversFolder
         self.defaults = defaults
         sort = LibrarySort(from: defaults)
+        let colors = core.highlightColors()
+        highlightColors = colors.colors
+        defaultHighlightColor = colors.defaultColor
         // Listed at once, so the Gallery opens in order rather than filling in.
         listing = LibraryListing(core, sort: sort.core)
         core.readMissingDetails(
@@ -296,6 +318,147 @@ final class LibraryModel {
         let id = book.id
         await relist { try? $0.delete(id: id) }
     }
+
+    /// EPUB `book`, opened for reading off the main thread. Nil for a PDF, and
+    /// for an EPUB the core can't read.
+    func epub(of book: Book) async -> EpubBook? {
+        let core = core
+        let id = book.id
+        return await Task.detached { (try? core.openEpub(id: id)) ?? nil }.value
+    }
+
+    /// Saves `place` as Reading Progress of `book`, read `lastRead`. The
+    /// core writes off the main thread, in order; this returns when it has, with
+    /// the Document updated in every window. The Library is listed again only if
+    /// the core says the Gallery shows something new. Does nothing for a
+    /// Document that was Deleted. A failed write is ignored: the next save
+    /// replaces it.
+    func saveProgress(_ place: Place, of book: Book, at lastRead: Date = .now) async {
+        let progress = ReadingProgress(place: place, lastRead: lastRead.millisecondsSince1970)
+        let id = book.id
+        let sort = sort.core
+        let changes = await inOrder { try? $0.saveProgress(id: id, progress: progress, sort: sort) }
+        switch changes {
+        case true?: await relist { _ in }
+        case false?: listing?.keep(progress, of: id)
+        case nil: break
+        }
+    }
+
+    /// The Highlights and page Comments of `book`, each oldest first, read at
+    /// once. Empty if there are none or the Document was Deleted.
+    func markup(of book: Book) async -> (highlights: [Highlight], pageComments: [PageComment]) {
+        let id = book.id
+        let markup = await inOrder { try? $0.markup(id: id) }
+        return (markup?.highlights ?? [], markup?.pageComments ?? [])
+    }
+
+    /// Adds a Highlight over `anchor` in the Default Highlight Color to `book`,
+    /// `created` now. The core writes off the main thread, in order, and this
+    /// returns the stored Highlight when it has. Nil for a Document that was
+    /// Deleted, or if the write failed.
+    func addHighlight(
+        _ anchor: Anchor, quotedText: String, to book: Book, at created: Date = .now
+    ) async -> Highlight? {
+        let id = book.id
+        let rgb = defaultHighlightColor.rgb
+        let milliseconds = created.millisecondsSince1970
+        return await inOrder {
+            try? $0.addHighlight(id: id, anchor: anchor, quotedText: quotedText, color: rgb, created: milliseconds)
+        }
+    }
+
+    /// Sets the color of `highlight` of `book`. The core writes off the
+    /// main thread, in order, and this returns when it has. Does nothing for a
+    /// Document that was Deleted.
+    func setHighlightColor(_ color: RGB, of highlight: Highlight, in book: Book) async {
+        let id = book.id
+        let highlightID = highlight.id
+        let rgb = Rgb(color)
+        await inOrder { try? $0.setHighlightColor(id: id, highlight: highlightID, color: rgb) }
+    }
+
+    /// Sets the Comment of `highlight` of `book` to `comment`; empty removes it. The
+    /// core writes off the main thread, in order, and this returns when it has.
+    /// Does nothing for a Document that was Deleted.
+    func setComment(_ comment: String, of highlight: Highlight, in book: Book) async {
+        let id = book.id
+        let highlightID = highlight.id
+        await inOrder { try? $0.setHighlightComment(id: id, highlight: highlightID, comment: comment) }
+    }
+
+    /// Deletes `highlight` from `book`. The core writes off the main
+    /// thread, in order, and this returns when it has. Does nothing for a
+    /// Document that was Deleted.
+    func removeHighlight(_ highlight: Highlight, from book: Book) async {
+        let id = book.id
+        let highlightID = highlight.id
+        await inOrder { try? $0.removeHighlight(id: id, highlight: highlightID) }
+    }
+
+    /// Adds a page Comment without text at `place` to `book`, `created` now. The
+    /// core writes off the main thread, in order, and this returns the stored
+    /// page Comment when it has. It isn't listed by `markup(of:)` until it has
+    /// text (`setText`). Nil for a Document that was Deleted, or if the write failed.
+    func addPageComment(at place: Place, to book: Book, at created: Date = .now) async -> PageComment? {
+        let id = book.id
+        let milliseconds = created.millisecondsSince1970
+        return await inOrder { try? $0.addPageComment(id: id, place: place, created: milliseconds) }
+    }
+
+    /// Sets the text of `comment` of `book` to `text`; empty removes the page
+    /// Comment. The core writes off the main thread, in order, and this returns when
+    /// it has. Does nothing for a Document that was Deleted.
+    func setText(_ text: String, of comment: PageComment, in book: Book) async {
+        let id = book.id
+        let commentID = comment.id
+        await inOrder { try? $0.setPageCommentText(id: id, comment: commentID, text: text) }
+    }
+
+    /// Deletes the page Comment `comment` from `book`. The core writes off the main
+    /// thread, in order, and this returns when it has. Does nothing for a
+    /// Document that was Deleted.
+    func removePageComment(_ comment: PageComment, from book: Book) async {
+        let id = book.id
+        let commentID = comment.id
+        await inOrder { try? $0.removePageComment(id: id, comment: commentID) }
+    }
+
+    /// Makes `color`, one of `highlightColors`, the Default Highlight Color. It
+    /// shows at once; the core writes off the main thread, in order, and this
+    /// returns when it has.
+    func setDefaultHighlightColor(_ color: HighlightColor) async {
+        defaultHighlightColor = color
+        let id = color.id
+        await inOrder { try? $0.setDefaultHighlightColor(id: id) }
+    }
+
+    /// Adds `color` as a Custom Color after the others, `added` now. It shows at
+    /// once, once the core, which writes off the main thread, in order, has
+    /// stored it. Nil if that failed.
+    @discardableResult
+    func addCustomColor(_ color: RGB, at added: Date = .now) async -> HighlightColor? {
+        let rgb = Rgb(color)
+        let milliseconds = added.millisecondsSince1970
+        guard let stored = await inOrder({ try? $0.addCustomColor(rgb: rgb, added: milliseconds) })
+        else { return nil }
+        highlightColors.append(stored)
+        return stored
+    }
+
+    /// Deletes the Custom Color `color`. It goes at once; Highlights keep their
+    /// color, and if it was the Default Highlight Color, yellow is again. Does
+    /// nothing for a built-in color. The core writes off the main thread, in
+    /// order, and this returns when it has.
+    func removeCustomColor(_ color: HighlightColor) async {
+        guard color.isCustom else { return }
+        highlightColors.removeAll { $0 == color }
+        if defaultHighlightColor == color { defaultHighlightColor = highlightColors[0] }
+        let id = color.id
+        await inOrder { try? $0.removeCustomColor(id: id) }
+    }
+
+    /// Runs `access` on the core off the main thread, after every earlier access
 
     /// Runs `access` on the core off the main thread, after every earlier
     /// access has finished, so reads and writes never overlap.

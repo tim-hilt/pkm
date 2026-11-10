@@ -1,0 +1,991 @@
+import PDFKit
+
+/// A `PDFView` zoomable from fit-to-width to 5× (`ZoomRange`) that keeps
+/// your place: the content at the top of the viewport stays put when the view
+/// is resized or rotated, and when zooming with the keyboard. PDFKit's own
+/// pinch gesture does the pinch zooming, so the content under the fingers
+/// stays put; on iOS a double-tap toggles between fit-to-width and zoomed in,
+/// and a single tap clears the selection or, without one and unless it is on a link, calls `onSingleTap`. It reports when it has opened and
+/// whenever it scrolls, so the Reader can save Reading Progress. Once opened, the
+/// pages show only when those in view are drawn, all at once, Comment icons included.
+///
+/// Highlights are drawn into the pages (`StyledDocument`); a Highlight with a
+/// Comment has a Comment icon at its end, drawn above the pages and zooming with them
+/// (`CommentIconsView`), which opens the same popover when clicked or tapped. The selection can be
+/// highlighted (`highlightSelection()`, also from the selection menu), which
+/// reports its anchor, and never changes the File. A single click or tap on a
+/// Highlight reports it (`onHighlightTap`); drags and long presses still select.
+///
+/// Page Comments have a Comment icon at their spot, centred on it. A right-click (macOS)
+/// or long press (iOS) on an empty spot offers "Add Comment", which reports the Place
+/// to `onAddComment`. A click or tap on a page Comment's icon reports it (`onPageCommentTap`).
+///
+/// A Jump goes to a Place and remembers where the viewport was, so that Back
+/// can return there. Only the latest Jump is remembered, and only for as long
+/// as the view lives.
+/// Following a link to a place in the Book is a Jump; links to web pages
+/// keep PDFKit's behaviour and are not. A Book Search session counts as
+/// one Jump from where the search started.
+final class ReaderPDFView: PDFView, ReaderBookView {
+    /// PDFKit's own scroll view; nil until it has one.
+    private var scrollView: PlatformScrollView? {
+        #if os(iOS)
+            subviews.lazy.compactMap { $0 as? UIScrollView }.first
+        #else
+            documentView?.enclosingScrollView
+        #endif
+    }
+
+    /// Where the viewport was before a size change, to be restored once the
+    /// new layout is known.
+    private struct Viewpoint {
+        let place: Place
+        let scale: CGFloat
+        let range: ZoomRange
+    }
+
+    /// PDFKit's fit-to-width changes with the view's width, so it is
+    /// refreshed on every layout. Nil until the first layout.
+    private var zoomRange: ZoomRange?
+    private var viewpoint: Viewpoint?
+    /// Where to open, until the first layout of a Book.
+    private var openingPlace: Place?
+    private var hasOpened = false
+
+    /// How the pages are drawn. Changing it redraws them, keeping the viewport.
+    /// Set it after the Book, which must be a `StyledDocument`.
+    var pageAppearance: PageAppearance {
+        get { (document as? StyledDocument)?.appearance ?? .light }
+        set {
+            guard newValue != pageAppearance, let styled = document as? StyledDocument else { return }
+            func restyle() {
+                styled.appearance = newValue
+                styleGaps()
+                redrawPages()
+            }
+            #if os(iOS)
+                coverPages {
+                    restyle()
+                    styleBackdrops()
+                }
+            #else
+                restyle()
+            #endif
+        }
+    }
+
+    /// The Highlights drawn into the pages, oldest first. Changing them redraws the pages,
+    /// keeping the viewport. Set it after the Book, which must be a `StyledDocument`.
+    var highlights: [Highlight] = [] {
+        didSet {
+            guard highlights != oldValue else { return }
+            noteIcons.refresh()
+            // Comments aren't drawn into the pages.
+            guard highlights.map(\.look) != oldValue.map(\.look), let styled = document as? StyledDocument else {
+                return
+            }
+            styled.highlights = highlights
+            redrawPages()
+        }
+    }
+
+    override var document: PDFDocument? {
+        didSet { styleGaps() }
+    }
+
+    /// Between pages, half the pages' paper, whatever the system appearance: the
+    /// system's own gap follows the appearance instead, so Light Pages would be
+    /// framed dark in a dark one and Dark Pages light in a light one.
+    private func styleGaps() {
+        let paper = pageAppearance.paper
+        let (r, g, b) = (paper.r / 2, paper.g / 2, paper.b / 2)
+        #if os(iOS)
+            backgroundColor = UIColor(red: r, green: g, blue: b, alpha: 1)
+        #else
+            backgroundColor = NSColor(srgbRed: r, green: g, blue: b, alpha: 1)
+        #endif
+    }
+
+    /// Redraws the pages, keeping the viewport.
+    private func redrawPages() {
+        #if os(iOS)
+            // `layoutDocumentView()` keeps the drawn tiles on iOS: only scrolling
+            // to new ones would show the change.
+            setNeedsDisplay()
+        #else
+            layoutDocumentView()
+        #endif
+    }
+
+    /// The page Comments, each with a Comment icon above the pages.
+    var pageComments: [PageComment] = [] {
+        didSet { if pageComments != oldValue { noteIcons.refresh() } }
+    }
+
+    /// The color of page Comments' icons. The owner sets it to the core's built-in yellow;
+    /// this is only a stand-in until then.
+    var pageCommentColor = RGB(1, 0.92, 0.24) {
+        didSet { if pageCommentColor != oldValue { noteIcons.refresh() } }
+    }
+
+    /// The Comment icons, above the pages. Hidden from hit-testing.
+    private lazy var noteIcons = CommentIconsView(reader: self)
+
+    /// What the Reader reports; `onOpen` is called once the Book is first
+    /// laid out at fit-to-width and scrolled to its opening Place.
+    var callbacks = ReaderCallbacks()
+
+    /// The Book's Table of Contents, which places Book Search's matches
+    /// in Chapters and Sections. The owner sets it before searching; empty until then.
+    var contents = TableOfContents(entries: [])
+
+    /// Back and Book Search session places, kept in the core, which calls
+    /// `backDidChange(to:)` when the Back place changes.
+    private lazy var history = JumpHistory(observer: BackChange(view: self))
+
+    /// Where Back returns to: the top of the viewport before the latest Jump.
+    /// Nil before any Jump and after Back.
+    var backPlace: Place? { history.backPlace() }
+
+    /// The matches of the Book Search that is going on, for the results list.
+    private(set) var results = SearchResults()
+
+    /// The matches of the Book Search, marked in the pages.
+    private(set) lazy var matches = PDFMatches(view: self, results: results)
+
+    /// The native find bar over Book Search. PDFView lays out inside its own
+    /// scroll view, which hosts the bar on macOS.
+    #if os(iOS)
+        private(set) lazy var find = BookFind(view: self, matches: matches)
+    #else
+        private(set) lazy var find = BookFind(view: self, matches: matches) { [weak self] in
+            self?.documentView?.enclosingScrollView
+        }
+    #endif
+
+    /// Shows the find bar; matches are revealed and marked as they are found.
+    func presentFind() { find.present() }
+
+    #if os(macOS)
+        func findNext() { find.next() }
+        func findPrevious() { find.previous() }
+    #endif
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setUpPlatform()
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(scaleDidChange), name: .PDFViewScaleChanged, object: self)
+    }
+
+    @objc private func scaleDidChange(_ notification: Notification) { noteIcons.refresh() }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    convenience init(handle: ReaderHandle, results: SearchResults = SearchResults()) {
+        self.init(frame: .zero)
+        handle.view = self
+        self.results = results
+    }
+
+    /// Makes the Book, once it is set and laid out, open with `place` at the
+    /// top of the viewport at fit-to-width. Call before setting the Book.
+    func open(at place: Place) { openingPlace = place }
+
+    // MARK: Keyboard zoom, anchored at the top of the viewport
+
+    func zoomIn() {
+        guard let range = zoomRange else { return }
+        zoom(to: range.zoomedIn(from: scaleFactor))
+    }
+
+    func zoomOut() {
+        guard let range = zoomRange else { return }
+        zoom(to: range.zoomedOut(from: scaleFactor))
+    }
+
+    func zoomToFitWidth() {
+        guard let range = zoomRange else { return }
+        zoom(to: range.fitToWidth)
+    }
+
+    private func zoom(to scale: CGFloat) {
+        let place = topOfViewport
+        scaleFactor = scale
+        if let place { go(to: place) }
+    }
+
+    // MARK: Keeping your place
+
+    /// The content at the viewport's top-left corner. Nil without a Book.
+    // Not `currentDestination`: on iOS it is the viewport's bottom-left.
+    var topOfViewport: Place? {
+        guard let document, let page = page(for: viewportTopLeft, nearest: true) else { return nil }
+        return Place.pdf(pageIndex: document.index(for: page), point: convert(viewportTopLeft, to: page))
+    }
+
+    /// Scrolls `place` to the viewport's top-left corner, as far as the
+    /// Book's edges allow.
+    func go(to place: Place) {
+        guard let (pageIndex, point) = place.pdfPosition, let page = document?.page(at: pageIndex) else { return }
+        #if os(iOS)
+            scroll(point, on: page, to: viewportTopLeft)
+        #else
+            go(to: PDFDestination(page: page, at: point))
+        #endif
+    }
+
+    /// Jump: goes to `place`, remembering the top of the viewport for `goBack()`
+    /// in place of any earlier Back place. Does nothing if `place` is already
+    /// at the top.
+    func jump(to place: Place) {
+        guard history.jump(place: place, from: topOfViewport) else { return }
+        go(to: place)
+    }
+
+    private func didScrollViewport() {
+        if let top = topOfViewport { history.didScroll(to: top) }
+        callbacks.onScroll()
+    }
+
+    /// Back: returns to the Back place at the current zoom and forgets it.
+    /// Does nothing without one.
+    func goBack() {
+        guard let place = history.goBack() else { return }
+        go(to: place)
+    }
+
+    /// The Back place changed in the core's JumpHistory: reports it by the
+    /// printed page number of the place.
+    func backDidChange(to place: Place?) {
+        callbacks.onBackChange(
+            place?.pdfPosition.flatMap { document?.printedPageNumber(at: $0.pageIndex) }.map(BackTarget.page))
+    }
+
+    /// Starts a Book Search session, called when the find bar opens. Until
+    /// `endSearchSession()`, every `reveal` that moves the view makes the
+    /// current top of the viewport the Back place, so the session is one Jump:
+    /// Back returns to where the search started, also after an earlier Back.
+    func beginSearchSession() { history.beginSearchSession(at: topOfViewport) }
+
+    /// Ends the Book Search session, called when the find bar closes. The
+    /// Back place it recorded stays.
+    func endSearchSession() { history.endSearchSession() }
+
+    /// Scrolls a Book Search match into view, a third of the way down the
+    /// viewport; does nothing if it is already fully in view. Within a search
+    /// session the move is part of one Jump; see `beginSearchSession()`.
+    func reveal(_ selection: PDFSelection) {
+        guard let page = selection.pages.first, let document, let top = topOfViewport?.pdfPosition
+        else { return }
+        let rect = selection.bounds(for: page)
+        let viewRect = convert(rect, from: page)
+        guard !viewportRect.contains(viewRect) else { return }
+        // Keeps the horizontal scroll, unless the match is off to the side.
+        let fitsAcross = viewportRect.minX <= viewRect.minX && viewRect.maxX <= viewportRect.maxX
+        let x = fitsAcross ? top.point.x : rect.minX - 20 / scaleFactor
+        let y = rect.maxY + viewportRect.height / 3 / scaleFactor
+        history.didReveal()
+        go(to: Place.pdf(pageIndex: document.index(for: page), point: CGPoint(x: x, y: y)))
+    }
+
+    // MARK: Highlights
+
+    /// The selection as an anchor: its line rectangles per page in page space,
+    /// and its text. Nil without a selection, or one without text.
+    var selectionPassage: (anchor: Anchor, quotedText: String)? {
+        guard let document, let selection = currentSelection, let text = selection.string, !text.isEmpty
+        else { return nil }
+        var pages: [PageRects] = []
+        for line in selection.selectionsByLine() {
+            for page in line.pages {
+                let index = document.index(for: page)
+                let rect = line.bounds(for: page)
+                guard index != NSNotFound, !rect.isEmpty else { continue }
+                if let last = pages.last, last.page == index {
+                    pages[pages.count - 1] = .init(pageIndex: index, rects: last.cgRects + [rect])
+                } else {
+                    pages.append(.init(pageIndex: index, rects: [rect]))
+                }
+            }
+        }
+        return pages.isEmpty ? nil : (.pdf(pages), text)
+    }
+
+    /// Highlights the selection: reports its anchor to `onHighlight` and clears
+    /// the selection. Does nothing without one.
+    func highlightSelection() {
+        guard let passage = selectionPassage else { return }
+        clearSelection()
+        callbacks.onHighlight(passage.anchor, passage.quotedText)
+    }
+
+    /// The Highlight at `point`, in the view's coordinates: the newest one
+    /// where several overlap. Nil where there is none.
+    func highlight(at point: CGPoint) -> Highlight? {
+        guard let document, let page = page(for: point, nearest: false) else { return nil }
+        let index = document.index(for: page)
+        let spot = convert(point, to: page)
+        return highlights.last { highlight in
+            highlight.anchor.pages.contains { $0.page == index && $0.cgRects.contains { $0.contains(spot) } }
+        }
+    }
+
+    /// Where the Comment icon of `highlight` is, in the view's coordinates: at the
+    /// end of its last rectangle, centred on its top-right corner so it covers
+    /// little text, zooming with the page. Nil without a Comment.
+    func noteIconRect(of highlight: Highlight) -> CGRect? {
+        guard highlight.comment != nil, let last = highlight.anchor.pages.last, let rect = last.cgRects.last,
+            let page = document?.page(at: last.page)
+        else { return nil }
+        return noteIconRect(around: convert(CGPoint(x: rect.maxX, y: rect.maxY), from: page))
+    }
+
+    /// The Highlight whose Comment icon is at `point`, in the view's coordinates:
+    /// the newest where several overlap. Nil where there is none.
+    func noteIcon(at point: CGPoint) -> Highlight? {
+        highlights.last { noteIconRect(of: $0)?.contains(point) == true }
+    }
+
+    /// Reports the page Comment icon, Highlight Comment icon or Highlight at `point`,
+    /// in that order, to `onPageCommentTap` or `onHighlightTap`. Returns whether
+    /// there was one.
+    @discardableResult
+    func reportMarkupTap(at point: CGPoint) -> Bool {
+        if let comment = pageComment(at: point) {
+            callbacks.onPageCommentTap(comment, fromTopLeft(point))
+        } else if let highlight = noteIcon(at: point) ?? highlight(at: point) {
+            callbacks.onHighlightTap(highlight, fromTopLeft(point))
+        } else {
+            return false
+        }
+        return true
+    }
+
+    /// `point`, given in the view's coordinates, with the origin at the top-left.
+    func fromTopLeft(_ point: CGPoint) -> CGPoint {
+        #if os(iOS)
+            point
+        #else
+            CGPoint(x: point.x, y: bounds.height - point.y)
+        #endif
+    }
+
+    // MARK: Page Comments
+
+    /// Where the Comment icon of `comment` is, in the view's coordinates: centred on
+    /// its spot, zooming with the page.
+    func noteIconRect(of comment: PageComment) -> CGRect? {
+        guard let (pageIndex, point) = comment.place.pdfPosition, let page = document?.page(at: pageIndex) else {
+            return nil
+        }
+        return noteIconRect(around: convert(point, from: page))
+    }
+
+    func popoverPoint(of comment: PageComment) -> CGPoint? {
+        noteIconRect(of: comment).map { fromTopLeft(CGPoint(x: $0.midX, y: $0.midY)) }
+    }
+
+    /// The square of a Comment icon centred on `point`, in the view's coordinates.
+    private func noteIconRect(around point: CGPoint) -> CGRect {
+        let side = CommentIconsView.size * scaleFactor
+        return CGRect(x: point.x - side / 2, y: point.y - side / 2, width: side, height: side)
+    }
+
+    /// The page Comment whose icon is at `point`, in the view's coordinates: the
+    /// newest where several overlap. Nil where there is none.
+    func pageComment(at point: CGPoint) -> PageComment? {
+        pageComments.last { noteIconRect(of: $0)?.contains(point) == true }
+    }
+
+    /// Whether any Highlight or page Comment has a Comment icon.
+    var hasCommentIcons: Bool { !pageComments.isEmpty || highlights.contains { $0.comment != nil } }
+
+    /// Every Comment icon, in the view's coordinates, in its color; also those
+    /// scrolled out of view.
+    var noteIconsToDraw: [(rect: CGRect, color: RGB)] {
+        highlights.compactMap { h in noteIconRect(of: h).map { ($0, h.tint) } }
+            + pageComments.compactMap { n in noteIconRect(of: n).map { ($0, pageCommentColor) } }
+    }
+
+    /// The Place at `point`, in the view's coordinates. Nil off the pages.
+    func place(at point: CGPoint) -> Place? {
+        guard let document, let page = page(for: point, nearest: false) else { return nil }
+        return Place.pdf(pageIndex: document.index(for: page), point: convert(point, to: page))
+    }
+
+    /// Whether nothing is at `point`, in the view's coordinates, but page: no
+    /// text, link, Highlight or Comment icon.
+    func isEmptySpot(at point: CGPoint) -> Bool {
+        guard let page = page(for: point, nearest: false), !hasLink(at: point),
+            pageComment(at: point) == nil, noteIcon(at: point) == nil, highlight(at: point) == nil
+        else { return false }
+        return page.characterIndex(at: convert(point, to: page)) == NSNotFound
+    }
+
+    /// Reports the Place at `point`, in the view's coordinates, to `onAddComment`.
+    /// Does nothing off the pages.
+    func addComment(at point: CGPoint) {
+        if let place = place(at: point) { callbacks.onAddComment(place) }
+    }
+
+    // MARK: Links
+
+    /// Whether a link (to the Book or the web) is at `point`, in the view's
+    /// coordinates.
+    func hasLink(at point: CGPoint) -> Bool { areaOfInterest(for: point).contains(.linkArea) }
+
+    /// PDFKit performs a link's action here when the reader follows it. A link
+    /// to a place in the Book becomes a Jump, so Back can undo it.
+    override func perform(_ action: PDFAction) {
+        guard let goTo = action as? PDFActionGoTo, let document,
+            let place = Place(goTo.destination, in: document)
+        else { return super.perform(action) }
+        jump(to: place)
+    }
+
+    /// Remembers the viewport; call just before the view's size changes.
+    private func sizeWillChange(to size: CGSize, from oldSize: CGSize) {
+        guard size != oldSize, viewpoint == nil, let range = zoomRange,
+            let place = topOfViewport
+        else { return }
+        viewpoint = Viewpoint(place: place, scale: scaleFactor, range: range)
+    }
+
+    /// Refreshes the zoom limits for the current width, then restores the
+    /// remembered viewpoint at the new fit-to-width.
+    private func layoutDidChange() {
+        let fit = scaleFactorForSizeToFit
+        guard fit > 0 else { return }
+        let range = ZoomRange(fitToWidth: fit)
+        if minScaleFactor != range.minimum { minScaleFactor = range.minimum }
+        if maxScaleFactor != range.maximum { maxScaleFactor = range.maximum }
+        zoomRange = range
+        noteIcons.refresh()
+        if !hasOpened {
+            hasOpened = true
+            if let place = openingPlace {
+                openingPlace = nil
+                go(to: place)
+            }
+            coverUntilDrawn()
+            observeScrolling()
+            callbacks.onOpen()
+        } else if let viewpoint {
+            self.viewpoint = nil
+            scaleFactor = range.rescaled(viewpoint.scale, from: viewpoint.range)
+            go(to: viewpoint.place)
+        }
+    }
+
+    // MARK: Showing the pages only once drawn
+
+    /// Over the pages (and Comment icons) while those in view aren't all drawn,
+    /// so they show at once, not in stages.
+    private var cover: PlatformView?
+    private var uncovering: Task<Void, Never>?
+
+    /// Whether the pages show, rather than a cover over them.
+    var showsPages: Bool { cover == nil }
+
+    /// Covers the pages with plain paper until those in view are drawn: PDFKit
+    /// would show them blank, with the Comment icons already on top, then (on iOS)
+    /// as a blurry preview, then tile by tile.
+    private func coverUntilDrawn() {
+        let paper = pageAppearance.paper
+        let color = CGColor(srgbRed: paper.r, green: paper.g, blue: paper.b, alpha: 1)
+        #if os(iOS)
+            let blank = UIView()
+            blank.backgroundColor = UIColor(cgColor: color)
+        #else
+            let blank = ClickThroughView()
+            blank.wantsLayer = true
+            blank.layer?.backgroundColor = color
+        #endif
+        cover(with: blank)
+        uncoverOnceDrawn(since: [:])
+    }
+
+    /// Puts `view` over the pages as the cover.
+    private func cover(with view: PlatformView) {
+        view.frame = bounds
+        #if os(iOS)
+            view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            view.isUserInteractionEnabled = false
+        #else
+            view.autoresizingMask = [.width, .height]
+        #endif
+        addSubview(view)
+        cover = view
+    }
+
+    /// Fades the cover out once every tile in view shows a drawing made since
+    /// `before`: PDFKit draws them one after the other.
+    private func uncoverOnceDrawn(since before: [ObjectIdentifier: ObjectIdentifier?]) {
+        guard let cover else { return }
+        uncovering?.cancel()
+        uncovering = Task { [weak self] in
+            // Up to a second, should PDFKit draw differently.
+            for _ in 0..<60 {
+                try? await Task.sleep(for: .milliseconds(16))
+                guard let self, !Task.isCancelled else { return }
+                let tiles = self.shownTiles()
+                if !tiles.isEmpty, tiles.allSatisfy({ $0.value != nil && $0.value != before[$0.key] ?? nil }) {
+                    break
+                }
+            }
+            guard !Task.isCancelled else { return }
+            self?.cover = nil
+            #if os(iOS)
+                UIView.animate(withDuration: 0.2) {
+                    cover.alpha = 0
+                } completion: { _ in
+                    cover.removeFromSuperview()
+                }
+            #else
+                await NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.2
+                    cover.animator().alphaValue = 0
+                }
+                cover.removeFromSuperview()
+            #endif
+        }
+    }
+
+    /// What each of PDFKit's tiles in view shows; nil until it is drawn. Tiles
+    /// are its layers without sublayers, other than plain `CALayer`s; each
+    /// drawing gives them a new surface.
+    private func shownTiles() -> [ObjectIdentifier: ObjectIdentifier?] {
+        let view: CALayer? = layer
+        let pages: CALayer? = documentView?.layer
+        guard let view, let pages else { return [:] }
+        var tiles: [ObjectIdentifier: ObjectIdentifier?] = [:]
+        func collect(_ layer: CALayer) {
+            if type(of: layer) != CALayer.self, layer.sublayers?.isEmpty ?? true,
+                layer.convert(layer.bounds, to: view).intersects(view.bounds)
+            {
+                tiles[ObjectIdentifier(layer)] = layer.contents.map { ObjectIdentifier($0 as AnyObject) }
+            }
+            layer.sublayers?.forEach(collect)
+        }
+        collect(pages)
+        return tiles
+    }
+
+    #if os(iOS)
+        /// PDFView is already the delegate of its own recognizers, so ours gets
+        /// a separate one rather than overriding PDFView's. It lets ours work
+        /// alongside PDFKit's, and ignores taps that start on a link: PDFKit
+        /// follows those, and that is all a link tap should do. It decides at
+        /// touch-down, since following the link moves the page from under the finger.
+        /// A tap that stops a scroll only stops it: by the time the tap is
+        /// recognized the scroll has already stopped, so this too is decided at touch-down.
+        private final class SingleTapFilter: NSObject, UIGestureRecognizerDelegate {
+            private weak var view: ReaderPDFView?
+
+            /// Where the current long press went down.
+            private var pressPoint: CGPoint?
+
+            init(view: ReaderPDFView) { self.view = view }
+
+            func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+                guard let view else { return false }
+                if gestureRecognizer is UITapGestureRecognizer && view.isScrolling { return false }
+                let point = touch.location(in: view)
+                if gestureRecognizer is UILongPressGestureRecognizer { pressPoint = point }
+                return !view.hasLink(at: point)
+            }
+
+            /// Asked lazily, once the long press has its touch.
+            func gestureRecognizer(
+                _ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy other: UIGestureRecognizer
+            ) -> Bool {
+                guard gestureRecognizer is UILongPressGestureRecognizer, let view, let pressPoint else { return false }
+                return view.addCommentPressPreempts(other, at: pressPoint)
+            }
+
+            func gestureRecognizer(
+                _ gestureRecognizer: UIGestureRecognizer,
+                shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+            ) -> Bool { true }
+        }
+
+        // Recognizers hold their delegate weakly.
+        private var singleTapFilter: SingleTapFilter?
+        private weak var singleTapRecognizer: UITapGestureRecognizer?
+
+        private var scrollObservation: NSKeyValueObservation?
+
+        /// Whether the pages are still moving after the finger left them.
+        fileprivate var isScrolling: Bool {
+            scrollView?.isDecelerating ?? false
+        }
+
+        /// The edit menu offering "Add Comment", and the spot it was asked at.
+        private lazy var addCommentMenu = UIEditMenuInteraction(delegate: self)
+        fileprivate var notePoint: CGPoint?
+
+        @objc private func panned(_ pan: UIPanGestureRecognizer) {
+            if pan.state == .began { callbacks.onDragScroll() }
+        }
+
+        private func observeScrolling() {
+            letScrollIndicatorScrub()
+            if let pan = scrollView?.panGestureRecognizer {
+                pan.addTarget(self, action: #selector(panned))
+                // A drag too short to leave a tap's slop must not also toggle Immersive Mode back.
+                singleTapRecognizer?.require(toFail: pan)
+            }
+            scrollObservation = scrollView?
+                .observe(\.contentOffset) { [weak self] _, _ in
+                    MainActor.assumeIsolated {
+                        self?.styleBackdrops()
+                        self?.noteIcons.pagesScrolled()
+                        self?.didScrollViewport()
+                    }
+                }
+        }
+
+        /// The native scroll indicator can be grabbed with a press while it shows, then
+        /// dragged to scrub through the Book. PDFKit's and our presses, and text
+        /// selection, would take that press first, so they wait for the indicator's,
+        /// which fails at once off the indicator.
+        private func letScrollIndicatorScrub() {
+            guard let scrollView, let documentView else { return }
+            // The scroll view's only long presses are its indicators'.
+            let indicatorPresses = (scrollView.gestureRecognizers ?? []).filter { $0 is UILongPressGestureRecognizer }
+            let presses = ((gestureRecognizers ?? []) + (documentView.gestureRecognizers ?? [])).filter {
+                $0 is UILongPressGestureRecognizer || $0 is UIPanGestureRecognizer
+            }
+            for press in presses {
+                for indicatorPress in indicatorPresses { press.require(toFail: indicatorPress) }
+            }
+        }
+
+        /// Below any part of the view hidden behind bars.
+        private var viewportTopLeft: CGPoint { CGPoint(x: 0, y: safeAreaInsets.top) }
+
+        /// The part of the view showing pages, in the view's coordinates.
+        private var viewportRect: CGRect {
+            CGRect(x: 0, y: safeAreaInsets.top, width: bounds.width, height: bounds.height - safeAreaInsets.top)
+        }
+
+        /// Scrolls so that `point` on `page` lands at `viewPoint`, as far as the
+        /// Book's edges allow. PDFKit's `go(to:)` can't do this: on iOS it
+        /// lands up to a page off, so this moves PDFKit's scroll view directly.
+        private func scroll(_ point: CGPoint, on page: PDFPage, to viewPoint: CGPoint) {
+            guard let scrollView else { return }
+            let current = convert(point, from: page)
+            let inset = scrollView.adjustedContentInset
+            let minimum = CGPoint(x: -inset.left, y: -inset.top)
+            let maximum = CGPoint(
+                x: scrollView.contentSize.width + inset.right - scrollView.bounds.width,
+                y: scrollView.contentSize.height + inset.bottom - scrollView.bounds.height)
+            var offset = scrollView.contentOffset
+            offset.x = min(max(offset.x + current.x - viewPoint.x, minimum.x), max(maximum.x, minimum.x))
+            offset.y = min(max(offset.y + current.y - viewPoint.y, minimum.y), max(maximum.y, minimum.y))
+            scrollView.contentOffset = offset
+        }
+
+        /// Until a page is drawn, PDFKit shows a backdrop: white, with a light preview
+        /// of the page. On Dark Pages that flashes, so there the backdrop is hidden
+        /// and the page shows plain paper until drawn. Run whenever PDFKit may have
+        /// added pages.
+        private func styleBackdrops() {
+            guard let documentView else { return }
+            let paper: UIColor? =
+                if case .dark(let colors) = pageAppearance {
+                    UIColor(red: colors.paper.r, green: colors.paper.g, blue: colors.paper.b, alpha: 1)
+                } else { nil }
+            for pageView in documentView.subviews
+            where !(pageView is CommentIconsView) && pageView.backgroundColor != paper {
+                pageView.backgroundColor = paper
+                // The backdrop: the opaque layer right under the page's own layer.
+                for pageLayer in pageView.layer.sublayers ?? [] {
+                    for layer in pageLayer.sublayers ?? [] where layer.backgroundColor?.alpha == 1 {
+                        layer.isHidden = paper != nil
+                    }
+                }
+            }
+        }
+
+        /// Restyles under a picture of the pages as they are, until all in view are redrawn.
+        private func coverPages(while restyle: () -> Void) {
+            if cover == nil, window != nil, let picture = snapshotView(afterScreenUpdates: false) {
+                cover(with: picture)
+            }
+            let before = shownTiles()
+            restyle()
+            uncoverOnceDrawn(since: before)
+        }
+
+        // The find bar is presented from the first responder.
+        override var canBecomeFirstResponder: Bool { true }
+
+        /// Adds "Highlight" to the edit menu of a selection.
+        override func buildMenu(with builder: any UIMenuBuilder) {
+            super.buildMenu(with: builder)
+            guard builder.system == .context, selectionPassage != nil else { return }
+            let highlight = UIAction(title: "Highlight", image: UIImage(systemName: "highlighter")) { [weak self] _ in
+                self?.highlightSelection()
+            }
+            builder.insertChild(UIMenu(options: .displayInline, children: [highlight]), atStartOfMenu: .standardEdit)
+        }
+
+        /// The edit menu is built from the selection as it is when the menu is rebuilt.
+        @objc private func selectionDidChange(_ notification: Notification) {
+            UIMenuSystem.context.setNeedsRebuild()
+        }
+
+        private func setUpPlatform() {
+            // Pages span the full width: PDFKit's side margins frame Dark Pages in the light background.
+            pageBreakMargins.left = 0
+            pageBreakMargins.right = 0
+            let doubleTap = UITapGestureRecognizer(target: self, action: #selector(didDoubleTap))
+            doubleTap.numberOfTapsRequired = 2
+            addGestureRecognizer(doubleTap)
+            // A double-tap zooms, so a single tap only counts once it can no
+            // longer become one.
+            // PDFKit's own tap handling (links, selection) must keep working.
+            let filter = SingleTapFilter(view: self)
+            singleTapFilter = filter
+            let longPress = UILongPressGestureRecognizer(target: self, action: #selector(didLongPress))
+            longPress.delegate = filter
+            addGestureRecognizer(longPress)
+            let singleTap = UITapGestureRecognizer(target: self, action: #selector(didSingleTap))
+            singleTap.require(toFail: doubleTap)
+            // A long press selects (or offers "Add Comment"); lifting the finger
+            // must not also open a popover or toggle Immersive Mode.
+            singleTap.require(toFail: longPress)
+            singleTap.delegate = filter
+            addGestureRecognizer(singleTap)
+            singleTapRecognizer = singleTap
+            addInteraction(addCommentMenu)
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(selectionDidChange), name: .PDFViewSelectionChanged, object: self)
+        }
+
+        /// No side insets: PDFKit fits pages to the width inside the safe area, which
+        /// leaves grey bars beside them in landscape.
+        override var safeAreaInsets: UIEdgeInsets {
+            var insets = super.safeAreaInsets
+            insets.left = 0
+            insets.right = 0
+            return insets
+        }
+
+        // UIKit may resize through either property.
+        override var bounds: CGRect {
+            willSet { sizeWillChange(to: newValue.size, from: bounds.size) }
+        }
+
+        override var frame: CGRect {
+            willSet { sizeWillChange(to: newValue.size, from: frame.size) }
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            insetBySafeArea()
+            layoutDidChange()
+            // Last: opening scrolls to a place, which adds pages.
+            styleBackdrops()
+        }
+
+        /// Insets the pages by the safe area without moving them. Bars come and go
+        /// over the pages (Immersive Mode), changing only the safe area; adjusting
+        /// for it itself, UIKit's scroll view would move the pages along with the bars.
+        private func insetBySafeArea() {
+            guard let scrollView else { return }
+            scrollView.contentInsetAdjustmentBehavior = .never
+            // A status-bar tap must not jump to the Book's start.
+            scrollView.scrollsToTop = false
+            let insets = UIEdgeInsets(top: safeAreaInsets.top, left: 0, bottom: safeAreaInsets.bottom, right: 0)
+            guard scrollView.contentInset != insets else { return }
+            scrollView.contentInset = insets
+            // Until it opens, the Book starts below the bars.
+            if !hasOpened { scrollView.contentOffset.y = -insets.top }
+        }
+
+        /// Zooms to `scale`, keeping the content at `point` (in view coordinates)
+        /// under that point.
+        private func zoom(to scale: CGFloat, keeping point: CGPoint) {
+            guard let page = page(for: point, nearest: true) else { return }
+            let anchor = convert(point, to: page)
+            scaleFactor = scale
+            scroll(anchor, on: page, to: point)
+        }
+
+        @objc private func didSingleTap(_ tap: UITapGestureRecognizer) {
+            singleTap(at: tap.location(in: self))
+        }
+
+        /// A single tap at `point`: with a selection it only clears it, as our
+        /// recognizers keep PDFKit from doing so; otherwise it reports any
+        /// markup there, or else calls `onSingleTap`.
+        func singleTap(at point: CGPoint) {
+            if currentSelection != nil {
+                clearSelection()
+                return
+            }
+            if reportMarkupTap(at: point) { return }
+            callbacks.onSingleTap()
+        }
+
+        /// Whether `other` must wait for a long press at `point` to fail. At an
+        /// empty spot PDFKit would select the nearest text and replace "Add Comment"
+        /// with its own menu; so there its gestures wait, but scrolling never does.
+        func addCommentPressPreempts(_ other: UIGestureRecognizer, at point: CGPoint) -> Bool {
+            guard let otherView = other.view, otherView.isDescendant(of: self), !(otherView is UIScrollView)
+            else { return false }
+            return isEmptySpot(at: point)
+        }
+
+        /// Offers "Add Comment" at an empty spot; elsewhere PDFKit's own long press selects.
+        @objc private func didLongPress(_ press: UILongPressGestureRecognizer) {
+            let point = press.location(in: self)
+            guard press.state == .began, isEmptySpot(at: point) else { return }
+            notePoint = point
+            addCommentMenu.presentEditMenu(with: UIEditMenuConfiguration(identifier: nil, sourcePoint: point))
+        }
+
+        @objc private func didDoubleTap(_ tap: UITapGestureRecognizer) {
+            guard let range = zoomRange else { return }
+            zoom(to: range.doubleTapTarget(from: scaleFactor), keeping: tap.location(in: self))
+        }
+    #else
+        /// A view that clicks pass through, to the pages under it.
+        private final class ClickThroughView: NSView {
+            override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        }
+
+        /// PDFView isn't flipped: its top edge is at `bounds.maxY`.
+        private var viewportTopLeft: CGPoint { CGPoint(x: 0, y: bounds.maxY) }
+
+        /// The part of the view showing pages, in the view's coordinates.
+        private var viewportRect: CGRect { bounds }
+
+        private func observeScrolling() {
+            guard let clip = scrollView?.contentView else { return }
+            clip.postsBoundsChangedNotifications = true
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(didScroll), name: NSView.boundsDidChangeNotification, object: clip)
+        }
+
+        @objc private func didScroll(_ notification: Notification) {
+            noteIcons.pagesScrolled()
+            didScrollViewport()
+        }
+
+        /// Adds "Highlight" to the context menu of a selection, and "Add Comment" to
+        /// that of an empty spot.
+        override func menu(for event: NSEvent) -> NSMenu? {
+            guard let menu = super.menu(for: event) else { return nil }
+            let point = convert(event.locationInWindow, from: nil)
+            if selectionPassage != nil {
+                insert("Highlight", #selector(highlightFromMenu), into: menu)
+            } else if isEmptySpot(at: point) {
+                insert("Add Comment", #selector(addCommentFromMenu), into: menu).representedObject = NSValue(
+                    point: point)
+            }
+            return menu
+        }
+
+        /// The item for `action` at the top of `menu`, new unless it already has one.
+        @discardableResult
+        private func insert(_ title: String, _ action: Selector, into menu: NSMenu) -> NSMenuItem {
+            if let existing = menu.items.first(where: { $0.action == action }) { return existing }
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            menu.insertItem(item, at: 0)
+            menu.insertItem(.separator(), at: 1)
+            return item
+        }
+
+        @objc private func highlightFromMenu(_ sender: Any?) { highlightSelection() }
+
+        @objc private func addCommentFromMenu(_ sender: NSMenuItem) {
+            if let point = (sender.representedObject as? NSValue)?.pointValue { addComment(at: point) }
+        }
+
+        /// Lets our click recognizers work alongside PDFKit's own mouse handling
+        /// (selecting, links), and makes a single click wait for a possible double click.
+        private final class ClickFilter: NSObject, NSGestureRecognizerDelegate {
+            private weak var view: ReaderPDFView?
+            var doubleClick: NSClickGestureRecognizer?
+
+            init(view: ReaderPDFView) { self.view = view }
+
+            func gestureRecognizer(
+                _ gestureRecognizer: NSGestureRecognizer, shouldRecognizeSimultaneouslyWith other: NSGestureRecognizer
+            ) -> Bool { true }
+
+            func gestureRecognizer(
+                _ gestureRecognizer: NSGestureRecognizer, shouldRequireFailureOf other: NSGestureRecognizer
+            ) -> Bool { other === doubleClick }
+
+            /// Not on a link: PDFKit follows those.
+            func gestureRecognizerShouldBegin(_ gestureRecognizer: NSGestureRecognizer) -> Bool {
+                guard let view else { return false }
+                return !view.hasLink(at: gestureRecognizer.location(in: view))
+            }
+        }
+
+        // Recognizers hold their delegate weakly.
+        private var clickFilter: ClickFilter?
+
+        private func setUpPlatform() {
+            let filter = ClickFilter(view: self)
+            clickFilter = filter
+            let doubleClick = NSClickGestureRecognizer()
+            doubleClick.numberOfClicksRequired = 2
+            doubleClick.delegate = filter
+            filter.doubleClick = doubleClick
+            addGestureRecognizer(doubleClick)
+            let click = NSClickGestureRecognizer(target: self, action: #selector(didClick))
+            click.delegate = filter
+            addGestureRecognizer(click)
+        }
+
+        @objc private func didClick(_ click: NSClickGestureRecognizer) {
+            _ = reportMarkupTap(at: click.location(in: self))
+        }
+
+        override func setFrameSize(_ newSize: NSSize) {
+            sizeWillChange(to: newSize, from: frame.size)
+            super.setFrameSize(newSize)
+        }
+
+        override func layout() {
+            super.layout()
+            layoutDidChange()
+        }
+    #endif
+}
+
+extension Highlight {
+    /// What is drawn into the pages: everything but the Comment.
+    fileprivate struct Look: Equatable {
+        let id: String
+        let anchor: Anchor
+        let color: Rgb
+    }
+
+    fileprivate var look: Look { Look(id: id, anchor: anchor, color: color) }
+}
+
+#if os(iOS)
+    extension ReaderPDFView: @MainActor UIEditMenuInteractionDelegate {
+        func editMenuInteraction(
+            _ interaction: UIEditMenuInteraction, menuFor configuration: UIEditMenuConfiguration,
+            suggestedActions: [UIMenuElement]
+        ) -> UIMenu? {
+            guard let point = notePoint else { return nil }
+            let add = UIAction(title: "Add Comment", image: UIImage(systemName: "comment.text.badge.plus")) {
+                [weak self] _ in
+                self?.addComment(at: point)
+            }
+            return UIMenu(children: [add])
+        }
+    }
+#endif

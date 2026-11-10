@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// What the Gallery's context menu tells about a Book: Title, Author (if
+/// What the Gallery's context menu and the Reader's cog popover tell about a Book: Title, Author (if
 /// known), Format, File size and Date Imported, in that order. The File size
 /// is read from disk when made.
 struct BookInfo {
@@ -42,15 +42,24 @@ extension View {
             contextMenu {
                 Button("Delete", systemImage: "trash", role: .destructive, action: delete)
             } preview: {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(BookInfo(book).rows) { row in
-                        LabeledContent(String(localized: row.label), value: row.value)
-                    }
-                }
-                .font(.callout)
-                .padding()
-                .frame(width: 320)
+                BookInfoList(info: BookInfo(book))
+                    .padding()
+                    .frame(width: 320)
             }
         #endif
+    }
+}
+
+/// `BookInfo` as label and value lines, for a popover.
+struct BookInfoList: View {
+    let info: BookInfo
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(info.rows) { row in
+                LabeledContent(String(localized: row.label), value: row.value)
+            }
+        }
+        .font(.callout)
     }
 }

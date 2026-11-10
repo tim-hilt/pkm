@@ -7,7 +7,8 @@ extension LibraryModel {
     /// The Library for this launch: the Books folder, with Covers in Caches and
     /// the sort choice in the standard defaults. For UI tests and screenshots
     /// (`-UITesting…`) it is empty and temporary, with sample Books when
-    /// launched with `-UITestingOpenBooks`.
+    /// launched with `-UITestingOpenBooks`, and the first of them open in the Reader
+    /// with `-UITestingOpenReader`.
     @MainActor
     static func forLaunch() -> LibraryModel {
         let arguments = ProcessInfo.processInfo.arguments
@@ -18,10 +19,15 @@ extension LibraryModel {
         }
         let root = temporaryRoot()
         let core = openOrTemporary(root.appending(path: "Books"))
-        if arguments.contains("-UITestingOpenBooks") { SampleBooks.import(into: core, sort: LibrarySort.standard.core) }
-        return LibraryModel(
+        let opensReader = arguments.contains("-UITestingOpenReader")
+        if opensReader || arguments.contains("-UITestingOpenBooks") {
+            SampleBooks.import(into: core, sort: LibrarySort.standard.core)
+        }
+        let library = LibraryModel(
             core: core, coversFolder: root.appending(path: "Covers"),
             defaults: UserDefaults(suiteName: root.lastPathComponent)!)
+        if opensReader, let first = library.books.first { library.openBook(id: first.id) }
+        return library
     }
 
     private static func temporaryRoot() -> URL {

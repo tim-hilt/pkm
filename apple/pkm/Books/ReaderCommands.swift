@@ -1,0 +1,67 @@
+#if os(macOS)
+    import SwiftUI
+
+    extension FocusedValues {
+        /// The Reader of the focused window, if one is showing.
+        @Entry var reader: ReaderHandle?
+        /// The focused Reader's Back place; nil when it has none (see `GoCommands`).
+        @Entry var backTarget: BackTarget?
+        /// Opens the focused Reader's Table of Contents; nil when it has none (see `GoCommands`).
+        @Entry var showTableOfContents: Binding<Bool>?
+        /// The color scheme the focused Reader shows in, which ⇧⌘D switches its pages
+        /// against; nil when no Reader is showing.
+        @Entry var readerColorScheme: ColorScheme?
+    }
+
+    /// View menu zoom and Page Style commands, and Edit > Highlight and Find, acting on the focused window's Reader.
+    struct ReaderCommands: Commands {
+        @FocusedValue(\.reader) private var reader
+        @FocusedValue(\.readerColorScheme) private var readerColorScheme
+        let settings: ReaderSettings
+
+        var body: some Commands {
+            // Only with a Reader showing: the Canvas has menu items of its own.
+            CommandGroup(after: .toolbar) {
+                if reader != nil {
+                    Button("Zoom In") { reader?.view?.zoomIn() }
+                        .keyboardShortcut("+", modifiers: .command)
+                        .disabled(reader == nil)
+                    Button("Zoom Out") { reader?.view?.zoomOut() }
+                        .keyboardShortcut("-", modifiers: .command)
+                        .disabled(reader == nil)
+                    Button("Fit to Width") { reader?.view?.zoomToFitWidth() }
+                        .keyboardShortcut("0", modifiers: .command)
+                        .disabled(reader == nil)
+                    Divider()
+                    ForEach(PageStyle.allCases) { style in
+                        Toggle(
+                            style.title,
+                            isOn: Binding(
+                                get: { settings.pageStyle == style }, set: { _ in settings.pageStyle = style }))
+                    }
+                    Button("Switch Light and Dark Pages") {
+                        if let readerColorScheme { settings.switchToOppositePageStyle(systemScheme: readerColorScheme) }
+                    }
+                    .keyboardShortcut("d", modifiers: [.shift, .command])
+                    .disabled(readerColorScheme == nil)
+                }
+            }
+            CommandGroup(after: .textEditing) {
+                if reader != nil {
+                    Button("Highlight") { reader?.view?.highlightSelection() }
+                        .keyboardShortcut("h", modifiers: [.control, .command])
+                        .disabled(reader == nil)
+                    Menu("Find") {
+                        Button("Find…") { reader?.view?.presentFind() }
+                            .keyboardShortcut("f", modifiers: .command)
+                        Button("Find Next") { reader?.view?.findNext() }
+                            .keyboardShortcut("g", modifiers: .command)
+                        Button("Find Previous") { reader?.view?.findPrevious() }
+                            .keyboardShortcut("g", modifiers: [.shift, .command])
+                    }
+                    .disabled(reader == nil)
+                }
+            }
+        }
+    }
+#endif
