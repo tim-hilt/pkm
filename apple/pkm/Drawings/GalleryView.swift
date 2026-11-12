@@ -20,7 +20,7 @@ struct GalleryView: View {
         @Environment(\.openSettings) private var openSettings
     #endif
 
-    private let columns = [GridItem(.adaptive(minimum: 160, maximum: 260), spacing: 16)]
+    private let columns = [GridItem(.adaptive(minimum: 160, maximum: 260), spacing: 16, alignment: .top)]
 
     var body: some View {
         NavigationStack {
