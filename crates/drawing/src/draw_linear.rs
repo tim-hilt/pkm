@@ -156,6 +156,11 @@ impl LinearDrawing {
         self.handle
     }
 
+    /// The id of the line being drawn.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
     /// The shape an end of the arrow is on, which is highlighted.
     pub fn highlight(&self) -> Option<&str> {
         self.highlight.as_deref()

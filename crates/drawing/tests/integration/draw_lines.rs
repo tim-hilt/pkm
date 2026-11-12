@@ -237,10 +237,7 @@ fn tapping_places_the_points_and_tapping_the_last_one_again_finishes() {
         [(0.0, 0.0), (50.0, 0.0), (50.0, 50.0)]
     );
     assert_eq!(editor.tool(), Tool::Selection);
-    assert!(
-        editor.selection().is_empty(),
-        "finishing taps select nothing"
-    );
+    assert_eq!(editor.selection().len(), 1, "the new line is selected");
 }
 
 #[test]
@@ -504,10 +501,37 @@ fn undoing_while_placing_points_finishes_the_line_first() {
 }
 
 #[test]
-fn drawing_lines_does_not_change_the_selection() {
-    let mut editor = editor_with(Tool::Line);
+fn a_new_line_or_arrow_is_selected_to_be_adjusted() {
+    for tool in [Tool::Line, Tool::Arrow] {
+        let mut editor = editor_with(tool);
+
+        drag(&mut editor, "mouse", (0.0, 0.0), (50.0, 50.0), "");
+
+        let id = text(&saved_elements(&editor)[0], "id").to_owned();
+        assert_eq!(editor.selection(), [id], "{tool:?}");
+    }
+}
+
+#[test]
+fn with_the_tool_lock_a_new_arrow_is_not_selected() {
+    let mut editor = editor_with(Tool::Arrow);
+    editor.set_tool_lock(true);
 
     drag(&mut editor, "mouse", (0.0, 0.0), (50.0, 50.0), "");
 
     assert!(editor.selection().is_empty());
+}
+
+#[test]
+fn a_double_tap_beside_a_selected_arrow_makes_a_text() {
+    for kind in ["mouse", "finger"] {
+        let mut editor = editor_with(Tool::Arrow);
+        editor.set_text_measurer(std::sync::Arc::new(common::FixedWidth));
+        drag(&mut editor, "mouse", (0.0, 0.0), (50.0, 50.0), "");
+
+        tap(&mut editor, kind, (300.0, 300.0), 10.0);
+        tap(&mut editor, kind, (300.0, 300.0), 10.1);
+
+        assert!(editor.text_editor().is_some(), "{kind}");
+    }
 }

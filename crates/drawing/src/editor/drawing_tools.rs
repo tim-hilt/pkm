@@ -117,8 +117,13 @@ impl Editor {
             return false;
         };
         let zoom = self.navigation.viewport().zoom();
+        let id = linear.id().to_owned();
         match linear.finish(&mut self.scene, &mut self.entropy, zoom) {
             Outcome::Drawn(step) => {
+                // Selected like a new shape, to adjust its ends and style.
+                if !self.tool_lock {
+                    self.selection.select(Some(id));
+                }
                 self.history.record(step, &self.scene, &self.selection);
                 self.changed();
                 true
