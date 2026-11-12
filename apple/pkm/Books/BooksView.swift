@@ -81,7 +81,14 @@ struct BooksView: View {
         ) { result in
             if case .success(let urls) = result { Task { await importFiles(urls) } }
         }
-        .modifier(BooksAlerts(rejection: $rejection, deleting: $deleting))
+        .alert(rejection?.title ?? "", isPresented: Binding(isPresenting: $rejection), presenting: rejection) { _ in
+        } message: { alert in
+            Text(alert.message)
+        }
+    }
+
+    private func isDeleting(_ book: Book) -> Binding<Bool> {
+        Binding(get: { deleting?.id == book.id }, set: { if !$0 { deleting = nil } })
     }
 
     /// The cells, "+" first, and "No Results" when a search matches no Book.
@@ -113,7 +120,13 @@ struct BooksView: View {
                     .id(GalleryItem.book(book.id))
                     .bookContextMenu(book) { deleting = book }
                     .accessibilityLabel(book.accessibilityLabel)
+                    .accessibilityIdentifier("book-\(book.id)")
                     .accessibilityAction(named: "Delete") { deleting = book }
+                    // On the cell, so that the dialog's popover points at it.
+                    .confirmationDialog("Delete", isPresented: isDeleting(book)) {
+                        Button("Delete", role: .destructive) { Task { await library.delete(book) } }
+                            .accessibilityIdentifier("delete-confirm")
+                    }
                 }
             }
             .buttonStyle(.plain)
@@ -184,31 +197,6 @@ struct BooksView: View {
         case .problems(let problems):
             rejection = ImportAlert(problems)
         }
-    }
-}
-
-/// The Gallery's alerts, each shown while its item is set: an Import that
-/// didn't happen, and the confirmation to Delete a Book.
-private struct BooksAlerts: ViewModifier {
-    @Environment(LibraryModel.self) private var library
-    @Binding var rejection: ImportAlert?
-    @Binding var deleting: Book?
-
-    func body(content: Content) -> some View {
-        content
-            .alert(rejection?.title ?? "", isPresented: Binding(isPresenting: $rejection), presenting: rejection) {
-                _ in
-            } message: { alert in
-                Text(alert.message)
-            }
-            .confirmationDialog(
-                "Delete “\(deleting?.title ?? "")”?", isPresented: Binding(isPresenting: $deleting),
-                titleVisibility: .visible, presenting: deleting
-            ) { book in
-                Button("Delete", role: .destructive) { Task { await library.delete(book) } }
-            } message: { _ in
-                Text("The file, its Markup and your Reading Progress are deleted.")
-            }
     }
 }
 

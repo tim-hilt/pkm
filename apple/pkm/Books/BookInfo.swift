@@ -41,6 +41,7 @@ extension View {
         #else
             contextMenu {
                 Button("Delete", systemImage: "trash", role: .destructive, action: delete)
+                    .accessibilityIdentifier("delete")
             } preview: {
                 BookInfoList(info: BookInfo(book))
                     .padding()
