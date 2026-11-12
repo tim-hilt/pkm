@@ -38,7 +38,8 @@ final class Thumbnails {
         /// The file is no valid Drawing (malformed): the Gallery shows an error.
         /// Nothing is ever written to such a file.
         case unreadable
-        /// No picture for another reason (the Drawing is gone, no GPU).
+        /// No picture for another reason (the Drawing is gone, no GPU, not
+        /// `rendering`).
         case unavailable
 
         var image: CGImage? {
@@ -54,14 +55,18 @@ final class Thumbnails {
     var rendered: Int { renderer?.rendered ?? 0 }
 
     /// The thumbnail of the Drawing as listed in `entry`, as the light or the
-    /// `dark` Canvas shows it. Cheap when called again.
-    func thumbnail(for entry: DrawingStore.Entry, dark: Bool = false) async -> Thumbnail {
+    /// `dark` Canvas shows it. Cheap when called again. Without `rendering`
+    /// (the app is in the background, where iOS refuses GPU work), only a
+    /// thumbnail made before is shown.
+    func thumbnail(for entry: DrawingStore.Entry, dark: Bool = false, rendering: Bool = true) async -> Thumbnail {
         let key = "\(entry.name)\u{0}\(entry.modified.timeIntervalSinceReferenceDate)\u{0}\(dark ? "dark" : "light")"
         if let image = memory.object(forKey: key as NSString) { return .image(image) }
         if unreadable.contains(key) { return .unreadable }
         let image: CGImage
         if let cached = await Self.decodeCachedThumbnail(of: entry, dark: dark, in: store) {
             image = cached
+        } else if !rendering {
+            return .unavailable
         } else {
             switch await Self.prepareScene(of: entry, dark: dark, in: store) {
             case .gone:

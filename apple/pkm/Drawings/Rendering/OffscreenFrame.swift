@@ -8,7 +8,8 @@ extension CanvasRenderer {
     /// - Parameter pixelsPerPoint: Device pixels per view point; the viewport's
     ///   zoom is in points.
     /// - Returns: The image, `width` x `height` device pixels; nil if the GPU
-    ///   could not provide the render target.
+    ///   could not provide the render target or refused the work (as iOS
+    ///   does in the background); never a blank picture in its place.
     func renderOffscreen(width: Int, height: Int, pixelsPerPoint: Float = 1) -> RenderedImage? {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: Self.pixelFormat, width: width, height: height, mipmapped: false)
@@ -18,6 +19,7 @@ extension CanvasRenderer {
             let frame = renderFrame(into: target, pixelsPerPoint: pixelsPerPoint, presenting: nil)
         else { return nil }
         frame.waitUntilCompleted()
+        guard frame.status == .completed else { return nil }
 
         var bgra = [UInt8](repeating: 0, count: width * height * RenderedImage.bytesPerPixel)
         target.getBytes(

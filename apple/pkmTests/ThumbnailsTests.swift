@@ -82,6 +82,22 @@ import Testing
         #expect(thumbnails.rendered == 1)
     }
 
+    /// iOS refuses GPU work from an app in the background, as at launch before
+    /// the scene comes to the front: the result would be a blank picture.
+    @Test func withoutRenderingOnlyCachedThumbnailsAreShown() async throws {
+        try store.save(sampleBytes(), as: "sample")
+        let thumbnails = Thumbnails(store: store)
+
+        let early = try await thumbnails.thumbnail(for: entry("sample"), rendering: false)
+        #expect(early.image == nil)
+        #expect(thumbnails.rendered == 0)
+        #expect(try store.thumbnail(for: entry("sample")) == nil)
+
+        _ = try await thumbnails.thumbnail(for: entry("sample"))
+        let later = Thumbnails(store: store)  // as after a restart of the app
+        #expect(try await later.thumbnail(for: entry("sample"), rendering: false).image != nil)
+    }
+
     @Test func aChangedDrawingGetsAFreshThumbnail() async throws {
         try store.save(Editor().save(), as: "a")
         try FileManager.default.setAttributes(

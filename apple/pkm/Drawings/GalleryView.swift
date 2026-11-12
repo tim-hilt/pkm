@@ -150,11 +150,19 @@ private struct Card: View {
     let thumbnails: Thumbnails
     @State private var thumbnail: Thumbnails.Thumbnail?
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
 
-    /// What a thumbnail is made for; a change of either restarts the task.
+    /// What a thumbnail is made for; a change of any restarts the task.
     private struct Request: Equatable {
         let drawing: DrawingStore.Entry
         let dark: Bool
+        /// Not in the background, where iOS refuses GPU work. The Gallery is
+        /// laid out there when the app launches into it.
+        let rendering: Bool
+    }
+
+    private var request: Request {
+        Request(drawing: drawing, dark: colorScheme == .dark, rendering: scenePhase != .background)
     }
 
     var body: some View {
@@ -180,10 +188,13 @@ private struct Card: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary) }
                 // Restarts when the Drawing or the appearance changed (the card
-                // never shows the other appearance's thumbnail); ends when the
-                // card leaves the screen.
-                .task(id: Request(drawing: drawing, dark: colorScheme == .dark)) {
-                    thumbnail = await thumbnails.thumbnail(for: drawing, dark: colorScheme == .dark)
+                // never shows the other appearance's thumbnail) and when the app
+                // comes to the front; ends when the card leaves the screen.
+                .task(id: request) {
+                    let made = await thumbnails.thumbnail(
+                        for: request.drawing, dark: request.dark, rendering: request.rendering)
+                    // A cancelled task gives way to its successor.
+                    if !Task.isCancelled { thumbnail = made }
                 }
                 // The lazy grid keeps the state of cards scrolled past; without
                 // this, every thumbnail seen would stay in memory. `thumbnails`

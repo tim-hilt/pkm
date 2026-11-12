@@ -528,7 +528,7 @@ import Testing
         #expect(try fileNames() == ["a.excalidraw"])
         #expect(try store.open("a") == Data("a".utf8))
         #expect(try entry("a") == before, "saving a thumbnail is not a change of the Drawing")
-        #expect(hasCache("a"))
+        #expect(store.thumbnail(for: before) == Data("png".utf8))
     }
 
     @Test func aThumbnailFollowsItsRenamedDrawing() throws {

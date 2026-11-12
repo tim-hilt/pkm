@@ -268,7 +268,8 @@ struct DrawingStore: Sendable {
     // MARK: Thumbnails
 
     /// One file per appearance: each is made once and stays until the Drawing changes.
-    private static func thumbnailFile(dark: Bool) -> String { dark ? "thumbnail-dark.png" : "thumbnail.png" }
+    /// "-2": earlier builds cached blank thumbnails of GPU work refused at launch.
+    private static func thumbnailFile(dark: Bool) -> String { dark ? "thumbnail-dark-2.png" : "thumbnail-2.png" }
 
     /// The cached thumbnail (PNG) of the Drawing as it is listed in `entry`, in
     /// the light or dark `appearance` (ADR-0010), or nil if there is none or
