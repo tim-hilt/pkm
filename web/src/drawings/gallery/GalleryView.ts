@@ -17,11 +17,7 @@ function make<K extends Tag>(
   return element;
 }
 
-function button(
-  className: string,
-  label: string,
-  onClick: () => void,
-): HTMLButtonElement {
+function button(className: string, label: string, onClick: () => void): HTMLButtonElement {
   const element = make("button", className, [label]);
   element.type = "button";
   element.addEventListener("click", onClick);
@@ -67,11 +63,7 @@ class Card {
     this.image.decoding = "async";
     this.image.hidden = true;
     this.thumb.append(this.image);
-    this.open = make("button", "gallery-open", [
-      this.thumb,
-      this.name,
-      this.date,
-    ]);
+    this.open = make("button", "gallery-open", [this.thumb, this.name, this.date]);
     this.open.type = "button";
     this.open.setAttribute("aria-haspopup", "menu");
     this.open.addEventListener("click", () => {
@@ -84,9 +76,7 @@ class Card {
       this.showMenu(event.clientX, event.clientY);
     });
     // Safari on iOS sends no `contextmenu` for a long press: time it.
-    this.element.addEventListener("pointerdown", (event) =>
-      this.startHold(event),
-    );
+    this.element.addEventListener("pointerdown", (event) => this.startHold(event));
     for (const type of ["pointerup", "pointercancel"]) {
       this.element.addEventListener(type, () => this.stopHold());
     }
@@ -147,29 +137,24 @@ class Card {
   private loadThumbnail(): void {
     if (!this.visible || !this.shown) return;
     const request = ++this.request;
-    void this.gallery.thumbnails
-      .thumbnail(this.shown, this.isDark())
-      .then((thumbnail) => {
-        if (request !== this.request) return;
-        this.dropImage();
-        this.thumb.classList.toggle(
-          "unreadable",
-          thumbnail.kind === "unreadable",
+    void this.gallery.thumbnails.thumbnail(this.shown, this.isDark()).then((thumbnail) => {
+      if (request !== this.request) return;
+      this.dropImage();
+      this.thumb.classList.toggle("unreadable", thumbnail.kind === "unreadable");
+      this.thumb.dataset.state = thumbnail.kind;
+      if (thumbnail.kind === "image") {
+        this.imageUrl = URL.createObjectURL(
+          new Blob([thumbnail.png as Uint8Array<ArrayBuffer>], {
+            type: "image/png",
+          }),
         );
-        this.thumb.dataset.state = thumbnail.kind;
-        if (thumbnail.kind === "image") {
-          this.imageUrl = URL.createObjectURL(
-            new Blob([thumbnail.png as Uint8Array<ArrayBuffer>], {
-              type: "image/png",
-            }),
-          );
-          this.image.src = this.imageUrl;
-          this.image.hidden = false;
-        } else if (thumbnail.kind === "unreadable") {
-          // A malformed file is shown as such; it is left as it is.
-          this.thumb.dataset.message = "Can’t be read";
-        }
-      });
+        this.image.src = this.imageUrl;
+        this.image.hidden = false;
+      } else if (thumbnail.kind === "unreadable") {
+        // A malformed file is shown as such; it is left as it is.
+        this.thumb.dataset.message = "Can’t be read";
+      }
+    });
   }
 
   private dropImage(): void {
@@ -184,12 +169,10 @@ class Card {
     this.stopHold();
     const { clientX: x, clientY: y } = event;
     const moved = (move: PointerEvent) => {
-      if (Math.hypot(move.clientX - x, move.clientY - y) > longPressSlop)
-        this.stopHold();
+      if (Math.hypot(move.clientX - x, move.clientY - y) > longPressSlop) this.stopHold();
     };
     this.element.addEventListener("pointermove", moved);
-    this.stopMoving = () =>
-      this.element.removeEventListener("pointermove", moved);
+    this.stopMoving = () => this.element.removeEventListener("pointermove", moved);
     this.holdTimer = setTimeout(() => {
       this.stopHold();
       this.swallowClick = true;
@@ -219,8 +202,7 @@ class Card {
       if (!this.menu.contains(event.target as Node)) this.hideMenu();
     };
     document.addEventListener("pointerdown", away, true);
-    this.closeMenu = () =>
-      document.removeEventListener("pointerdown", away, true);
+    this.closeMenu = () => document.removeEventListener("pointerdown", away, true);
     this.menu.querySelector<HTMLElement>("[role=menuitem]")?.focus();
   }
 
@@ -231,17 +213,13 @@ class Card {
   }
 
   private menuKey(event: KeyboardEvent): void {
-    const items = [
-      ...this.menu.querySelectorAll<HTMLElement>("[role=menuitem]"),
-    ];
+    const items = [...this.menu.querySelectorAll<HTMLElement>("[role=menuitem]")];
     const at = items.indexOf(document.activeElement as HTMLElement);
     if (event.key === "Escape") {
       this.hideMenu();
       this.open.focus();
-    } else if (event.key === "ArrowDown")
-      items[(at + 1) % items.length].focus();
-    else if (event.key === "ArrowUp")
-      items[(at - 1 + items.length) % items.length].focus();
+    } else if (event.key === "ArrowDown") items[(at + 1) % items.length].focus();
+    else if (event.key === "ArrowUp") items[(at - 1 + items.length) % items.length].focus();
     else return;
     event.preventDefault();
   }
@@ -284,16 +262,9 @@ export class GalleryView {
   constructor(
     private readonly gallery: Gallery,
     private readonly isDark: () => boolean = () => false,
-    private readonly cloud?: Pick<
-      CloudBacking,
-      "syncReport" | "hasProblem" | "onSyncChange"
-    >,
+    private readonly cloud?: Pick<CloudBacking, "syncReport" | "hasProblem" | "onSyncChange">,
   ) {
-    const create = button(
-      "gallery-new",
-      "",
-      () => void gallery.createDrawing(),
-    );
+    const create = button("gallery-new", "", () => void gallery.createDrawing());
     create.innerHTML = plusGlyph;
     create.setAttribute("aria-label", "New Drawing");
     create.title = "New Drawing";
@@ -360,15 +331,11 @@ export class GalleryView {
   /** "Syncing 3 of 40 Drawings" while Drawings transfer, a warning while Sync is blocked. */
   private showSync(): void {
     const state = this.cloud!.syncReport;
-    const text =
-      state.status === "syncing" && state.progress ? statusText(state, "") : "";
+    const text = state.status === "syncing" && state.progress ? statusText(state, "") : "";
     this.syncText.textContent = text;
     this.syncText.hidden = text === "";
     this.syncWarning.hidden = !this.cloud!.hasProblem;
-    this.syncWarning.setAttribute(
-      "aria-label",
-      statusText(state, "The server"),
-    );
+    this.syncWarning.setAttribute("aria-label", statusText(state, "The server"));
     this.syncWarning.title = statusText(state, "The server");
   }
 
@@ -411,18 +378,12 @@ export class GalleryView {
     const renameForm = make("form", "", [
       renameTitle,
       this.renameField,
-      make("div", "gallery-dialog-buttons", [
-        cancel(this.renameDialog),
-        rename,
-      ]),
+      make("div", "gallery-dialog-buttons", [cancel(this.renameDialog), rename]),
     ]);
     renameForm.method = "dialog";
     renameForm.addEventListener("submit", () => {
       if (this.renaming)
-        void this.gallery.renameDrawing(
-          this.renaming.name,
-          this.renameField.value,
-        );
+        void this.gallery.renameDrawing(this.renaming.name, this.renameField.value);
       this.renaming = undefined;
     });
     this.renameDialog.append(renameForm);
@@ -438,29 +399,19 @@ export class GalleryView {
     this.deleteDialog.append(
       this.deleteTitle,
       make("p", "", ["This Drawing will be deleted for good."]),
-      make("div", "gallery-dialog-buttons", [
-        cancel(this.deleteDialog),
-        remove,
-      ]),
+      make("div", "gallery-dialog-buttons", [cancel(this.deleteDialog), remove]),
     );
     labelled(this.deleteDialog, this.deleteTitle);
 
     // Failure
     const ok = button("primary", "OK", () => this.failureDialog.close());
     this.failureDialog.setAttribute("role", "alertdialog");
-    this.failureDialog.append(
-      this.failureText,
-      make("div", "gallery-dialog-buttons", [ok]),
-    );
+    this.failureDialog.append(this.failureText, make("div", "gallery-dialog-buttons", [ok]));
     this.failureDialog.setAttribute("aria-label", "Something went wrong");
     this.failureDialog.addEventListener("close", () => {
       if (this.gallery.failure !== undefined) this.gallery.dismissFailure();
     });
 
-    this.element.append(
-      this.renameDialog,
-      this.deleteDialog,
-      this.failureDialog,
-    );
+    this.element.append(this.renameDialog, this.deleteDialog, this.failureDialog);
   }
 }
