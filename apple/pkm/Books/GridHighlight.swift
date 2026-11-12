@@ -4,7 +4,7 @@ struct GridHighlight {
     enum Arrow { case up, down, left, right }
 
     let columns: Int
-    /// Every cell, including a "+" cell if there is one. At least 1.
+    /// Every cell. At least 1.
     let cellCount: Int
 
     /// The cell highlighted after `arrow`, from `current` (nil: nothing yet).

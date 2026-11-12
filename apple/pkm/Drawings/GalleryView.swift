@@ -70,31 +70,8 @@ struct GalleryView: View {
                 #if os(iOS)
                     ToolbarItem(placement: .topBarTrailing) { SettingsButton() }
                 #endif
-                #if os(macOS)
-                    ToolbarItem {
-                        Button("New Drawing", systemImage: "plus") { gallery.createDrawing() }
-                            .accessibilityIdentifier("new-drawing")
-                    }
-                #endif
             }
-            #if os(iOS)
-                // Lower right, within thumb's reach, like other native iOS apps.
-                .overlay(alignment: .bottomTrailing) {
-                    Button {
-                        gallery.createDrawing()
-                    } label: {
-                        Image(systemName: "plus")
-                        .font(.title2.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 56, height: 56)
-                        .background(Color.accentColor, in: Circle())
-                        .shadow(radius: 4, y: 2)
-                    }
-                    .padding(20)
-                    .accessibilityLabel("New Drawing")
-                    .accessibilityIdentifier("new-drawing")
-                }
-            #endif
+            .addButton("New Drawing", identifier: "new-drawing") { gallery.createDrawing() }
             .overlay {
                 if gallery.drawings.isEmpty {
                     ContentUnavailableView(

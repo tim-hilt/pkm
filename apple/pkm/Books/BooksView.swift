@@ -1,14 +1,14 @@
 import SwiftUI
 
 /// The Books Context's first screen, the Gallery: the Library as a grid of
-/// Covers after a "+" cell, sorted by Date Imported, Title or Recently Read and narrowed by
-/// Library Search. Import by the "+" cell, File > Import… or dropping Files
+/// Covers, sorted by Date Imported, Title or Recently Read and narrowed by
+/// Library Search. Import by the "+" button, File > Import… or dropping Files
 /// onto the grid; a single File opens its Book, new or already in the Library.
 /// A cell's context menu (long-press, right-click) shows the Book's
 /// `BookInfo`; it or a VoiceOver action offers "Delete", after confirmation.
 ///
-/// With a keyboard (Mac, iPad), arrow keys move a highlight through the grid,
-/// including the "+" cell; nothing is highlighted until the first press.
+/// With a keyboard (Mac, iPad), arrow keys move a highlight through the grid;
+/// nothing is highlighted until the first press.
 /// Return opens the highlighted cell, ⌘⌫ asks to Delete it, and ↓ in the
 /// search field highlights the first match.
 struct BooksView: View {
@@ -19,17 +19,15 @@ struct BooksView: View {
     @State private var deleting: Book?
     @State private var scroll = ScrollActivity()
     @State private var columnCount = 2
-    /// The keyboard highlight; nil until the first arrow press.
-    @State private var highlighted: GalleryItem?
+    /// The id of the Book under the keyboard highlight; nil until the first arrow press.
+    @State private var highlighted: String?
     @FocusState private var isGridFocused: Bool
     @FocusState private var isSearchFocused: Bool
     /// Library Search; empty when not searching.
     @State private var searchText = ""
 
-    /// The Books shown, in grid order after the "+" cell.
+    /// The Books shown, in grid order.
     private var visibleBooks: [Book] { library.visibleBooks(matching: searchText) }
-    /// Every cell in grid order.
-    private var items: [GalleryItem] { [.importCell] + visibleBooks.map { .book($0.id) } }
 
     var body: some View {
         NavigationStack {
@@ -48,9 +46,20 @@ struct BooksView: View {
                     .focused($isGridFocused)
                     .focusEffectDisabled()
                     .onAppear { isGridFocused = true }
-                    .onChange(of: highlighted) { _, item in
-                        if let item { proxy.scrollTo(item) }
+                    .onChange(of: highlighted) { _, id in
+                        if let id { proxy.scrollTo(id) }
                     }
+            }
+            .addButton("Import…", identifier: "import") { isImporting = true }
+            .overlay {
+                if library.books.isEmpty {
+                    ContentUnavailableView(
+                        "No Books", systemImage: "books.vertical",
+                        description: Text("Tap + to import PDFs and EPUBs.")
+                    )
+                    // Drops pass through to the grid.
+                    .allowsHitTesting(false)
+                }
             }
             .onScrollPhaseChange { _, phase in scroll.scrollingChanged(isScrolling: phase != .idle) }
             .environment(scroll)
@@ -91,7 +100,7 @@ struct BooksView: View {
         Binding(get: { deleting?.id == book.id }, set: { if !$0 { deleting = nil } })
     }
 
-    /// The cells, "+" first, and "No Results" when a search matches no Book.
+    /// The cells, and "No Results" when a search matches no Book.
     private var grid: some View {
         let visibleBooks = visibleBooks
         return VStack(alignment: .leading, spacing: GalleryLayout.spacing) {
@@ -101,23 +110,14 @@ struct BooksView: View {
                     count: columnCount),
                 spacing: GalleryLayout.spacing
             ) {
-                Button {
-                    open(.importCell)
-                } label: {
-                    ImportCell()
-                }
-                .galleryHighlight(highlighted == .importCell)
-                .id(GalleryItem.importCell)
-                .accessibilityLabel("Import…")
-                .accessibilityIdentifier("import")
                 ForEach(visibleBooks) { book in
                     Button {
-                        open(.book(book.id))
+                        library.openBook(id: book.id)
                     } label: {
                         BookCell(book: book)
                     }
-                    .galleryHighlight(highlighted == .book(book.id))
-                    .id(GalleryItem.book(book.id))
+                    .galleryHighlight(highlighted == book.id)
+                    .id(book.id)
                     .bookContextMenu(book) { deleting = book }
                     .accessibilityLabel(book.accessibilityLabel)
                     .accessibilityIdentifier("book-\(book.id)")
@@ -139,26 +139,20 @@ struct BooksView: View {
         .padding(GalleryLayout.spacing)
     }
 
-    /// Opens a Book, or starts an Import for the "+" cell.
-    private func open(_ item: GalleryItem) {
-        switch item {
-        case .importCell: isImporting = true
-        case .book(let id): library.openBook(id: id)
-        }
-    }
-
     /// Moves the highlight; from the search field, ↓ highlights the first
     /// match and hands the keyboard to the grid. False if the key isn't ours.
     private func handleArrow(_ arrow: GridHighlight.Arrow) -> Bool {
         if isSearchFocused {
             guard arrow == .down, let first = visibleBooks.first else { return false }
-            highlighted = .book(first.id)
+            highlighted = first.id
             isGridFocused = true
             return true
         }
-        let grid = GridHighlight(columns: columnCount, cellCount: items.count)
-        let current = highlighted.flatMap(items.firstIndex(of:))
-        highlighted = items[grid.moved(from: current, arrow)]
+        let ids = visibleBooks.map(\.id)
+        guard !ids.isEmpty else { return false }
+        let grid = GridHighlight(columns: columnCount, cellCount: ids.count)
+        let current = highlighted.flatMap(ids.firstIndex(of:))
+        highlighted = ids[grid.moved(from: current, arrow)]
         return true
     }
 
@@ -167,10 +161,9 @@ struct BooksView: View {
         guard !isSearchFocused, let highlighted else { return false }
         switch press.key {
         case .return:
-            open(highlighted)
+            library.openBook(id: highlighted)
         case .delete where press.modifiers == .command:
-            guard case .book(let id) = highlighted else { return false }
-            deleting = visibleBooks.first { $0.id == id }
+            deleting = visibleBooks.first { $0.id == highlighted }
         default:
             return false
         }
@@ -198,12 +191,6 @@ struct BooksView: View {
             rejection = ImportAlert(problems)
         }
     }
-}
-
-/// A cell of the grid: the "+" cell, or a Book's.
-private enum GalleryItem: Hashable {
-    case importCell
-    case book(String)
 }
 
 extension GridHighlight.Arrow {

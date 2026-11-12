@@ -74,7 +74,7 @@ extension View {
 }
 
 extension ShapeStyle where Self == Color {
-    /// The grey of a Book's placeholder and of the "+" cell.
+    /// The grey of a Book's placeholder.
     static var placeholderGrey: Color { Color.gray.opacity(0.3) }
 }
 
@@ -119,17 +119,4 @@ struct BookCell: View {
 private struct LoadKey: Equatable {
     let book: String
     let galleryIsStill: Bool
-}
-
-/// The first cell: a white "+" on the placeholder grey.
-struct ImportCell: View {
-    var body: some View {
-        GalleryCell(caption: String(localized: "Import…")) {
-            Color.placeholderGrey.overlay {
-                Image(systemName: "plus")
-                    .font(.largeTitle)
-                    .foregroundStyle(.white)
-            }
-        }
-    }
 }

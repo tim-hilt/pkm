@@ -3,7 +3,7 @@ import Testing
 @testable import pkm
 
 @Suite struct GridHighlightTests {
-    // 3 columns, 8 cells (the "+" cell is 0):
+    // 3 columns, 8 cells:
     //   0 1 2
     //   3 4 5
     //   6 7
