@@ -239,8 +239,9 @@ import Testing
         let cloud = model()
         cloud.startSyncing(
             drawings: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
+            books: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
             stateDirectory: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
-            onChanged: { _ in })
+            onChanged: { _ in }, onBooksChanged: { _ in })
 
         #expect(cloud.status == .accessLost)
         #expect(cloud.hasProblem)
@@ -341,7 +342,8 @@ import Testing
         let cloud = model()
         cloud.startSyncing(
             drawings: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
-            stateDirectory: state.directory, onChanged: { _ in })
+            books: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
+            stateDirectory: state.directory, onChanged: { _ in }, onBooksChanged: { _ in })
 
         try await cloud.connect(url: "https://dav.example.com", username: "me", password: "pw")
 
@@ -355,7 +357,8 @@ import Testing
         let cloud = model()
         cloud.startSyncing(
             drawings: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
-            stateDirectory: state.directory, onChanged: { _ in })
+            books: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
+            stateDirectory: state.directory, onChanged: { _ in }, onBooksChanged: { _ in })
 
         try await cloud.reconnect(password: "new")
 
