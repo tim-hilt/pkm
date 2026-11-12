@@ -68,7 +68,16 @@ export class TextEditorOverlay {
   caret(editor: TextEditor, font: TextMeasurer): Rect | undefined {
     const view = this.view;
     if (!view) return undefined;
-    const box = { ...editor, lineHeight: editor.fontSize * editor.lineHeight };
+    // The text starts at `editor.x`: the view's padding is the caret room left of it.
+    const box = {
+      x: editor.x,
+      y: editor.y,
+      width: editor.width,
+      height: editor.height,
+      // In points, where the editor has it relative to the font size.
+      lineHeight: editor.fontSize * editor.lineHeight,
+      align: editor.align,
+    };
     const lineWidth = (text: string) => font.lineWidth(text, editor.fontSize);
     return caretLine(box, view.value, view.selectionEnd, lineWidth);
   }

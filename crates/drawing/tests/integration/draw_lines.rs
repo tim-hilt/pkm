@@ -9,7 +9,8 @@
 //! excalidraw.com.
 
 use pkm_base::json::Value;
-use pkm_drawing::{Editor, Tool};
+use pkm_drawing::input::Modifiers;
+use pkm_drawing::{Editor, PointerKind, Tool};
 
 use crate::common;
 use common::{replay, saved_elements, saved_points, tap};
@@ -375,17 +376,47 @@ fn hovering_makes_the_next_point_appear_only_beyond_the_zone_of_the_last() {
     let mut editor = editor_with(Tool::Line);
     tap(&mut editor, "mouse", (0.0, 0.0), 0.0);
 
-    replay(&mut editor, "1 move 9 mouse 5 0");
+    let none = Modifiers::default();
+    editor.hover(5.0, 0.0, PointerKind::Mouse, none);
     assert_eq!(saved_points(&saved_elements(&editor)[0]).len(), 1);
 
-    replay(&mut editor, "1.1 move 9 mouse 30 0");
+    editor.hover(30.0, 0.0, PointerKind::Mouse, none);
     assert_eq!(
         saved_points(&saved_elements(&editor)[0]),
         [(0.0, 0.0), (30.0, 0.0)]
     );
 
-    replay(&mut editor, "1.2 move 9 mouse 2 0");
+    editor.hover(2.0, 0.0, PointerKind::Mouse, none);
     assert_eq!(saved_points(&saved_elements(&editor)[0]).len(), 1);
+}
+
+#[test]
+fn hovering_leaves_a_point_being_pressed_alone() {
+    let mut editor = editor_with(Tool::Line);
+    tap(&mut editor, "mouse", (0.0, 0.0), 0.0);
+    replay(&mut editor, "1 down 3 pencil 50 0");
+
+    editor.hover(100.0, 100.0, PointerKind::Mouse, Modifiers::default());
+
+    assert_eq!(
+        saved_points(&saved_elements(&editor)[0]),
+        [(0.0, 0.0), (50.0, 0.0)]
+    );
+}
+
+#[test]
+fn shift_snaps_the_hovering_next_point() {
+    let mut editor = editor_with(Tool::Line);
+    tap(&mut editor, "mouse", (0.0, 0.0), 0.0);
+
+    let shift = Modifiers {
+        shift: true,
+        ..Modifiers::default()
+    };
+    editor.hover(100.0, 10.0, PointerKind::Mouse, shift);
+
+    let points = saved_points(&saved_elements(&editor)[0]);
+    assert_eq!(points[1].1, 0.0, "{points:?}");
 }
 
 #[test]

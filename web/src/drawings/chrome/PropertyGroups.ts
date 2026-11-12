@@ -252,7 +252,7 @@ const across = {
       [6.5, 11.5, 7.7, 3.3],
     ],
   },
-  centre: {
+  center: {
     lines: [
       [10, 1.7, 10, 4.8],
       [10, 8.1, 10, 11.5],
@@ -289,7 +289,7 @@ export const arrangeRows: readonly (readonly ArrangeButton[])[] = [
     {
       name: "Center Horizontally",
       align: Alignment.CenterHorizontally,
-      icon: arrangeIcon(across.centre),
+      icon: arrangeIcon(across.center),
     },
     { name: "Align Right", align: Alignment.Right, icon: arrangeIcon(across.end) },
     {
@@ -303,7 +303,7 @@ export const arrangeRows: readonly (readonly ArrangeButton[])[] = [
     {
       name: "Center Vertically",
       align: Alignment.CenterVertically,
-      icon: arrangeIcon(transposed(across.centre)),
+      icon: arrangeIcon(transposed(across.center)),
     },
     { name: "Align Bottom", align: Alignment.Bottom, icon: arrangeIcon(transposed(across.end)) },
     {

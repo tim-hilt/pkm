@@ -47,6 +47,9 @@ struct Unit {
 
 /// The units of the Selection, in z-order (see the module).
 fn units(scene: &Scene, selection: &Selection, editing: Option<&str>) -> Vec<Unit> {
+    if selection.is_empty() {
+        return Vec::new();
+    }
     let selected: Vec<Element> = scene
         .elements()
         .filter(|e| !e.is_deleted() && !e.is_locked() && selection.contains(e.id()))
@@ -110,14 +113,9 @@ fn is_label(element: &Element) -> bool {
     element.kind() == ElementType::Text && element.container_id().is_some()
 }
 
-/// Whether aligning would do anything with this Selection: it has two units.
-pub(crate) fn can_align(scene: &Scene, selection: &Selection, editing: Option<&str>) -> bool {
-    units(scene, selection, editing).len() > 1
-}
-
-/// Whether distributing would: it has three units.
-pub(crate) fn can_distribute(scene: &Scene, selection: &Selection, editing: Option<&str>) -> bool {
-    units(scene, selection, editing).len() > 2
+/// How many units the Selection has: aligning takes two, distributing three.
+pub(crate) fn unit_count(scene: &Scene, selection: &Selection, editing: Option<&str>) -> usize {
+    units(scene, selection, editing).len()
 }
 
 /// Lines up the units of `selection` with the edge or middle of all of them,

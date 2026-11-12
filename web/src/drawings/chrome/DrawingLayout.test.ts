@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  backButtonSize,
   bottomBarWidth,
   layoutFor,
+  margin,
   popoverPlacement,
   propertiesMaxHeight,
   propertiesTop,
@@ -44,7 +46,7 @@ describe("the desktop Properties panel's placement", () => {
   });
 
   it("clears the back button", () => {
-    expect(propertiesTop(1470, 456)).toBeGreaterThanOrEqual(16 + 36);
+    expect(propertiesTop(1470, 456)).toBeGreaterThanOrEqual(margin + backButtonSize);
   });
 
   it("gets room as it grows above the default top", () => {

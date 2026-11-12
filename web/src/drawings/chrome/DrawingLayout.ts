@@ -15,8 +15,12 @@ export function layoutFor(width: number, height: number): Layout {
 export const margin = 16;
 /** Top of the desktop Properties panel, below the toolbar. */
 export const propertiesTopBelowToolbar = 76;
-/** Top of the desktop Properties panel when level with the toolbar: just below the back button, top left. */
-export const propertiesTopBesideToolbar = margin + 36 + 8;
+/** The back button's side, top left (`.back-to-gallery` in `index.html`). */
+export const backButtonSize = 36;
+/** Gap between the back button and the Properties panel below it. */
+const belowBackButtonGap = 8;
+/** Top of the desktop Properties panel when level with the toolbar: just below the back button. */
+export const propertiesTopBesideToolbar = margin + backButtonSize + belowBackButtonGap;
 /** The desktop Properties panel's width. */
 export const propertiesWidth = 195;
 /** Clear room kept between the panel and a toolbar that shares its top. */

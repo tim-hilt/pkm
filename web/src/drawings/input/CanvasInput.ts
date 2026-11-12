@@ -2,6 +2,7 @@ import {
   type CorePointerEvent,
   type CoreScrollEvent,
   type CoreMagnifyEvent,
+  type Modifiers,
   PointerButton,
   PointerKind,
   PointerPhase,
@@ -10,6 +11,7 @@ import {
   lostCapturePhase,
   magnifyEvent,
   magnifyOfGesture,
+  modifiersOf,
   pointerButton,
   pointerEvent,
   pointerKind,
@@ -28,8 +30,8 @@ export interface InputSink {
   shortcut(chord: KeyChord): boolean;
   /** A finger was held, or the mouse clicked with its secondary button, at the Canvas point `(x, y)`: the Context menu. */
   contextMenu(x: number, y: number, kind: PointerKind): void;
-  /** A mouse or pen moved over the Canvas without a button down. */
-  hover(x: number, y: number, kind: PointerKind): void;
+  /** A mouse or pen moved over the Canvas without a button down, with `modifiers` held. */
+  hover(x: number, y: number, kind: PointerKind, modifiers: Modifiers): void;
   /** Nothing hovers over the Canvas any more. */
   endHover(): void;
 }
@@ -138,6 +140,7 @@ export class CanvasInput {
           e.clientX - origin.left,
           e.clientY - origin.top,
           pointerKind(e.pointerType),
+          modifiersOf(e),
         );
       return;
     }

@@ -98,7 +98,7 @@ struct CanvasCommands: Commands {
             // pasteboard. ⇧⌥C as on excalidraw.com.
             Button("Copy as PNG") { controller?.canvas?.copyAsPNG() }
                 .keyboardShortcut("c", modifiers: [.shift, .option])
-                .disabled(controller == nil || controller?.isEditingText == true)
+                .disabled(controller?.hasElements != true || controller?.isEditingText == true)
             Divider()
             items(for: [.duplicate])
         }

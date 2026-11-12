@@ -205,7 +205,7 @@ struct ArrangeGlyph: Sendable {
     static let start = ArrangeGlyph(
         lines: [line(3.3, 3.3, 3.3, 16.7)],
         bars: [CGRect(x: 6.5, y: 4.8, width: 10.4, height: 3.3), CGRect(x: 6.5, y: 11.5, width: 7.7, height: 3.3)])
-    static let centre = ArrangeGlyph(
+    static let center = ArrangeGlyph(
         lines: [line(10, 1.7, 10, 4.8), line(10, 8.1, 10, 11.5), line(10, 14.8, 10, 18.3)],
         bars: [CGRect(x: 6.5, y: 4.8, width: 7, height: 3.3), CGRect(x: 4.8, y: 11.5, width: 10.4, height: 3.3)])
     static let end = ArrangeGlyph(

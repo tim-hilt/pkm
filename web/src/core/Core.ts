@@ -436,9 +436,9 @@ export class Editor {
     this.inner.setPanKey(held);
   }
 
-  /** A mouse or pen hovers at the view point `(x, y)`, no button down. */
-  hover(x: number, y: number, kind: PointerKind): void {
-    this.inner.hover(x, y, kind);
+  /** A mouse or pen hovers at the view point `(x, y)`, no button down, with `modifiers` held. */
+  hover(x: number, y: number, kind: PointerKind, modifiers: Modifiers): void {
+    this.inner.hover(x, y, kind, modifierBits(modifiers));
   }
 
   /** Nothing hovers over the Canvas any more. */

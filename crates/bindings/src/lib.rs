@@ -1379,8 +1379,8 @@ impl Editor {
 
     /// A mouse or Pencil hovers at a view point; see
     /// [`pkm_drawing::Editor::hover`].
-    pub fn hover(&self, x: f64, y: f64, kind: PointerKind) {
-        self.editor().hover(x, y, kind);
+    pub fn hover(&self, x: f64, y: f64, kind: PointerKind, modifiers: Modifiers) {
+        self.editor().hover(x, y, kind, modifiers);
     }
 
     /// Nothing hovers over the Canvas any more.

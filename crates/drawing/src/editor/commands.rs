@@ -195,12 +195,17 @@ impl Editor {
     /// selected (or one group of them). The Properties panel offers Align
     /// exactly then (see [`crate::Sections::align`]).
     pub fn can_align(&self) -> bool {
-        align::can_align(&self.scene, &self.selection, self.editing_group.as_deref())
+        self.arranged_units() > 1
     }
 
     /// Whether distributing would do anything: three or more are selected.
     pub fn can_distribute(&self) -> bool {
-        align::can_distribute(&self.scene, &self.selection, self.editing_group.as_deref())
+        self.arranged_units() > 2
+    }
+
+    /// How many groups or Elements align and distribute move as wholes.
+    pub(super) fn arranged_units(&self) -> usize {
+        align::unit_count(&self.scene, &self.selection, self.editing_group.as_deref())
     }
 
     /// Moves the Selection with `how` as one undo step, unless a pointer is
@@ -225,6 +230,8 @@ impl Editor {
             return;
         }
         self.history.record(step, &self.scene, &self.selection);
+        // Moved, or, after a z-order move, the handles of the Elements now
+        // stand for others.
         self.changed();
     }
 

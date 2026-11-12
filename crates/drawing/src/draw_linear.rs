@@ -218,6 +218,28 @@ impl LinearDrawing {
         update
     }
 
+    /// A pointer hovers at `at` (in the Scene) with shift held or not, in a
+    /// view at `zoom`: while points are placed and none is pressed, the next
+    /// one follows it.
+    pub fn hover(
+        &mut self,
+        scene: &mut Scene,
+        entropy: &mut Entropy,
+        at: Point,
+        zoom: f64,
+        shift: bool,
+    ) -> Update {
+        if !matches!(self.stage, Stage::Placing { press: None }) {
+            return Update::Unchanged;
+        }
+        self.zoom = zoom;
+        let update = self.aim(at, zoom, shift);
+        if update == Update::Changed {
+            self.write(scene, entropy);
+        }
+        update
+    }
+
     /// The first pointer: a tap or a drag.
     fn follow_first(&mut self, event: PointerEvent, at: Point, zoom: f64, dragged: bool) -> Update {
         let origin = self.points[0];

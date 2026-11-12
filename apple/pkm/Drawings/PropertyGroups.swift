@@ -234,48 +234,48 @@ struct AlignGroup: View {
     let controller: CanvasController
     let sections: Sections
 
+    /// What a button of the section does.
+    private enum Arrange {
+        case align(Alignment)
+        case distribute(Distribution)
+    }
+
+    /// As on excalidraw.com: across, then down, each ending with Distribute.
+    private static var rows: [[(ArrangeGlyph, LocalizedStringResource, Arrange)]] {
+        [
+            [
+                (.start, "Align Left", .align(.left)),
+                (.center, "Center Horizontally", .align(.centerHorizontally)),
+                (.end, "Align Right", .align(.right)),
+                (.spread, "Distribute Horizontally", .distribute(.horizontally)),
+            ],
+            [
+                (.start.transposed, "Align Top", .align(.top)),
+                (.center.transposed, "Center Vertically", .align(.centerVertically)),
+                (.end.transposed, "Align Bottom", .align(.bottom)),
+                (.spread.transposed, "Distribute Vertically", .distribute(.vertically)),
+            ],
+        ]
+    }
+
     var body: some View {
         PanelSection(title: "Align") {
-            ActionRow(
-                buttons: [
-                    (.drawing(PanelIcon.arrange(.start)), "Align Left", { controller.align(.left) }),
-                    (
-                        .drawing(PanelIcon.arrange(.centre)), "Center Horizontally",
-                        {
-                            controller.align(.centerHorizontally)
-                        }
-                    ),
-                    (.drawing(PanelIcon.arrange(.end)), "Align Right", { controller.align(.right) }),
-                ]
-                    + (sections.distribute
-                        ? [
-                            (
-                                .drawing(PanelIcon.arrange(.spread)), "Distribute Horizontally",
-                                {
-                                    controller.distribute(.horizontally)
-                                }
-                            )
-                        ] : []))
-            ActionRow(
-                buttons: [
-                    (.drawing(PanelIcon.arrange(.start.transposed)), "Align Top", { controller.align(.top) }),
-                    (
-                        .drawing(PanelIcon.arrange(.centre.transposed)), "Center Vertically",
-                        {
-                            controller.align(.centerVertically)
-                        }
-                    ),
-                    (.drawing(PanelIcon.arrange(.end.transposed)), "Align Bottom", { controller.align(.bottom) }),
-                ]
-                    + (sections.distribute
-                        ? [
-                            (
-                                .drawing(PanelIcon.arrange(.spread.transposed)), "Distribute Vertically",
-                                {
-                                    controller.distribute(.vertically)
-                                }
-                            )
-                        ] : []))
+            ForEach(Self.rows.indices, id: \.self) { row in
+                ActionRow(buttons: Self.rows[row].compactMap(button))
+            }
+        }
+    }
+
+    /// The button for `arrange`; none for Distribute unless it applies.
+    private func button(_ glyph: ArrangeGlyph, _ name: LocalizedStringResource, _ arrange: Arrange) -> (
+        PanelIcon, LocalizedStringResource, () -> Void
+    )? {
+        let icon = PanelIcon.drawing(PanelIcon.arrange(glyph))
+        switch arrange {
+        case .align(let how):
+            return (icon, name, { controller.align(how) })
+        case .distribute(let how):
+            return sections.distribute ? (icon, name, { controller.distribute(how) }) : nil
         }
     }
 }

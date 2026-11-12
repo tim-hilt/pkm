@@ -49,7 +49,7 @@ export interface Origin {
 /** Points a wheel line scrolls, as on the Swift Mac client. */
 const pointsPerWheelLine = 10;
 
-const modifiersOf = (e: ModifierData): Modifiers => ({
+export const modifiersOf = (e: ModifierData): Modifiers => ({
   shift: e.shiftKey,
   ctrl: e.ctrlKey,
   alt: e.altKey,

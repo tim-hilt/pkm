@@ -27,7 +27,9 @@ extension CanvasMetalView {
 
     /// What Copy as PNG puts on the pasteboard: the PNG export of the
     /// Selection, or of the Scene with nothing selected, as Excalidraw's Copy
-    /// to clipboard as PNG; `nil` if there is nothing to export.
+    /// to clipboard as PNG; `nil` if there is nothing to export. With the
+    /// background, as every PNG export here (the web app's follows its export
+    /// setting, which the native app does not have).
     var pngForPasteboard: Data? {
         guard let editor else { return nil }
         return PNGExport.pngData(editor, scope: canCopy ? .selection : .scene, background: true)

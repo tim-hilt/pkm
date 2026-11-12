@@ -238,12 +238,17 @@ final class CanvasMetalView: MTKView {
         didReachEditor()
     }
 
-    /// A mouse or Pencil hovers at `point` (`nil`: nothing does any more).
-    /// Only the overlay (a highlight) and the cursor follow: the chrome has
-    /// nothing to show for it.
-    func hover(at point: CGPoint?, kind: PointerKind = .mouse) {
+    /// A mouse or Pencil hovers at `point` with `modifiers` held (`nil`:
+    /// nothing does any more). Only the Canvas (a highlight, the next point
+    /// of a line) and the cursor follow: the chrome has nothing to show for it.
+    func hover(at point: CGPoint?, kind: PointerKind = .mouse, modifiers: Modifiers = Modifiers([])) {
         guard let editor else { return }
-        if let point { editor.hover(x: point.x, y: point.y, kind: kind) } else { editor.endHover() }
+        if let point {
+            editor.hover(x: point.x, y: point.y, kind: kind, modifiers: modifiers)
+        } else {
+            editor.endHover()
+        }
+        syncScene()
         syncOverlay()
         syncCursor()
     }
@@ -415,7 +420,7 @@ final class CanvasMetalView: MTKView {
             let inWindow = event.locationInWindow
             let contentView = window?.contentView
             let hit = contentView?.hitTest(contentView?.superview?.convert(inWindow, from: nil) ?? inWindow)
-            hover(at: hit === self ? convert(inWindow, from: nil) : nil)
+            hover(at: hit === self ? convert(inWindow, from: nil) : nil, modifiers: Modifiers(event.modifierFlags))
         }
 
         override func mouseExited(with event: NSEvent) { hover(at: nil) }
@@ -528,7 +533,9 @@ final class CanvasMetalView: MTKView {
         @objc private func hovered(_ recognizer: UIHoverGestureRecognizer) {
             switch recognizer.state {
             case .began, .changed:
-                hover(at: recognizer.location(in: self), kind: recognizer.zOffset > 0 ? .pencil : .mouse)
+                hover(
+                    at: recognizer.location(in: self), kind: recognizer.zOffset > 0 ? .pencil : .mouse,
+                    modifiers: Modifiers(recognizer.modifierFlags))
             default: hover(at: nil)
             }
         }
@@ -729,6 +736,8 @@ final class CanvasController {
     /// Whether something is selected: it enables the Edit and Export Selection
     /// items exactly then.
     private(set) var hasSelection = false
+    /// Whether the Scene has Elements: Copy as PNG has something to export.
+    private(set) var hasElements = false
     /// The zoom in whole percent, as the reset zoom button shows it. Whole
     /// percent, so that a pinch updates the chrome only when the number does.
     private(set) var zoomPercent = 100
@@ -748,6 +757,7 @@ final class CanvasController {
         canRedo = editor.canRedo()
         properties = editor.showsProperties() ? editor.properties() : nil
         hasSelection = !editor.selection().isEmpty
+        hasElements = editor.elementCount() > 0
         zoomPercent = Int((editor.viewport().zoom * 100).rounded())
     }
 

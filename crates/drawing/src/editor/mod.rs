@@ -22,7 +22,7 @@ use crate::geometry::Geometry;
 use crate::group;
 use crate::history::{self, History, Step};
 use crate::hit_test::{self, Reach};
-use crate::input::{MagnifyEvent, PointerEvent, PointerKind, PointerPhase, ScrollEvent};
+use crate::input::{MagnifyEvent, Modifiers, PointerEvent, PointerKind, PointerPhase, ScrollEvent};
 use crate::insert_image::{self, ImageFile, Placement};
 use crate::move_selection::MoveGesture;
 use crate::navigation::{Bounds, Navigation};
@@ -697,8 +697,9 @@ impl Editor {
         // panel offers, as excalidraw.com does.
         let covered: Vec<Element> = self.selection.covered(&self.scene).collect();
         let mut shown = Properties::of_selection(&covered, tool, &self.style);
-        shown.sections.align = self.can_align();
-        shown.sections.distribute = self.can_distribute();
+        let units = self.arranged_units();
+        shown.sections.align = units > 1;
+        shown.sections.distribute = units > 2;
         shown
     }
 
@@ -940,11 +941,28 @@ impl Editor {
     }
 
     /// A mouse or Pencil of `kind` hovers at the view point `(x, y)`, no
-    /// button down: with the arrow Tool the shape an arrow would start on
-    /// there is highlighted, as on excalidraw.com. Clients send it for every
-    /// hovering move, and [`Editor::end_hover`] when the pointer leaves.
-    pub fn hover(&mut self, x: f64, y: f64, kind: PointerKind) {
+    /// button down, with `modifiers` held: with the arrow Tool the shape an
+    /// arrow would start on there is highlighted, and a line or arrow being
+    /// placed shows its next point there (snapped with shift), as on
+    /// excalidraw.com. Clients send it for every hovering move, and
+    /// [`Editor::end_hover`] when the pointer leaves.
+    pub fn hover(&mut self, x: f64, y: f64, kind: PointerKind, modifiers: Modifiers) {
         self.hovering = Some((x, y, kind));
+        // Two fingers navigating leave the line as it is.
+        if !self.navigation.suspends_tool()
+            && let Some(linear) = self.linear.as_mut()
+        {
+            let viewport = self.navigation.viewport();
+            let at = viewport.scene_at(x, y);
+            let update = linear.hover(
+                &mut self.scene,
+                &mut self.entropy,
+                at,
+                viewport.zoom(),
+                modifiers.shift,
+            );
+            self.linear_updated(update);
+        }
         self.sync_highlight();
     }
 

@@ -397,12 +397,12 @@ fn the_arrow_tool_highlights_the_shape_a_hovering_pointer_would_start_on() {
     editor.set_tool(Tool::Arrow);
     let before = editor.overlay_revision();
 
-    editor.hover(120.0, 40.0, PointerKind::Mouse);
+    editor.hover(120.0, 40.0, PointerKind::Mouse, Modifiers::default());
 
     assert_box(highlight(&editor), (94.0, -6.0, 206.0, 106.0));
     assert_ne!(editor.overlay_revision(), before);
 
-    editor.hover(40.0, 40.0, PointerKind::Mouse);
+    editor.hover(40.0, 40.0, PointerKind::Mouse, Modifiers::default());
     assert_eq!(highlight(&editor), None, "moved away");
 }
 
@@ -410,16 +410,16 @@ fn the_arrow_tool_highlights_the_shape_a_hovering_pointer_would_start_on() {
 fn the_hover_highlight_goes_with_the_hover_or_the_arrow_tool() {
     let mut editor = editor_with(&[BOX]);
     editor.set_tool(Tool::Arrow);
-    editor.hover(120.0, 40.0, PointerKind::Pencil);
+    editor.hover(120.0, 40.0, PointerKind::Pencil, Modifiers::default());
     editor.end_hover();
     assert_eq!(highlight(&editor), None, "left the Canvas");
 
-    editor.hover(120.0, 40.0, PointerKind::Mouse);
+    editor.hover(120.0, 40.0, PointerKind::Mouse, Modifiers::default());
     editor.set_tool(Tool::Selection);
     assert_eq!(highlight(&editor), None, "other Tool");
 
     editor.set_tool(Tool::Line);
-    editor.hover(120.0, 40.0, PointerKind::Mouse);
+    editor.hover(120.0, 40.0, PointerKind::Mouse, Modifiers::default());
     assert_eq!(highlight(&editor), None, "lines do not bind");
 }
 
@@ -428,7 +428,7 @@ fn the_hover_highlight_follows_where_the_mouse_is_after_an_arrow() {
     let mut editor = editor_with(&[BOX, OTHER]);
     editor.set_tool(Tool::Arrow);
     editor.set_tool_lock(true);
-    editor.hover(0.0, 40.0, PointerKind::Mouse);
+    editor.hover(0.0, 40.0, PointerKind::Mouse, Modifiers::default());
 
     drag(&mut editor, "mouse", (0.0, 40.0), (120.0, 40.0));
     assert_box(highlight(&editor), (94.0, -6.0, 206.0, 106.0));
@@ -442,7 +442,7 @@ fn the_hover_highlight_follows_where_the_mouse_is_after_an_arrow() {
 fn the_hover_highlight_follows_a_scroll_under_the_mouse() {
     let mut editor = editor_with(&[BOX]);
     editor.set_tool(Tool::Arrow);
-    editor.hover(40.0, 40.0, PointerKind::Mouse);
+    editor.hover(40.0, 40.0, PointerKind::Mouse, Modifiers::default());
 
     editor.scroll(ScrollEvent {
         x: 40.0,

@@ -228,11 +228,11 @@ export function showCanvas(
       const bounds = canvas.getBoundingClientRect();
       contextMenu.show(wrapped(entries), bounds.left + x, bounds.top + y);
     },
-    // Only the cursor and the overlay (a highlight) follow a hover: the
-    // chrome has nothing to show for it.
-    hover: (x, y, kind) => {
+    // Only the Canvas (a highlight, the next point of a line) and the
+    // cursor follow a hover: the chrome has nothing to show for it.
+    hover: (x, y, kind, modifiers) => {
       pointer = { x, y };
-      editor.hover(x, y, kind);
+      editor.hover(x, y, kind, modifiers);
       sync.sync();
       canvas.style.cursor = cssCursor(editor.cursor(x, y));
     },

@@ -1,6 +1,8 @@
 import type { Entry } from "./DrawingStore";
 import type { Gallery } from "./Gallery";
 import { type CloudBacking, statusText } from "../../cloud/CloudBacking";
+import { HoldDetector } from "../input/HoldDetector";
+import { menuCorner } from "./CardMenu";
 
 let nextDialog = 0;
 
@@ -26,12 +28,11 @@ function button(className: string, label: string, onClick: () => void): HTMLButt
 
 const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
 
-/** How long a touch holds still before it opens the card's menu. */
-const longPressMs = 500;
-/** How far a touch may move and still be a hold. */
-const longPressSlop = 10;
-
-/** One Drawing's card: its thumbnail, name and date. Its menu opens on right click or long press. */
+/**
+ * One Drawing's card: its thumbnail, name and date. Its menu opens on right
+ * click or long press; its Delete asks with a lone Delete button at the same
+ * spot, as the native app's popover does.
+ */
 class Card {
   readonly element = make("li", "gallery-card");
   private readonly open: HTMLButtonElement;
@@ -40,23 +41,27 @@ class Card {
   private readonly name = make("span", "gallery-name");
   private readonly date = make("time", "gallery-date");
   private readonly menu = make("div", "gallery-menu");
+  private readonly confirm = make("div", "gallery-menu");
   private shown: Entry | undefined;
   private imageUrl: string | undefined;
   /** Counts requests, so that a late answer to an old one is dropped. */
   private request = 0;
   private visible = false;
   private closeMenu: (() => void) | undefined;
-  private holdTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Where the menu last opened, a viewport point: the confirmation opens there too. */
+  private menuAt = { x: 0, y: 0 };
+  /** Safari on iOS sends no `contextmenu` for a long press: it is timed. */
+  private readonly hold = new HoldDetector((x, y) => {
+    this.swallowClick = true;
+    this.showMenu(this.menu, x, y);
+  });
   /** Set when a long press opened the menu, so that the touch's release does not also open the Drawing. */
   private swallowClick = false;
 
   constructor(
     private readonly gallery: Gallery,
     private readonly isDark: () => boolean,
-    private readonly actions: {
-      rename(e: Entry): void;
-      remove(e: Entry): void;
-    },
+    private readonly rename: (e: Entry) => void,
     entry: Entry,
   ) {
     this.image.alt = "";
@@ -73,16 +78,20 @@ class Card {
     // Right click, the menu key and (where the browser sends it) a long press.
     this.element.addEventListener("contextmenu", (event) => {
       event.preventDefault();
-      this.showMenu(event.clientX, event.clientY);
+      this.showMenu(this.menu, event.clientX, event.clientY);
     });
-    // Safari on iOS sends no `contextmenu` for a long press: time it.
-    this.element.addEventListener("pointerdown", (event) => this.startHold(event));
-    for (const type of ["pointerup", "pointercancel"]) {
-      this.element.addEventListener(type, () => this.stopHold());
+    this.element.addEventListener("pointerdown", (event) => {
+      this.swallowClick = false;
+      if (event.pointerType === "touch")
+        this.hold.down(event.pointerId, event.clientX, event.clientY);
+    });
+    this.element.addEventListener("pointermove", (event) =>
+      this.hold.move(event.pointerId, event.clientX, event.clientY),
+    );
+    for (const type of ["pointerup", "pointercancel"] as const) {
+      this.element.addEventListener(type, (event) => this.hold.up(event.pointerId));
     }
 
-    this.menu.hidden = true;
-    this.menu.setAttribute("role", "menu");
     const item = (label: string, run: () => void, className = "") => {
       const element = button(`gallery-menu-item ${className}`, label, () => {
         this.hideMenu();
@@ -93,12 +102,20 @@ class Card {
       return element;
     };
     this.menu.append(
-      item("Rename", () => this.actions.rename(this.shown!)),
+      item("Rename", () => this.rename(this.shown!)),
       item("Duplicate", () => void gallery.duplicateDrawing(this.shown!.name)),
-      item("Delete", () => this.actions.remove(this.shown!), "danger"),
+      item("Delete", () => this.showMenu(this.confirm, this.menuAt.x, this.menuAt.y), "danger"),
     );
-    this.menu.addEventListener("keydown", (event) => this.menuKey(event));
-    this.element.append(this.open, this.menu);
+    this.confirm.append(
+      item("Delete", () => void gallery.deleteDrawing(this.shown!.name), "danger"),
+    );
+    this.confirm.setAttribute("aria-label", "Delete the Drawing for good");
+    for (const popup of [this.menu, this.confirm]) {
+      popup.hidden = true;
+      popup.setAttribute("role", "menu");
+      popup.addEventListener("keydown", (event) => this.menuKey(popup, event));
+    }
+    this.element.append(this.open, this.menu, this.confirm);
     this.update(entry);
   }
 
@@ -129,7 +146,7 @@ class Card {
 
   dispose(): void {
     this.request++;
-    this.stopHold();
+    this.hold.cancel();
     this.dropImage();
     this.hideMenu();
   }
@@ -144,9 +161,7 @@ class Card {
       this.thumb.dataset.state = thumbnail.kind;
       if (thumbnail.kind === "image") {
         this.imageUrl = URL.createObjectURL(
-          new Blob([thumbnail.png as Uint8Array<ArrayBuffer>], {
-            type: "image/png",
-          }),
+          new Blob([thumbnail.png as Uint8Array<ArrayBuffer>], { type: "image/png" }),
         );
         this.image.src = this.imageUrl;
         this.image.hidden = false;
@@ -164,56 +179,33 @@ class Card {
     this.imageUrl = undefined;
   }
 
-  private startHold(event: PointerEvent): void {
-    if (event.pointerType !== "touch") return;
-    this.stopHold();
-    const { clientX: x, clientY: y } = event;
-    const moved = (move: PointerEvent) => {
-      if (Math.hypot(move.clientX - x, move.clientY - y) > longPressSlop) this.stopHold();
-    };
-    this.element.addEventListener("pointermove", moved);
-    this.stopMoving = () => this.element.removeEventListener("pointermove", moved);
-    this.holdTimer = setTimeout(() => {
-      this.stopHold();
-      this.swallowClick = true;
-      this.showMenu(x, y);
-    }, longPressMs);
-  }
-
-  private stopMoving: (() => void) | undefined;
-
-  private stopHold(): void {
-    clearTimeout(this.holdTimer);
-    this.holdTimer = undefined;
-    this.stopMoving?.();
-    this.stopMoving = undefined;
-  }
-
-  /** Opens the menu with its corner at the viewport point (`x`, `y`), kept within the card. */
-  private showMenu(x: number, y: number): void {
+  /** Opens `popup` (the menu or the confirmation) with its corner at the viewport point (`x`, `y`), kept within the card. */
+  private showMenu(popup: HTMLElement, x: number, y: number): void {
     this.hideMenu();
-    this.menu.hidden = false;
-    const card = this.element.getBoundingClientRect();
-    const left = Math.min(x - card.left, card.width - this.menu.offsetWidth);
-    const top = Math.min(y - card.top, card.height - this.menu.offsetHeight);
-    this.menu.style.left = `${Math.max(0, left)}px`;
-    this.menu.style.top = `${Math.max(0, top)}px`;
+    this.menuAt = { x, y };
+    popup.hidden = false;
+    const at = { x, y };
+    const size = { width: popup.offsetWidth, height: popup.offsetHeight };
+    const { left, top } = menuCorner(at, this.element.getBoundingClientRect(), size);
+    popup.style.left = `${left}px`;
+    popup.style.top = `${top}px`;
     const away = (event: Event) => {
-      if (!this.menu.contains(event.target as Node)) this.hideMenu();
+      if (!popup.contains(event.target as Node)) this.hideMenu();
     };
     document.addEventListener("pointerdown", away, true);
     this.closeMenu = () => document.removeEventListener("pointerdown", away, true);
-    this.menu.querySelector<HTMLElement>("[role=menuitem]")?.focus();
+    popup.querySelector<HTMLElement>("[role=menuitem]")?.focus();
   }
 
   private hideMenu(): void {
     this.closeMenu?.();
     this.closeMenu = undefined;
     this.menu.hidden = true;
+    this.confirm.hidden = true;
   }
 
-  private menuKey(event: KeyboardEvent): void {
-    const items = [...this.menu.querySelectorAll<HTMLElement>("[role=menuitem]")];
+  private menuKey(popup: HTMLElement, event: KeyboardEvent): void {
+    const items = [...popup.querySelectorAll<HTMLElement>("[role=menuitem]")];
     const at = items.indexOf(document.activeElement as HTMLElement);
     if (event.key === "Escape") {
       this.hideMenu();
@@ -230,9 +222,10 @@ class Card {
  * create a new one. A card shows the Drawing's thumbnail, which is made when
  * the card comes into view and again after the Drawing changed, with the name
  * and date below it. A card's context menu (right click, long press)
- * renames, duplicates and deletes the Drawing; deleting asks first. A port of the Swift `GalleryView`, in native
- * elements (buttons, a list, modal dialogs) so that it is labelled and
- * reachable by keyboard.
+ * renames, duplicates and deletes the Drawing; deleting asks first, at the
+ * card. A port of the Swift `GalleryView`, in native elements (buttons, a
+ * list, menus, modal dialogs) so that it is labelled and reachable by
+ * keyboard.
  */
 export class GalleryView {
   readonly element = make("main", "gallery");
@@ -248,9 +241,6 @@ export class GalleryView {
   private readonly renameDialog = make("dialog", "gallery-dialog");
   private readonly renameField = document.createElement("input");
   private renaming: Entry | undefined;
-  private readonly deleteDialog = make("dialog", "gallery-dialog");
-  private readonly deleteTitle = make("h2", "");
-  private deleting: Entry | undefined;
   private readonly failureDialog = make("dialog", "gallery-dialog");
   private readonly failureText = make("p", "");
 
@@ -304,7 +294,7 @@ export class GalleryView {
       let card = this.cards.get(entry.id);
       if (card) card.update(entry);
       else {
-        card = new Card(this.gallery, this.isDark, this.cardActions, entry);
+        card = new Card(this.gallery, this.isDark, this.rename, entry);
         this.cards.set(entry.id, card);
         this.cardOf.set(card.element, card);
         this.observer.observe(card.element);
@@ -340,18 +330,11 @@ export class GalleryView {
     this.cards.clear();
   }
 
-  private readonly cardActions = {
-    rename: (entry: Entry) => {
-      this.renaming = entry;
-      this.renameField.value = entry.name;
-      this.renameDialog.showModal();
-      this.renameField.select();
-    },
-    remove: (entry: Entry) => {
-      this.deleting = entry;
-      this.deleteTitle.textContent = `Delete “${entry.name}”?`;
-      this.deleteDialog.showModal();
-    },
+  private readonly rename = (entry: Entry) => {
+    this.renaming = entry;
+    this.renameField.value = entry.name;
+    this.renameDialog.showModal();
+    this.renameField.select();
   };
 
   private buildDialogs(): void {
@@ -383,20 +366,6 @@ export class GalleryView {
     this.renameDialog.append(renameForm);
     labelled(this.renameDialog, renameTitle);
 
-    // Delete
-    const remove = button("primary danger", "Delete", () => {
-      if (this.deleting) void this.gallery.deleteDrawing(this.deleting.name);
-      this.deleting = undefined;
-      this.deleteDialog.close();
-    });
-    this.deleteDialog.setAttribute("role", "alertdialog");
-    this.deleteDialog.append(
-      this.deleteTitle,
-      make("p", "", ["This Drawing will be deleted for good."]),
-      make("div", "gallery-dialog-buttons", [cancel(this.deleteDialog), remove]),
-    );
-    labelled(this.deleteDialog, this.deleteTitle);
-
     // Failure
     const ok = button("primary", "OK", () => this.failureDialog.close());
     this.failureDialog.setAttribute("role", "alertdialog");
@@ -406,6 +375,6 @@ export class GalleryView {
       if (this.gallery.failure !== undefined) this.gallery.dismissFailure();
     });
 
-    this.element.append(this.renameDialog, this.deleteDialog, this.failureDialog);
+    this.element.append(this.renameDialog, this.failureDialog);
   }
 }
