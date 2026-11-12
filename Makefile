@@ -31,9 +31,11 @@ web/node_modules: web/package.json web/bun.lock
 web-fmt: web-install
 	cd web && bun run format
 
-# Cheapest first: formatting, lint and types need no wasm.
+# Cheapest first; types need the generated wasm bindings.
 web-lint: web-install
-	cd web && bun run format:check && bun run lint && bun run typecheck
+	cd web && bun run format:check && bun run lint
+	$(MAKE) web-wasm
+	cd web && bun run typecheck
 
 # Vitest on Node, against the real wasm.
 web-test: web-install web-wasm
