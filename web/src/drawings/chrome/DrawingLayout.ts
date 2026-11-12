@@ -15,16 +15,18 @@ export function layoutFor(width: number, height: number): Layout {
 export const margin = 16;
 /** Top of the desktop Properties panel, below the toolbar. */
 export const propertiesTopBelowToolbar = 76;
+/** Top of the desktop Properties panel when level with the toolbar: just below the back button, top left. */
+export const propertiesTopBesideToolbar = margin + 36 + 8;
 /** The desktop Properties panel's width. */
 export const propertiesWidth = 195;
 /** Clear room kept between the panel and a toolbar that shares its top. */
 export const propertiesGap = 80;
 
-/** Top of the desktop Properties panel: level with the toolbar when the centred toolbar leaves the panel (and a gap) clear on the left, otherwise below the toolbar. */
+/** Top of the desktop Properties panel: beside the toolbar (below the back button) when the centred toolbar leaves the panel (and a gap) clear on the left, otherwise below the toolbar. */
 export function propertiesTop(containerWidth: number, toolbarWidth: number): number {
   const toolbarLeft = (containerWidth - toolbarWidth) / 2;
   return toolbarLeft >= margin + propertiesWidth + propertiesGap
-    ? margin
+    ? propertiesTopBesideToolbar
     : propertiesTopBelowToolbar;
 }
 

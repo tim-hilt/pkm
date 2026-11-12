@@ -35,16 +35,20 @@ describe("the desktop Properties panel's placement", () => {
 
   // The desktop toolbar's measured width is about 456.
   it.each([
-    [1470, 16], // MacBook Air window
-    [1366, 16], // iPad full screen
+    [1470, 60], // MacBook Air window
+    [1366, 60], // iPad full screen
     [1024, 76], // 1024 pt Mac window
     [678, 76], // iPad Split View half
-  ])("shares the toolbar's top in a %d wide container only if it fits (top %d)", (width, top) => {
+  ])("sits beside the toolbar in a %d wide container only if it fits (top %d)", (width, top) => {
     expect(propertiesTop(width, 456)).toBe(top);
   });
 
+  it("clears the back button", () => {
+    expect(propertiesTop(1470, 456)).toBeGreaterThanOrEqual(16 + 36);
+  });
+
   it("gets room as it grows above the default top", () => {
-    expect(propertiesMaxHeight(832, 16)).toBe(726);
+    expect(propertiesMaxHeight(832, 60)).toBe(682);
   });
 });
 
