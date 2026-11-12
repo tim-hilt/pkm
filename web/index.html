@@ -830,13 +830,7 @@
       .gallery-dialog-buttons .primary.danger {
         background: #c92a2a;
       }
-      /* What Sync is doing, in the Gallery and in Settings. */
-      .gallery-sync {
-        margin: -8px 0 16px;
-        font-size: 0.9rem;
-        color: var(--control-ink);
-        opacity: 0.7;
-      }
+      /* Sync is blocked; Settings tells what Sync is doing. */
       .gallery-sync-warning {
         position: absolute;
         top: 16px;
@@ -847,8 +841,7 @@
         color: #e67700;
         font-size: 1.3rem;
       }
-      .gallery-sync-warning[hidden],
-      .gallery-sync[hidden] {
+      .gallery-sync-warning[hidden] {
         display: none;
       }
       .cloud-status {

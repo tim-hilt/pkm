@@ -254,11 +254,10 @@ export class GalleryView {
   private readonly failureDialog = make("dialog", "gallery-dialog");
   private readonly failureText = make("p", "");
 
-  private readonly syncText = make("p", "gallery-sync");
   private readonly syncWarning = make("span", "gallery-sync-warning");
   private stopSyncListening: (() => void) | undefined;
 
-  /** `isDark` tells which appearance the thumbnails are made for; `cloud` tells what Sync is doing, shown as "Syncing N of M Drawings" and a warning icon. */
+  /** `isDark` tells which appearance the thumbnails are made for; `cloud` tells whether Sync is blocked, shown as a warning icon. */
   constructor(
     private readonly gallery: Gallery,
     private readonly isDark: () => boolean = () => false,
@@ -273,10 +272,8 @@ export class GalleryView {
     this.empty.setAttribute("role", "status");
     this.element.append(this.grid, this.empty, create);
     if (cloud) {
-      this.syncText.setAttribute("role", "status");
       this.syncWarning.textContent = "⚠";
       this.syncWarning.setAttribute("role", "img");
-      this.element.prepend(this.syncText);
       this.element.append(this.syncWarning);
       this.stopSyncListening = cloud.onSyncChange(() => this.showSync());
       this.showSync();
@@ -328,12 +325,9 @@ export class GalleryView {
     for (const card of this.cards.values()) card.reloadThumbnail();
   }
 
-  /** "Syncing 3 of 40 Drawings" while Drawings transfer, a warning while Sync is blocked. */
+  /** A warning while Sync is blocked; progress shows in Settings only, so the Gallery doesn't shift. */
   private showSync(): void {
     const state = this.cloud!.syncReport;
-    const text = state.status === "syncing" && state.progress ? statusText(state, "") : "";
-    this.syncText.textContent = text;
-    this.syncText.hidden = text === "";
     this.syncWarning.hidden = !this.cloud!.hasProblem;
     this.syncWarning.setAttribute("aria-label", statusText(state, "The server"));
     this.syncWarning.title = statusText(state, "The server");
