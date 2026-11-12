@@ -1,51 +1,52 @@
 import { describe, expect, it } from "vitest";
-import { type Rect, caretClearOf, caretLine, keyboardCovering } from "./KeyboardAvoidance";
+import { type Rect, caretLine, keyboardCovering, textAboveKeyboard } from "./KeyboardAvoidance";
 
-// iPhone 15 Pro: the keyboard covers y 510...852 of a 393 × 852 Canvas.
+// iPhone 15 Pro: the keyboard covers y 510...852 of a 393 × 852 Canvas, below
+// the status bar's 59 points. The room's middle is at 284.5.
 const viewport = { originX: 10, originY: 20, zoom: 2 };
 const keyboard: Rect = { x: 0, y: 510, width: 393, height: 342 };
+const top = 59;
 const caret = (bottom: number): Rect => ({ x: 50, y: bottom - 20, width: 2, height: 20 });
+const text = (from: number, to: number): Rect => ({
+  x: 40,
+  y: from,
+  width: 120,
+  height: to - from,
+});
+const avoid = (shown: Rect, caretBottom: number, over: Rect | undefined = keyboard) =>
+  textAboveKeyboard(over, top, shown, caret(caretBottom), viewport);
 
-describe("keeping the caret above the keyboard", () => {
-  it("pans a caret below the keyboard by the overlap plus the margin", () => {
-    // Caret bottom 600 must reach 510 − 16 = 494: 106 points up = 53 Scene units.
-    expect(caretClearOf(keyboard, caret(600), viewport)).toEqual({
-      originX: 10,
-      originY: 73,
-      zoom: 2,
-    });
+describe("keeping the text above the keyboard", () => {
+  it("moves a covered text to the middle of the room above the keyboard", () => {
+    // Middle 580 → 284.5: 295.5 points up = 147.75 Scene units.
+    expect(avoid(text(560, 600), 600)).toEqual({ originX: 10, originY: 167.75, zoom: 2 });
   });
 
-  it("pans a caret in the margin above the keyboard", () => {
-    expect(caretClearOf(keyboard, caret(500), viewport)).toEqual({
-      originX: 10,
-      originY: 23,
-      zoom: 2,
-    });
+  it("moves the text for a caret in the margin above the keyboard", () => {
+    // Middle 490 → 284.5: 205.5 points up.
+    expect(avoid(text(480, 500), 500)).toEqual({ originX: 10, originY: 122.75, zoom: 2 });
   });
 
-  it("pans further as the text grows", () => {
-    const first = caretClearOf(keyboard, caret(520), viewport)!;
-    const second = caretClearOf(keyboard, caret(494 + 30), first)!;
-    expect(second.originY).toBe(first.originY + 15);
+  it("centres the caret's line of a text taller than the room", () => {
+    // Caret middle 590 → 284.5: 305.5 points up.
+    expect(avoid(text(100, 600), 600)).toEqual({ originX: 10, originY: 172.75, zoom: 2 });
   });
 
   it("does not pan a caret that is clear of the keyboard", () => {
-    expect(caretClearOf(keyboard, caret(494), viewport)).toBeUndefined();
-    expect(caretClearOf(keyboard, caret(100), viewport)).toBeUndefined();
+    expect(avoid(text(474, 494), 494)).toBeUndefined();
+    expect(avoid(text(80, 100), 100)).toBeUndefined();
   });
 
   it("does not pan without a keyboard over the Canvas", () => {
-    expect(caretClearOf(undefined, caret(800), viewport)).toBeUndefined();
-    expect(caretClearOf({ x: 0, y: 0, width: 0, height: 0 }, caret(800), viewport)).toBeUndefined();
+    expect(textAboveKeyboard(undefined, top, text(780, 800), caret(800), viewport)).toBeUndefined();
+    expect(avoid(text(780, 800), 800, { x: 0, y: 0, width: 0, height: 0 })).toBeUndefined();
   });
 
   it("does not pan for a floating keyboard beside or above the caret", () => {
     const floating: Rect = { x: 200, y: 300, width: 180, height: 120 };
-    expect(caretClearOf(floating, caret(400), viewport)).toBeUndefined();
-    expect(
-      caretClearOf(floating, { x: 250, y: 600, width: 2, height: 20 }, viewport),
-    ).toBeUndefined();
+    expect(avoid(text(380, 400), 400, floating)).toBeUndefined();
+    const below: Rect = { x: 250, y: 600, width: 2, height: 20 };
+    expect(textAboveKeyboard(floating, top, below, below, viewport)).toBeUndefined();
   });
 });
 

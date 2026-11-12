@@ -26,6 +26,7 @@ final class CanvasMetalView: MTKView {
             shownRevision = editor?.revision()
             showScene()
             shownOverlayRevision = nil
+            hasRevealedContent = false
             reportViewSize()
             syncViewport()
             syncOverlay()
@@ -188,10 +189,21 @@ final class CanvasMetalView: MTKView {
         override func delete(_ sender: Any?) { perform { $0.perform(command: .delete) } }
     #endif
 
+    /// Whether the editor's content was brought into view once it had a size.
+    private var hasRevealedContent = false
+
     /// The core's zoom commands act around the middle of the view, so it must
-    /// know the view's size.
+    /// know the view's size. With the first size an opened Drawing shows its
+    /// content, even if it was left (or made elsewhere) with none in view.
     private func reportViewSize() {
-        editor?.setViewSize(width: bounds.width, height: bounds.height)
+        guard let editor else { return }
+        editor.setViewSize(width: bounds.width, height: bounds.height)
+        guard !hasRevealedContent, !bounds.isEmpty else { return }
+        hasRevealedContent = true
+        editor.revealContent()
+        syncViewport()
+        syncOverlay()
+        onEditorChange?()
     }
 
     #if os(macOS)
@@ -280,15 +292,19 @@ final class CanvasMetalView: MTKView {
             avoidKeyboard()
         }
 
-        /// Pans the viewport, if need be, so that the caret's line is above
-        /// the keyboard. Does not pan back afterwards.
+        /// Pans the viewport, if the keyboard covers the caret's line, so that
+        /// the text is in the middle of the room above the keyboard, below
+        /// the status bar. Does not pan back afterwards.
         private func avoidKeyboard() {
             guard let editor, let field = textOverlay.view, let window,
                 let end = field.selectedTextRange?.end
             else { return }
             let keyboard = keyboardFrame.map { window.screen.coordinateSpace.convert($0, to: self) }
             let caret = field.convert(field.caretRect(for: end), to: self)
-            guard let panned = KeyboardAvoidance.viewport(keyboard: keyboard, caret: caret, current: editor.viewport())
+            guard
+                let panned = KeyboardAvoidance.viewport(
+                    keyboard: keyboard, top: safeAreaInsets.top, text: field.frame, caret: caret,
+                    current: editor.viewport())
             else { return }
             editor.setViewport(viewport: panned)
             syncViewport()

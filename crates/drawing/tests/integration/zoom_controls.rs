@@ -278,6 +278,59 @@ fn fit_before_the_view_has_a_size_leaves_the_viewport_alone() {
     assert_eq!(editor.viewport(), Editor::new().viewport());
 }
 
+// --- Reveal content on open ----------------------------------------------
+
+#[test]
+fn reveal_frames_a_scene_wholly_out_of_view() {
+    // Drawn on a bigger screen: nothing in the phone's 393 x 852 view.
+    let mut editor = editor_showing(&rectangle(500.0, 100.0, 200.0, 100.0), 393.0, 852.0);
+
+    editor.reveal_content();
+
+    // As zoom to fit: centre (600, 150) at the view centre, at 100 %.
+    assert_viewport(&editor, (600.0 - 196.5, 150.0 - 426.0), 1.0);
+}
+
+#[test]
+fn reveal_leaves_a_scene_partly_in_view_alone() {
+    let elements = [
+        rectangle(380.0, 100.0, 200.0, 100.0),
+        rectangle(5000.0, 5000.0, 10.0, 10.0),
+    ];
+    let mut editor = editor_showing(&elements.join(","), 393.0, 852.0);
+
+    editor.reveal_content();
+
+    assert_eq!(editor.viewport(), Editor::new().viewport());
+}
+
+#[test]
+fn reveal_follows_the_viewport() {
+    let mut editor = editor_showing(&rectangle(0.0, 0.0, 100.0, 100.0), 400.0, 200.0);
+    // Left panned away from everything.
+    editor.set_viewport((1000.0, 1000.0), 2.0);
+
+    editor.reveal_content();
+
+    assert_viewport(&editor, (50.0 - 200.0, 50.0 - 100.0), 1.0);
+}
+
+#[test]
+fn reveal_of_an_empty_scene_or_without_a_view_size_leaves_the_viewport_alone() {
+    let mut empty = editor_with_view(400.0, 200.0);
+    empty.set_viewport((1000.0, 1000.0), 2.0);
+    let before = empty.viewport();
+    empty.reveal_content();
+    assert_eq!(empty.viewport(), before);
+
+    let mut sizeless = Editor::new();
+    sizeless
+        .load(br#"{"type":"excalidraw","elements":[{"id":"a","type":"rectangle","x":900,"y":900,"width":5,"height":5}]}"#)
+        .unwrap();
+    sizeless.reveal_content();
+    assert_eq!(sizeless.viewport(), Editor::new().viewport());
+}
+
 #[test]
 fn zooming_does_not_touch_the_scenes_geometry() {
     let mut editor = editor_showing(&rectangle(10.0, 20.0, 30.0, 40.0), 400.0, 200.0);

@@ -339,6 +339,11 @@ export class Editor {
     this.inner.zoomToFit();
   }
 
+  /** Frames all shown Elements if none is in view: once after opening. */
+  revealContent(): void {
+    this.inner.revealContent();
+  }
+
   tool(): Tool {
     return this.inner.tool();
   }

@@ -441,6 +441,28 @@ impl Editor {
         }
     }
 
+    /// Frames the Scene, as [`Editor::zoom_to_fit`], if none of its Elements
+    /// is in view: a Drawing made on a bigger screen, or left panned away
+    /// from everything, never opens on an empty Canvas. Clients call it once
+    /// a Drawing is opened and its viewport restored, as soon as the view has
+    /// a size; until then it does nothing.
+    pub fn reveal_content(&mut self) {
+        let (width, height) = self.navigation.view_size();
+        if width <= 0.0 || height <= 0.0 {
+            return;
+        }
+        let viewport = self.navigation.viewport();
+        let (left, top) = viewport.origin();
+        let (right, bottom) = viewport.scene_at(width, height);
+        let in_view = self
+            .shown()
+            .map(|e| Frame::shown(&e))
+            .any(|f| f.min.0 <= right && f.max.0 >= left && f.min.1 <= bottom && f.max.1 >= top);
+        if !in_view {
+            self.zoom_to_fit();
+        }
+    }
+
     /// The active Tool.
     pub fn tool(&self) -> Tool {
         self.tool

@@ -1108,6 +1108,11 @@ impl Editor {
         self.editor().zoom_to_fit();
     }
 
+    /// Frames all shown Elements if none is in view; once after opening.
+    pub fn reveal_content(&self) {
+        self.editor().reveal_content();
+    }
+
     /// The active Tool.
     pub fn tool(&self) -> Tool {
         self.editor().tool()

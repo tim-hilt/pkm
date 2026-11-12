@@ -12,17 +12,21 @@ export interface Rect {
 export const keyboardMargin = 16;
 
 /**
- * Keeps the line being typed above the on-screen keyboard: given where the
- * keyboard covers the Canvas and where the caret is, says how the core's
- * viewport must move (the Scene and the Text view then move together). A port
- * of the Swift `KeyboardAvoidance`.
+ * Keeps the text being typed visible above the on-screen keyboard: given where
+ * the keyboard covers the Canvas and where the text and its caret are, says how
+ * the core's viewport must move (the Scene and the Text view then move
+ * together). A port of the Swift `KeyboardAvoidance`.
  *
- * `undefined` if the caret is clear already, or if no keyboard covers it (a
- * hardware keyboard, or a floating one beside or above it). Only panning,
- * never zooming.
+ * Moves `text` to the middle of the room between `top` (the top of the visible
+ * page) and the keyboard, or the caret's line if the text is too tall for it.
+ * `undefined` if the caret's line is clear of the keyboard already, or if no
+ * keyboard covers it (a hardware keyboard, or a floating one beside or above
+ * it). Only panning, never zooming.
  */
-export function caretClearOf(
+export function textAboveKeyboard(
   keyboard: Rect | undefined,
+  top: number,
+  text: Rect,
   caret: Rect,
   current: Viewport,
 ): Viewport | undefined {
@@ -34,7 +38,10 @@ export function caretClearOf(
     height: caret.height + keyboardMargin,
   };
   if (!intersects(line, keyboard)) return undefined;
-  const lift = line.y + line.height - keyboard.y;
+  const room = keyboard.y - top;
+  const shown = text.height + 2 * keyboardMargin <= room ? text : caret;
+  const lift = shown.y + shown.height / 2 - (top + room / 2);
+  if (lift <= 0) return undefined;
   return { ...current, originY: current.originY + lift / current.zoom };
 }
 

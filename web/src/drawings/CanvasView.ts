@@ -16,7 +16,7 @@ import { ContextMenu } from "./chrome/ContextMenu";
 import { type MenuEntry, openContextMenu } from "./chrome/ContextMenuModel";
 import { MainMenu } from "./chrome/MainMenu";
 import { TextEditorOverlay } from "./text/TextEditorOverlay";
-import { caretClearOf, keyboardCovering } from "./text/KeyboardAvoidance";
+import { keyboardCovering, textAboveKeyboard } from "./text/KeyboardAvoidance";
 import type { Appearance } from "../settings/Appearance";
 import type { DrawingSettings } from "./chrome/DrawingSettings";
 import type { DrawingExport } from "./export/DrawingExport";
@@ -140,9 +140,9 @@ export function showCanvas(
   bottomLeft.append(zoomControls.element, undoRedo.element);
   /**
    * Shows the Text view where the core says, or takes it away if no text is
-   * edited; like the viewport it follows panning and zooming. Keeps the
-   * caret's line above the on-screen keyboard, which only pans the viewport
-   * (and does not pan back afterwards). Returns whether it panned.
+   * edited; like the viewport it follows panning and zooming. Moves a text
+   * the on-screen keyboard covers to the middle of the room above it, which
+   * only pans the viewport (and does not pan back afterwards). Returns whether it panned.
    */
   const syncTextView = (): boolean => {
     const shown = editor.textEditor();
@@ -156,7 +156,8 @@ export function showCanvas(
     if (!visual || !caret) return false;
     const bounds = canvas.getBoundingClientRect();
     const keyboard = keyboardCovering(bounds, visual, document.documentElement.clientHeight);
-    const panned = caretClearOf(keyboard, caret, editor.viewport());
+    const top = Math.max(0, visual.offsetTop - bounds.y);
+    const panned = textAboveKeyboard(keyboard, top, shown, caret, editor.viewport());
     if (!panned) return false;
     editor.setViewport(panned);
     return true;
@@ -233,11 +234,18 @@ export function showCanvas(
   // Off the Canvas, a paste from the keyboard lands in the middle of the view.
   canvas.addEventListener("pointerleave", () => (pointer = undefined));
 
+  // With its first size the Drawing shows its content, even if it was left
+  // (or made elsewhere) with none in view.
+  let hasRevealedContent = false;
   const resize = () => {
     const ratio = window.devicePixelRatio;
     canvas.width = Math.max(1, Math.round(canvas.clientWidth * ratio));
     canvas.height = Math.max(1, Math.round(canvas.clientHeight * ratio));
     editor.setViewSize(canvas.clientWidth, canvas.clientHeight);
+    if (!hasRevealedContent && canvas.clientWidth > 0 && canvas.clientHeight > 0) {
+      hasRevealedContent = true;
+      editor.revealContent();
+    }
     renderer.paperColor = editor.canvasColor();
     properties.place(canvas.clientWidth, canvas.clientHeight, toolbar.element.offsetWidth);
     phone.place(canvas.clientWidth);
