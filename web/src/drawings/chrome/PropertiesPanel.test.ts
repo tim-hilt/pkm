@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
-import { type Core, StrokeWidth, Tool, loadCore } from "../../core/Core";
+import { Alignment, type Core, Distribution, StrokeWidth, Tool, loadCore } from "../../core/Core";
 import { Excalifont } from "../text/Excalifont";
 import { drag } from "../testing/Gestures";
 
@@ -77,6 +77,24 @@ describe("the Properties panel's commands", () => {
     expect(editor.showsProperties()).toBe(false);
     select(editor);
     expect(editor.showsProperties()).toBe(true);
+    editor.free();
+  });
+
+  it("align and distribute two and three Elements", () => {
+    const editor = makeEditor();
+    select(editor);
+    expect(editor.properties().sections.align).toBe(false);
+    editor.duplicate();
+    editor.duplicate();
+    editor.selectAll();
+    expect(editor.properties().sections).toMatchObject({ align: true, distribute: true });
+
+    editor.align(Alignment.Left);
+    editor.undo();
+    expect(editor.canRedo()).toBe(true);
+    // The copies are spaced evenly already.
+    editor.distribute(Distribution.Vertically);
+    expect(editor.canRedo()).toBe(true);
     editor.free();
   });
 

@@ -5,6 +5,7 @@ import {
   type ActionButton,
   type Icon,
   type OptionGroup,
+  arrangeRows,
   deleteButton,
   duplicateButton,
   layerButtons,
@@ -31,10 +32,13 @@ export class PropertyControls {
   readonly groups: { group: OptionGroup; section: Section; buttons: HTMLButtonElement[] }[];
   readonly opacity: Section;
   readonly layers: Section;
+  /** Align and distribute; shown for two or more groups or Elements, Distribute for three. */
+  readonly align: Section;
   readonly actions: Section;
   private readonly strokePicker: ColorPicker;
   private readonly backgroundPicker: ColorPicker;
   private readonly opacityInput = document.createElement("input");
+  private readonly distributeButtons: HTMLButtonElement[] = [];
   private readonly duplicate: HTMLButtonElement;
   private readonly delete: HTMLButtonElement;
 
@@ -101,6 +105,19 @@ export class PropertyControls {
       "Layers",
       row(layerButtons.map((b) => action(b, () => editor.moveInZOrder(b.how)))),
     );
+    this.align = section(
+      "Align",
+      ...arrangeRows.map((buttons) =>
+        row(
+          buttons.map((button) => {
+            if ("align" in button) return action(button, () => editor.align(button.align));
+            const element = action(button, () => editor.distribute(button.distribute));
+            this.distributeButtons.push(element);
+            return element;
+          }),
+        ),
+      ),
+    );
     this.duplicate = action(duplicateButton, () => editor.duplicate());
     this.delete = action(deleteButton, () => editor.deleteSelection());
     this.actions = section("Actions", row([this.duplicate, this.delete]));
@@ -138,6 +155,8 @@ export class PropertyControls {
     this.opacity.element.hidden = !shown.sections.opacity;
     this.opacityInput.value = String(shown.opacity ?? 100);
     this.layers.element.hidden = !hasSelection;
+    this.align.element.hidden = !shown.sections.align;
+    for (const button of this.distributeButtons) button.hidden = !shown.sections.distribute;
     this.actions.element.hidden = !hasSelection;
   }
 }

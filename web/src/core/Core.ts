@@ -1,5 +1,7 @@
 import init, {
+  Alignment,
   Cursor,
+  Distribution,
   Edges,
   Editor as WasmEditor,
   ExportScope,
@@ -36,7 +38,9 @@ import {
 } from "../drawings/rendering/GeometryBuffers";
 
 export {
+  Alignment,
   Cursor,
+  Distribution,
   Edges,
   ExportScope,
   FillPattern,
@@ -64,6 +68,10 @@ export interface Sections {
   edges: boolean;
   opacity: boolean;
   text: boolean;
+  /** Align: two or more groups or Elements are selected. */
+  align: boolean;
+  /** Distribute: three or more are. */
+  distribute: boolean;
 }
 
 /** What the Properties panel shows; `undefined` where the Selection's Elements differ. */
@@ -515,6 +523,8 @@ export class Editor {
         edges: sections.edges,
         opacity: sections.opacity,
         text: sections.text,
+        align: sections.align,
+        distribute: sections.distribute,
       },
     };
     sections.free();
@@ -617,6 +627,16 @@ export class Editor {
 
   moveInZOrder(how: ZOrder): void {
     this.inner.moveInZOrder(how);
+  }
+
+  /** Lines up the Selection's groups and Elements; one undo step. */
+  align(how: Alignment): void {
+    this.inner.align(how);
+  }
+
+  /** Spaces the Selection's groups and Elements evenly; one undo step. */
+  distribute(how: Distribution): void {
+    this.inner.distribute(how);
   }
 
   free(): void {

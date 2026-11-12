@@ -77,6 +77,11 @@ pub struct Sections {
     /// Font size and alignment: for a text, a labelled shape (its label is
     /// covered) and the text Tool.
     pub text: bool,
+    /// Align: two or more groups or Elements are selected (see
+    /// [`crate::Editor::can_align`]).
+    pub align: bool,
+    /// Distribute, within Align: three or more are.
+    pub distribute: bool,
 }
 
 impl Sections {
@@ -105,6 +110,8 @@ impl Sections {
             edges: any(takes_edges),
             opacity: true,
             text: any(has_font),
+            align: false,
+            distribute: false,
         }
     }
 }

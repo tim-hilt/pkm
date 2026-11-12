@@ -66,6 +66,7 @@ describe("the key's name", () => {
     expect(shortcutOf(key("Delete"), true)?.key).toBe("delete");
     expect(shortcutOf(key("Escape"), true)?.key).toBe("escape");
     expect(shortcutOf(key("Enter"), true)?.key).toBe("enter");
+    expect(shortcutOf(key("ArrowUp", { shiftKey: true }), true)?.key).toBe("arrowup");
   });
 
   it("is the character without Shift, as the core has it", () => {

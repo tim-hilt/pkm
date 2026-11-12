@@ -167,23 +167,64 @@ impl Editor {
     /// while a pointer is drawing or moving, or if the Selection is already
     /// as far as it goes.
     pub fn move_in_z_order(&mut self, how: ZOrder) {
+        self.arrange(|scene, entropy, step, selection, editing| {
+            z_order::move_selection(scene, entropy, step, selection, editing, how)
+        });
+    }
+
+    /// Lines up the Selection's groups and Elements (the `align` commands),
+    /// as Excalidraw does: see [`crate::align`]. One undo step. Does nothing
+    /// unless [`Editor::can_align`], or while a pointer is drawing or moving.
+    pub fn align(&mut self, how: Alignment) {
+        self.arrange(|scene, entropy, step, selection, editing| {
+            align::align(scene, entropy, step, selection, editing, how)
+        });
+    }
+
+    /// Spaces the Selection's groups and Elements evenly (the `distribute`
+    /// commands), as Excalidraw does: see [`crate::align`]. One undo step.
+    /// Does nothing unless [`Editor::can_distribute`], or while a pointer is
+    /// drawing or moving.
+    pub fn distribute(&mut self, how: Distribution) {
+        self.arrange(|scene, entropy, step, selection, editing| {
+            align::distribute(scene, entropy, step, selection, editing, how)
+        });
+    }
+
+    /// Whether aligning would do anything: two or more groups or Elements are
+    /// selected (or one group of them). The Properties panel offers Align
+    /// exactly then (see [`crate::Sections::align`]).
+    pub fn can_align(&self) -> bool {
+        align::can_align(&self.scene, &self.selection, self.editing_group.as_deref())
+    }
+
+    /// Whether distributing would do anything: three or more are selected.
+    pub fn can_distribute(&self) -> bool {
+        align::can_distribute(&self.scene, &self.selection, self.editing_group.as_deref())
+    }
+
+    /// Moves the Selection with `how` as one undo step, unless a pointer is
+    /// drawing or moving or `how` moves nothing.
+    fn arrange(
+        &mut self,
+        how: impl FnOnce(&mut Scene, &mut Entropy, &mut Step, &Selection, Option<&str>) -> bool,
+    ) {
         self.finish_placing();
         if self.is_gesturing() || self.selection.is_empty() {
             return;
         }
         let mut step = Step::begin(&self.selection);
-        if !z_order::move_selection(
+        let editing = self.editing_group.as_deref();
+        if !how(
             &mut self.scene,
             &mut self.entropy,
             &mut step,
             &self.selection,
-            self.editing_group.as_deref(),
-            how,
+            editing,
         ) {
             return;
         }
         self.history.record(step, &self.scene, &self.selection);
-        // The handles of the Elements now stand for others.
         self.changed();
     }
 
@@ -273,6 +314,8 @@ impl Editor {
             Command::Group => self.group(),
             Command::Ungroup => self.ungroup(),
             Command::MoveInZOrder(how) => self.move_in_z_order(how),
+            Command::Align(how) => self.align(how),
+            Command::Distribute(how) => self.distribute(how),
             Command::SelectAll => self.select_all(),
             Command::ZoomIn => self.zoom_in(),
             Command::ZoomOut => self.zoom_out(),

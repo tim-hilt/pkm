@@ -21,6 +21,10 @@ const named: Record<string, string> = {
   Delete: "delete",
   Escape: "escape",
   Enter: "enter",
+  ArrowLeft: "arrowleft",
+  ArrowRight: "arrowright",
+  ArrowUp: "arrowup",
+  ArrowDown: "arrowdown",
 };
 
 const punctuation: Record<string, string> = {

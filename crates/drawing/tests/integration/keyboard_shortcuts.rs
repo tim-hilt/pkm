@@ -6,7 +6,10 @@
 use crate::common;
 
 use common::editor_with;
-use pkm_drawing::{Command, ContextMenu, Editor, Modifiers, PointerKind, Tool, ZOrder, shortcuts};
+use pkm_drawing::{
+    Alignment, Command, ContextMenu, Distribution, Editor, Modifiers, PointerKind, Tool, ZOrder,
+    shortcuts,
+};
 
 const NONE: Modifiers = Modifiers {
     shift: false,
@@ -25,6 +28,7 @@ const CMD_ALT: Modifiers = Modifiers {
     alt: true,
     ..NONE
 };
+const ALT: Modifiers = Modifiers { alt: true, ..NONE };
 const SHIFT: Modifiers = Modifiers {
     shift: true,
     ..NONE
@@ -152,6 +156,26 @@ fn cmd_g_groups_and_cmd_shift_g_ungroups() {
     assert!(can_ungroup(&mut editor));
     press(&mut editor, "g", CMD_SHIFT);
     assert!(!can_ungroup(&mut editor));
+}
+
+#[test]
+fn arrows_align_and_alt_letters_distribute() {
+    let cases = [
+        ("arrowleft", CMD_SHIFT, Command::Align(Alignment::Left)),
+        ("arrowright", CMD_SHIFT, Command::Align(Alignment::Right)),
+        ("arrowup", CMD_SHIFT, Command::Align(Alignment::Top)),
+        ("arrowdown", CMD_SHIFT, Command::Align(Alignment::Bottom)),
+        ("h", ALT, Command::Distribute(Distribution::Horizontally)),
+        ("v", ALT, Command::Distribute(Distribution::Vertically)),
+    ];
+    for (key, modifiers, command) in cases {
+        assert_eq!(command_for(key, modifiers), Some(command), "{key}");
+    }
+
+    let mut editor = editor_with(&[&rect("a", 0.0), &rect("b", 30.0)]);
+    press(&mut editor, "a", CMD);
+    press(&mut editor, "arrowright", CMD_SHIFT);
+    assert!(editor.can_undo());
 }
 
 #[test]

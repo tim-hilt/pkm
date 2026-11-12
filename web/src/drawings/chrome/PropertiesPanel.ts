@@ -12,7 +12,7 @@ import { PropertyControls } from "./PropertyControls";
  * The desktop Properties panel, on the left beside the Canvas: Excalidraw's
  * 195 px island, as tall as its content and scrolling beyond the height the
  * layout offers. It stacks the Properties controls, and with a Selection also
- * its layer and action buttons. The core is the source of truth: `update`
+ * its layer, align and action buttons. The core is the source of truth: `update`
  * re-reads it after every event and patches the DOM. A port of the Swift
  * `PropertiesPanel`.
  */
@@ -35,13 +35,14 @@ export class PropertiesPanel {
     this.controls = new PropertyControls(editor, onChange, isDark);
     const c = this.controls;
     // Stroke, background, then the options in the panel's order, opacity,
-    // layers, actions.
+    // layers, align, actions.
     this.element.append(
       c.stroke.element,
       c.background.element,
       ...c.groups.map((g) => g.section.element),
       c.opacity.element,
       c.layers.element,
+      c.align.element,
       c.actions.element,
     );
   }

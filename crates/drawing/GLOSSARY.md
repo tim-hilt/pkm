@@ -77,7 +77,7 @@ The platform's menu (on the web, the app's own) opened by a long-press with a fi
 _Avoid_: Action Bar (the removed floating bar), popover, popup, long-press menu
 
 **Properties panel**:
-The panel that sets stroke colour, background colour, fill style, stroke width, stroke style, sloppiness, edges and opacity (and, for text, font size and text alignment) on the Selection, and, with an empty Selection, as the style of the next Element. It shows the Selection's current values, or none chosen where they are mixed. Shown as a panel beside the Canvas on wide screens; on a phone it is split by concern into popovers opened from the Action row.
+The panel that sets stroke colour, background colour, fill style, stroke width, stroke style, sloppiness, edges and opacity (and, for text, font size and text alignment) on the Selection, and, with an empty Selection, as the style of the next Element. It shows the Selection's current values, or none chosen where they are mixed. With a Selection it also has layer (z-order), align (two or more groups or Elements) and distribute (three or more) buttons. Shown as a panel beside the Canvas on wide screens; on a phone it is split by concern into popovers opened from the Action row.
 _Avoid_: Inspector, style bar, sidebar, property popover
 
 **Action row**:

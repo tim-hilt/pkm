@@ -427,6 +427,8 @@ const NONE: Sections = Sections {
     edges: false,
     opacity: true,
     text: false,
+    align: false,
+    distribute: false,
 };
 
 fn element_json(kind: &str, extra: &str) -> String {
@@ -537,6 +539,7 @@ fn a_mixed_selection_has_the_sections_of_any_of_its_elements() {
             stroke_color: true,
             edges: true,
             text: true,
+            align: true,
             ..NONE
         }
     );

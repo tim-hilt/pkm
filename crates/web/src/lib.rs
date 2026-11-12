@@ -121,6 +121,14 @@ mirror_enum!(
     /// Where a layer command moves the Selection in the z-order.
     ZOrder { Forward, Backward, ToFront, ToBack }
 );
+mirror_enum!(
+    /// Which edges or middles an align command lines up.
+    Alignment { Left, CenterHorizontally, Right, Top, CenterVertically, Bottom }
+);
+mirror_enum!(
+    /// Along which axis a distribute command spaces the Selection.
+    Distribution { Horizontally, Vertically }
+);
 
 /// Modifier keys as a bit set: shift 1, ctrl 2, alt 4, meta 8.
 fn modifiers(bits: u8) -> pkm_drawing::input::Modifiers {
@@ -573,6 +581,8 @@ impl Editor {
                 edges: s.edges,
                 opacity: s.opacity,
                 text: s.text,
+                align: s.align,
+                distribute: s.distribute,
             },
         }
     }
@@ -648,6 +658,16 @@ impl Editor {
     #[wasm_bindgen(js_name = moveInZOrder)]
     pub fn move_in_z_order(&self, how: ZOrder) {
         self.inner.borrow_mut().move_in_z_order(how.into());
+    }
+
+    /// Lines up the Selection (see [`pkm_drawing::Editor::align`]).
+    pub fn align(&self, how: Alignment) {
+        self.inner.borrow_mut().align(how.into());
+    }
+
+    /// Spaces the Selection evenly (see [`pkm_drawing::Editor::distribute`]).
+    pub fn distribute(&self, how: Distribution) {
+        self.inner.borrow_mut().distribute(how.into());
     }
 
     /// Groups the Selection (see [`pkm_drawing::Editor::group`]).
@@ -869,6 +889,8 @@ pub struct Sections {
     pub edges: bool,
     pub opacity: bool,
     pub text: bool,
+    pub align: bool,
+    pub distribute: bool,
 }
 
 /// Whether two Drawings' files are the same Drawing (they share Elements, or

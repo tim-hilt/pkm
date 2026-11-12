@@ -16,9 +16,10 @@ use pkm_cloud::{
 };
 use pkm_drawing::scene::{FillPattern, LineStyle};
 use pkm_drawing::{
-    Command, ContextMenu, Cursor, Edges, ExportScope, FontSize, ImageFile, MagnifyEvent, Modifiers,
-    PencilDoubleTap, PointerButton, PointerEvent, PointerKind, PointerPhase, Properties, Property,
-    ScrollEvent, Sections, Shortcut, Sloppiness, StrokeWidth, TextAlign, TextEditor, Tool, ZOrder,
+    Alignment, Command, ContextMenu, Cursor, Distribution, Edges, ExportScope, FontSize, ImageFile,
+    MagnifyEvent, Modifiers, PencilDoubleTap, PointerButton, PointerEvent, PointerKind,
+    PointerPhase, Properties, Property, ScrollEvent, Sections, Shortcut, Sloppiness, StrokeWidth,
+    TextAlign, TextEditor, Tool, ZOrder,
 };
 
 uniffi::setup_scaffolding!("pkmCore");
@@ -775,6 +776,22 @@ pub enum ZOrder {
     ToBack,
 }
 
+#[uniffi::remote(Enum)]
+pub enum Alignment {
+    Left,
+    CenterHorizontally,
+    Right,
+    Top,
+    CenterVertically,
+    Bottom,
+}
+
+#[uniffi::remote(Enum)]
+pub enum Distribution {
+    Horizontally,
+    Vertically,
+}
+
 // The properties panel's options and values; see
 // [`pkm_drawing::Property`].
 
@@ -853,6 +870,8 @@ pub enum Command {
     Group,
     Ungroup,
     MoveInZOrder(ZOrder),
+    Align(Alignment),
+    Distribute(Distribution),
     SelectAll,
     ZoomIn,
     ZoomOut,
@@ -908,6 +927,8 @@ pub struct Sections {
     pub edges: bool,
     pub opacity: bool,
     pub text: bool,
+    pub align: bool,
+    pub distribute: bool,
 }
 
 /// The text view to show over the Canvas while a text is edited, in view
@@ -1312,6 +1333,16 @@ impl Editor {
     /// [`pkm_drawing::Editor::move_in_z_order`].
     pub fn move_in_z_order(&self, how: ZOrder) {
         self.editor().move_in_z_order(how);
+    }
+
+    /// Lines up the Selection; see [`pkm_drawing::Editor::align`].
+    pub fn align(&self, how: Alignment) {
+        self.editor().align(how);
+    }
+
+    /// Spaces the Selection evenly; see [`pkm_drawing::Editor::distribute`].
+    pub fn distribute(&self, how: Distribution) {
+        self.editor().distribute(how);
     }
 
     /// Differs from before whenever [`Editor::overlay`] may: read it after

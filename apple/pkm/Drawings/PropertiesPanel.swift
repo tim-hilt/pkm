@@ -7,7 +7,7 @@ import SwiftUI
 /// they are; a value the Selection's Elements do not share shows no option
 /// chosen. The option sets are Excalidraw's, shown as icons like Excalidraw's
 /// (`PanelIcon`; VoiceOver reads their names). With a Selection the panel also
-/// has its layer (z-order) and action (duplicate, delete) buttons.
+/// has its layer (z-order), align and action (duplicate, delete) buttons.
 struct PropertiesPanel: View {
     let controller: CanvasController
     /// The tallest the panel may be; beyond it, it scrolls.
@@ -34,6 +34,7 @@ struct PropertiesPanel: View {
                     if shown.sections.opacity { OpacityGroup(controller: controller, shown: shown) }
                     if controller.hasSelection {
                         LayersGroup(controller: controller)
+                        if shown.sections.align { AlignGroup(controller: controller, sections: shown.sections) }
                         ActionsGroup(controller: controller)
                     }
                 }
@@ -160,10 +161,57 @@ enum PanelIcon {
         }
     }
 
+    /// Excalidraw's align and distribute glyphs: guide lines and bars.
+    static func arrange(_ glyph: ArrangeGlyph) -> @Sendable (inout GraphicsContext, CGSize) -> Void {
+        { context, _ in
+            var lines = Path()
+            for (from, to) in glyph.lines {
+                lines.move(to: from)
+                lines.addLine(to: to)
+            }
+            context.stroke(lines, with: .foreground, style: StrokeStyle(lineWidth: 1.25, lineCap: .round))
+            for bar in glyph.bars {
+                context.stroke(Path(roundedRect: bar, cornerRadius: 1.6), with: .foreground, lineWidth: 1.25)
+            }
+        }
+    }
+
     /// A square whose corners have `radius`.
     static func corner(radius: CGFloat) -> @Sendable (inout GraphicsContext, CGSize) -> Void {
         { context, _ in
             context.stroke(Path(roundedRect: box, cornerRadius: radius / 2), with: .foreground, lineWidth: 1.6)
         }
     }
+}
+
+/// An align or distribute glyph in the 20 pt square: guide lines and bars,
+/// across; `transposed` makes its twin down.
+struct ArrangeGlyph: Sendable {
+    let lines: [(CGPoint, CGPoint)]
+    let bars: [CGRect]
+
+    /// Mirrored about the diagonal.
+    var transposed: ArrangeGlyph {
+        let flip = { (p: CGPoint) in CGPoint(x: p.y, y: p.x) }
+        return ArrangeGlyph(
+            lines: lines.map { (flip($0.0), flip($0.1)) },
+            bars: bars.map { CGRect(x: $0.minY, y: $0.minX, width: $0.height, height: $0.width) })
+    }
+
+    private static func line(_ x1: CGFloat, _ y1: CGFloat, _ x2: CGFloat, _ y2: CGFloat) -> (CGPoint, CGPoint) {
+        (CGPoint(x: x1, y: y1), CGPoint(x: x2, y: y2))
+    }
+
+    static let start = ArrangeGlyph(
+        lines: [line(3.3, 3.3, 3.3, 16.7)],
+        bars: [CGRect(x: 6.5, y: 4.8, width: 10.4, height: 3.3), CGRect(x: 6.5, y: 11.5, width: 7.7, height: 3.3)])
+    static let centre = ArrangeGlyph(
+        lines: [line(10, 1.7, 10, 4.8), line(10, 8.1, 10, 11.5), line(10, 14.8, 10, 18.3)],
+        bars: [CGRect(x: 6.5, y: 4.8, width: 7, height: 3.3), CGRect(x: 4.8, y: 11.5, width: 10.4, height: 3.3)])
+    static let end = ArrangeGlyph(
+        lines: [line(16.7, 3.3, 16.7, 16.7)],
+        bars: [CGRect(x: 3.1, y: 4.8, width: 10.4, height: 3.3), CGRect(x: 5.8, y: 11.5, width: 7.7, height: 3.3)])
+    static let spread = ArrangeGlyph(
+        lines: [line(3.3, 3.3, 3.3, 16.7), line(16.7, 3.3, 16.7, 16.7)],
+        bars: [CGRect(x: 5.6, y: 8.1, width: 8.8, height: 3.8)])
 }

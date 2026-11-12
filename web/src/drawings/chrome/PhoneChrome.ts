@@ -169,7 +169,7 @@ export class PhoneChrome {
         break;
       case "actions":
         this.offerActions();
-        content.append(c.layers.element, c.actions.element);
+        content.append(c.layers.element, c.align.element, c.actions.element);
         break;
     }
     return content;

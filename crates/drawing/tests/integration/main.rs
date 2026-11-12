@@ -7,6 +7,7 @@
 
 mod common;
 
+mod align;
 mod arrow_binding;
 mod arrow_labels;
 mod benchmarks;

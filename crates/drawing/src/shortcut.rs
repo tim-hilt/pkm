@@ -4,6 +4,7 @@
 //! [`crate::Editor::perform`]. Copy, cut and paste are not in it: they go
 //! through the platform's own Edit commands and pasteboard.
 
+use crate::align::{Alignment, Distribution};
 use crate::input::Modifiers;
 use crate::tool::Tool;
 use crate::z_order::ZOrder;
@@ -20,6 +21,8 @@ pub enum Command {
     Group,
     Ungroup,
     MoveInZOrder(ZOrder),
+    Align(Alignment),
+    Distribute(Distribution),
     SelectAll,
     ZoomIn,
     ZoomOut,
@@ -34,7 +37,8 @@ pub enum Command {
 
 /// A key that performs a Command. `key` is the character the key types
 /// without Shift (`"r"`, `"1"`, `"["`), or `"backspace"`, `"delete"`, `"escape"`,
-/// `"enter"` (Return and keypad Enter).
+/// `"enter"` (Return and keypad Enter), `"arrowleft"`, `"arrowright"`,
+/// `"arrowup"`, `"arrowdown"`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Shortcut {
     pub key: String,
@@ -51,6 +55,7 @@ const NONE: Modifiers = Modifiers {
 const CMD: Modifiers = Modifiers { meta: true, ..NONE };
 const CMD_SHIFT: Modifiers = Modifiers { shift: true, ..CMD };
 const CMD_ALT: Modifiers = Modifiers { alt: true, ..CMD };
+const ALT: Modifiers = Modifiers { alt: true, ..NONE };
 const SHIFT: Modifiers = Modifiers {
     shift: true,
     ..NONE
@@ -92,6 +97,12 @@ const TABLE: &[(&str, Modifiers, Command)] = &[
     ("[", CMD, Command::MoveInZOrder(ZOrder::Backward)),
     ("]", CMD_ALT, Command::MoveInZOrder(ZOrder::ToFront)),
     ("[", CMD_ALT, Command::MoveInZOrder(ZOrder::ToBack)),
+    ("arrowleft", CMD_SHIFT, Command::Align(Alignment::Left)),
+    ("arrowright", CMD_SHIFT, Command::Align(Alignment::Right)),
+    ("arrowup", CMD_SHIFT, Command::Align(Alignment::Top)),
+    ("arrowdown", CMD_SHIFT, Command::Align(Alignment::Bottom)),
+    ("h", ALT, Command::Distribute(Distribution::Horizontally)),
+    ("v", ALT, Command::Distribute(Distribution::Vertically)),
     ("a", CMD, Command::SelectAll),
     ("=", CMD, Command::ZoomIn),
     ("=", CMD_SHIFT, Command::ZoomIn),

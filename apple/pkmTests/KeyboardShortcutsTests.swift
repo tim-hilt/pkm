@@ -40,6 +40,9 @@ import Testing
         #expect(delete?.key == .delete)
         let toFront = entries.first { $0.command == .moveInZOrder(.toFront) }
         #expect(toFront?.modifiers == [.command, .option])
+        let alignTop = entries.first { $0.command == .align(.top) }
+        #expect(alignTop?.key == .upArrow)
+        #expect(alignTop?.modifiers == [.command, .shift])
     }
 
     @Test func theSystemsEditItemsActOnTheCanvas() throws {

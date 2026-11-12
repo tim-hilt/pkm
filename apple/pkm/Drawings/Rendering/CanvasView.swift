@@ -393,6 +393,10 @@ final class CanvasMetalView: MTKView {
             case forwardDeleteKey: "delete"
             case escapeKey: "escape"
             case returnKey, keypadEnterKey: "enter"
+            case leftArrowKey: "arrowleft"
+            case rightArrowKey: "arrowright"
+            case downArrowKey: "arrowdown"
+            case upArrowKey: "arrowup"
             default: event.characters(byApplyingModifiers: [])?.lowercased() ?? ""
             }
         }
@@ -404,6 +408,10 @@ final class CanvasMetalView: MTKView {
         private static let escapeKey: UInt16 = 53
         private static let returnKey: UInt16 = 36
         private static let keypadEnterKey: UInt16 = 76
+        private static let leftArrowKey: UInt16 = 123
+        private static let rightArrowKey: UInt16 = 124
+        private static let downArrowKey: UInt16 = 125
+        private static let upArrowKey: UInt16 = 126
 
         override func mouseDown(with event: NSEvent) {
             // Keys go to the Canvas, unless a text is being edited: the core
@@ -475,6 +483,10 @@ final class CanvasMetalView: MTKView {
                     case .keyboardDeleteForward: "delete"
                     case .keyboardEscape: "escape"
                     case .keyboardReturnOrEnter, .keypadEnter: "enter"
+                    case .keyboardLeftArrow: "arrowleft"
+                    case .keyboardRightArrow: "arrowright"
+                    case .keyboardUpArrow: "arrowup"
+                    case .keyboardDownArrow: "arrowdown"
                     default: key.charactersIgnoringModifiers.lowercased()
                     }
                 if !pressKey(name, Modifiers(key.modifierFlags)) { unhandled.insert(press) }
@@ -704,6 +716,8 @@ final class CanvasController {
     func group() { canvas?.perform { $0.group() } }
     func ungroup() { canvas?.perform { $0.ungroup() } }
     func moveInZOrder(_ how: ZOrder) { canvas?.perform { $0.moveInZOrder(how: how) } }
+    func align(_ how: Alignment) { canvas?.perform { $0.align(how: how) } }
+    func distribute(_ how: Distribution) { canvas?.perform { $0.distribute(how: how) } }
     func deleteSelection() { canvas?.perform { $0.deleteSelection() } }
     /// Puts the Selection on the system pasteboard, as Edit > Copy does.
     func copySelection() { canvas?.copy(nil) }

@@ -1,4 +1,6 @@
 import {
+  Alignment,
+  Distribution,
   Edges,
   FillPattern,
   FontSize,
@@ -216,6 +218,100 @@ export const layerButtons: readonly (ActionButton & { how: ZOrder })[] = [
   { name: "Send Backward", how: ZOrder.Backward, icon: arrowIcon("M10 4v11M6 11l4 4 4-4") },
   { name: "Bring Forward", how: ZOrder.Forward, icon: arrowIcon("M10 16V5M6 9l4-4 4 4") },
   { name: "Bring to Front", how: ZOrder.ToFront, icon: arrowIcon("M10 17V7M6 11l4-4 4 4M4 3h12") },
+];
+
+/** Guide lines `[x1, y1, x2, y2]` and bars `[x, y, width, height]` in the 20 x 20 box. */
+interface ArrangeGlyph {
+  lines: number[][];
+  bars: number[][];
+}
+
+/** The glyph mirrored about the diagonal: its horizontal twin made vertical. */
+const transposed = ({ lines, bars }: ArrangeGlyph): ArrangeGlyph => ({
+  lines: lines.map(([x1, y1, x2, y2]) => [y1, x1, y2, x2]),
+  bars: bars.map(([x, y, w, h]) => [y, x, h, w]),
+});
+
+const arrangeIcon = ({ lines, bars }: ArrangeGlyph): Icon =>
+  svg(
+    `<path d="${lines.map(([x1, y1, x2, y2]) => `M${x1} ${y1}L${x2} ${y2}`).join("")}" ${stroke(' stroke-width="1.25" stroke-linecap="round"')}/>` +
+      bars
+        .map(
+          ([x, y, w, h]) =>
+            `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="1.6" ${stroke(' stroke-width="1.25"')}/>`,
+        )
+        .join(""),
+  );
+
+/** Excalidraw's align and distribute glyphs, across; their vertical twins are transposed. */
+const across = {
+  start: {
+    lines: [[3.3, 3.3, 3.3, 16.7]],
+    bars: [
+      [6.5, 4.8, 10.4, 3.3],
+      [6.5, 11.5, 7.7, 3.3],
+    ],
+  },
+  centre: {
+    lines: [
+      [10, 1.7, 10, 4.8],
+      [10, 8.1, 10, 11.5],
+      [10, 14.8, 10, 18.3],
+    ],
+    bars: [
+      [6.5, 4.8, 7, 3.3],
+      [4.8, 11.5, 10.4, 3.3],
+    ],
+  },
+  end: {
+    lines: [[16.7, 3.3, 16.7, 16.7]],
+    bars: [
+      [3.1, 4.8, 10.4, 3.3],
+      [5.8, 11.5, 7.7, 3.3],
+    ],
+  },
+  spread: {
+    lines: [
+      [3.3, 3.3, 3.3, 16.7],
+      [16.7, 3.3, 16.7, 16.7],
+    ],
+    bars: [[5.6, 8.1, 8.8, 3.8]],
+  },
+} satisfies Record<string, ArrangeGlyph>;
+
+/** An align or distribute button. */
+export type ArrangeButton = ActionButton & ({ align: Alignment } | { distribute: Distribution });
+
+/** The Align section's rows, as on excalidraw.com: across, then down, each ending with Distribute. */
+export const arrangeRows: readonly (readonly ArrangeButton[])[] = [
+  [
+    { name: "Align Left", align: Alignment.Left, icon: arrangeIcon(across.start) },
+    {
+      name: "Center Horizontally",
+      align: Alignment.CenterHorizontally,
+      icon: arrangeIcon(across.centre),
+    },
+    { name: "Align Right", align: Alignment.Right, icon: arrangeIcon(across.end) },
+    {
+      name: "Distribute Horizontally",
+      distribute: Distribution.Horizontally,
+      icon: arrangeIcon(across.spread),
+    },
+  ],
+  [
+    { name: "Align Top", align: Alignment.Top, icon: arrangeIcon(transposed(across.start)) },
+    {
+      name: "Center Vertically",
+      align: Alignment.CenterVertically,
+      icon: arrangeIcon(transposed(across.centre)),
+    },
+    { name: "Align Bottom", align: Alignment.Bottom, icon: arrangeIcon(transposed(across.end)) },
+    {
+      name: "Distribute Vertically",
+      distribute: Distribution.Vertically,
+      icon: arrangeIcon(transposed(across.spread)),
+    },
+  ],
 ];
 
 export const duplicateButton: ActionButton = {

@@ -2,6 +2,7 @@
 //!
 //! Clients drive everything through [`Editor`].
 
+mod align;
 mod arrowhead;
 mod binding;
 mod box_select;
@@ -59,6 +60,7 @@ mod viewport;
 mod wrap;
 mod z_order;
 
+pub use align::{Alignment, Distribution};
 pub use color::dark_mode_color;
 pub use context_menu::ContextMenu;
 pub use cursor::Cursor;

@@ -28,6 +28,10 @@ struct MenuShortcut {
             case "delete": .deleteForward
             case "escape": .escape
             case "enter": .return
+            case "arrowleft": .leftArrow
+            case "arrowright": .rightArrow
+            case "arrowup": .upArrow
+            case "arrowdown": .downArrow
             default: KeyEquivalent(Character(shortcut.key))
             }
         var modifiers: EventModifiers = []
@@ -105,6 +109,10 @@ struct CanvasCommands: Commands {
             items(for: [.group, .ungroup])
             Divider()
             items { if case .moveInZOrder = $0 { true } else { false } }
+            Divider()
+            items { if case .align = $0 { true } else { false } }
+            Divider()
+            items { if case .distribute = $0 { true } else { false } }
         }
     }
 
@@ -137,6 +145,14 @@ struct CanvasCommands: Commands {
         case .moveInZOrder(.backward): "Send Backward"
         case .moveInZOrder(.toFront): "Bring to Front"
         case .moveInZOrder(.toBack): "Send to Back"
+        case .align(.left): "Align Left"
+        case .align(.centerHorizontally): "Center Horizontally"
+        case .align(.right): "Align Right"
+        case .align(.top): "Align Top"
+        case .align(.centerVertically): "Center Vertically"
+        case .align(.bottom): "Align Bottom"
+        case .distribute(.horizontally): "Distribute Horizontally"
+        case .distribute(.vertically): "Distribute Vertically"
         case .selectAll: "Select All"
         case .zoomIn: "Zoom In"
         case .zoomOut: "Zoom Out"

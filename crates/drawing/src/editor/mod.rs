@@ -4,6 +4,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::align::{self, Alignment, Distribution};
 use crate::binding::{self, Attachments, End};
 use crate::box_select::BoxSelect;
 use crate::clipboard;
@@ -665,7 +666,10 @@ impl Editor {
         // With the labels of selected containers, whose text options the
         // panel offers, as excalidraw.com does.
         let covered: Vec<Element> = self.selection.covered(&self.scene).collect();
-        Properties::of_selection(&covered, tool, &self.style)
+        let mut shown = Properties::of_selection(&covered, tool, &self.style);
+        shown.sections.align = self.can_align();
+        shown.sections.distribute = self.can_distribute();
+        shown
     }
 
     /// Whether the chrome shows the properties panel (Excalidraw's

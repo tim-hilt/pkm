@@ -127,6 +127,9 @@ struct ActionPopoverContent: View {
         if item == .actions {
             VStack(alignment: .leading, spacing: 8) {
                 LayersGroup(controller: controller)
+                if let sections = controller.properties?.sections, sections.align {
+                    AlignGroup(controller: controller, sections: sections)
+                }
                 ActionsGroup(
                     controller: controller, showsDuplicate: model.popoverHasDuplicate,
                     showsDelete: model.popoverHasDelete)

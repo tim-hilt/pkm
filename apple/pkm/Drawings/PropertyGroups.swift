@@ -228,6 +228,58 @@ struct LayersGroup: View {
     }
 }
 
+/// Align and, for three or more groups or Elements, Distribute; shown where
+/// the core says Align applies (`Sections.align`).
+struct AlignGroup: View {
+    let controller: CanvasController
+    let sections: Sections
+
+    var body: some View {
+        PanelSection(title: "Align") {
+            ActionRow(
+                buttons: [
+                    (.drawing(PanelIcon.arrange(.start)), "Align Left", { controller.align(.left) }),
+                    (
+                        .drawing(PanelIcon.arrange(.centre)), "Center Horizontally",
+                        {
+                            controller.align(.centerHorizontally)
+                        }
+                    ),
+                    (.drawing(PanelIcon.arrange(.end)), "Align Right", { controller.align(.right) }),
+                ]
+                    + (sections.distribute
+                        ? [
+                            (
+                                .drawing(PanelIcon.arrange(.spread)), "Distribute Horizontally",
+                                {
+                                    controller.distribute(.horizontally)
+                                }
+                            )
+                        ] : []))
+            ActionRow(
+                buttons: [
+                    (.drawing(PanelIcon.arrange(.start.transposed)), "Align Top", { controller.align(.top) }),
+                    (
+                        .drawing(PanelIcon.arrange(.centre.transposed)), "Center Vertically",
+                        {
+                            controller.align(.centerVertically)
+                        }
+                    ),
+                    (.drawing(PanelIcon.arrange(.end.transposed)), "Align Bottom", { controller.align(.bottom) }),
+                ]
+                    + (sections.distribute
+                        ? [
+                            (
+                                .drawing(PanelIcon.arrange(.spread.transposed)), "Distribute Vertically",
+                                {
+                                    controller.distribute(.vertically)
+                                }
+                            )
+                        ] : []))
+        }
+    }
+}
+
 /// Duplicate and Delete; on the phone, whichever sit on the Action row instead are left out.
 struct ActionsGroup: View {
     let controller: CanvasController
