@@ -16,7 +16,7 @@ import { ContextMenu } from "./chrome/ContextMenu";
 import { type MenuEntry, openContextMenu } from "./chrome/ContextMenuModel";
 import { MainMenu } from "./chrome/MainMenu";
 import { TextEditorOverlay } from "./text/TextEditorOverlay";
-import { keyboardCovering, textAboveKeyboard } from "./text/KeyboardAvoidance";
+import { caretInView, keyboardCovering, textAboveKeyboard } from "./text/KeyboardAvoidance";
 import type { Appearance } from "../settings/Appearance";
 import type { DrawingSettings } from "./chrome/DrawingSettings";
 import type { DrawingExport } from "./export/DrawingExport";
@@ -77,7 +77,7 @@ export function showCanvas(
   const textView = new TextEditorOverlay();
   textView.onChange = (text) => {
     editor.setEditingText(text);
-    didReachEditor();
+    didReachEditor(true);
   };
   textView.onEnd = () => {
     editor.commitText();
@@ -141,10 +141,12 @@ export function showCanvas(
   /**
    * Shows the Text view where the core says, or takes it away if no text is
    * edited; like the viewport it follows panning and zooming. Moves a text
-   * the on-screen keyboard covers to the middle of the room above it, which
-   * only pans the viewport (and does not pan back afterwards). Returns whether it panned.
+   * the on-screen keyboard covers to the middle of the room above it and, if
+   * `followCaret` (it was typed in), pans a caret out of view just into it, as
+   * Excalidraw does. Both only pan the viewport (and do not pan back
+   * afterwards). Returns whether it panned.
    */
-  const syncTextView = (): boolean => {
+  const syncTextView = (followCaret: boolean): boolean => {
     const shown = editor.textEditor();
     if (!shown) {
       textView.hide();
@@ -152,20 +154,23 @@ export function showCanvas(
     }
     textView.show(shown, root);
     const visual = window.visualViewport;
-    const caret = textView.caret(shown);
+    const caret = textView.caret(shown, font);
     if (!visual || !caret) return false;
     const bounds = canvas.getBoundingClientRect();
     const keyboard = keyboardCovering(bounds, visual, document.documentElement.clientHeight);
     const top = Math.max(0, visual.offsetTop - bounds.y);
-    const panned = textAboveKeyboard(keyboard, top, shown, caret, editor.viewport());
+    const room = { x: 0, y: top, width: bounds.width, height: bounds.height - top };
+    const panned =
+      textAboveKeyboard(keyboard, top, shown, caret, editor.viewport()) ??
+      (followCaret ? caretInView(room, caret, editor.viewport()) : undefined);
     if (!panned) return false;
     editor.setViewport(panned);
     return true;
   };
-  /** Shows whatever the editor did with an input or command. */
-  const didReachEditor = () => {
-    // Panning for the keyboard moves the Text view too: shown once more.
-    if (syncTextView()) syncTextView();
+  /** Shows whatever the editor did with an input or command; `typed` if text was typed. */
+  const didReachEditor = (typed = false) => {
+    // Panning moves the Text view too: shown once more.
+    if (syncTextView(typed)) syncTextView(false);
     sync.sync();
     handlers.edited();
     zoomControls.update();
@@ -265,7 +270,7 @@ export function showCanvas(
   // The keyboard coming up or going shrinks or grows the visual viewport.
   const visual = window.visualViewport;
   const keyboardChanged = () => {
-    if (syncTextView()) didReachEditor();
+    if (syncTextView(false)) didReachEditor();
   };
   visual?.addEventListener("resize", keyboardChanged);
   // Dark mode is display only: the Scene, Selection, Text view and history stay

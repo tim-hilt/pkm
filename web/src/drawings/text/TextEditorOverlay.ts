@@ -1,4 +1,5 @@
 import type { TextEditor } from "../../core/Core";
+import type { TextMeasurer } from "./Excalifont";
 import { caretLine, type Rect } from "./KeyboardAvoidance";
 import { caretRoom, textViewStyle } from "./TextViewStyle";
 
@@ -60,17 +61,16 @@ export class TextEditorOverlay {
     view.remove();
   }
 
-  /** The caret's line in the Canvas's coordinates, for keeping it above the keyboard. */
-  caret(editor: TextEditor): Rect | undefined {
+  /**
+   * The caret in the Canvas's coordinates, measured by `font`, for keeping it
+   * in view and above the keyboard.
+   */
+  caret(editor: TextEditor, font: TextMeasurer): Rect | undefined {
     const view = this.view;
     if (!view) return undefined;
-    const box = {
-      x: editor.x - caretRoom,
-      y: editor.y,
-      height: editor.height,
-      lineHeight: editor.fontSize * editor.lineHeight,
-    };
-    return caretLine(box, view.value, view.selectionEnd);
+    const box = { ...editor, lineHeight: editor.fontSize * editor.lineHeight };
+    const lineWidth = (text: string) => font.lineWidth(text, editor.fontSize);
+    return caretLine(box, view.value, view.selectionEnd, lineWidth);
   }
 
   private open(host: HTMLElement): HTMLTextAreaElement {

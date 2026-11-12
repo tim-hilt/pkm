@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { type Rect, caretLine, keyboardCovering, textAboveKeyboard } from "./KeyboardAvoidance";
+import { TextAlign } from "../../core/Core";
+import {
+  type Rect,
+  caretInView,
+  caretLine,
+  keyboardCovering,
+  textAboveKeyboard,
+} from "./KeyboardAvoidance";
 
 // iPhone 15 Pro: the keyboard covers y 510...852 of a 393 × 852 Canvas, below
 // the status bar's 59 points. The room's middle is at 284.5.
@@ -78,14 +85,66 @@ describe("finding the keyboard from the visual viewport", () => {
   });
 });
 
-describe("where the caret is", () => {
-  const box = { x: 100, y: 200, height: 70, lineHeight: 35 };
+describe("following the caret out of view", () => {
+  // A 800 × 600 Canvas below a 20 point status bar.
+  const room: Rect = { x: 0, y: 20, width: 800, height: 580 };
+  const at = (x: number, y: number): Rect => ({ x, y, width: 1, height: 20 });
 
-  it("is the last line of the box with the caret at the end", () => {
-    expect(caretLine(box, "ab\ncd", 5)).toEqual({ x: 100, y: 235, width: 1, height: 35 });
+  it("pans a caret past the right edge just into view, with the margin", () => {
+    // Right edge 801 must reach 800 − 16 = 784: 17 points = 8.5 Scene units.
+    expect(caretInView(room, at(800, 100), viewport)).toEqual({
+      originX: 18.5,
+      originY: 20,
+      zoom: 2,
+    });
   });
 
-  it("is the line the caret is on", () => {
-    expect(caretLine(box, "ab\ncd", 1)).toEqual({ x: 100, y: 200, width: 1, height: 35 });
+  it("pans a caret past the left edge or above the top", () => {
+    expect(caretInView(room, at(4, 100), viewport)).toEqual({ originX: 4, originY: 20, zoom: 2 });
+    expect(caretInView(room, at(100, 10), viewport)).toEqual({ originX: 10, originY: 7, zoom: 2 });
+  });
+
+  it("pans a caret past the bottom edge", () => {
+    // Bottom 610 must reach 600 − 16 = 584: 26 points up.
+    expect(caretInView(room, at(100, 590), viewport)).toEqual({
+      originX: 10,
+      originY: 33,
+      zoom: 2,
+    });
+  });
+
+  it("does not pan a caret in view", () => {
+    expect(caretInView(room, at(783, 563), viewport)).toBeUndefined();
+    expect(caretInView(room, at(16, 36), viewport)).toBeUndefined();
+  });
+});
+
+describe("where the caret is", () => {
+  // Each character is 10 points wide.
+  const width = (text: string) => text.length * 10;
+  const box = (align = TextAlign.Left) => ({
+    x: 100,
+    y: 200,
+    width: 60,
+    height: 70,
+    lineHeight: 35,
+    align,
+  });
+
+  it("is the last line of the box with the caret at the end", () => {
+    expect(caretLine(box(), "ab\ncd", 5, width)).toEqual({ x: 120, y: 235, width: 1, height: 35 });
+  });
+
+  it("is the line the caret is on, after the characters before it", () => {
+    expect(caretLine(box(), "ab\ncd", 1, width)).toEqual({ x: 110, y: 200, width: 1, height: 35 });
+  });
+
+  it("follows the alignment of a line shorter than the box", () => {
+    expect(caretLine(box(TextAlign.Center), "ab\ncd", 5, width).x).toBe(140);
+    expect(caretLine(box(TextAlign.Right), "ab\ncd", 5, width).x).toBe(160);
+  });
+
+  it("stays in the box when a wrapped line is longer than it", () => {
+    expect(caretLine(box(), "abcdefghij", 10, width).x).toBe(160);
   });
 });

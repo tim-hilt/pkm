@@ -1,4 +1,4 @@
-import type { Viewport } from "../../core/Core";
+import { TextAlign, type Viewport } from "../../core/Core";
 
 /** A rectangle in the Canvas's coordinates. */
 export interface Rect {
@@ -8,7 +8,7 @@ export interface Rect {
   height: number;
 }
 
-/** Room kept between the caret's line and the keyboard, in points. */
+/** Room kept between the caret's line and the keyboard or the Canvas's edge, in points. */
 export const keyboardMargin = 16;
 
 /**
@@ -45,6 +45,31 @@ export function textAboveKeyboard(
   return { ...current, originY: current.originY + lift / current.zoom };
 }
 
+/**
+ * Follows the caret out of view as Excalidraw does: the viewport that pans
+ * `caret` just into `room` (what is visible of the Canvas), with the margin to
+ * spare, or `undefined` if it is in already. A port of the Swift
+ * `KeyboardAvoidance.follow`. Only panning, never zooming.
+ */
+export function caretInView(room: Rect, caret: Rect, current: Viewport): Viewport | undefined {
+  if (current.zoom <= 0) return undefined;
+  const dx = overflow(caret.x, caret.x + caret.width, room.x, room.x + room.width);
+  const dy = overflow(caret.y, caret.y + caret.height, room.y, room.y + room.height);
+  if (dx === 0 && dy === 0) return undefined;
+  return {
+    ...current,
+    originX: current.originX + dx / current.zoom,
+    originY: current.originY + dy / current.zoom,
+  };
+}
+
+/** How far `from...to` must move to be within `min...max`, the margin in. */
+function overflow(from: number, to: number, min: number, max: number): number {
+  if (to > max - keyboardMargin) return to - (max - keyboardMargin);
+  if (from < min + keyboardMargin) return from - (min + keyboardMargin);
+  return 0;
+}
+
 function intersects(a: Rect, b: Rect): boolean {
   if (a.width <= 0 || a.height <= 0 || b.width <= 0 || b.height <= 0) return false;
   return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
@@ -68,21 +93,39 @@ export function keyboardCovering(
   return { x: 0, y: top - canvas.y, width: canvas.width, height };
 }
 
+const alignShares: Record<TextAlign, number> = {
+  [TextAlign.Left]: 0,
+  [TextAlign.Center]: 0.5,
+  [TextAlign.Right]: 1,
+};
+
 /**
- * The caret's line of a text view: the line of `value` that `caret` (an offset)
- * is on, counted by the line breaks typed, in the box of the text.
+ * The caret in a text view: on the line of `value` that `caret` (an offset) is
+ * on, counted by the line breaks typed, after the characters before it on that
+ * line, as wide as `lineWidth` says, in the box of the text.
  */
 export function caretLine(
-  box: { x: number; y: number; height: number; lineHeight: number },
+  box: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    lineHeight: number;
+    align: TextAlign;
+  },
   value: string,
   caret: number,
+  lineWidth: (text: string) => number,
 ): Rect {
-  const line = value.slice(0, caret).split("\n").length - 1;
-  const lines = value.split("\n").length;
+  const before = value.slice(0, caret).split("\n");
+  const line = before.length - 1;
+  const lines = value.split("\n");
   // Wrapped text has more lines than typed: counted from the bottom at the end.
   const y =
     caret >= value.length
       ? box.y + box.height - box.lineHeight
-      : box.y + Math.min(line, lines - 1) * box.lineHeight;
-  return { x: box.x, y, width: 1, height: box.lineHeight };
+      : box.y + Math.min(line, lines.length - 1) * box.lineHeight;
+  const start = (box.width - lineWidth(lines[line])) * alignShares[box.align];
+  const x = Math.min(Math.max(start, 0) + lineWidth(before[line]), box.width);
+  return { x: box.x + x, y, width: 1, height: box.lineHeight };
 }

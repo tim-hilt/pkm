@@ -64,3 +64,34 @@ import Testing
                 keyboard: floating, top: top, text: below, caret: below, current: viewport) == nil)
     }
 }
+
+/// The caret pans just into view, with the margin, as on excalidraw.com.
+@Suite struct CaretFollowingTests {
+    private let viewport = ViewportState(originX: 10, originY: 20, zoom: 2)
+    /// An 800 × 600 Canvas below a 20 point status bar.
+    private let room = CGRect(x: 0, y: 20, width: 800, height: 580)
+
+    private func follow(x: CGFloat, y: CGFloat) -> ViewportState? {
+        KeyboardAvoidance.follow(caret: CGRect(x: x, y: y, width: 1, height: 20), into: room, current: viewport)
+    }
+
+    @Test func aCaretPastTheRightEdgePansJustIntoViewWithTheMargin() {
+        // Right edge 801 must reach 800 − 16 = 784: 17 points = 8.5 Scene units.
+        #expect(follow(x: 800, y: 100) == ViewportState(originX: 18.5, originY: 20, zoom: 2))
+    }
+
+    @Test func aCaretPastTheLeftEdgeOrAboveTheTopPans() {
+        #expect(follow(x: 4, y: 100) == ViewportState(originX: 4, originY: 20, zoom: 2))
+        #expect(follow(x: 100, y: 10) == ViewportState(originX: 10, originY: 7, zoom: 2))
+    }
+
+    @Test func aCaretPastTheBottomEdgePans() {
+        // Bottom 610 must reach 600 − 16 = 584: 26 points up.
+        #expect(follow(x: 100, y: 590) == ViewportState(originX: 10, originY: 33, zoom: 2))
+    }
+
+    @Test func aCaretInViewDoesNotPan() {
+        #expect(follow(x: 783, y: 563) == nil)
+        #expect(follow(x: 16, y: 36) == nil)
+    }
+}

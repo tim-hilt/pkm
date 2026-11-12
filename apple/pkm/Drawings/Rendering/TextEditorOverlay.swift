@@ -232,6 +232,21 @@ final class TextEditorOverlay: NSObject {
             alpha: CGFloat(rgba & 0xFF) / 255 * editor.opacity)
     }
 
+    /// The caret (the end of the selection) in `host`'s coordinates, while a
+    /// text is edited.
+    func caret(in host: PlatformView) -> CGRect? {
+        guard let view else { return nil }
+        #if os(macOS)
+            guard let window = view.window else { return nil }
+            let end = NSRange(location: NSMaxRange(view.selectedRange()), length: 0)
+            let onScreen = view.firstRect(forCharacterRange: end, actualRange: nil)
+            return host.convert(window.convertFromScreen(onScreen), from: nil)
+        #else
+            guard let end = view.selectedTextRange?.end else { return nil }
+            return view.convert(view.caretRect(for: end), to: host)
+        #endif
+    }
+
     // MARK: Reporting
 
     /// Tells what the view says now; the view's delegate calls it on every change.

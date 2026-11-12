@@ -102,7 +102,10 @@ final class CanvasMetalView: MTKView {
         enableSetNeedsDisplay = true
         delegate = renderer
         renderer?.onNeedsDisplay = { [weak self] in self?.requestRedraw() }
-        textOverlay.onChange = { [weak self] text in self?.perform { $0.setEditingText(text: text) } }
+        textOverlay.onChange = { [weak self] text in
+            self?.perform { $0.setEditingText(text: text) }
+            self?.followCaret()
+        }
         textOverlay.onEnd = { [weak self] in self?.perform { $0.commitText() } }
         #if !os(macOS)
             isMultipleTouchEnabled = true
@@ -275,6 +278,29 @@ final class CanvasMetalView: MTKView {
         }
     }
 
+    /// Pans the viewport, if the caret is out of view after typing, just
+    /// enough to bring it in, as Excalidraw does. Does not pan back afterwards.
+    private func followCaret() {
+        let insets = safeAreaInsets
+        let room = CGRect(
+            x: insets.left, y: insets.top, width: bounds.width - insets.left - insets.right,
+            height: bounds.height - insets.top - insets.bottom)
+        guard let editor, let caret = textOverlay.caret(in: self),
+            let panned = KeyboardAvoidance.follow(caret: caret, into: room, current: editor.viewport())
+        else { return }
+        showPanned(panned)
+    }
+
+    /// Shows `viewport`, and the Scene, overlay and text view in it.
+    private func showPanned(_ viewport: ViewportState) {
+        guard let editor else { return }
+        editor.setViewport(viewport: viewport)
+        syncViewport()
+        syncOverlay()
+        if let moved = editor.textEditor() { textOverlay.show(moved, in: self) }
+        onEditorChange?()
+    }
+
     #if !os(macOS)
         /// The on-screen keyboard's frame in screen coordinates; `nil` while
         /// it is hidden. A hardware keyboard shows none (or only the small
@@ -297,20 +323,15 @@ final class CanvasMetalView: MTKView {
         /// the status bar. Does not pan back afterwards.
         private func avoidKeyboard() {
             guard let editor, let field = textOverlay.view, let window,
-                let end = field.selectedTextRange?.end
+                let caret = textOverlay.caret(in: self)
             else { return }
             let keyboard = keyboardFrame.map { window.screen.coordinateSpace.convert($0, to: self) }
-            let caret = field.convert(field.caretRect(for: end), to: self)
             guard
                 let panned = KeyboardAvoidance.viewport(
                     keyboard: keyboard, top: safeAreaInsets.top, text: field.frame, caret: caret,
                     current: editor.viewport())
             else { return }
-            editor.setViewport(viewport: panned)
-            syncViewport()
-            syncOverlay()
-            if let moved = editor.textEditor() { textOverlay.show(moved, in: self) }
-            onEditorChange?()
+            showPanned(panned)
         }
     #endif
 
