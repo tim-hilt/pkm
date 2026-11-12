@@ -45,17 +45,6 @@
         }
       }
     },
-    "Actions for %@": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Actions for %@"
-          }
-        }
-      }
-    },
     "Add Comment": {
       "extractionState": "manual",
       "localizations": {

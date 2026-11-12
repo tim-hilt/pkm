@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 /// first, with a button to create a new one. A card shows the Drawing's thumbnail, which is made when
 /// the card comes into view (the grid is lazy) and again after the Drawing
 /// changed, with the name and date below it.
-/// A card's menu (also its context menu) renames, duplicates, exports (via the
+/// A card's context menu (right click, long press) renames, duplicates, exports (via the
 /// share sheet) and deletes the Drawing; deleting asks first.
 struct GalleryView: View {
     let gallery: Gallery
@@ -35,21 +35,8 @@ struct GalleryView: View {
                         .buttonStyle(.plain)
                         .buttonPointer()
                         .accessibilityIdentifier("drawing-\(drawing.name)")
-                        // VoiceOver reaches the menu's actions from the card itself.
+                        // VoiceOver reaches the context menu's actions from the card itself.
                         .accessibilityActions { actions(for: drawing) }
-                        .overlay(alignment: .topTrailing) {
-                            Menu {
-                                actions(for: drawing)
-                            } label: {
-                                Image(systemName: "ellipsis.circle.fill")
-                                    .symbolRenderingMode(.hierarchical)
-                                    .font(.title2)
-                                    .padding(8)
-                                    .contentShape(Rectangle())
-                            }
-                            .accessibilityLabel("Actions for \(drawing.name)")
-                            .accessibilityIdentifier("actions-\(drawing.name)")
-                        }
                         .contextMenu { actions(for: drawing) }
                     }
                 }

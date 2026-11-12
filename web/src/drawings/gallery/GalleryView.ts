@@ -17,7 +17,11 @@ function make<K extends Tag>(
   return element;
 }
 
-function button(className: string, label: string, onClick: () => void): HTMLButtonElement {
+function button(
+  className: string,
+  label: string,
+  onClick: () => void,
+): HTMLButtonElement {
   const element = make("button", className, [label]);
   element.type = "button";
   element.addEventListener("click", onClick);
@@ -25,9 +29,13 @@ function button(className: string, label: string, onClick: () => void): HTMLButt
 }
 
 const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
-const moreGlyph = `<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`;
 
-/** One Drawing's card: its thumbnail, name and date, and its menu. */
+/** How long a touch holds still before it opens the card's menu. */
+const longPressMs = 500;
+/** How far a touch may move and still be a hold. */
+const longPressSlop = 10;
+
+/** One Drawing's card: its thumbnail, name and date. Its menu opens on right click or long press. */
 class Card {
   readonly element = make("li", "gallery-card");
   private readonly open: HTMLButtonElement;
@@ -35,7 +43,6 @@ class Card {
   private readonly image = document.createElement("img");
   private readonly name = make("span", "gallery-name");
   private readonly date = make("time", "gallery-date");
-  private readonly more = make("button", "gallery-more");
   private readonly menu = make("div", "gallery-menu");
   private shown: Entry | undefined;
   private imageUrl: string | undefined;
@@ -43,35 +50,53 @@ class Card {
   private request = 0;
   private visible = false;
   private closeMenu: (() => void) | undefined;
+  private holdTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Set when a long press opened the menu, so that the touch's release does not also open the Drawing. */
+  private swallowClick = false;
 
   constructor(
     private readonly gallery: Gallery,
     private readonly isDark: () => boolean,
-    private readonly actions: { rename(e: Entry): void; remove(e: Entry): void },
+    private readonly actions: {
+      rename(e: Entry): void;
+      remove(e: Entry): void;
+    },
     entry: Entry,
   ) {
     this.image.alt = "";
     this.image.decoding = "async";
     this.image.hidden = true;
     this.thumb.append(this.image);
-    this.open = make("button", "gallery-open", [this.thumb, this.name, this.date]);
+    this.open = make("button", "gallery-open", [
+      this.thumb,
+      this.name,
+      this.date,
+    ]);
     this.open.type = "button";
-    this.open.addEventListener("click", () => void gallery.openDrawing(this.shown!.id));
-
-    this.more.type = "button";
-    this.more.innerHTML = moreGlyph;
-    this.more.setAttribute("aria-haspopup", "menu");
-    this.more.setAttribute("aria-expanded", "false");
-    this.more.addEventListener("click", () =>
-      this.menu.hidden ? this.showMenu() : this.hideMenu(),
+    this.open.setAttribute("aria-haspopup", "menu");
+    this.open.addEventListener("click", () => {
+      if (this.swallowClick) this.swallowClick = false;
+      else void gallery.openDrawing(this.shown!.id);
+    });
+    // Right click, the menu key and (where the browser sends it) a long press.
+    this.element.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      this.showMenu(event.clientX, event.clientY);
+    });
+    // Safari on iOS sends no `contextmenu` for a long press: time it.
+    this.element.addEventListener("pointerdown", (event) =>
+      this.startHold(event),
     );
+    for (const type of ["pointerup", "pointercancel"]) {
+      this.element.addEventListener(type, () => this.stopHold());
+    }
 
     this.menu.hidden = true;
     this.menu.setAttribute("role", "menu");
     const item = (label: string, run: () => void, className = "") => {
       const element = button(`gallery-menu-item ${className}`, label, () => {
         this.hideMenu();
-        this.more.focus();
+        this.open.focus();
         run();
       });
       element.setAttribute("role", "menuitem");
@@ -83,7 +108,7 @@ class Card {
       item("Delete", () => this.actions.remove(this.shown!), "danger"),
     );
     this.menu.addEventListener("keydown", (event) => this.menuKey(event));
-    this.element.append(this.open, this.more, this.menu);
+    this.element.append(this.open, this.menu);
     this.update(entry);
   }
 
@@ -97,7 +122,6 @@ class Card {
       timeStyle: "short",
     });
     this.date.dateTime = new Date(entry.modified).toISOString();
-    this.more.setAttribute("aria-label", `Actions for ${entry.name}`);
     if (changed) this.loadThumbnail();
   }
 
@@ -115,6 +139,7 @@ class Card {
 
   dispose(): void {
     this.request++;
+    this.stopHold();
     this.dropImage();
     this.hideMenu();
   }
@@ -122,22 +147,29 @@ class Card {
   private loadThumbnail(): void {
     if (!this.visible || !this.shown) return;
     const request = ++this.request;
-    void this.gallery.thumbnails.thumbnail(this.shown, this.isDark()).then((thumbnail) => {
-      if (request !== this.request) return;
-      this.dropImage();
-      this.thumb.classList.toggle("unreadable", thumbnail.kind === "unreadable");
-      this.thumb.dataset.state = thumbnail.kind;
-      if (thumbnail.kind === "image") {
-        this.imageUrl = URL.createObjectURL(
-          new Blob([thumbnail.png as Uint8Array<ArrayBuffer>], { type: "image/png" }),
+    void this.gallery.thumbnails
+      .thumbnail(this.shown, this.isDark())
+      .then((thumbnail) => {
+        if (request !== this.request) return;
+        this.dropImage();
+        this.thumb.classList.toggle(
+          "unreadable",
+          thumbnail.kind === "unreadable",
         );
-        this.image.src = this.imageUrl;
-        this.image.hidden = false;
-      } else if (thumbnail.kind === "unreadable") {
-        // A malformed file is shown as such; it is left as it is.
-        this.thumb.dataset.message = "Can’t be read";
-      }
-    });
+        this.thumb.dataset.state = thumbnail.kind;
+        if (thumbnail.kind === "image") {
+          this.imageUrl = URL.createObjectURL(
+            new Blob([thumbnail.png as Uint8Array<ArrayBuffer>], {
+              type: "image/png",
+            }),
+          );
+          this.image.src = this.imageUrl;
+          this.image.hidden = false;
+        } else if (thumbnail.kind === "unreadable") {
+          // A malformed file is shown as such; it is left as it is.
+          this.thumb.dataset.message = "Can’t be read";
+        }
+      });
   }
 
   private dropImage(): void {
@@ -147,14 +179,48 @@ class Card {
     this.imageUrl = undefined;
   }
 
-  private showMenu(): void {
+  private startHold(event: PointerEvent): void {
+    if (event.pointerType !== "touch") return;
+    this.stopHold();
+    const { clientX: x, clientY: y } = event;
+    const moved = (move: PointerEvent) => {
+      if (Math.hypot(move.clientX - x, move.clientY - y) > longPressSlop)
+        this.stopHold();
+    };
+    this.element.addEventListener("pointermove", moved);
+    this.stopMoving = () =>
+      this.element.removeEventListener("pointermove", moved);
+    this.holdTimer = setTimeout(() => {
+      this.stopHold();
+      this.swallowClick = true;
+      this.showMenu(x, y);
+    }, longPressMs);
+  }
+
+  private stopMoving: (() => void) | undefined;
+
+  private stopHold(): void {
+    clearTimeout(this.holdTimer);
+    this.holdTimer = undefined;
+    this.stopMoving?.();
+    this.stopMoving = undefined;
+  }
+
+  /** Opens the menu with its corner at the viewport point (`x`, `y`), kept within the card. */
+  private showMenu(x: number, y: number): void {
+    this.hideMenu();
     this.menu.hidden = false;
-    this.more.setAttribute("aria-expanded", "true");
+    const card = this.element.getBoundingClientRect();
+    const left = Math.min(x - card.left, card.width - this.menu.offsetWidth);
+    const top = Math.min(y - card.top, card.height - this.menu.offsetHeight);
+    this.menu.style.left = `${Math.max(0, left)}px`;
+    this.menu.style.top = `${Math.max(0, top)}px`;
     const away = (event: Event) => {
-      if (!this.element.contains(event.target as Node)) this.hideMenu();
+      if (!this.menu.contains(event.target as Node)) this.hideMenu();
     };
     document.addEventListener("pointerdown", away, true);
-    this.closeMenu = () => document.removeEventListener("pointerdown", away, true);
+    this.closeMenu = () =>
+      document.removeEventListener("pointerdown", away, true);
     this.menu.querySelector<HTMLElement>("[role=menuitem]")?.focus();
   }
 
@@ -162,17 +228,20 @@ class Card {
     this.closeMenu?.();
     this.closeMenu = undefined;
     this.menu.hidden = true;
-    this.more.setAttribute("aria-expanded", "false");
   }
 
   private menuKey(event: KeyboardEvent): void {
-    const items = [...this.menu.querySelectorAll<HTMLElement>("[role=menuitem]")];
+    const items = [
+      ...this.menu.querySelectorAll<HTMLElement>("[role=menuitem]"),
+    ];
     const at = items.indexOf(document.activeElement as HTMLElement);
     if (event.key === "Escape") {
       this.hideMenu();
-      this.more.focus();
-    } else if (event.key === "ArrowDown") items[(at + 1) % items.length].focus();
-    else if (event.key === "ArrowUp") items[(at - 1 + items.length) % items.length].focus();
+      this.open.focus();
+    } else if (event.key === "ArrowDown")
+      items[(at + 1) % items.length].focus();
+    else if (event.key === "ArrowUp")
+      items[(at - 1 + items.length) % items.length].focus();
     else return;
     event.preventDefault();
   }
@@ -182,8 +251,8 @@ class Card {
  * The Gallery as a grid of Drawings, last modified first, with a button to
  * create a new one. A card shows the Drawing's thumbnail, which is made when
  * the card comes into view and again after the Drawing changed, with the name
- * and date below it. A card's menu renames, duplicates and deletes the
- * Drawing; deleting asks first. A port of the Swift `GalleryView`, in native
+ * and date below it. A card's context menu (right click, long press)
+ * renames, duplicates and deletes the Drawing; deleting asks first. A port of the Swift `GalleryView`, in native
  * elements (buttons, a list, modal dialogs) so that it is labelled and
  * reachable by keyboard.
  */
@@ -215,9 +284,16 @@ export class GalleryView {
   constructor(
     private readonly gallery: Gallery,
     private readonly isDark: () => boolean = () => false,
-    private readonly cloud?: Pick<CloudBacking, "syncReport" | "hasProblem" | "onSyncChange">,
+    private readonly cloud?: Pick<
+      CloudBacking,
+      "syncReport" | "hasProblem" | "onSyncChange"
+    >,
   ) {
-    const create = button("gallery-new", "", () => void gallery.createDrawing());
+    const create = button(
+      "gallery-new",
+      "",
+      () => void gallery.createDrawing(),
+    );
     create.innerHTML = plusGlyph;
     create.setAttribute("aria-label", "New Drawing");
     create.title = "New Drawing";
@@ -284,11 +360,15 @@ export class GalleryView {
   /** "Syncing 3 of 40 Drawings" while Drawings transfer, a warning while Sync is blocked. */
   private showSync(): void {
     const state = this.cloud!.syncReport;
-    const text = state.status === "syncing" && state.progress ? statusText(state, "") : "";
+    const text =
+      state.status === "syncing" && state.progress ? statusText(state, "") : "";
     this.syncText.textContent = text;
     this.syncText.hidden = text === "";
     this.syncWarning.hidden = !this.cloud!.hasProblem;
-    this.syncWarning.setAttribute("aria-label", statusText(state, "The server"));
+    this.syncWarning.setAttribute(
+      "aria-label",
+      statusText(state, "The server"),
+    );
     this.syncWarning.title = statusText(state, "The server");
   }
 
@@ -331,12 +411,18 @@ export class GalleryView {
     const renameForm = make("form", "", [
       renameTitle,
       this.renameField,
-      make("div", "gallery-dialog-buttons", [cancel(this.renameDialog), rename]),
+      make("div", "gallery-dialog-buttons", [
+        cancel(this.renameDialog),
+        rename,
+      ]),
     ]);
     renameForm.method = "dialog";
     renameForm.addEventListener("submit", () => {
       if (this.renaming)
-        void this.gallery.renameDrawing(this.renaming.name, this.renameField.value);
+        void this.gallery.renameDrawing(
+          this.renaming.name,
+          this.renameField.value,
+        );
       this.renaming = undefined;
     });
     this.renameDialog.append(renameForm);
@@ -352,19 +438,29 @@ export class GalleryView {
     this.deleteDialog.append(
       this.deleteTitle,
       make("p", "", ["This Drawing will be deleted for good."]),
-      make("div", "gallery-dialog-buttons", [cancel(this.deleteDialog), remove]),
+      make("div", "gallery-dialog-buttons", [
+        cancel(this.deleteDialog),
+        remove,
+      ]),
     );
     labelled(this.deleteDialog, this.deleteTitle);
 
     // Failure
     const ok = button("primary", "OK", () => this.failureDialog.close());
     this.failureDialog.setAttribute("role", "alertdialog");
-    this.failureDialog.append(this.failureText, make("div", "gallery-dialog-buttons", [ok]));
+    this.failureDialog.append(
+      this.failureText,
+      make("div", "gallery-dialog-buttons", [ok]),
+    );
     this.failureDialog.setAttribute("aria-label", "Something went wrong");
     this.failureDialog.addEventListener("close", () => {
       if (this.gallery.failure !== undefined) this.gallery.dismissFailure();
     });
 
-    this.element.append(this.renameDialog, this.deleteDialog, this.failureDialog);
+    this.element.append(
+      this.renameDialog,
+      this.deleteDialog,
+      this.failureDialog,
+    );
   }
 }
