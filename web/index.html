@@ -569,7 +569,8 @@
       .color-more {
         flex: 1;
         min-height: 36px;
-        min-width: 30px;
+        /* At least the drawn swatch, as in Swift; 30px overflowed the panel. */
+        min-width: var(--size);
         padding: 0;
         border: 0;
         background: none;
