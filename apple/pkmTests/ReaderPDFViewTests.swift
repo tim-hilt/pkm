@@ -33,6 +33,31 @@ import Testing
         #expect(reader.showsPages)
     }
 
+    @Test func pdfKitMayReadTheBookOffTheMainThread() async throws {
+        // PDFKit's form-field detection does, on its own queue, as pages scroll into view.
+        nonisolated(unsafe) let reader = try makeReader(size: portrait)
+        let read = await withCheckedContinuation { done in
+            // Through Objective-C, as PDFKit does.
+            DispatchQueue.global().async { done.resume(returning: reader.value(forKey: "document") != nil) }
+        }
+        #expect(read)
+    }
+
+    @Test func gapsBetweenPagesAreHalfThePaper() throws {
+        let document = try #require(StyledDocument(url: writePDF(named: "Gaps.pdf", pageCount: 2)))
+        document.appearance = .dark(.default)
+        let reader = ReaderPDFView(handle: ReaderHandle())
+        reader.document = document
+        let paper = PageAppearance.dark(.default).paper
+        var (r, g, b): (CGFloat, CGFloat, CGFloat) = (0, 0, 0)
+        #if os(iOS)
+            reader.backgroundColor.getRed(&r, green: &g, blue: &b, alpha: nil)
+        #else
+            reader.backgroundColor.usingColorSpace(.sRGB)?.getRed(&r, green: &g, blue: &b, alpha: nil)
+        #endif
+        #expect(abs(r - paper.r / 2) < 0.01 && abs(g - paper.g / 2) < 0.01 && abs(b - paper.b / 2) < 0.01)
+    }
+
     @Test func keepsThePlaceWhenResizedAtFitToWidth() throws {
         let reader = try makeReader(size: portrait)
         reader.go(to: place)

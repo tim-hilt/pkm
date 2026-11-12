@@ -30,7 +30,7 @@ final class ReadingProgressSaver {
     func opened() { save(unlessUnmoved: false) }
 
     /// The viewport moved: saves once it has stopped for `quietPeriod`. Called on
-    /// every frame of a scroll, so it only comments the time while a wait runs.
+    /// every frame of a scroll, so it only notes the time while a wait runs.
     func scrolled() {
         lastScroll = .now
         guard settling == nil else { return }

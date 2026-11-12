@@ -89,9 +89,9 @@ final class ReaderPDFView: PDFView, ReaderBookView {
         }
     }
 
-    override var document: PDFDocument? {
-        didSet { styleGaps() }
-    }
+    /// Not an override of `document`, whose getter PDFKit calls off the main
+    /// thread: Swift would trap there, as the view is main-actor isolated.
+    @objc private func documentDidChange(_ notification: Notification) { styleGaps() }
 
     /// Between pages, half the pages' paper, whatever the system appearance: the
     /// system's own gap follows the appearance instead, so Light Pages would be
@@ -176,6 +176,8 @@ final class ReaderPDFView: PDFView, ReaderBookView {
         setUpPlatform()
         NotificationCenter.default.addObserver(
             self, selector: #selector(scaleDidChange), name: .PDFViewScaleChanged, object: self)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(documentDidChange), name: .PDFViewDocumentChanged, object: self)
     }
 
     @objc private func scaleDidChange(_ notification: Notification) { noteIcons.refresh() }
