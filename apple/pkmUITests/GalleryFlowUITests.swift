@@ -63,6 +63,34 @@ import XCTest
         XCTAssertTrue(app.buttons["back-to-gallery"].waitForExistence(timeout: 10))
     }
 
+    /// The confirmation is a lone Delete button next to the card, like Photos'.
+    func testDeletingAsksWithALoneDeleteButtonAtTheCard() {
+        openDrawings()
+        app.buttons["new-drawing"].tap()
+        drawARectangle()
+        app.buttons["back-to-gallery"].tap()
+        let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'drawing-Untitled '")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 10))
+
+        card.press(forDuration: 1)
+        app.buttons["delete"].tap()
+
+        let confirm = app.buttons["delete-confirm"].firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "delete-confirmation"
+        shot.lifetime = .keepAlways
+        add(shot)
+        XCTAssertTrue(
+            (card.frame.minX...card.frame.maxX).contains(confirm.frame.midX), "the button is at the card")
+        let texts = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'delete'"))
+        XCTAssertEqual(texts.count, 0, "no title or message")
+
+        confirm.tap()
+
+        XCTAssertTrue(card.waitForNonExistence(timeout: 5), "the Drawing is gone")
+    }
+
     func testEveryContextsRootHasTheSettingsGearOnPhonesAndPads() throws {
         let tabs = app.tabBars.firstMatch
         try XCTSkipUnless(tabs.waitForExistence(timeout: 10), "a Mac has a sidebar and ⌘,")

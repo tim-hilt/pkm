@@ -38,6 +38,11 @@ struct GalleryView: View {
                         // VoiceOver reaches the context menu's actions from the card itself.
                         .accessibilityActions { actions(for: drawing) }
                         .contextMenu { actions(for: drawing) }
+                        // On the card, so that the dialog's popover points at it.
+                        .confirmationDialog("Delete", isPresented: isDeleting(drawing)) {
+                            Button("Delete", role: .destructive) { gallery.deleteDrawing(named: drawing.name) }
+                                .accessibilityIdentifier("delete-confirm")
+                        }
                     }
                 }
                 .padding()
@@ -109,17 +114,6 @@ struct GalleryView: View {
                 .accessibilityIdentifier("rename-confirm")
                 Button("Cancel", role: .cancel) {}
             }
-            .confirmationDialog(
-                "Delete “\(deleting?.name ?? "")”?", isPresented: isDeleting, titleVisibility: .visible
-            ) {
-                Button("Delete", role: .destructive) {
-                    if let drawing = deleting { gallery.deleteDrawing(named: drawing.name) }
-                }
-                .accessibilityIdentifier("delete-confirm")
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This Drawing will be deleted for good.")
-            }
         }
         // Files and Finder change the folder while the app is away or the
         // Gallery is not shown; while it is shown, the list follows them.
@@ -146,8 +140,8 @@ struct GalleryView: View {
         Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })
     }
 
-    private var isDeleting: Binding<Bool> {
-        Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })
+    private func isDeleting(_ drawing: DrawingStore.Entry) -> Binding<Bool> {
+        Binding(get: { deleting == drawing }, set: { if !$0 { deleting = nil } })
     }
 }
 

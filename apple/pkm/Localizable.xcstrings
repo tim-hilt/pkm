@@ -1915,17 +1915,6 @@
         }
       }
     },
-    "This Drawing will be deleted for good.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This Drawing will be deleted for good."
-          }
-        }
-      }
-    },
     "Title": {
       "extractionState": "manual",
       "localizations": {
