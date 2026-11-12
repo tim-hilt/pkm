@@ -34,6 +34,18 @@ pending_blockers() {
   echo "${pending% }"
 }
 
+# Writes to $1 the log sections since the last review: implementations, test
+# failures and fixes, without quota noise, so a review doesn't read the whole log.
+write_review_context() {
+  awk '
+    /^[^ ]+ reviewed in [0-9]/ { kept = ""; keep = 0; next }
+    /^([^ ]+\.md implemented in |make test failed after |Fix attempt [0-9]+ after )/ { keep = 1 }
+    /^(Claude (weekly|5-hour) window exhausted|pi hit a Claude rate limit|Still blocked, not implemented)/ { keep = 0 }
+    keep { kept = kept $0 "\n" }
+    END { printf "%s", kept }
+  ' "$log_file" >"$1"
+}
+
 # Reviews the tasks implemented since the last review. An interrupted review
 # is resumed first, under its own session id.
 reviews=0
@@ -41,8 +53,11 @@ unreviewed=0
 review() {
   local session="$review_session-$((reviews + 1))"
   if [[ $resume_session == "$review_session"* ]]; then session=$resume_session; fi
+  local context_file="logs/$name/$session.context.log"
+  mkdir -p "logs/$name"
+  write_review_context "$context_file"
   run_pi "Reviewing $spec_file" claude-opus-5-5 high "$session" \
-    "/skill:software-design the last $unreviewed commits implemented the tickets in @$tasks_dir. Please review \`git diff HEAD~$unreviewed\` according to @$spec_file. Also consider @$log_file to understand how we got to the current state. Pay special attention to correctness and simplicity. Fix found issues right away. If an issue is fully implemented, then please set its Status line to 'done'. Commit your changes using the commit-message 'Reviewed $spec_file'."
+    "/skill:software-design the last $unreviewed commits implemented the tickets in @$tasks_dir. Please review \`git diff HEAD~$unreviewed\` according to @$spec_file. Also consider @$context_file, the loop log since the last review, to understand how we got to the current state. Pay special attention to correctness and simplicity. Fix found issues right away. If an issue is fully implemented, then please set its Status line to 'done'. Commit your changes using the commit-message 'Reviewed $spec_file'."
   log_section "$spec_file reviewed in $status_elapsed" "$pi_output"
   reviews=$((reviews + 1))
   unreviewed=0
