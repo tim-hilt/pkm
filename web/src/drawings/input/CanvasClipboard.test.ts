@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
-import { beforeAll, describe, expect, it } from "vitest";
-import { type Core, type Editor, loadCore } from "../../core/Core";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { type Core, type Editor, ExportScope, loadCore } from "../../core/Core";
 import { Excalifont } from "../text/Excalifont";
 import { drag } from "../testing/Gestures";
 import { CanvasClipboard, type SystemClipboard } from "./CanvasClipboard";
@@ -38,6 +38,16 @@ function empty(): Editor {
 class FakeClipboard implements SystemClipboard {
   text: string | undefined;
   held: { type: string; data: Uint8Array | string }[] = [];
+  /** As browsers do, all of `items` is there before any is written. */
+  async write(items: ClipboardItem[]) {
+    const held = [];
+    for (const item of items as unknown as FakeClipboardItem[]) {
+      for (const [type, blob] of Object.entries(item.items)) {
+        held.push({ type, data: new Uint8Array(await (await blob).arrayBuffer()) });
+      }
+    }
+    this.held = held;
+  }
   async writeText(text: string) {
     this.text = text;
     this.held = [{ type: "text/plain", data: text }];
@@ -55,12 +65,29 @@ class FakeClipboard implements SystemClipboard {
   }
 }
 
-function setup(editor: Editor, system = new FakeClipboard()) {
+/** The browser's `ClipboardItem`, which Node lacks. */
+class FakeClipboardItem {
+  constructor(readonly items: Record<string, Blob | Promise<Blob>>) {}
+}
+vi.stubGlobal("ClipboardItem", FakeClipboardItem);
+
+/** A PNG export that gives the scope it was asked for as its single byte (or nothing if `nothing`). */
+function fakePng(nothing = false) {
+  const asked: ExportScope[] = [];
+  const png = async (scope: ExportScope) => {
+    asked.push(scope);
+    return nothing ? undefined : new Uint8Array([scope]);
+  };
+  return { asked, png };
+}
+
+function setup(editor: Editor, system = new FakeClipboard(), { png } = fakePng()) {
   const inserted: { sources: Uint8Array[]; at?: { x: number; y: number } }[] = [];
   let changes = 0;
   const clipboard = new CanvasClipboard(editor, system, {
     images: (sources, at) => inserted.push({ sources, at }),
     changed: () => changes++,
+    png,
   });
   return { clipboard, system, inserted, changes: () => changes };
 }
@@ -128,6 +155,45 @@ describe("copying and pasting Elements", () => {
     const { clipboard } = setup(withSelection(), system);
     await expect(clipboard.copy()).resolves.toBeUndefined();
     await expect(clipboard.paste()).resolves.toBeUndefined();
+  });
+});
+
+describe("copying as PNG", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("puts a PNG of the Selection on the clipboard", async () => {
+    const export_ = fakePng();
+    const { clipboard, system } = setup(withSelection(), new FakeClipboard(), export_);
+    await clipboard.copyPng();
+    expect(export_.asked).toEqual([ExportScope.Selection]);
+    expect(system.held).toEqual([
+      { type: "image/png", data: new Uint8Array([ExportScope.Selection]) },
+    ]);
+  });
+
+  it("puts a PNG of the Scene on the clipboard with nothing selected", async () => {
+    const editor = empty();
+    editor.load(rectangle);
+    const export_ = fakePng();
+    const { clipboard, system } = setup(editor, new FakeClipboard(), export_);
+    await clipboard.copyPng();
+    expect(export_.asked).toEqual([ExportScope.Scene]);
+    expect(system.held).toEqual([{ type: "image/png", data: new Uint8Array([ExportScope.Scene]) }]);
+  });
+
+  it("leaves the clipboard as it was with nothing to export", async () => {
+    const system = new FakeClipboard();
+    await system.writeText("kept");
+    const { clipboard } = setup(empty(), system, fakePng(true));
+    await expect(clipboard.copyPng()).resolves.toBeUndefined();
+    expect(system.held).toEqual([{ type: "text/plain", data: "kept" }]);
+  });
+
+  it("does not fail where the clipboard refuses", async () => {
+    const system = new FakeClipboard();
+    system.write = () => Promise.reject(new DOMException("denied", "NotAllowedError"));
+    const { clipboard } = setup(withSelection(), system);
+    await expect(clipboard.copyPng()).resolves.toBeUndefined();
   });
 });
 

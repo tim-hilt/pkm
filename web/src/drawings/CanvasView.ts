@@ -4,6 +4,8 @@ import { cssCursor } from "./rendering/CursorStyle";
 import { CanvasInput } from "./input/CanvasInput";
 import { ImageInput, pickImages } from "./images/ImageInput";
 import { CanvasClipboard } from "./input/CanvasClipboard";
+import { isCopyPngShortcut } from "./input/KeyboardShortcuts";
+import { exportPng } from "./export/PngExport";
 import { insertImages } from "./images/ImageInsertion";
 import { ZoomControls } from "./chrome/ZoomControls";
 import { Toolbar } from "./chrome/Toolbar";
@@ -98,6 +100,7 @@ export function showCanvas(
   const clipboard = new CanvasClipboard(editor, navigator.clipboard, {
     ...images,
     changed: () => didReachEditor(),
+    png: (scope) => exportPng(device, font, editor, scope, handlers.settings.exportBackground),
   });
   const insertFromPicker = () => void pickImages(images);
   const toolbar = new Toolbar(editor, () => didReachEditor(), insertFromPicker);
@@ -203,6 +206,10 @@ export function showCanvas(
     magnify: send((e) => editor.magnify(e)),
     setPanKey: send((held) => editor.setPanKey(held)),
     shortcut: ({ key, modifiers }) => {
+      if (isCopyPngShortcut({ key, modifiers })) {
+        void clipboard.copyPng();
+        return true;
+      }
       const handled = editor.pressKey(key, modifiers);
       if (handled) didReachEditor();
       return handled;

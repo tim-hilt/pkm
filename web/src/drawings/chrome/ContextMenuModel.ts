@@ -20,15 +20,20 @@ type Point = { x: number; y: number };
  */
 export function openContextMenu(
   editor: Editor,
-  clipboard: Pick<CanvasClipboard, "copy" | "cut" | "paste">,
+  clipboard: Pick<CanvasClipboard, "copy" | "cut" | "paste" | "copyPng">,
   at: Point,
   kind: PointerKind,
 ): MenuEntry[] | undefined {
   const menu = editor.longPress(at.x, at.y, kind);
   if (!menu) return undefined;
   const paste: MenuEntry = { label: "Paste", run: () => clipboard.paste(at) };
+  const copyPng: MenuEntry = {
+    label: "Copy as PNG",
+    disabled: editor.elementCount() === 0,
+    run: () => clipboard.copyPng(),
+  };
   if (!menu.element) {
-    return [paste, { label: "Select All", run: () => editor.selectAll() }];
+    return [paste, copyPng, { label: "Select All", run: () => editor.selectAll() }];
   }
   const move = (label: string, how: ZOrder): MenuEntry => ({
     label,
@@ -38,6 +43,7 @@ export function openContextMenu(
     { label: "Cut", run: () => clipboard.cut() },
     { label: "Copy", run: () => clipboard.copy() },
     paste,
+    copyPng,
     { label: "Duplicate", run: () => editor.duplicate() },
     { label: "Group", disabled: !menu.canGroup, run: () => editor.group() },
     { label: "Ungroup", disabled: !menu.canUngroup, run: () => editor.ungroup() },

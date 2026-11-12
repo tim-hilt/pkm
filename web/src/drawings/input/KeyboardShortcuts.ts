@@ -71,3 +71,11 @@ export function shortcutOf(event: KeyLike, apple: boolean): KeyChord | undefined
     },
   };
 }
+
+/**
+ * Whether `chord` is Copy as PNG: ⇧⌥C, as on excalidraw.com. The client's own,
+ * not the core's: like copy, it goes to the platform's clipboard.
+ */
+export function isCopyPngShortcut({ key, modifiers }: KeyChord): boolean {
+  return key === "c" && modifiers.shift && modifiers.alt && !modifiers.meta && !modifiers.ctrl;
+}

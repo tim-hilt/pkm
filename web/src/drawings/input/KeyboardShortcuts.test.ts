@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { type Core, type Editor, Tool, loadCore } from "../../core/Core";
 import { Excalifont } from "../text/Excalifont";
 import { drag } from "../testing/Gestures";
-import { isApplePlatform, shortcutOf, type KeyLike } from "./KeyboardShortcuts";
+import { isApplePlatform, isCopyPngShortcut, shortcutOf, type KeyLike } from "./KeyboardShortcuts";
 
 const generated = new URL("../../../generated/", import.meta.url);
 const font = new Excalifont(
@@ -141,6 +141,29 @@ describe("pressing a key on the core", () => {
       expect(press(editor, k, apple)).toBe(true);
       expect(editor.viewport().zoom).toBeGreaterThan(before);
       editor.free();
+    }
+  });
+});
+
+describe("Copy as PNG", () => {
+  it("is ⇧⌥C, as on excalidraw.com, on every platform", () => {
+    // On a Mac ⌥⇧C types "Ç".
+    const mac = key("Ç", { code: "KeyC", altKey: true, shiftKey: true });
+    const other = key("C", { code: "KeyC", altKey: true, shiftKey: true });
+    expect(isCopyPngShortcut(shortcutOf(mac, true)!)).toBe(true);
+    expect(isCopyPngShortcut(shortcutOf(other, false)!)).toBe(true);
+  });
+
+  it("is not C with other modifiers", () => {
+    for (const extra of [
+      {},
+      { altKey: true },
+      { shiftKey: true },
+      { altKey: true, shiftKey: true, metaKey: true },
+    ]) {
+      expect(isCopyPngShortcut(shortcutOf(key("c", { code: "KeyC", ...extra }), true)!)).toBe(
+        false,
+      );
     }
   });
 });

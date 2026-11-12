@@ -15,6 +15,14 @@ import Testing
         {"id":"a","type":"rectangle","x":100,"y":100,"width":100,"height":50,"backgroundColor":"#ffc9c9","roundness":null}]}
         """.utf8)
 
+    /// The rectangle and another, to tell the Selection's PNG from the Scene's.
+    private static let twoRectangles = Data(
+        """
+        {"type":"excalidraw","version":2,"elements":[
+        {"id":"a","type":"rectangle","x":100,"y":100,"width":100,"height":50,"backgroundColor":"#ffc9c9","roundness":null},
+        {"id":"b","type":"rectangle","x":300,"y":100,"width":100,"height":50,"backgroundColor":"#ffc9c9","roundness":null}]}
+        """.utf8)
+
     @MainActor private struct Setup {
         let canvas = CanvasMetalView()
         let editor = Editor()
@@ -94,5 +102,29 @@ import Testing
 
         let saved = String(decoding: target.editor.save(), as: UTF8.self)
         #expect(saved.contains(#""x": 50"#) && saved.contains(#""y": 55"#), "\(saved)")
+    }
+
+    // MARK: Copy as PNG
+
+    @Test func copyAsPNGIsOfTheSelection() throws {
+        let setup = try makeSetup(drawing: Self.twoRectangles)
+        selectRectangle(setup.canvas)
+
+        let png = try #require(setup.canvas.pngForPasteboard)
+
+        #expect(png == PNGExport.pngData(setup.editor, scope: .selection, background: true))
+        #expect(png != PNGExport.pngData(setup.editor, scope: .scene, background: true))
+    }
+
+    @Test func copyAsPNGIsOfTheSceneWithNothingSelected() throws {
+        let setup = try makeSetup(drawing: Self.twoRectangles)
+
+        let png = try #require(setup.canvas.pngForPasteboard)
+
+        #expect(png == PNGExport.pngData(setup.editor, scope: .scene, background: true))
+    }
+
+    @Test func copyAsPNGHasNothingOnAnEmptyScene() throws {
+        #expect(try makeSetup().canvas.pngForPasteboard == nil)
     }
 }

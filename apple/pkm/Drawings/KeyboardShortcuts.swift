@@ -94,6 +94,11 @@ struct CanvasCommands: Commands {
         // `CanvasMetalView.selectAll` and `delete`), so that they are not
         // listed twice.
         CommandGroup(after: .pasteboard) {
+            // The client's own, not the core's: like Copy, it goes to the
+            // pasteboard. ⇧⌥C as on excalidraw.com.
+            Button("Copy as PNG") { controller?.canvas?.copyAsPNG() }
+                .keyboardShortcut("c", modifiers: [.shift, .option])
+                .disabled(controller == nil || controller?.isEditingText == true)
             Divider()
             items(for: [.duplicate])
         }

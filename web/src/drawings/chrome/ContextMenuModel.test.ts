@@ -35,6 +35,7 @@ function fakeClipboard() {
     calls,
     at,
     copy: async () => void calls.push("copy"),
+    copyPng: async () => void calls.push("copyPng"),
     cut: async () => void calls.push("cut"),
     paste: async (point?: { x: number; y: number }) => {
       calls.push("paste");
@@ -63,6 +64,7 @@ describe("the Element menu", () => {
       "Cut",
       "Copy",
       "Paste",
+      "Copy as PNG",
       "Duplicate",
       "Group",
       "Ungroup",
@@ -124,20 +126,23 @@ describe("the Element menu", () => {
     entry(entries!, "Copy").run!();
     entry(entries!, "Cut").run!();
     entry(entries!, "Paste").run!();
+    entry(entries!, "Copy as PNG").run!();
 
-    expect(clipboard.calls).toEqual(["copy", "cut", "paste"]);
+    expect(clipboard.calls).toEqual(["copy", "cut", "paste", "copyPng"]);
     expect(clipboard.at).toEqual([onElement]);
   });
 });
 
 describe("the Canvas menu", () => {
-  it("has Paste and Select All and keeps the Selection", () => {
+  it("has Paste, Copy as PNG and Select All and keeps the Selection", () => {
     const editor = makeEditor();
     open(editor);
 
-    const { entries } = open(editor, onCanvas);
+    const { entries, clipboard } = open(editor, onCanvas);
 
-    expect(labels(entries!)).toEqual(["Paste", "Select All"]);
+    expect(labels(entries!)).toEqual(["Paste", "Copy as PNG", "Select All"]);
+    entry(entries!, "Copy as PNG").run!();
+    expect(clipboard.calls).toEqual(["copyPng"]);
     expect(editor.selection()).toEqual(["a"]);
     entry(entries!, "Select All").run!();
     expect(new Set(editor.selection())).toEqual(new Set(["a", "b"]));
@@ -150,11 +155,16 @@ describe("the Canvas menu", () => {
     editor.deleteSelection();
     const system: SystemClipboard = {
       writeText: async () => {},
+      write: async () => {},
       read: async () => [
         { types: ["text/plain"], getType: async () => new Blob([text], { type: "text/plain" }) },
       ],
     };
-    const clipboard = new CanvasClipboard(editor, system, { images() {}, changed() {} });
+    const clipboard = new CanvasClipboard(editor, system, {
+      images() {},
+      changed() {},
+      png: async () => undefined,
+    });
 
     const entries = openContextMenu(editor, clipboard, onCanvas, PointerKind.Mouse)!;
     await entry(entries, "Paste").run!();
@@ -162,6 +172,15 @@ describe("the Canvas menu", () => {
     expect(editor.elementCount()).toBe(2);
     // The two rectangles span 300 wide, centred on the press point.
     expect(new TextDecoder().decode(editor.save())).toMatch(/"x": 450(\.|,)/);
+  });
+
+  it("offers no Copy as PNG on an empty Scene", () => {
+    const editor = core.makeEditor();
+    editor.setViewSize(800, 600);
+
+    const { entries } = open(editor, onCanvas);
+
+    expect(entry(entries!, "Copy as PNG").disabled).toBe(true);
   });
 });
 
