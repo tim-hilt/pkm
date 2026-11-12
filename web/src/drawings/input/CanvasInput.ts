@@ -12,6 +12,7 @@ import {
   magnifyOfGesture,
   pointerButton,
   pointerEvent,
+  pointerKind,
   scrollEvent,
 } from "./InputMapping";
 import { HoldDetector } from "./HoldDetector";
@@ -27,8 +28,10 @@ export interface InputSink {
   shortcut(chord: KeyChord): boolean;
   /** A finger was held, or the mouse clicked with its secondary button, at the Canvas point `(x, y)`: the Context menu. */
   contextMenu(x: number, y: number, kind: PointerKind): void;
-  /** The mouse moved over the Canvas without a button down. */
-  hover(x: number, y: number): void;
+  /** A mouse or pen moved over the Canvas without a button down. */
+  hover(x: number, y: number, kind: PointerKind): void;
+  /** Nothing hovers over the Canvas any more. */
+  endHover(): void;
 }
 
 // Safari's gesture events, which the DOM types lack.
@@ -68,6 +71,7 @@ export class CanvasInput {
     on("pointermove", (e) => this.move(e));
     on("pointerup", (e) => this.up(e, PointerPhase.Up));
     on("pointercancel", (e) => this.up(e, PointerPhase.Cancel));
+    on("pointerleave", () => sink.endHover());
     // Usually after the pointerup, which has ended the press already.
     on("lostpointercapture", (e) => this.up(e, lostCapturePhase(e.buttons)));
     // Passive listeners cannot stop the page from zooming or scrolling.
@@ -128,9 +132,13 @@ export class CanvasInput {
     if (e.pointerType === "touch")
       this.hold.move(e.pointerId, e.clientX - origin.left, e.clientY - origin.top);
     if (button === undefined) {
-      // Hovering: only the mouse's cursor cares, as on the Mac.
-      if (e.pointerType === "mouse")
-        this.sink.hover(e.clientX - origin.left, e.clientY - origin.top);
+      // Hovering: a touch never does.
+      if (e.pointerType !== "touch")
+        this.sink.hover(
+          e.clientX - origin.left,
+          e.clientY - origin.top,
+          pointerKind(e.pointerType),
+        );
       return;
     }
     // A moving pointer is forwarded with every sample the browser coalesced

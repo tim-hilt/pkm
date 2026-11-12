@@ -11,7 +11,7 @@
 //! stroke width, so a shape with a stroke width of 2 has a gap of 6.
 
 use pkm_base::json::Value;
-use pkm_drawing::{Editor, PartKind, Tool};
+use pkm_drawing::{Editor, Modifiers, PartKind, PointerKind, ScrollEvent, Tool};
 
 use crate::common;
 use common::{editor_with, ops, replay, saved_elements, saved_points, tap};
@@ -387,6 +387,70 @@ fn the_highlight_follows_the_start_of_the_arrow_too() {
     editor.set_tool(Tool::Arrow);
 
     replay(&mut editor, "0.00 down 1 mouse 150 50");
+
+    assert_box(highlight(&editor), (94.0, -6.0, 206.0, 106.0));
+}
+
+#[test]
+fn the_arrow_tool_highlights_the_shape_a_hovering_pointer_would_start_on() {
+    let mut editor = editor_with(&[BOX]);
+    editor.set_tool(Tool::Arrow);
+    let before = editor.overlay_revision();
+
+    editor.hover(120.0, 40.0, PointerKind::Mouse);
+
+    assert_box(highlight(&editor), (94.0, -6.0, 206.0, 106.0));
+    assert_ne!(editor.overlay_revision(), before);
+
+    editor.hover(40.0, 40.0, PointerKind::Mouse);
+    assert_eq!(highlight(&editor), None, "moved away");
+}
+
+#[test]
+fn the_hover_highlight_goes_with_the_hover_or_the_arrow_tool() {
+    let mut editor = editor_with(&[BOX]);
+    editor.set_tool(Tool::Arrow);
+    editor.hover(120.0, 40.0, PointerKind::Pencil);
+    editor.end_hover();
+    assert_eq!(highlight(&editor), None, "left the Canvas");
+
+    editor.hover(120.0, 40.0, PointerKind::Mouse);
+    editor.set_tool(Tool::Selection);
+    assert_eq!(highlight(&editor), None, "other Tool");
+
+    editor.set_tool(Tool::Line);
+    editor.hover(120.0, 40.0, PointerKind::Mouse);
+    assert_eq!(highlight(&editor), None, "lines do not bind");
+}
+
+#[test]
+fn the_hover_highlight_follows_where_the_mouse_is_after_an_arrow() {
+    let mut editor = editor_with(&[BOX, OTHER]);
+    editor.set_tool(Tool::Arrow);
+    editor.set_tool_lock(true);
+    editor.hover(0.0, 40.0, PointerKind::Mouse);
+
+    drag(&mut editor, "mouse", (0.0, 40.0), (120.0, 40.0));
+    assert_box(highlight(&editor), (94.0, -6.0, 206.0, 106.0));
+
+    // The mouse is where it lifted; a finger hovers nowhere.
+    drag(&mut editor, "finger", (0.0, 40.0), (320.0, 40.0));
+    assert_eq!(highlight(&editor), None);
+}
+
+#[test]
+fn the_hover_highlight_follows_a_scroll_under_the_mouse() {
+    let mut editor = editor_with(&[BOX]);
+    editor.set_tool(Tool::Arrow);
+    editor.hover(40.0, 40.0, PointerKind::Mouse);
+
+    editor.scroll(ScrollEvent {
+        x: 40.0,
+        y: 40.0,
+        dx: -80.0,
+        dy: 0.0,
+        modifiers: Modifiers::default(),
+    });
 
     assert_box(highlight(&editor), (94.0, -6.0, 206.0, 106.0));
 }

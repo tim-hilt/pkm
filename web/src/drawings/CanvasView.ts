@@ -228,16 +228,24 @@ export function showCanvas(
       const bounds = canvas.getBoundingClientRect();
       contextMenu.show(wrapped(entries), bounds.left + x, bounds.top + y);
     },
-    hover: (x, y) => {
+    // Only the cursor and the overlay (a highlight) follow a hover: the
+    // chrome has nothing to show for it.
+    hover: (x, y, kind) => {
       pointer = { x, y };
+      editor.hover(x, y, kind);
+      sync.sync();
       canvas.style.cursor = cssCursor(editor.cursor(x, y));
+    },
+    // Off the Canvas, a paste from the keyboard lands in the middle of the view.
+    endHover: () => {
+      pointer = undefined;
+      editor.endHover();
+      sync.sync();
     },
   });
 
   const imageInput = new ImageInput(canvas, images);
   const stopClipboard = clipboard.listen(document, () => pointer);
-  // Off the Canvas, a paste from the keyboard lands in the middle of the view.
-  canvas.addEventListener("pointerleave", () => (pointer = undefined));
 
   // With its first size the Drawing shows its content, even if it was left
   // (or made elsewhere) with none in view.

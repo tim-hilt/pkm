@@ -404,18 +404,32 @@ impl Editor {
     }
 
     /// Makes the highlight the shape an arrow end is over, if one is being put
-    /// somewhere.
+    /// somewhere, or else the one an arrow would start on under the hovering
+    /// pointer.
     pub(super) fn sync_highlight(&mut self) {
         let current = self
             .linear
             .as_ref()
             .and_then(LinearDrawing::highlight)
             .or_else(|| self.point_dragging.as_ref().and_then(PointDrag::highlight))
-            .map(str::to_owned);
+            .map(str::to_owned)
+            .or_else(|| self.hover_highlight());
         if current != self.highlight {
             self.highlight = current;
             self.overlay_revision += 1;
         }
+    }
+
+    /// The shape an arrow would start on under the hovering pointer, while
+    /// the arrow Tool waits for one.
+    fn hover_highlight(&self) -> Option<String> {
+        let (x, y, kind) = self.hovering?;
+        if self.tool != Tool::Arrow || self.linear.is_some() {
+            return None;
+        }
+        let viewport = self.navigation.viewport();
+        let reach = binding::reach(kind, viewport.zoom());
+        binding::hovered(&self.scene, viewport.scene_at(x, y), reach)
     }
 
     /// Forgets the selected points that the Selection no longer has.

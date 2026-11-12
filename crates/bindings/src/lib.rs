@@ -1377,6 +1377,17 @@ impl Editor {
         self.editor().long_press(x, y, kind)
     }
 
+    /// A mouse or Pencil hovers at a view point; see
+    /// [`pkm_drawing::Editor::hover`].
+    pub fn hover(&self, x: f64, y: f64, kind: PointerKind) {
+        self.editor().hover(x, y, kind);
+    }
+
+    /// Nothing hovers over the Canvas any more.
+    pub fn end_hover(&self) {
+        self.editor().end_hover();
+    }
+
     /// The mouse cursor at the view point `(x, y)`; see
     /// [`pkm_drawing::Editor::cursor`].
     pub fn cursor(&self, x: f64, y: f64) -> Cursor {

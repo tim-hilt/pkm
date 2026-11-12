@@ -502,6 +502,18 @@ impl Editor {
         self.inner.borrow_mut().set_pan_key(held);
     }
 
+    /// A mouse or Pencil hovers at the view point `(x, y)`; see
+    /// [`pkm_drawing::Editor::hover`].
+    pub fn hover(&self, x: f64, y: f64, kind: PointerKind) {
+        self.inner.borrow_mut().hover(x, y, kind.into());
+    }
+
+    /// Nothing hovers over the Canvas any more.
+    #[wasm_bindgen(js_name = endHover)]
+    pub fn end_hover(&self) {
+        self.inner.borrow_mut().end_hover();
+    }
+
     /// The mouse cursor at the view point `(x, y)`.
     pub fn cursor(&self, x: f64, y: f64) -> Cursor {
         self.inner.borrow().cursor(x, y).into()

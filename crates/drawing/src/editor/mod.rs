@@ -197,6 +197,9 @@ pub struct Editor {
     /// The shape an arrow end that is being put somewhere is over, which the
     /// overlay highlights.
     highlight: Option<String>,
+    /// Where a mouse or Pencil hovers over the Canvas, in view points, see
+    /// [`Editor::hover`].
+    hovering: Option<(f64, f64, PointerKind)>,
     measurer: Option<Measurer>,
     /// The text being edited, if the client shows a text view for one; see
     /// [`Editor::text_editor`].
@@ -252,6 +255,7 @@ impl Editor {
             overlay_revision: 0,
             overlay_zoom: 1.0,
             highlight: None,
+            hovering: None,
             measurer: None,
             text: None,
         }
@@ -579,6 +583,10 @@ impl Editor {
     /// which tap to select and drag to pan.
     pub fn pointer(&mut self, event: PointerEvent) {
         self.last_pointer = event.kind;
+        // A mouse stays where it was pressed or lifted; a finger or Pencil
+        // that lifts hovers no more.
+        self.hovering =
+            (event.kind == PointerKind::Mouse).then_some((event.x, event.y, event.kind));
         self.pencil_only.observe(event.kind);
         // A finger in Pencil-only drawing: it pans, and only selects.
         let finger = self.pencil_only.restricts(event.kind);
@@ -920,12 +928,30 @@ impl Editor {
     pub fn scroll(&mut self, event: ScrollEvent) {
         self.navigation.scroll(event);
         self.navigated();
+        // Another shape may be under the hovering pointer now.
+        self.sync_highlight();
     }
 
     /// A trackpad pinch (Mac): zooms around the pinch centre.
     pub fn magnify(&mut self, event: MagnifyEvent) {
         self.navigation.magnify(event);
         self.navigated();
+        self.sync_highlight();
+    }
+
+    /// A mouse or Pencil of `kind` hovers at the view point `(x, y)`, no
+    /// button down: with the arrow Tool the shape an arrow would start on
+    /// there is highlighted, as on excalidraw.com. Clients send it for every
+    /// hovering move, and [`Editor::end_hover`] when the pointer leaves.
+    pub fn hover(&mut self, x: f64, y: f64, kind: PointerKind) {
+        self.hovering = Some((x, y, kind));
+        self.sync_highlight();
+    }
+
+    /// Nothing hovers over the Canvas any more, see [`Editor::hover`].
+    pub fn end_hover(&mut self) {
+        self.hovering = None;
+        self.sync_highlight();
     }
 
     /// Records that the Scene changed. [`Geometry::generation`] stays: handles

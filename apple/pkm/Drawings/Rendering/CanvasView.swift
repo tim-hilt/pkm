@@ -238,6 +238,16 @@ final class CanvasMetalView: MTKView {
         didReachEditor()
     }
 
+    /// A mouse or Pencil hovers at `point` (`nil`: nothing does any more).
+    /// Only the overlay (a highlight) and the cursor follow: the chrome has
+    /// nothing to show for it.
+    func hover(at point: CGPoint?, kind: PointerKind = .mouse) {
+        guard let editor else { return }
+        if let point { editor.hover(x: point.x, y: point.y, kind: kind) } else { editor.endHover() }
+        syncOverlay()
+        syncCursor()
+    }
+
     /// Shows whatever the editor did with an input or command.
     private func didReachEditor() {
         syncScene()
@@ -386,19 +396,29 @@ final class CanvasMetalView: MTKView {
         /// cursor, even over the chrome.
         private var isMouseDragging = false
 
-        /// Mouse moves only, no cursor updates: the Canvas lies under the
-        /// whole window, and its cursor-update area would take the updates
-        /// the chrome's buttons show their pointing hand with.
+        /// Mouse moves and exits only, no cursor updates: the Canvas lies
+        /// under the whole window, and its cursor-update area would take the
+        /// updates the chrome's buttons show their pointing hand with.
         override func updateTrackingAreas() {
             super.updateTrackingAreas()
             if trackingAreas.isEmpty {
                 addTrackingArea(
                     NSTrackingArea(
-                        rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self))
+                        rect: .zero,
+                        options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                        owner: self))
             }
         }
 
-        override func mouseMoved(with event: NSEvent) { syncCursor() }
+        /// Over the chrome or the text view, the mouse hovers over those.
+        override func mouseMoved(with event: NSEvent) {
+            let inWindow = event.locationInWindow
+            let contentView = window?.contentView
+            let hit = contentView?.hitTest(contentView?.superview?.convert(inWindow, from: nil) ?? inWindow)
+            hover(at: hit === self ? convert(inWindow, from: nil) : nil)
+        }
+
+        override func mouseExited(with event: NSEvent) { hover(at: nil) }
 
         /// A lost key-up must not leave panning stuck.
         override func resignFirstResponder() -> Bool {
@@ -500,6 +520,17 @@ final class CanvasMetalView: MTKView {
             let interaction = UIPointerInteraction(delegate: self)
             addInteraction(interaction)
             pointerInteraction = interaction
+            addGestureRecognizer(UIHoverGestureRecognizer(target: self, action: #selector(hovered)))
+        }
+
+        /// A trackpad's or mouse's pointer, or a Pencil above the screen
+        /// (which has a height), hovers.
+        @objc private func hovered(_ recognizer: UIHoverGestureRecognizer) {
+            switch recognizer.state {
+            case .began, .changed:
+                hover(at: recognizer.location(in: self), kind: recognizer.zOffset > 0 ? .pencil : .mouse)
+            default: hover(at: nil)
+            }
         }
 
         /// Keys the menus do not list (see `pressKey`).
