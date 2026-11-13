@@ -18,7 +18,7 @@ struct TasksView: View {
                     }
                 } else {
                     List(model.tasks) { task in
-                        TaskRow(task: task)
+                        TaskRow(task: task) { model.toggleDone(task) }
                             .contentShape(Rectangle())
                             .onTapGesture { editing = task }
                             .contextMenu {
@@ -30,6 +30,9 @@ struct TasksView: View {
                                     Button("Move to Backlog", systemImage: "tray") {
                                         model.plan(task, as: .backlog)
                                     }
+                                }
+                                Button("Reject", systemImage: "xmark.circle", role: .destructive) {
+                                    model.close(task, as: .rejected)
                                 }
                             }
                     }
@@ -51,6 +54,10 @@ struct TasksView: View {
                     ToolbarItem(placement: .topBarTrailing) { SettingsButton() }
                 #endif
             }
+            .safeAreaInset(edge: .bottom) {
+                if let closed = model.closed { ClosedToast(closed: closed) }
+            }
+            .animation(.default, value: model.closed)
             .addButton("New Task", identifier: "add-task") { isAdding = true }
             .sheet(isPresented: $isAdding) { NewTaskSheet(planning: model.planning) }
             .sheet(item: $editing) { EditTaskSheet(task: $0) }
@@ -58,17 +65,42 @@ struct TasksView: View {
     }
 }
 
-/// One Task: an empty circle, coloured by Priority, and beside it the Title,
-/// the Description faded on one line, and the Tags fainter still.
+/// Names the Task just Closed and offers to Revert it.
+private struct ClosedToast: View {
+    @Environment(TasksModel.self) private var model
+    let closed: TasksModel.Closed
+
+    var body: some View {
+        HStack {
+            Text("\(closed.title) \(closed.closing == .done ? "done" : "rejected")")
+                .lineLimit(1)
+            Spacer()
+            Button("Revert") { model.revert() }
+                .accessibilityIdentifier("revert-close")
+        }
+        .padding()
+        .background(.regularMaterial, in: .rect(cornerRadius: 12))
+        .padding(.horizontal)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+}
+
+/// One Task: a circle, coloured by Priority and filled while Done, and beside
+/// it the Title, the Description faded on one line, and the Tags fainter still.
+/// `onCircle` is a tap on the circle.
 private struct TaskRow: View {
     let task: OpenTask
+    let onCircle: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "circle")
-                .font(.title2)
-                .foregroundStyle(task.priorityColor)
-                .accessibilityHidden(true)
+            Button(action: onCircle) {
+                Image(systemName: task.done ? "circle.inset.filled" : "circle")
+                    .font(.title2)
+                    .foregroundStyle(task.priorityColor)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(task.done ? "Revert Done" : "Done")
             VStack(alignment: .leading, spacing: 2) {
                 Text(task.title)
                 if !task.description.isEmpty {

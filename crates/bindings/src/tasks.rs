@@ -1,7 +1,7 @@
 //! The Tasks surface of the UniFFI library (ADR-0007): the Tasks store. The
 //! logic lives in `pkm-tasks`.
 
-use pkm_tasks::{Error, Planning, Task, Tasks};
+use pkm_tasks::{Closing, Error, Planning, Task, Tasks};
 
 /// Why a Task wasn't saved or the Tasks couldn't be read.
 #[derive(Debug, uniffi::Error)]
@@ -45,6 +45,13 @@ pub enum Planning {
     Backlog,
 }
 
+/// How a Task is Closed.
+#[uniffi::remote(Enum)]
+pub enum Closing {
+    Done,
+    Rejected,
+}
+
 /// An Open Task as the lists show it, see `pkm_tasks::Task` (named apart from
 /// Swift's `Task`).
 #[derive(uniffi::Record)]
@@ -58,6 +65,8 @@ pub struct OpenTask {
     pub description: String,
     /// In the order they were added.
     pub tags: Vec<String>,
+    /// Closed as Done, the Close still pending: shown in place, marked.
+    pub done: bool,
 }
 
 impl From<Task> for OpenTask {
@@ -69,6 +78,7 @@ impl From<Task> for OpenTask {
             planning: t.planning,
             description: t.description,
             tags: t.tags,
+            done: t.done,
         }
     }
 }
@@ -91,6 +101,22 @@ impl TaskStore {
     /// Makes a Task Active or moves it to the Backlog, at the end of that list.
     pub fn plan(&self, id: String, planning: Planning) -> Result<OpenTask, TasksError> {
         Ok(self.0.plan(&id, planning)?.into())
+    }
+
+    /// Closes a Task as a pending change, committing the previous one first.
+    /// Nothing is saved until `commit`; `revert` takes it back.
+    pub fn close(&self, id: String, closing: Closing) -> Result<(), TasksError> {
+        Ok(self.0.close(&id, closing)?)
+    }
+
+    /// Drops the pending Close, leaving no trace.
+    pub fn revert(&self) {
+        self.0.revert();
+    }
+
+    /// Saves the pending Close, if any.
+    pub fn commit(&self) -> Result<(), TasksError> {
+        Ok(self.0.commit()?)
     }
 
     /// Creates a Task, refusing an empty Title.

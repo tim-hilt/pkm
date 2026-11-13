@@ -7,6 +7,7 @@ struct ContentView: View {
     @Environment(AppNavigation.self) private var navigation
     @Environment(LibraryModel.self) private var library
     @Environment(CloudBackingModel.self) private var cloud
+    @Environment(TasksModel.self) private var tasks
     @Environment(\.scenePhase) private var scenePhase
     #if os(macOS)
         @Environment(\.openSettings) private var openSettings
@@ -53,7 +54,10 @@ struct ContentView: View {
         }
         .onChange(of: cloud.progress, initial: true) { gallery.syncProgress = cloud.progress }
         .onChange(of: cloud.status, initial: true) { gallery.syncStatus = cloud.status }
-        .onChange(of: scenePhase) { cloud.appBecame(inFront: scenePhase == .active) }
+        .onChange(of: scenePhase) {
+            cloud.appBecame(inFront: scenePhase == .active)
+            if scenePhase == .background { tasks.commit() }
+        }
         #if os(macOS)
             .task { if AppNavigation.opensSettingsAtLaunch { openSettings() } }
         #endif

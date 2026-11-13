@@ -10,6 +10,7 @@ use std::cmp::Ordering;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 const DEFAULT_PRIORITY: u8 = 4;
 
@@ -29,6 +30,36 @@ impl Planning {
     }
 }
 
+/// How a Task is Closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Closing {
+    Done,
+    Rejected,
+}
+
+impl Closing {
+    fn state(self) -> &'static str {
+        match self {
+            Self::Done => "done",
+            Self::Rejected => "rejected",
+        }
+    }
+
+    fn event(self) -> Event {
+        match self {
+            Self::Done => Event::Done,
+            Self::Rejected => Event::Rejected,
+        }
+    }
+}
+
+/// A Close not yet saved, which `revert` can still take back.
+#[derive(Debug, Clone)]
+struct Pending {
+    id: ItemId,
+    closing: Closing,
+}
+
 /// An Open Task as the lists show it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Task {
@@ -41,6 +72,9 @@ pub struct Task {
     pub description: String,
     /// Valid Tags, in the order they were added.
     pub tags: Vec<String>,
+    /// Closed as Done, but the Close is still pending: the list keeps the Task
+    /// in place, marked.
+    pub done: bool,
 }
 
 #[derive(Debug)]
@@ -83,6 +117,8 @@ impl std::error::Error for Error {}
 pub struct Tasks {
     root: PathBuf,
     history: History,
+    /// The one Close that can still be reverted.
+    pending: Mutex<Option<Pending>>,
 }
 
 impl Tasks {
@@ -95,7 +131,11 @@ impl Tasks {
         let root = root.into();
         fs::create_dir_all(&root)?;
         let history = History::new(root.join(".history"), device);
-        Ok(Self { root, history })
+        Ok(Self {
+            root,
+            history,
+            pending: Mutex::new(None),
+        })
     }
 
     /// Creates a Task at the end of its list, with priority 4. The Title is
@@ -129,6 +169,7 @@ impl Tasks {
                         planning,
                         description: String::new(),
                         tags: Vec::new(),
+                        done: false,
                     });
                 }
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
@@ -190,6 +231,38 @@ impl Tasks {
         Ok(task)
     }
 
+    /// Closes the Open Task `id` as a pending change: nothing is saved until
+    /// `commit`, and `revert` leaves no trace. A Close still pending is
+    /// committed first. There is no way to Delete a Task. Fails with
+    /// `NotFound` if there is no such Open Task.
+    pub fn close(&self, id: &str, closing: Closing) -> Result<(), Error> {
+        let id = ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?;
+        self.commit()?;
+        self.read_open(&id)?;
+        *self.pending() = Some(Pending { id, closing });
+        Ok(())
+    }
+
+    /// Drops the pending Close, if any, as if it never happened.
+    pub fn revert(&self) {
+        self.pending().take();
+    }
+
+    /// Saves the pending Close, if any: sets the Task's `state` and appends
+    /// `done` or `rejected` to the History.
+    pub fn commit(&self) -> Result<(), Error> {
+        let Some(Pending { id, closing }) = self.pending().take() else {
+            return Ok(());
+        };
+        self.rewrite(&id, |file| file.set_scalar("state", closing.state()))?;
+        self.history.record(closing.event(), &id, now_ms())?;
+        Ok(())
+    }
+
+    fn pending(&self) -> MutexGuard<'_, Option<Pending>> {
+        self.pending.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// Adds `tag` to the Open Task `id`, as a Tag it already has: nothing
     /// changes. Fails with `InvalidTag` for an invalid Tag and `NotFound` if
     /// there is no such Task.
@@ -246,11 +319,17 @@ impl Tasks {
     /// Every property `change` leaves alone, known or not, stays as it was.
     fn modify(&self, id: &str, change: impl FnOnce(&mut Document)) -> Result<Task, Error> {
         let id = ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?;
-        let (mut file, _) = self.read_open(&id)?;
+        let file = self.rewrite(&id, change)?;
+        Ok(task_of(&file).ok_or(io::ErrorKind::InvalidData)?)
+    }
+
+    /// `modify` for a change that may leave the Task no longer Open.
+    fn rewrite(&self, id: &ItemId, change: impl FnOnce(&mut Document)) -> Result<Document, Error> {
+        let (mut file, _) = self.read_open(id)?;
         change(&mut file);
         file.set_scalar("updated", iso8601(now_ms()));
-        self.write(&id, &file.render(), Overwrite::Yes)?;
-        Ok(task_of(&file).ok_or(io::ErrorKind::InvalidData)?)
+        self.write(id, &file.render(), Overwrite::Yes)?;
+        Ok(file)
     }
 
     /// The Tasks planned as `planning`, in their order.
@@ -258,13 +337,22 @@ impl Tasks {
         Ok(self.list(planning)?.into_iter().map(|e| e.task).collect())
     }
 
+    /// The Entries planned as `planning`, in their order. A pending Done shows
+    /// marked, a pending Rejected not at all.
     fn list(&self, planning: Planning) -> io::Result<Vec<Entry>> {
+        let pending = self.pending().clone();
         let mut entries = Vec::new();
         for item in fs::read_dir(&self.root)? {
             let path = item?.path();
             if path.extension().is_some_and(|e| e == "md")
-                && let Some(entry) = read(&path, planning)
+                && let Some(mut entry) = read(&path, planning)
             {
+                if let Some(p) = pending.as_ref().filter(|p| p.id.as_str() == entry.task.id) {
+                    match p.closing {
+                        Closing::Rejected => continue,
+                        Closing::Done => entry.task.done = true,
+                    }
+                }
                 entries.push(entry);
             }
         }
@@ -337,6 +425,7 @@ fn task_of(file: &Document) -> Option<Task> {
         planning,
         description: file.body.trim().to_owned(),
         tags: tags_of(file),
+        done: false,
     })
 }
 
@@ -732,5 +821,132 @@ mod tests {
             })
             .collect();
         assert_eq!(events, ["created", "made-active", "moved-to-backlog"]);
+    }
+
+    fn closing_fixture(dir: &Scratch) -> (Tasks, Task) {
+        let tasks = dir.store();
+        tasks.create("other", Planning::Active).unwrap();
+        let task = tasks.create("Buy milk", Planning::Active).unwrap();
+        (tasks, task)
+    }
+
+    fn file_of(dir: &Scratch, task: &Task) -> String {
+        fs::read_to_string(dir.0.join(format!("{}.md", task.id))).unwrap()
+    }
+
+    #[test]
+    fn a_pending_done_task_stays_in_place_marked_done() {
+        let dir = Scratch::new();
+        let (tasks, task) = closing_fixture(&dir);
+        tasks.close(&task.id, Closing::Done).unwrap();
+        let listed = tasks.tasks(Planning::Active).unwrap();
+        assert_eq!(
+            listed.iter().map(|t| t.done).collect::<Vec<_>>(),
+            [false, true]
+        );
+        assert_eq!(listed[1].id, task.id);
+    }
+
+    #[test]
+    fn a_pending_rejected_task_is_left_out() {
+        let dir = Scratch::new();
+        let (tasks, task) = closing_fixture(&dir);
+        tasks.close(&task.id, Closing::Rejected).unwrap();
+        assert_eq!(titles(&tasks, Planning::Active), ["other"]);
+    }
+
+    #[test]
+    fn reverting_leaves_no_trace_in_files_or_history() {
+        let dir = Scratch::new();
+        let (tasks, task) = closing_fixture(&dir);
+        let (before, lines) = (file_of(&dir, &task), history(&dir));
+        tasks.close(&task.id, Closing::Done).unwrap();
+        tasks.revert();
+        tasks.commit().unwrap();
+        assert_eq!(tasks.tasks(Planning::Active).unwrap().len(), 2);
+        assert!(
+            tasks
+                .tasks(Planning::Active)
+                .unwrap()
+                .iter()
+                .all(|t| !t.done)
+        );
+        assert_eq!((file_of(&dir, &task), history(&dir)), (before, lines));
+    }
+
+    #[test]
+    fn nothing_is_saved_before_the_commit() {
+        let dir = Scratch::new();
+        let (tasks, task) = closing_fixture(&dir);
+        tasks.close(&task.id, Closing::Done).unwrap();
+        assert!(file_of(&dir, &task).contains("state: active"));
+        assert_eq!(history(&dir).len(), 2); // the two creations
+    }
+
+    #[test]
+    fn committing_saves_the_state_and_appends_to_the_history() {
+        let dir = Scratch::new();
+        let (tasks, task) = closing_fixture(&dir);
+        tasks.close(&task.id, Closing::Done).unwrap();
+        tasks.commit().unwrap();
+        assert!(file_of(&dir, &task).contains("state: done"));
+        assert_eq!(titles(&dir.store(), Planning::Active), ["other"]);
+        assert!(
+            history(&dir)
+                .last()
+                .unwrap()
+                .ends_with(&format!(" done {}", task.id))
+        );
+        tasks.commit().unwrap(); // nothing pending: no second line
+        assert_eq!(history(&dir).len(), 3);
+    }
+
+    #[test]
+    fn a_rejected_task_is_recorded_as_rejected() {
+        let dir = Scratch::new();
+        let (tasks, task) = closing_fixture(&dir);
+        tasks.close(&task.id, Closing::Rejected).unwrap();
+        tasks.commit().unwrap();
+        assert!(file_of(&dir, &task).contains("state: rejected"));
+        assert!(
+            history(&dir)
+                .last()
+                .unwrap()
+                .ends_with(&format!(" rejected {}", task.id))
+        );
+    }
+
+    #[test]
+    fn a_new_close_commits_the_previous_one_first() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let first = tasks.create("first", Planning::Active).unwrap();
+        let second = tasks.create("second", Planning::Active).unwrap();
+        tasks.close(&first.id, Closing::Done).unwrap();
+        tasks.close(&second.id, Closing::Rejected).unwrap();
+        assert!(file_of(&dir, &first).contains("state: done"));
+        assert!(file_of(&dir, &second).contains("state: active"));
+        tasks.revert();
+        assert_eq!(titles(&tasks, Planning::Active), ["second"]);
+    }
+
+    #[test]
+    fn closing_an_unknown_task_fails() {
+        let dir = Scratch::new();
+        assert!(dir.store().close("aaaaaaaaaaaa", Closing::Done).is_err());
+    }
+
+    #[test]
+    fn a_pending_close_keeps_edits_made_meanwhile() {
+        let dir = Scratch::new();
+        let (tasks, task) = closing_fixture(&dir);
+        tasks.close(&task.id, Closing::Done).unwrap();
+        tasks.edit(&task.id, "Renamed", "", 1).unwrap();
+        tasks.commit().unwrap();
+        let text = file_of(&dir, &task);
+        assert!(
+            text.contains("title: Renamed") && text.contains("state: done"),
+            "{text}"
+        );
     }
 }

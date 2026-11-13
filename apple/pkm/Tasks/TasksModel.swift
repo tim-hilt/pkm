@@ -5,6 +5,8 @@ import Observation
 @MainActor @Observable
 final class TasksModel {
     private let store: TaskStore
+    private let revertWindow: Duration
+    private var commitTimer: Task<Void, Never>?
 
     /// The list shown: Active or the Backlog.
     var planning: Planning = .active {
@@ -13,8 +15,17 @@ final class TasksModel {
     /// The Open Tasks planned as `planning`, in their order.
     private(set) var tasks: [OpenTask] = []
 
-    init(store: TaskStore) {
+    /// The Close that can still be Reverted, for the toast.
+    struct Closed: Equatable {
+        let title: String
+        let closing: Closing
+    }
+    private(set) var closed: Closed?
+
+    /// A Close is saved once its toast has been shown for `revertWindow`.
+    init(store: TaskStore, revertWindow: Duration = .seconds(5)) {
         self.store = store
+        self.revertWindow = revertWindow
         reload()
     }
 
@@ -43,6 +54,45 @@ final class TasksModel {
     /// Makes a Task Active or moves it to the Backlog; it leaves the list shown.
     func plan(_ task: OpenTask, as planning: Planning) {
         guard (try? store.plan(id: task.id, planning: planning)) != nil else { return }
+        reload()
+    }
+
+    /// Closes a Task, committing the previous Close first. Done leaves it in
+    /// place, marked, Rejected removes it; either way nothing is saved until
+    /// `commit`, which follows `revertWindow` later.
+    func close(_ task: OpenTask, as closing: Closing) {
+        commitTimer?.cancel()
+        guard (try? store.close(id: task.id, closing: closing)) != nil else {
+            closed = nil
+            reload()
+            return
+        }
+        closed = Closed(title: task.title, closing: closing)
+        reload()
+        commitTimer = Task { [revertWindow] in
+            try? await Task.sleep(for: revertWindow)
+            if !Task.isCancelled { commit() }
+        }
+    }
+
+    /// The circle of a Task: Done if it is Open, Reverts the Close if it is Done.
+    func toggleDone(_ task: OpenTask) {
+        if task.done { revert() } else { close(task, as: .done) }
+    }
+
+    /// Takes the pending Close back, as if it never happened.
+    func revert() {
+        commitTimer?.cancel()
+        store.revert()
+        closed = nil
+        reload()
+    }
+
+    /// Saves the pending Close, if any; a Done Task leaves the list.
+    func commit() {
+        commitTimer?.cancel()
+        try? store.commit()
+        closed = nil
         reload()
     }
 

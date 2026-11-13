@@ -1,5 +1,5 @@
-//! The History (ADR-0022): when Tasks were created, made Active and moved to
-//! the Backlog, by Item ID and time only.
+//! The History (ADR-0022): when Tasks were created, made Active, moved to the
+//! Backlog, Done and Rejected, by Item ID and time only.
 
 use pkm_base::clock::iso8601;
 use pkm_base::item_id::ItemId;
@@ -13,6 +13,8 @@ pub(crate) enum Event {
     Created,
     MadeActive,
     MovedToBacklog,
+    Done,
+    Rejected,
 }
 
 impl Event {
@@ -21,6 +23,8 @@ impl Event {
             Self::Created => "created",
             Self::MadeActive => "made-active",
             Self::MovedToBacklog => "moved-to-backlog",
+            Self::Done => "done",
+            Self::Rejected => "rejected",
         }
     }
 }

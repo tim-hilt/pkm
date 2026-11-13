@@ -30,6 +30,49 @@ import Testing
         #expect(model.tasks.isEmpty)
     }
 
+    @Test func aDoneTaskStaysMarkedUntilCommittedThenLeavesAndStays() throws {
+        let model = try openModel()
+        model.add(title: "Buy milk", planning: .active)
+        model.toggleDone(model.tasks[0])
+        #expect(model.tasks.map(\.done) == [true])
+        #expect(model.closed == .init(title: "Buy milk", closing: .done))
+        #expect(try openModel().tasks.map(\.title) == ["Buy milk"])  // nothing saved yet
+        model.commit()
+        #expect(model.tasks.isEmpty && model.closed == nil)
+        #expect(try openModel().tasks.isEmpty)
+    }
+
+    @Test func tappingTheFilledCircleReverts() throws {
+        let model = try openModel()
+        model.add(title: "Buy milk", planning: .active)
+        model.toggleDone(model.tasks[0])
+        model.toggleDone(model.tasks[0])
+        #expect(model.tasks.map(\.done) == [false] && model.closed == nil)
+        model.commit()
+        #expect(try openModel().tasks.map(\.title) == ["Buy milk"])
+    }
+
+    @Test func aRejectedTaskLeavesAtOnceAndRevertBringsItBack() throws {
+        let model = try openModel()
+        model.add(title: "Oops", planning: .active)
+        model.close(model.tasks[0], as: .rejected)
+        #expect(model.tasks.isEmpty && model.closed?.closing == .rejected)
+        model.revert()
+        #expect(model.tasks.map(\.title) == ["Oops"])
+    }
+
+    @Test func aCloseIsCommittedWhenItsToastGoesAway() async throws {
+        let model = TasksModel(
+            store: try TaskStore.open(
+                root: root.appending(path: "Tasks").path, deviceFolder: root.appending(path: "Device").path),
+            revertWindow: .milliseconds(20))
+        model.add(title: "Gone", planning: .active)
+        model.close(model.tasks[0], as: .rejected)
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(model.closed == nil)
+        #expect(try openModel().tasks.isEmpty)
+    }
+
     @Test func addingToTheBacklogShowsTheBacklog() throws {
         let model = try openModel()
         model.add(title: "Later", planning: .backlog)
