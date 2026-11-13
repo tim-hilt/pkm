@@ -16,13 +16,17 @@ extension TasksModel {
         let store = openOrTemporary(temporaryFolder())
         if arguments.contains("-UITestingOpenTasks") {
             let samples = [
-                ("Buy milk", "Two litres of oat milk, and a loaf of bread if the bakery is still open.", UInt8(1)),
-                ("Book the dentist", "", 2),
-                ("Reply to Anna's email", "About the trip", 3),
+                (
+                    "Buy milk", "Two litres of oat milk, and a loaf of bread if the bakery is still open.", UInt8(1),
+                    ["home", "shopping"]
+                ),
+                ("Book the dentist", "", 2, ["health"]),
+                ("Reply to Anna's email", "About the trip", 3, []),
             ]
-            for (title, description, priority) in samples {
+            for (title, description, priority, tags) in samples {
                 if let task = try? store.create(title: title, planning: .active) {
                     _ = try? store.edit(id: task.id, title: title, description: description, priority: priority)
+                    for tag in tags { _ = try? store.addTag(id: task.id, tag: tag) }
                 }
             }
             _ = try? store.create(title: "Learn Rust", planning: .backlog)

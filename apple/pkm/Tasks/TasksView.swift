@@ -47,8 +47,8 @@ struct TasksView: View {
     }
 }
 
-/// One Task: an empty circle, coloured by Priority, and beside it the Title and,
-/// faded on one line, the Description.
+/// One Task: an empty circle, coloured by Priority, and beside it the Title,
+/// the Description faded on one line, and the Tags fainter still.
 private struct TaskRow: View {
     let task: OpenTask
 
@@ -66,6 +66,12 @@ private struct TaskRow: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                }
+                if !task.tags.isEmpty {
+                    Text(task.tags.joined(separator: " "))
+                        .font(.subheadline)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
                 }
             }
         }
@@ -133,7 +139,7 @@ private struct NewTaskSheet: View {
     }
 }
 
-/// Edits a Task's Title, Description and Priority; Save is off while the Title is empty.
+/// Edits a Task's Title, Description, Priority and Tags; Save is off while the Title is empty.
 private struct EditTaskSheet: View {
     @Environment(TasksModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -141,12 +147,29 @@ private struct EditTaskSheet: View {
     @State private var title: String
     @State private var description: String
     @State private var priority: UInt8
+    @State private var tags: [String]
+    @State private var newTag = ""
+    @State private var refusedTagText = false
 
     init(task: OpenTask) {
         self.task = task
         _title = State(initialValue: task.title)
         _description = State(initialValue: task.description)
         _priority = State(initialValue: task.priority)
+        _tags = State(initialValue: task.tags)
+    }
+
+    /// Existing Tags matching what is typed, not yet on the Task.
+    private var suggestions: [String] {
+        guard !newTag.isEmpty else { return [] }
+        return model.knownTags(prefix: newTag).filter { !tags.contains($0) }
+    }
+
+    private func addTag(_ tag: String) {
+        guard isValidTag(tag: tag) else { return }
+        if !tags.contains(tag) { tags.append(tag) }
+        newTag = ""
+        refusedTagText = false
     }
 
     private var canSave: Bool { !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -164,6 +187,37 @@ private struct EditTaskSheet: View {
                     ForEach(UInt8(1)...4, id: \.self) { Text("P\($0)").tag($0) }
                 }
                 .pickerStyle(.segmented)
+                Section("Tags") {
+                    ForEach(tags, id: \.self) { tag in
+                        HStack {
+                            Text(tag)
+                            Spacer()
+                            Button("Remove \(tag)", systemImage: "minus.circle") { tags.removeAll { $0 == tag } }
+                                .labelStyle(.iconOnly)
+                                .buttonStyle(.borderless)
+                        }
+                    }
+                    TextField("Add Tag", text: $newTag)
+                        .onSubmit { addTag(newTag) }
+                        .onChange(of: newTag) { _, text in
+                            let allowed = TasksModel.allowedTagText(text)
+                            refusedTagText = allowed != text
+                            if refusedTagText { newTag = allowed }
+                        }
+                        #if os(iOS)
+                            .textInputAutocapitalization(.never)
+                        #endif
+                        .autocorrectionDisabled()
+                        .accessibilityIdentifier("task-tag")
+                    if refusedTagText {
+                        Text("Tags use a–z, 0–9, - and / only.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(suggestions, id: \.self) { tag in
+                        Button(tag) { addTag(tag) }
+                    }
+                }
             }
             .formStyle(.grouped)
             .navigationTitle("Task")
@@ -184,6 +238,8 @@ private struct EditTaskSheet: View {
     }
 
     private func save() {
-        if model.edit(task, title: title, description: description, priority: priority) { dismiss() }
+        var saved = tags
+        if isValidTag(tag: newTag), !saved.contains(newTag) { saved.append(newTag) }
+        if model.edit(task, title: title, description: description, priority: priority, tags: saved) { dismiss() }
     }
 }

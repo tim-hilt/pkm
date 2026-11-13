@@ -1,9 +1,10 @@
 //! The Tasks store: a folder of `<id>.md` files.
 
 use pkm_base::clock::{iso8601, now_ms};
-use pkm_base::front_matter::Document;
+use pkm_base::front_matter::{Document, Value};
 use pkm_base::item_id::ItemId;
 use pkm_base::random::Entropy;
+use pkm_base::tag;
 use std::cmp::Ordering;
 use std::fs;
 use std::io::{self, Write};
@@ -37,12 +38,16 @@ pub struct Task {
     pub planning: Planning,
     /// Plain text, the file's body; empty if there is none.
     pub description: String,
+    /// Valid Tags, in the order they were added.
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug)]
 pub enum Error {
     /// The Title is empty or only whitespace.
     EmptyTitle,
+    /// A Tag with a forbidden character, or empty, or a misplaced `/`.
+    InvalidTag,
     Io(io::Error),
 }
 
@@ -62,6 +67,9 @@ impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::EmptyTitle => f.write_str("A Task needs a Title."),
+            Self::InvalidTag => {
+                f.write_str("A Tag uses a-z, 0-9, - and /, and doesn't start or end with /.")
+            }
             Self::Io(e) => e.fmt(f),
         }
     }
@@ -115,6 +123,7 @@ impl Tasks {
                         priority: DEFAULT_PRIORITY,
                         planning,
                         description: String::new(),
+                        tags: Vec::new(),
                     });
                 }
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
@@ -138,20 +147,73 @@ impl Tasks {
         if title.is_empty() {
             return Err(Error::EmptyTitle);
         }
+        let priority = priority.clamp(1, 4);
+        let description = description.trim();
+        self.modify(id, |file| {
+            file.set_scalar("title", &title);
+            file.set_scalar("priority", priority.to_string());
+            file.body = if description.is_empty() {
+                String::new()
+            } else {
+                format!("{description}\n")
+            };
+        })
+    }
+
+    /// Adds `tag` to the Open Task `id`, as a Tag it already has: nothing
+    /// changes. Fails with `InvalidTag` for an invalid Tag and `NotFound` if
+    /// there is no such Task.
+    pub fn add_tag(&self, id: &str, tag: &str) -> Result<Task, Error> {
+        if !tag::is_valid(tag) {
+            return Err(Error::InvalidTag);
+        }
+        self.modify(id, |file| {
+            let mut tags = tags_of(file);
+            if !tags.iter().any(|t| t == tag) {
+                tags.push(tag.to_owned());
+                set_tags(file, tags);
+            }
+        })
+    }
+
+    /// Removes `tag` from the Open Task `id`; a Tag it doesn't have is
+    /// ignored. Fails with `NotFound` if there is no such Task.
+    pub fn remove_tag(&self, id: &str, tag: &str) -> Result<Task, Error> {
+        self.modify(id, |file| {
+            let mut tags = tags_of(file);
+            tags.retain(|t| t != tag);
+            set_tags(file, tags);
+        })
+    }
+
+    /// The Tags that start with `prefix` and are carried by an Open or Closed
+    /// Task, each once, sorted.
+    pub fn tags_with_prefix(&self, prefix: &str) -> io::Result<Vec<String>> {
+        let mut found = Vec::new();
+        for item in fs::read_dir(&self.root)? {
+            let path = item?.path();
+            if path.extension().is_some_and(|e| e == "md")
+                && let Ok(text) = fs::read_to_string(&path)
+                && let Some(file) = Document::parse(&text)
+            {
+                found.extend(tags_of(&file).into_iter().filter(|t| t.starts_with(prefix)));
+            }
+        }
+        found.sort();
+        found.dedup();
+        Ok(found)
+    }
+
+    /// Applies `change` to the Open Task `id`, bumps `updated` and saves.
+    /// Every property `change` leaves alone, known or not, stays as it was.
+    fn modify(&self, id: &str, change: impl FnOnce(&mut Document)) -> Result<Task, Error> {
         let id = ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?;
         let path = self.path(&id);
         let mut file = Document::parse(&fs::read_to_string(&path)?)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "unreadable Task"))?;
-        let priority = priority.clamp(1, 4);
-        let description = description.trim();
-        file.set_scalar("title", &title);
-        file.set_scalar("priority", priority.to_string());
+        task_of(&file).ok_or(io::ErrorKind::NotFound)?;
+        change(&mut file);
         file.set_scalar("updated", iso8601(now_ms()));
-        file.body = if description.is_empty() {
-            String::new()
-        } else {
-            format!("{description}\n")
-        };
         self.write(&id, &file.render(), Overwrite::Yes)?;
         Ok(task_of(&file).ok_or(io::ErrorKind::InvalidData)?)
     }
@@ -239,7 +301,24 @@ fn task_of(file: &Document) -> Option<Task> {
             .unwrap_or(DEFAULT_PRIORITY),
         planning,
         description: file.body.trim().to_owned(),
+        tags: tags_of(file),
     })
+}
+
+/// The valid Tags in a file; others, which only other tools could have
+/// written, are ignored.
+fn tags_of(file: &Document) -> Vec<String> {
+    let tags = file.list("tags").unwrap_or_default();
+    tags.iter().filter(|t| tag::is_valid(t)).cloned().collect()
+}
+
+/// An empty list is no property at all.
+fn set_tags(file: &mut Document, tags: Vec<String>) {
+    if tags.is_empty() {
+        file.remove("tags");
+    } else {
+        file.set("tags", Value::List(tags));
+    }
 }
 
 fn one_line(title: &str) -> String {
@@ -453,5 +532,103 @@ mod tests {
         fs::write(dir.0.join("broken.md"), "---\ntitle: no end").unwrap();
         fs::write(dir.0.join("plain.md"), "no front matter").unwrap();
         assert!(titles(&tasks, Planning::Active).is_empty());
+    }
+
+    fn tagged(tasks: &Tasks, tags: &[&str]) -> Task {
+        let task = tasks.create("t", Planning::Active).unwrap();
+        for tag in tags {
+            tasks.add_tag(&task.id, tag).unwrap();
+        }
+        tasks.tasks(Planning::Active).unwrap().pop().unwrap()
+    }
+
+    #[test]
+    fn tags_are_added_in_order_and_stored_as_a_block_list() {
+        let dir = Scratch::new();
+        let task = tagged(&dir.store(), &["home", "work/x"]);
+        assert_eq!(task.tags, ["home", "work/x"]);
+        let text = fs::read_to_string(dir.0.join(format!("{}.md", task.id))).unwrap();
+        assert!(text.contains("tags:\n  - home\n  - work/x\n"), "{text}");
+        assert_eq!(dir.store().tasks(Planning::Active).unwrap(), [task]);
+    }
+
+    #[test]
+    fn adding_a_tag_twice_keeps_one() {
+        let dir = Scratch::new();
+        assert_eq!(tagged(&dir.store(), &["a", "a"]).tags, ["a"]);
+    }
+
+    #[test]
+    fn invalid_tags_are_refused_and_change_nothing() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let task = tagged(&tasks, &["ok"]);
+        for tag in ["", "Home", "a b", "/a", "a/", "a//b"] {
+            assert!(matches!(
+                tasks.add_tag(&task.id, tag),
+                Err(Error::InvalidTag)
+            ));
+        }
+        assert_eq!(tasks.tasks(Planning::Active).unwrap(), [task]);
+    }
+
+    #[test]
+    fn removing_a_tag_keeps_the_others_and_ignores_a_missing_one() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let task = tagged(&tasks, &["a", "b"]);
+        assert_eq!(tasks.remove_tag(&task.id, "a").unwrap().tags, ["b"]);
+        assert_eq!(tasks.remove_tag(&task.id, "zzz").unwrap().tags, ["b"]);
+        let task = tasks.remove_tag(&task.id, "b").unwrap();
+        assert!(task.tags.is_empty());
+        let text = fs::read_to_string(dir.0.join(format!("{}.md", task.id))).unwrap();
+        assert!(!text.contains("tags"), "{text}");
+    }
+
+    #[test]
+    fn tagging_an_unknown_task_fails() {
+        let dir = Scratch::new();
+        assert!(matches!(
+            dir.store().add_tag("abcdefgh", "a"),
+            Err(Error::Io(e)) if e.kind() == io::ErrorKind::NotFound
+        ));
+    }
+
+    #[test]
+    fn editing_and_tagging_keep_each_other() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let task = tagged(&tasks, &["a"]);
+        assert_eq!(tasks.edit(&task.id, "n", "d", 2).unwrap().tags, ["a"]);
+        let task = tasks.add_tag(&task.id, "b").unwrap();
+        assert_eq!((task.title.as_str(), task.priority), ("n", 2));
+    }
+
+    #[test]
+    fn known_tags_are_listed_by_prefix_sorted_and_once() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        tagged(&tasks, &["work/b", "home"]);
+        tagged(&tasks, &["work/a", "home", "w"]);
+        assert_eq!(
+            tasks.tags_with_prefix("w").unwrap(),
+            ["w", "work/a", "work/b"]
+        );
+        assert_eq!(tasks.tags_with_prefix("").unwrap().len(), 4);
+        assert!(tasks.tags_with_prefix("x").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_tag_only_closed_tasks_carry_is_still_listed_but_an_unused_one_is_not() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let task = tagged(&tasks, &["gone", "closed"]);
+        tasks.remove_tag(&task.id, "gone").unwrap();
+        let path = dir.0.join(format!("{}.md", task.id));
+        let text = fs::read_to_string(&path)
+            .unwrap()
+            .replace("state: active", "state: done");
+        fs::write(&path, text).unwrap();
+        assert_eq!(tasks.tags_with_prefix("").unwrap(), ["closed"]);
     }
 }

@@ -27,15 +27,26 @@ final class TasksModel {
         return true
     }
 
-    /// Saves a Task's Title, Description and Priority. False, saving nothing, if
-    /// the Title is empty.
+    /// Saves a Task's Title, Description, Priority and Tags (adding and removing
+    /// what differs). False, saving nothing, if the Title is empty or a Tag is invalid.
     @discardableResult
-    func edit(_ task: OpenTask, title: String, description: String, priority: UInt8) -> Bool {
+    func edit(_ task: OpenTask, title: String, description: String, priority: UInt8, tags: [String]) -> Bool {
+        guard tags.allSatisfy(isValidTag) else { return false }
         guard (try? store.edit(id: task.id, title: title, description: description, priority: priority)) != nil
         else { return false }
+        for tag in task.tags where !tags.contains(tag) { _ = try? store.removeTag(id: task.id, tag: tag) }
+        for tag in tags where !task.tags.contains(tag) { _ = try? store.addTag(id: task.id, tag: tag) }
         reload()
         return true
     }
+
+    /// The known Tags starting with `prefix`, to pick from.
+    func knownTags(prefix: String) -> [String] {
+        (try? store.tagsWithPrefix(prefix: prefix)) ?? []
+    }
+
+    /// `text` without the characters a Tag can never contain.
+    static func allowedTagText(_ text: String) -> String { stripForbiddenTagCharacters(text: text) }
 
     private func reload() {
         tasks = (try? store.tasks(planning: planning)) ?? []

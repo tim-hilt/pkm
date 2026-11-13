@@ -8,3 +8,4 @@ pub mod item_id;
 pub mod json;
 pub mod random;
 pub mod sha256;
+pub mod tag;
