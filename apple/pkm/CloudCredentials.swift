@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import Synchronization
 
 /// The details of a Connected WebDAV server.
 struct WebDAVAccount: Equatable, Sendable {
@@ -9,14 +10,14 @@ struct WebDAVAccount: Equatable, Sendable {
 }
 
 /// Where the credentials of the Connected Cloud Provider are kept on this
-/// Device: URL and username in `defaults`, the password in the Keychain under
-/// `service`; for iCloud Drive the bookmark of the grant in `defaults`; for
-/// Google Drive and OneDrive the account's email in `defaults` and its refresh
-/// token in the Keychain. Never synced. Losing any part means not Connected.
-// `UserDefaults` and the Keychain are safe to use from any thread.
+/// Device: URL and username in `defaults`, the password in `secrets`; for
+/// iCloud Drive the bookmark of the grant in `defaults`; for Google Drive and
+/// OneDrive the account's email in `defaults` and its refresh token in
+/// `secrets`. Never synced. Losing any part means not Connected.
+// `UserDefaults` is safe to use from any thread.
 struct CloudCredentials: @unchecked Sendable {
     let defaults: UserDefaults
-    let service: String
+    let secrets: any SecretStore
 
     private static let urlKey = "cloud.webdav.url"
     private static let usernameKey = "cloud.webdav.username"
@@ -36,7 +37,7 @@ struct CloudCredentials: @unchecked Sendable {
     func load() -> WebDAVAccount? {
         guard let url = defaults.string(forKey: Self.urlKey),
             let username = defaults.string(forKey: Self.usernameKey),
-            let password = secret()
+            let password = secrets.read(Self.passwordName)
         else { return nil }
         return WebDAVAccount(url: url, username: username, password: password)
     }
@@ -50,7 +51,7 @@ struct CloudCredentials: @unchecked Sendable {
         loadOAuth(.google).map { GoogleDriveAccount(refreshToken: $0.token, email: $0.email) }
     }
 
-    /// Replaces what was saved with the Google account. False if the Keychain
+    /// Replaces what was saved with the Google account. False if `secrets`
     /// refused the token; then nothing is saved.
     @discardableResult
     func saveGoogle(_ account: GoogleDriveAccount) -> Bool {
@@ -76,22 +77,21 @@ struct CloudCredentials: @unchecked Sendable {
     func rotateOneDriveToken(to token: String) { rotateOAuth(.oneDrive, to: token) }
 
     private func loadOAuth(_ slot: OAuthSlot) -> (token: String, email: String)? {
-        guard let email = defaults.string(forKey: slot.emailKey), let token = secret(slot.tokenName)
+        guard let email = defaults.string(forKey: slot.emailKey), let token = secrets.read(slot.tokenName)
         else { return nil }
         return (token, email)
     }
 
     private func saveOAuth(_ slot: OAuthSlot, token: String, email: String) -> Bool {
         forget()
-        guard store(token, as: slot.tokenName) else { return false }
+        guard secrets.write(token, as: slot.tokenName) else { return false }
         defaults.set(email, forKey: slot.emailKey)
         return true
     }
 
     private func rotateOAuth(_ slot: OAuthSlot, to token: String) {
         guard defaults.string(forKey: slot.emailKey) != nil else { return }
-        SecItemDelete(query(slot.tokenName) as CFDictionary)
-        _ = store(token, as: slot.tokenName)
+        _ = secrets.write(token, as: slot.tokenName)
     }
 
     /// Replaces what was saved with the iCloud Drive grant `bookmark`.
@@ -100,12 +100,12 @@ struct CloudCredentials: @unchecked Sendable {
         defaults.set(bookmark, forKey: Self.bookmarkKey)
     }
 
-    /// Replaces what was saved. False if the Keychain refused the password;
+    /// Replaces what was saved. False if `secrets` refused the password;
     /// then nothing is saved.
     @discardableResult
     func save(_ account: WebDAVAccount) -> Bool {
         forget()
-        guard store(account.password, as: Self.passwordName) else { return false }
+        guard secrets.write(account.password, as: Self.passwordName) else { return false }
         defaults.set(account.url, forKey: Self.urlKey)
         defaults.set(account.username, forKey: Self.usernameKey)
         return true
@@ -116,21 +116,48 @@ struct CloudCredentials: @unchecked Sendable {
         defaults.removeObject(forKey: Self.urlKey)
         defaults.removeObject(forKey: Self.usernameKey)
         defaults.removeObject(forKey: Self.bookmarkKey)
-        SecItemDelete(query(Self.passwordName) as CFDictionary)
+        secrets.delete(Self.passwordName)
         for slot in OAuthSlot.all {
             defaults.removeObject(forKey: slot.emailKey)
-            SecItemDelete(query(slot.tokenName) as CFDictionary)
+            secrets.delete(slot.tokenName)
         }
     }
+}
 
-    private func store(_ secret: String, as name: String) -> Bool {
-        var item = query(name)
-        item[kSecValueData] = Data(secret.utf8)
-        item[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlock
-        return SecItemAdd(item as CFDictionary, nil) == errSecSuccess
+extension CloudCredentials {
+    /// The credentials for this launch: the app's, in the standard defaults and
+    /// the Keychain. Launches for UI tests and screenshots (`-UITesting…`) and
+    /// as the host of unit tests get empty ones in memory instead: they must
+    /// not see the user's Connection, and reading the Keychain from a rebuilt
+    /// Debug build makes macOS ask for access.
+    static func forLaunch(
+        arguments: [String] = ProcessInfo.processInfo.arguments,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> CloudCredentials {
+        let isolated =
+            arguments.contains { $0.hasPrefix("-UITesting") } || environment["XCTestConfigurationFilePath"] != nil
+        guard isolated else {
+            return CloudCredentials(defaults: .standard, secrets: KeychainSecrets(service: "com.timhilt.pkm.cloud"))
+        }
+        let path = FileManager.default.temporaryDirectory.appending(path: "pkm.cloud.\(UUID().uuidString)").path
+        return CloudCredentials(defaults: UserDefaults(suiteName: path)!, secrets: MemorySecrets())
     }
+}
 
-    private func secret(_ name: String = CloudCredentials.passwordName) -> String? {
+/// Where `CloudCredentials` keeps passwords and tokens, by name.
+protocol SecretStore: Sendable {
+    func read(_ name: String) -> String?
+    /// Replaces the secret named `name`. False if it could not be kept.
+    func write(_ secret: String, as name: String) -> Bool
+    func delete(_ name: String)
+}
+
+/// The Keychain's generic passwords of `service`, readable after the first
+/// unlock. The Keychain is safe to use from any thread.
+struct KeychainSecrets: SecretStore {
+    let service: String
+
+    func read(_ name: String) -> String? {
         var item = query(name)
         item[kSecReturnData] = true
         var result: CFTypeRef?
@@ -139,14 +166,33 @@ struct CloudCredentials: @unchecked Sendable {
         return String(data: data, encoding: .utf8)
     }
 
+    func write(_ secret: String, as name: String) -> Bool {
+        delete(name)
+        var item = query(name)
+        item[kSecValueData] = Data(secret.utf8)
+        item[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlock
+        return SecItemAdd(item as CFDictionary, nil) == errSecSuccess
+    }
+
+    func delete(_ name: String) {
+        SecItemDelete(query(name) as CFDictionary)
+    }
+
     private func query(_ name: String) -> [CFString: Any] {
         [kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: name]
     }
 }
 
-extension CloudCredentials {
-    /// The app's credentials, in the standard defaults and the Keychain.
-    static var app: CloudCredentials {
-        CloudCredentials(defaults: .standard, service: "com.timhilt.pkm.cloud")
+/// Secrets gone at quit, for tests, UI tests and screenshots.
+final class MemorySecrets: SecretStore {
+    private let secrets = Mutex<[String: String]>([:])
+
+    func read(_ name: String) -> String? { secrets.withLock { $0[name] } }
+
+    func write(_ secret: String, as name: String) -> Bool {
+        secrets.withLock { $0[name] = secret }
+        return true
     }
+
+    func delete(_ name: String) { secrets.withLock { _ = $0.removeValue(forKey: name) } }
 }

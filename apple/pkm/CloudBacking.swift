@@ -212,7 +212,7 @@ final class CloudBackingModel {
     /// offline works. `checkWebDAV` is the core's Connect and `showSignInPage`
     /// shows a provider's sign-in page and returns the redirect; tests replace them.
     init(
-        credentials: CloudCredentials = .app,
+        credentials: CloudCredentials = .forLaunch(),
         checkWebDAV: @escaping @Sendable (String, String, String) throws -> Void = {
             try connectWebdav(url: $0, username: $1, password: $2)
         },

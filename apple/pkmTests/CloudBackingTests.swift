@@ -6,11 +6,8 @@ import Testing
 /// Connecting a WebDAV server through `CloudBackingModel`. The core's check of
 /// the server is replaced; the core itself is tested in `crates/cloud`.
 @MainActor @Suite struct CloudBackingTests {
-    private let name = UUID().uuidString
-
-    private var credentials: CloudCredentials {
-        CloudCredentials(defaults: UserDefaults(suiteName: name)!, service: "pkm-test-\(name)")
-    }
+    /// The test's own, in memory: tests must not touch the user's Keychain.
+    private let credentials = CloudCredentials(defaults: .isolated(), secrets: MemorySecrets())
 
     private func model(
         checking check: @escaping @Sendable (String, String, String) throws -> Void = { _, _, _ in },
@@ -41,7 +38,6 @@ import Testing
         #expect(
             credentials.load()
                 == WebDAVAccount(url: "https://dav.example.com/files", username: "me", password: "s3cret"))
-        credentials.forget()
     }
 
     @Test func theConnectionSurvivesARelaunchWithoutContactingTheServer() async throws {
@@ -50,7 +46,6 @@ import Testing
         let relaunched = model(checking: { _, _, _ in Issue.record("contacted the server") })
 
         #expect(relaunched.connection?.detail == "https://dav.example.com")
-        credentials.forget()
     }
 
     @Test func aFailedConnectKeepsNothing() async {
@@ -82,7 +77,6 @@ import Testing
         try await cloud.connect(url: "https://dav.example.com", username: "me", password: "new")
 
         #expect(credentials.load()?.password == "new")
-        credentials.forget()
     }
 
     @Test func everyFailureHasItsOwnMessage() {
@@ -115,7 +109,6 @@ import Testing
         #expect(relaunched.connection == CloudConnection(provider: .googleDrive, detail: "tim@example.com"))
         #expect(credentials.loadGoogle() == account)
         #expect(CloudProvider.googleDrive.detailLabel == "Account")
-        credentials.forget()
     }
 
     @Test func aRotatedRefreshTokenReplacesTheOneInTheKeychain() {
@@ -124,7 +117,6 @@ import Testing
         credentials.rotateGoogleToken(to: "new")
 
         #expect(credentials.loadGoogle() == GoogleDriveAccount(refreshToken: "new", email: "tim@example.com"))
-        credentials.forget()
     }
 
     @Test func disconnectingGoogleDriveForgetsTheAccount() {
@@ -162,7 +154,6 @@ import Testing
         #expect(relaunched.connection == CloudConnection(provider: .oneDrive, detail: "tim@example.com"))
         #expect(credentials.loadOneDrive() == account)
         #expect(credentials.loadGoogle() == nil)
-        credentials.forget()
     }
 
     @Test func aRotatedOneDriveTokenReplacesTheOneInTheKeychain() {
@@ -171,7 +162,6 @@ import Testing
         credentials.rotateOneDriveToken(to: "new")
 
         #expect(credentials.loadOneDrive() == OneDriveAccount(refreshToken: "new", email: "tim@example.com"))
-        credentials.forget()
     }
 
     @Test func disconnectingOneDriveForgetsTheAccount() {
@@ -203,7 +193,6 @@ import Testing
 
         #expect(cloud.connection == CloudConnection(provider: .iCloudDrive, detail: "pkm"))
         #expect(FileManager.default.fileExists(atPath: root.appending(path: "pkm").path))
-        credentials.forget()
     }
 
     @Test func theGrantSurvivesARelaunch() async throws {
@@ -215,7 +204,6 @@ import Testing
         #expect(relaunched.connection?.provider == .iCloudDrive)
         let bookmark = try #require(credentials.loadBookmark())
         #expect(ICloudGrant.resolve(bookmark)?.folder.standardizedFileURL.lastPathComponent == "com~apple~CloudDocs")
-        credentials.forget()
     }
 
     @Test func anyOtherFolderIsRefusedAndNothingIsKept() async throws {
@@ -263,7 +251,6 @@ import Testing
 
         #expect(cloud.connection?.provider == .webDAV)
         #expect(credentials.loadBookmark() == nil)
-        credentials.forget()
     }
 
     // MARK: Problems and switching
@@ -291,7 +278,6 @@ import Testing
 
         #expect(cloud.pendingSwitch == nil)
         #expect(cloud.connection != nil)
-        credentials.forget()
     }
 
     @Test func pickingTheConnectedProviderAsksNothing() async throws {
@@ -301,7 +287,6 @@ import Testing
         cloud.requestSwitch(to: .webDAV)
 
         #expect(cloud.pendingSwitch == nil)
-        credentials.forget()
     }
 
     @Test func reconnectingWithRefusedCredentialsKeepsTheOldOnes() async throws {
@@ -311,7 +296,6 @@ import Testing
         await #expect(throws: ConnectError.self) { try await cloud.reconnect(password: "wrong") }
 
         #expect(credentials.load()?.password == "old")
-        credentials.forget()
     }
 
     @Test func reconnectingKeepsTheNewPassword() async throws {
@@ -322,7 +306,6 @@ import Testing
 
         #expect(credentials.load()?.password == "new")
         #expect(cloud.connection?.detail == "https://dav.example.com")
-        credentials.forget()
     }
 
     /// A Sync state folder that remembers one Drawing, and the file that says so.
@@ -372,6 +355,5 @@ import Testing
 
         #expect(cloud.statusText == "Not synced yet")
         #expect(!cloud.hasProblem)
-        credentials.forget()
     }
 }
