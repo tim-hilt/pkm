@@ -14,6 +14,19 @@ mirror_enum!(
     Planning in pkm_tasks::Planning { Active, Backlog }
 );
 
+mirror_enum!(
+    /// How a Task is Closed.
+    Closing in pkm_tasks::Closing { Done, Rejected }
+);
+
+/// A Task another Task is Blocked by; a `closed` one no longer blocks.
+#[wasm_bindgen(getter_with_clone)]
+pub struct Blocker {
+    pub id: String,
+    pub title: String,
+    pub closed: bool,
+}
+
 /// A Task as the lists show it, one row of the flattened tree.
 #[wasm_bindgen(getter_with_clone)]
 pub struct ListedTask {
@@ -38,6 +51,23 @@ pub struct ListedTask {
     pub closed: bool,
     /// Whether any Task it's Blocked by is Open.
     pub blocked: bool,
+    blocked_by: Vec<pkm_tasks::Blocker>,
+}
+
+#[wasm_bindgen]
+impl ListedTask {
+    /// The Tasks it's Blocked by, Open or Closed.
+    #[wasm_bindgen(js_name = blockedBy)]
+    pub fn blocked_by(&self) -> Vec<Blocker> {
+        let blockers = self.blocked_by.iter();
+        blockers
+            .map(|b| Blocker {
+                id: b.id.clone(),
+                title: b.title.clone(),
+                closed: b.closed,
+            })
+            .collect()
+    }
 }
 
 impl From<Row> for ListedTask {
@@ -56,6 +86,7 @@ impl From<Row> for ListedTask {
             done: t.done,
             closed: t.closed,
             blocked: t.blocked,
+            blocked_by: t.blocked_by,
         }
     }
 }
@@ -119,6 +150,64 @@ impl TaskStore {
     pub fn create(&self, title: &str, planning: Planning) -> Result<(), JsError> {
         self.tasks
             .create(title, planning.into())
+            .map(drop)
+            .map_err(error)
+    }
+
+    /// Creates a Subtask under a Task, refusing an empty Title; it follows its
+    /// top-level Task's Active or Backlog.
+    #[wasm_bindgen(js_name = createSubtask)]
+    pub fn create_subtask(&self, parent: &str, title: &str) -> Result<(), JsError> {
+        self.tasks
+            .create_subtask(parent, title)
+            .map(drop)
+            .map_err(error)
+    }
+
+    /// Moves a Task under `parent`, or to the top level of the `planning` list,
+    /// before its sibling `before` or last; see `pkm_tasks::Tasks::move_to`.
+    #[wasm_bindgen(js_name = moveTo)]
+    pub fn move_to(
+        &self,
+        id: &str,
+        parent: Option<String>,
+        planning: Planning,
+        before: Option<String>,
+    ) -> Result<(), JsError> {
+        self.tasks
+            .move_to(id, parent.as_deref(), planning.into(), before.as_deref())
+            .map(drop)
+            .map_err(error)
+    }
+
+    /// Closes a Task as a pending change, committing the previous one first.
+    /// Nothing is saved until `commit`; `revert` takes it back.
+    pub fn close(&self, id: &str, closing: Closing) -> Result<(), JsError> {
+        self.tasks.close(id, closing.into()).map_err(error)
+    }
+
+    /// Drops the pending Close, leaving no trace.
+    pub fn revert(&self) {
+        self.tasks.revert();
+    }
+
+    /// Saves the pending Close, if any.
+    pub fn commit(&self) -> Result<(), JsError> {
+        self.tasks.commit().map_err(error)
+    }
+
+    /// Marks a Task as Blocked by another Open Task; refused for itself, its
+    /// Parent, its Subtask and a loop.
+    #[wasm_bindgen(js_name = addBlocker)]
+    pub fn add_blocker(&self, id: &str, blocker: &str) -> Result<(), JsError> {
+        self.tasks.add_blocker(id, blocker).map(drop).map_err(error)
+    }
+
+    /// Removes a Blocked by from a Task.
+    #[wasm_bindgen(js_name = removeBlocker)]
+    pub fn remove_blocker(&self, id: &str, blocker: &str) -> Result<(), JsError> {
+        self.tasks
+            .remove_blocker(id, blocker)
             .map(drop)
             .map_err(error)
     }

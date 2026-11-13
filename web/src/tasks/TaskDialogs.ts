@@ -1,5 +1,5 @@
 import { button, make } from "../Dom";
-import { type ListedTask, TasksModel, lists } from "./TasksModel";
+import { type Blocker, type ListedTask, TasksModel, lists } from "./TasksModel";
 
 let nextId = 0;
 
@@ -67,32 +67,38 @@ function choice<T extends string | number>(
   return group;
 }
 
-/** Asks for a Title and Active or Backlog (the list shown at first), and adds the Task. */
-export function newTaskDialog(model: TasksModel, parent: HTMLElement): void {
+/**
+ * Asks for a Title and adds the Task: Active or Backlog (the list shown at
+ * first), or, for a Subtask of `under`, only a Title, as it follows its
+ * top-level Task's list.
+ */
+export function newTaskDialog(model: TasksModel, host: HTMLElement, under?: ListedTask): void {
   const title = textInput("");
   title.setAttribute("aria-label", "Title");
   title.placeholder = "Title";
   let planning = model.planning;
+  const listChoice = under
+    ? []
+    : [
+        choice(
+          "List",
+          lists.map(({ planning, title }) => ({ value: planning, text: title })),
+          planning,
+          (value) => (planning = value),
+        ),
+      ];
   openDialog(
-    parent,
-    "New Task",
+    host,
+    under ? "New Subtask" : "New Task",
     "Add",
-    [
-      title,
-      choice(
-        "List",
-        lists.map(({ planning, title }) => ({ value: planning, text: title })),
-        planning,
-        (value) => (planning = value),
-      ),
-    ],
-    () => model.add(title.value, planning),
+    [title, ...listChoice],
+    () => (under ? model.addSubtask(title.value, under) : model.add(title.value, planning)),
     () => title.value.trim() !== "",
   );
   title.focus();
 }
 
-/** Edits a Task's Title, Description, Priority and Tags; Save is off while the Title is empty. */
+/** Edits a Task's Title, Description, Priority, Tags and Blocked by; Save is off while the Title is empty. */
 export function editTaskDialog(model: TasksModel, task: ListedTask, parent: HTMLElement): void {
   const title = textInput(task.title);
   const description = make("textarea", "tasks-input");
@@ -101,6 +107,7 @@ export function editTaskDialog(model: TasksModel, task: ListedTask, parent: HTML
   let priority = task.priority;
   const priorities = [1, 2, 3, 4].map((value) => ({ value, text: `P${value}` }));
   const tags = new TagField(model, [...task.tags]);
+  const blockers = new BlockedByField(model.blockerCandidates(task), [...task.blockedBy]);
   openDialog(
     parent,
     "Task",
@@ -110,14 +117,17 @@ export function editTaskDialog(model: TasksModel, task: ListedTask, parent: HTML
       field("Description", description),
       choice("Priority", priorities, priority, (value) => (priority = value)),
       tags.element,
+      blockers.element,
     ],
-    () =>
-      model.edit(task, {
+    () => {
+      if (!model.setBlockedBy(task, blockers.ids())) return blockers.refuse();
+      return model.edit(task, {
         title: title.value,
         description: description.value,
         priority,
         tags: tags.all(),
-      }),
+      });
+    },
     () => title.value.trim() !== "",
   );
 }
@@ -202,5 +212,62 @@ class TagField {
         .filter((tag) => !this.tags.includes(tag))
         .map((tag) => make("li", "", [button("tasks-suggestion", tag, () => this.add(tag))])),
     );
+  }
+}
+
+/**
+ * The Tasks a Task is Blocked by: chips to remove, and a menu of the Open
+ * Tasks it could be Blocked by to add. Closed blockers stay listed, struck through.
+ */
+class BlockedByField {
+  readonly element = make("fieldset", "tasks-blocked");
+  private readonly chips = make("ul", "tasks-chips");
+  private readonly choose = make("select", "tasks-input");
+  private readonly hint = make("p", "tasks-hint", ["That would make Tasks wait on each other."]);
+
+  constructor(
+    private readonly candidates: ListedTask[],
+    private readonly chosen: Blocker[],
+  ) {
+    this.choose.setAttribute("aria-label", "Add Blocked by");
+    this.hint.hidden = true;
+    this.choose.addEventListener("change", () => {
+      const task = this.candidates.find((t) => t.id === this.choose.value);
+      if (task) this.chosen.push({ id: task.id, title: task.title, closed: false });
+      this.hint.hidden = true;
+      this.show();
+    });
+    this.element.append(make("legend", "", ["Blocked by"]), this.chips, this.choose, this.hint);
+    this.show();
+  }
+
+  ids(): string[] {
+    return this.chosen.map((b) => b.id);
+  }
+
+  /** Shows why the choice was refused; false, for the save to return. */
+  refuse(): false {
+    this.hint.hidden = false;
+    return false;
+  }
+
+  private show(): void {
+    this.chips.replaceChildren(
+      ...this.chosen.map((blocker) => {
+        const remove = button("tasks-chip", `${blocker.title} ×`, () => {
+          this.chosen.splice(this.chosen.indexOf(blocker), 1);
+          this.show();
+        });
+        remove.setAttribute("aria-label", `Remove ${blocker.title}`);
+        remove.classList.toggle("closed", blocker.closed);
+        return make("li", "", [remove]);
+      }),
+    );
+    const open = this.candidates.filter((t) => !this.chosen.some((b) => b.id === t.id));
+    this.choose.replaceChildren(
+      new Option("Add Blocked by…", ""),
+      ...open.map((t) => new Option(t.title, t.id)),
+    );
+    this.choose.hidden = open.length === 0;
   }
 }

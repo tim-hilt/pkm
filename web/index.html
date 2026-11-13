@@ -994,11 +994,39 @@
         border-bottom: 1px solid var(--divider);
         -webkit-touch-callout: none;
       }
-      .task-open {
+      .task-row.drop-before {
+        box-shadow: 0 -2px 0 var(--accent);
+      }
+      .task-row.drop-under {
+        background: var(--control-fill);
+      }
+      .task-line {
         display: flex;
         align-items: flex-start;
-        gap: 12px;
-        width: 100%;
+        gap: 8px;
+      }
+      .task-disclose {
+        flex: none;
+        width: 24px;
+        height: 24px;
+        margin-top: 9px;
+        padding: 0;
+        border: 0;
+        background: none;
+        color: color-mix(in srgb, var(--control-ink) 65%, transparent);
+        cursor: pointer;
+        touch-action: manipulation;
+        transform: rotate(90deg);
+      }
+      .task-disclose.collapsed {
+        transform: none;
+      }
+      .task-disclose:disabled {
+        visibility: hidden;
+      }
+      .task-open {
+        flex: 1;
+        min-width: 0;
         padding: 10px 0;
         border: 0;
         background: none;
@@ -1015,9 +1043,16 @@
         box-sizing: border-box;
         width: 22px;
         height: 22px;
-        margin-top: 1px;
+        margin: 11px 4px 0 0;
+        padding: 0;
         border: 2px solid currentColor;
         border-radius: 50%;
+        background-color: transparent;
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+      .task-circle:disabled {
+        cursor: default;
       }
       .task-circle.done {
         background: radial-gradient(currentColor 45%, transparent 50%);
@@ -1044,6 +1079,49 @@
       }
       .task-title {
         overflow-wrap: anywhere;
+      }
+      .task-row.closed .task-title {
+        text-decoration: line-through;
+        color: color-mix(in srgb, var(--control-ink) 65%, transparent);
+      }
+      .task-blocked {
+        flex: none;
+        margin-top: 12px;
+        color: color-mix(in srgb, var(--control-ink) 65%, transparent);
+      }
+      .tasks-toast {
+        position: fixed;
+        left: 50%;
+        bottom: max(20px, env(safe-area-inset-bottom));
+        transform: translateX(-50%);
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        box-sizing: border-box;
+        width: min(420px, calc(100vw - 112px));
+        padding: 8px 8px 8px 16px;
+        border-radius: 12px;
+        background: var(--island-fill);
+        box-shadow: 0 2px 10px rgb(0 0 0 / 0.25);
+      }
+      .tasks-toast-text {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .tasks-toast-revert {
+        min-height: 40px;
+        padding: 0 12px;
+        border: 0;
+        border-radius: 8px;
+        background: none;
+        color: var(--accent);
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
       }
       .task-description,
       .task-tags {
@@ -1160,6 +1238,7 @@
         font-size: 1rem;
       }
       .tasks-choice,
+      .tasks-blocked,
       .tasks-tags {
         display: flex;
         flex-wrap: wrap;
@@ -1169,6 +1248,7 @@
         border: 0;
       }
       .tasks-choice legend,
+      .tasks-blocked legend,
       .tasks-tags legend {
         width: 100%;
         padding: 0;
@@ -1180,8 +1260,12 @@
         gap: 4px;
         min-height: 32px;
       }
+      .tasks-blocked > *,
       .tasks-tags > * {
         width: 100%;
+      }
+      .tasks-chip.closed {
+        text-decoration: line-through;
       }
       .tasks-chips,
       .tasks-suggestions {

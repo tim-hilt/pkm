@@ -61,9 +61,8 @@ export async function startApp(
   const navigation = new Navigation(browserHistory(window), localStorage);
   const shell = new Shell(navigation, new SettingsView(appearance, cloud));
   root.replaceChildren(shell.element);
-  shell
-    .pane("tasks")
-    .append(new TasksView(new TasksModel(await TaskFiles.open(core, storage))).element);
+  const tasks = new TasksModel(await TaskFiles.open(core, storage));
+  shell.pane("tasks").append(new TasksView(tasks).element);
   const pane = shell.pane("drawings");
 
   let canvas: { drawing: OpenDrawing; stop: () => void } | undefined;
@@ -126,7 +125,11 @@ export async function startApp(
   show();
 
   // The page may be gone before the delay of an autosave is over.
-  const background = () => void gallery.open?.saveNow();
+  // So may a pending Close of a Task, which is committed too.
+  const background = () => {
+    void gallery.open?.saveNow();
+    tasks.commit();
+  };
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") background();
   });

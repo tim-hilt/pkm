@@ -1,5 +1,6 @@
 import init, {
   Alignment,
+  Closing,
   Cursor,
   Distribution,
   Edges,
@@ -43,6 +44,7 @@ import {
 
 export {
   Alignment,
+  Closing,
   Cursor,
   Distribution,
   Edges,

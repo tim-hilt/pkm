@@ -587,6 +587,7 @@ dependencies = [
  "pkm-base",
  "pkm-cloud",
  "pkm-drawing",
+ "pkm-tasks",
  "wasm-bindgen",
 ]
 
