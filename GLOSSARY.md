@@ -19,7 +19,7 @@ The random identifier an Item gets when it is created and keeps for life, throug
 _Avoid_: Name, hash, key
 
 **Delete**:
-Taking an Item out of its Context, with its file and everything recorded about it, on every Device; it wins over edits made elsewhere at the same time.
+Taking an Item out of its Context, with its file and everything recorded about it except its Tasks History, on every Device; it wins over edits made elsewhere at the same time.
 _Avoid_: Remove, trash
 
 **Task**:
@@ -37,6 +37,10 @@ _Avoid_: Link (that is a reference between items), favourite
 **Book**:
 One PDF or EPUB to read in the Books Context, including papers and other non-book texts.
 _Avoid_: E-book, document, paper, bookmark (when meaning a saved position in a Book)
+
+**Tag**:
+A name the user puts on Items, of lowercase letters, digits, `-` and `/`; it exists as long as an Item carries it.
+_Avoid_: Label, category, hashtag
 
 **Link**:
 A reference from one item to another, possibly in another Context.
