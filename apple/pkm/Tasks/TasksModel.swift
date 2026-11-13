@@ -40,6 +40,12 @@ final class TasksModel {
         return true
     }
 
+    /// Makes a Task Active or moves it to the Backlog; it leaves the list shown.
+    func plan(_ task: OpenTask, as planning: Planning) {
+        guard (try? store.plan(id: task.id, planning: planning)) != nil else { return }
+        reload()
+    }
+
     /// The known Tags starting with `prefix`, to pick from.
     func knownTags(prefix: String) -> [String] {
         (try? store.tagsWithPrefix(prefix: prefix)) ?? []

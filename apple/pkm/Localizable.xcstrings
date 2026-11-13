@@ -1255,6 +1255,17 @@
         }
       }
     },
+    "Make Active": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Make Active"
+          }
+        }
+      }
+    },
     "Medium": {
       "extractionState": "manual",
       "localizations": {
@@ -1295,6 +1306,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "More colours"
+          }
+        }
+      }
+    },
+    "Move to Backlog": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move to Backlog"
           }
         }
       }

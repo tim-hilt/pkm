@@ -80,9 +80,17 @@ pub struct TaskStore(Tasks);
 #[uniffi::export]
 impl TaskStore {
     /// Opens the Tasks in the folder `root`, creating it if needed.
+    /// `device_folder` is local to the Device and never Synced: it keeps the
+    /// Device ID, which names this Device's History files.
     #[uniffi::constructor]
-    pub fn open(root: String) -> Result<Self, TasksError> {
-        Ok(Self(Tasks::open(root)?))
+    pub fn open(root: String, device_folder: String) -> Result<Self, TasksError> {
+        let device = pkm_base::device::id(device_folder.as_ref())?;
+        Ok(Self(Tasks::open(root, device)?))
+    }
+
+    /// Makes a Task Active or moves it to the Backlog, at the end of that list.
+    pub fn plan(&self, id: String, planning: Planning) -> Result<OpenTask, TasksError> {
+        Ok(self.0.plan(&id, planning)?.into())
     }
 
     /// Creates a Task, refusing an empty Title.

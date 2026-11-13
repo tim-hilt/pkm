@@ -8,13 +8,26 @@ import Testing
         .appending(path: UUID().uuidString, directoryHint: .isDirectory)
 
     func openModel() throws -> TasksModel {
-        TasksModel(store: try TaskStore.open(root: root.path))
+        TasksModel(
+            store: try TaskStore.open(
+                root: root.appending(path: "Tasks").path, deviceFolder: root.appending(path: "Device").path))
     }
 
     @Test func aNewTaskAppearsInTheListItWasAddedTo() throws {
         let model = try openModel()
         #expect(model.add(title: "Buy milk", planning: .active))
         #expect(model.tasks.map(\.title) == ["Buy milk"])
+    }
+
+    @Test func aTaskMovesBetweenTheBacklogAndActive() throws {
+        let model = try openModel()
+        model.add(title: "Later", planning: .backlog)
+        model.plan(model.tasks[0], as: .active)
+        #expect(model.tasks.isEmpty)
+        model.planning = .active
+        #expect(model.tasks.map(\.title) == ["Later"])
+        model.plan(model.tasks[0], as: .backlog)
+        #expect(model.tasks.isEmpty)
     }
 
     @Test func addingToTheBacklogShowsTheBacklog() throws {

@@ -21,6 +21,17 @@ struct TasksView: View {
                         TaskRow(task: task)
                             .contentShape(Rectangle())
                             .onTapGesture { editing = task }
+                            .contextMenu {
+                                if task.planning == .backlog {
+                                    Button("Make Active", systemImage: "arrow.up.circle") {
+                                        model.plan(task, as: .active)
+                                    }
+                                } else {
+                                    Button("Move to Backlog", systemImage: "tray") {
+                                        model.plan(task, as: .backlog)
+                                    }
+                                }
+                            }
                     }
                     .listStyle(.plain)
                 }

@@ -4,6 +4,9 @@ extension TasksModel {
     /// The Tasks folder in the app's Documents, which Files and Finder show.
     static let documentsFolder = URL.documentsDirectory.appending(path: "Tasks", directoryHint: .isDirectory)
 
+    /// Where the Device ID lives: on this Device only, outside every Synced folder.
+    static let deviceFolder = URL.applicationSupportDirectory.appending(path: "Device", directoryHint: .isDirectory)
+
     /// The Tasks for this launch: the Tasks folder. For UI tests and screenshots
     /// (`-UITesting…`) it is empty and temporary, with sample Tasks when
     /// launched with `-UITestingOpenTasks`.
@@ -42,6 +45,7 @@ extension TasksModel {
     /// The store in `folder`, created if needed. Where that fails, a temporary one:
     /// the app still runs, its Tasks just don't stay.
     private static func openOrTemporary(_ folder: URL) -> TaskStore {
-        (try? TaskStore.open(root: folder.path)) ?? (try! TaskStore.open(root: temporaryFolder().path))
+        (try? TaskStore.open(root: folder.path, deviceFolder: deviceFolder.path))
+            ?? (try! TaskStore.open(root: temporaryFolder().path, deviceFolder: temporaryFolder().path))
     }
 }

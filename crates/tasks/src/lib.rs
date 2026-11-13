@@ -5,6 +5,7 @@
 //! plain Rust with no FFI concerns; foreign-language clients go through
 //! `pkm-bindings`.
 
+mod history;
 mod store;
 
 pub use store::{Error, Planning, Task, Tasks};

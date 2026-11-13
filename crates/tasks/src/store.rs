@@ -1,5 +1,6 @@
 //! The Tasks store: a folder of `<id>.md` files.
 
+use crate::history::{Event, History};
 use pkm_base::clock::{iso8601, now_ms};
 use pkm_base::front_matter::{Document, Value};
 use pkm_base::item_id::ItemId;
@@ -81,17 +82,20 @@ impl std::error::Error for Error {}
 #[derive(Debug)]
 pub struct Tasks {
     root: PathBuf,
+    history: History,
 }
 
 impl Tasks {
     /// The folder's name, in the app's storage and in the cloud.
     pub const FOLDER: &'static str = "Tasks";
 
-    /// Opens the Tasks in `root`, creating the folder if needed.
-    pub fn open(root: impl Into<PathBuf>) -> io::Result<Self> {
+    /// Opens the Tasks in `root`, creating the folder if needed. `device` is
+    /// this Device's ID, which names its History files in `root/.history`.
+    pub fn open(root: impl Into<PathBuf>, device: ItemId) -> io::Result<Self> {
         let root = root.into();
         fs::create_dir_all(&root)?;
-        Ok(Self { root })
+        let history = History::new(root.join(".history"), device);
+        Ok(Self { root, history })
     }
 
     /// Creates a Task at the end of its list, with priority 4. The Title is
@@ -117,6 +121,7 @@ impl Tasks {
             file.set_scalar("updated", iso8601(now_ms()));
             match self.write(&id, &file.render(), Overwrite::No) {
                 Ok(()) => {
+                    self.history.record(Event::Created, &id, now_ms())?;
                     return Ok(Task {
                         id: id.to_string(),
                         title,
@@ -158,6 +163,31 @@ impl Tasks {
                 format!("{description}\n")
             };
         })
+    }
+
+    /// Plans the Open Task `id` as `planning`, at the end of that list, and
+    /// records it in the History. A Task already planned so stays untouched.
+    /// Fails with `NotFound` if there is no such Task.
+    pub fn plan(&self, id: &str, planning: Planning) -> Result<Task, Error> {
+        let item = ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?;
+        let (_, current) = self.read_open(&item)?;
+        if current.planning == planning {
+            return Ok(current);
+        }
+        let order = self
+            .list(planning)?
+            .last()
+            .map_or(1.0, |last| last.order + 1.0);
+        let task = self.modify(id, |file| {
+            file.set_scalar("state", planning.state());
+            file.set_scalar("order", order.to_string());
+        })?;
+        let event = match planning {
+            Planning::Active => Event::MadeActive,
+            Planning::Backlog => Event::MovedToBacklog,
+        };
+        self.history.record(event, &item, now_ms())?;
+        Ok(task)
     }
 
     /// Adds `tag` to the Open Task `id`, as a Tag it already has: nothing
@@ -204,14 +234,19 @@ impl Tasks {
         Ok(found)
     }
 
+    /// The file of the Open Task `id` and the Task it describes.
+    fn read_open(&self, id: &ItemId) -> Result<(Document, Task), Error> {
+        let file = Document::parse(&fs::read_to_string(self.path(id))?)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "unreadable Task"))?;
+        let task = task_of(&file).ok_or(io::ErrorKind::NotFound)?;
+        Ok((file, task))
+    }
+
     /// Applies `change` to the Open Task `id`, bumps `updated` and saves.
     /// Every property `change` leaves alone, known or not, stays as it was.
     fn modify(&self, id: &str, change: impl FnOnce(&mut Document)) -> Result<Task, Error> {
         let id = ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?;
-        let path = self.path(&id);
-        let mut file = Document::parse(&fs::read_to_string(&path)?)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "unreadable Task"))?;
-        task_of(&file).ok_or(io::ErrorKind::NotFound)?;
+        let (mut file, _) = self.read_open(&id)?;
         change(&mut file);
         file.set_scalar("updated", iso8601(now_ms()));
         self.write(&id, &file.render(), Overwrite::Yes)?;
@@ -345,7 +380,7 @@ mod tests {
         }
 
         fn store(&self) -> Tasks {
-            Tasks::open(&self.0).unwrap()
+            Tasks::open(&self.0, ItemId::parse("dddddddddddd").unwrap()).unwrap()
         }
     }
 
@@ -630,5 +665,72 @@ mod tests {
             .replace("state: active", "state: done");
         fs::write(&path, text).unwrap();
         assert_eq!(tasks.tags_with_prefix("").unwrap(), ["closed"]);
+    }
+
+    fn history(dir: &Scratch) -> Vec<String> {
+        let mut lines = Vec::new();
+        for entry in fs::read_dir(dir.0.join(".history")).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_str().unwrap().to_owned();
+            assert!(
+                name.starts_with("dddddddddddd-") && name.ends_with(".log"),
+                "{name}"
+            );
+            lines.extend(fs::read_to_string(path).unwrap().lines().map(String::from));
+        }
+        lines
+    }
+
+    #[test]
+    fn a_backlog_task_can_be_made_active_and_moved_back() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        tasks.create("first", Planning::Active).unwrap();
+        let later = tasks.create("later", Planning::Backlog).unwrap();
+        let moved = tasks.plan(&later.id, Planning::Active).unwrap();
+        assert_eq!(moved.planning, Planning::Active);
+        assert_eq!(titles(&tasks, Planning::Active), ["first", "later"]);
+        assert!(titles(&tasks, Planning::Backlog).is_empty());
+        tasks.plan(&later.id, Planning::Backlog).unwrap();
+        assert_eq!(titles(&tasks, Planning::Backlog), ["later"]);
+    }
+
+    #[test]
+    fn planning_an_unknown_task_fails() {
+        let dir = Scratch::new();
+        assert!(dir.store().plan("aaaaaaaaaaaa", Planning::Active).is_err());
+    }
+
+    #[test]
+    fn planning_keeps_the_other_properties() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let task = tasks.create("t", Planning::Backlog).unwrap();
+        tasks.add_tag(&task.id, "home").unwrap();
+        let moved = tasks.plan(&task.id, Planning::Active).unwrap();
+        assert_eq!(moved.tags, ["home"]);
+    }
+
+    #[test]
+    fn creating_and_planning_are_recorded_by_id_and_time_only() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let task = tasks.create("Secret title", Planning::Backlog).unwrap();
+        tasks.add_tag(&task.id, "private").unwrap();
+        tasks.plan(&task.id, Planning::Active).unwrap();
+        tasks.plan(&task.id, Planning::Active).unwrap(); // no change, no line
+        tasks.plan(&task.id, Planning::Backlog).unwrap();
+        let lines = history(&dir);
+        let events: Vec<_> = lines
+            .iter()
+            .map(|l| {
+                let parts: Vec<_> = l.split(' ').collect();
+                assert_eq!(parts.len(), 3, "{l}");
+                assert!(parts[0].ends_with('Z'));
+                assert_eq!(parts[2], task.id);
+                parts[1]
+            })
+            .collect();
+        assert_eq!(events, ["created", "made-active", "moved-to-backlog"]);
     }
 }
