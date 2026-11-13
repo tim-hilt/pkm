@@ -101,9 +101,9 @@ impl Sides<'_> {
             return self.winner.cloned(); // the newer one
         }
         if SETS.contains(&key) {
-            return Some(Value::List(
-                self.merged_set(items(self.winner), items(self.loser)),
-            ));
+            // An empty set is no property at all, as the store writes it.
+            let set = self.merged_set(items(self.winner), items(self.loser));
+            return (!set.is_empty()).then_some(Value::List(set));
         }
         pick(self.base.as_ref(), &self.winner, &self.loser).cloned()
     }
@@ -216,6 +216,14 @@ mod tests {
         let file = merged(Some(&base), &local, &remote);
         assert_eq!(file.list("tags"), Some(&["home".to_owned()][..]));
         assert_eq!(file.scalar("priority"), Some("1"));
+    }
+
+    #[test]
+    fn the_last_tag_removed_leaves_no_property() {
+        let base = task("Milk", 4, &["home"], &[], T0);
+        let local = task("Milk", 4, &[], &[], T1);
+        let remote = task("Milk", 1, &["home"], &[], T2);
+        assert_eq!(merged(Some(&base), &local, &remote).get("tags"), None);
     }
 
     #[test]

@@ -156,4 +156,17 @@ extension AppNavigationTests {
         links.follow(URL(string: "pkm://tasks")!)
         #expect(tasks.editing == nil)
     }
+
+    @Test func aLinkToAClosedSubtaskOpensNoSheet() throws {
+        let (links, _, _, tasks) = try makeLinks()
+        tasks.add(title: "Parent", planning: .backlog)
+        _ = tasks.addSubtask(title: "Sub", under: tasks.tasks[0])
+        let sub = tasks.tasks[1]
+        tasks.toggleDone(sub)
+        tasks.commit()
+
+        links.follow(URL(string: "pkm://tasks/\(sub.id)")!)
+        #expect(tasks.planning == .active)
+        #expect(tasks.editing == nil)
+    }
 }

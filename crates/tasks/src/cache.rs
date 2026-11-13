@@ -23,6 +23,12 @@ struct Entry {
     node: Option<Node>,
 }
 
+impl Entry {
+    fn is_closed(&self) -> bool {
+        self.node.as_ref().is_some_and(|n| n.task.closed)
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct Cache {
     /// Never in the Synced folder.
@@ -55,7 +61,8 @@ impl Cache {
             self.restored = true;
         }
         let mut previous = std::mem::take(&mut self.entries);
-        let mut changed = false;
+        // Only Closed Tasks are persisted: an Open one changing leaves the file.
+        let mut stale = false;
         for item in fs::read_dir(folder)? {
             let path = item?.path();
             let (Some(name), true) = (
@@ -69,17 +76,18 @@ impl Cache {
             };
             let entry = match previous.remove(name) {
                 Some(entry) if entry.stamp == stamp => entry,
-                _ => {
-                    changed = true;
-                    Entry {
+                old => {
+                    let entry = Entry {
                         stamp,
                         node: read(&path),
-                    }
+                    };
+                    stale |= entry.is_closed() || old.is_some_and(|o| o.is_closed());
+                    entry
                 }
             };
             self.entries.insert(name.to_owned(), entry);
         }
-        if changed || !previous.is_empty() {
+        if stale || previous.values().any(Entry::is_closed) {
             drop(persist(&self.file, &self.entries)); // only a speed-up
         }
         Ok(self

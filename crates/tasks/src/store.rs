@@ -8,7 +8,7 @@ use pkm_base::item_id::ItemId;
 use pkm_base::random::Entropy;
 use pkm_base::tag;
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -817,9 +817,11 @@ fn resolve_blockers(nodes: &mut Nodes) {
 }
 
 /// Whether `from` is Blocked by `target`, directly or through other Tasks.
+/// Ends on loops Sync left that don't pass `target`.
 fn waits_for(nodes: &Nodes, from: &str, target: &str) -> bool {
-    let mut seen = vec![from];
-    while let Some(current) = seen.pop() {
+    let mut seen = HashSet::from([from]);
+    let mut todo = vec![from];
+    while let Some(current) = todo.pop() {
         let Some(node) = nodes.get(current) else {
             continue;
         };
@@ -827,8 +829,8 @@ fn waits_for(nodes: &Nodes, from: &str, target: &str) -> bool {
             if next == target {
                 return true;
             }
-            if !seen.contains(&next.as_str()) {
-                seen.push(next);
+            if seen.insert(next) {
+                todo.push(next);
             }
         }
     }
@@ -957,8 +959,17 @@ mod tests {
         }
 
         fn store(&self) -> Tasks {
-            let cache = self.0.parent().unwrap().join("cache");
-            Tasks::open(&self.0, ItemId::parse("dddddddddddd").unwrap(), cache).unwrap()
+            Tasks::open(
+                &self.0,
+                ItemId::parse("dddddddddddd").unwrap(),
+                self.cache(),
+            )
+            .unwrap()
+        }
+
+        /// Beside the Tasks folder, as a Device keeps it.
+        fn cache(&self) -> PathBuf {
+            self.0.parent().unwrap().join("cache")
         }
     }
 
@@ -1989,6 +2000,12 @@ mod tests {
         let listed = tasks.tasks(Planning::Active).unwrap();
         assert_eq!(listed.len(), 3);
         assert!(listed.iter().all(|t| t.blocked));
+        let d = tasks.create("d", Planning::Active).unwrap();
+        tasks.add_blocker(&d.id, "aaaaaaaaaaaa").unwrap();
+        assert!(matches!(
+            tasks.add_blocker("bbbbbbbbbbbb", &d.id),
+            Err(Error::BlockedByLoop)
+        ));
     }
 
     /// Makes every Task file unreadable, so a listing that still works read
@@ -2009,7 +2026,6 @@ mod tests {
         fs::set_permissions(path, fs::Permissions::from_mode(0o000)).unwrap();
     }
 
-    #[cfg(unix)]
     fn cache_fixture(dir: &Scratch) -> (Tasks, Task) {
         let tasks = dir.store();
         let parent = tasks.create("parent", Planning::Active).unwrap();
@@ -2090,29 +2106,39 @@ mod tests {
         let dir = Scratch::new();
         let (tasks, _) = cache_fixture(&dir);
         tasks.tasks(Planning::Active).unwrap();
-        let cache = dir.0.parent().unwrap().join("cache");
-        fs::write(&cache, "nonsense\n\t\t\n").unwrap();
+        fs::write(dir.cache(), "nonsense\n\t\t\n").unwrap();
         assert_eq!(dir.store().tasks(Planning::Active).unwrap().len(), 1);
     }
 
     #[test]
-    fn the_cache_is_not_in_the_synced_folder() {
+    fn the_cache_is_kept_outside_the_synced_folder() {
         let dir = Scratch::new();
-        cache_fixture_any(&dir);
-        let cache = dir.0.parent().unwrap().join("cache");
-        assert!(cache.exists());
+        let (tasks, _) = cache_fixture(&dir);
+        tasks.tasks(Planning::Active).unwrap();
+        assert!(dir.cache().exists());
         let names: Vec<_> = fs::read_dir(&dir.0)
             .unwrap()
-            .map(|e| e.unwrap().file_name())
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
             .collect();
-        assert!(names.iter().all(|n| n.to_str().unwrap() != "cache"));
+        assert!(
+            names.iter().all(|n| n.ends_with(".md") || n == ".history"),
+            "{names:?}"
+        );
     }
 
-    fn cache_fixture_any(dir: &Scratch) {
-        let tasks = dir.store();
-        let task = tasks.create("t", Planning::Active).unwrap();
-        tasks.close(&task.id, Closing::Done).unwrap();
+    #[test]
+    fn the_cache_file_is_rewritten_only_when_a_closed_task_changes() {
+        let dir = Scratch::new();
+        let (tasks, _) = cache_fixture(&dir);
+        let parent = tasks.tasks(Planning::Active).unwrap().remove(0);
+        fs::remove_file(dir.cache()).unwrap();
+        tasks.edit(&parent.id, "renamed", "", 1).unwrap();
+        tasks.create("new", Planning::Active).unwrap();
+        tasks.tasks(Planning::Active).unwrap();
+        assert!(!dir.cache().exists());
+        tasks.close(&parent.id, Closing::Rejected).unwrap();
         tasks.commit().unwrap();
         tasks.tasks(Planning::Active).unwrap();
+        assert!(dir.cache().exists());
     }
 }

@@ -32,16 +32,17 @@ final class TasksModel {
         }
     }
 
-    /// Opens the sheet of the Task `id`, over the list it is in. An unknown `id`
-    /// (or `nil`) opens no sheet; an unknown one shows the Active list.
+    /// Opens the sheet of the Open Task `id`, over the list it is in. `nil` opens
+    /// no sheet; an unknown or Closed `id` shows the Active list.
     func open(id: String?) {
         editing = nil
         guard let id else { return }
+        let isTask = { (task: ListedTask) in task.id == id && !task.closed }
         let list = [Planning.active, .backlog].first {
-            ((try? store.tasks(planning: $0)) ?? []).contains { $0.id == id }
+            ((try? store.tasks(planning: $0)) ?? []).contains(where: isTask)
         }
         planning = list ?? .active
-        editing = tasks.first { $0.id == id }
+        editing = tasks.first(where: isTask)
     }
 
     func isCollapsed(_ task: ListedTask) -> Bool { collapsed.contains(task.id) }
