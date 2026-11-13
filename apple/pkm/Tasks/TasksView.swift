@@ -5,6 +5,7 @@ struct TasksView: View {
     @Environment(TasksModel.self) private var model
     @State private var isAdding = false
     @State private var editing: OpenTask?
+    @State private var subtaskParent: OpenTask?
 
     var body: some View {
         @Bindable var model = model
@@ -17,24 +18,32 @@ struct TasksView: View {
                         Text(model.planning == .active ? "Nothing active." : "The Backlog is empty.")
                     }
                 } else {
-                    List(model.tasks) { task in
-                        TaskRow(task: task) { model.toggleDone(task) }
-                            .contentShape(Rectangle())
-                            .onTapGesture { editing = task }
-                            .contextMenu {
-                                if task.planning == .backlog {
-                                    Button("Make Active", systemImage: "arrow.up.circle") {
-                                        model.plan(task, as: .active)
-                                    }
-                                } else {
-                                    Button("Move to Backlog", systemImage: "tray") {
-                                        model.plan(task, as: .backlog)
+                    List(model.rows) { task in
+                        TaskRow(
+                            task: task, isCollapsed: model.isCollapsed(task),
+                            onCircle: { model.toggleDone(task) }, onDisclose: { model.toggleCollapsed(task) }
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture { if !task.closed { editing = task } }
+                        .contextMenu {
+                            if !task.closed {
+                                Button("Add Subtask", systemImage: "plus.circle") { subtaskParent = task }
+                                if task.depth == 0 {  // a Subtask follows its top-level Task
+                                    if task.planning == .backlog {
+                                        Button("Make Active", systemImage: "arrow.up.circle") {
+                                            model.plan(task, as: .active)
+                                        }
+                                    } else {
+                                        Button("Move to Backlog", systemImage: "tray") {
+                                            model.plan(task, as: .backlog)
+                                        }
                                     }
                                 }
                                 Button("Reject", systemImage: "xmark.circle", role: .destructive) {
                                     model.close(task, as: .rejected)
                                 }
                             }
+                        }
                     }
                     .listStyle(.plain)
                 }
@@ -60,6 +69,7 @@ struct TasksView: View {
             .animation(.default, value: model.closed)
             .addButton("New Task", identifier: "add-task") { isAdding = true }
             .sheet(isPresented: $isAdding) { NewTaskSheet(planning: model.planning) }
+            .sheet(item: $subtaskParent) { NewTaskSheet(planning: $0.planning, parent: $0) }
             .sheet(item: $editing) { EditTaskSheet(task: $0) }
         }
     }
@@ -87,22 +97,38 @@ private struct ClosedToast: View {
 
 /// One Task: a circle, coloured by Priority and filled while Done, and beside
 /// it the Title, the Description faded on one line, and the Tags fainter still.
-/// `onCircle` is a tap on the circle.
+/// A Subtask is indented, a Parent has a chevron to collapse it, a Closed Subtask
+/// is struck through. `onCircle` is a tap on the circle.
 private struct TaskRow: View {
     let task: OpenTask
+    let isCollapsed: Bool
     let onCircle: () -> Void
+    let onDisclose: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
+            Button(action: onDisclose) {
+                Image(systemName: "chevron.right")
+                    .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+            }
+            .buttonStyle(.plain)
+            .opacity(task.hasSubtasks ? 1 : 0)
+            .disabled(!task.hasSubtasks)
+            .accessibilityLabel(isCollapsed ? "Expand" : "Collapse")
             Button(action: onCircle) {
                 Image(systemName: task.done ? "circle.inset.filled" : "circle")
                     .font(.title2)
                     .foregroundStyle(task.priorityColor)
             }
             .buttonStyle(.plain)
+            .disabled(task.closed)
             .accessibilityLabel(task.done ? "Revert Done" : "Done")
             VStack(alignment: .leading, spacing: 2) {
                 Text(task.title)
+                    .strikethrough(task.closed)
+                    .foregroundStyle(task.closed ? .secondary : .primary)
                 if !task.description.isEmpty {
                     Text(task.description)
                         .font(.subheadline)
@@ -119,6 +145,7 @@ private struct TaskRow: View {
             }
         }
         .padding(.vertical, 4)
+        .padding(.leading, CGFloat(task.depth) * 24)
     }
 }
 
@@ -133,15 +160,20 @@ extension OpenTask {
     }
 }
 
-/// Asks for a Title and Active or Backlog (Active unless the Backlog is shown).
+/// Asks for a Title and Active or Backlog (Active unless the Backlog is shown),
+/// or only a Title for a Subtask of `parent`.
 private struct NewTaskSheet: View {
     @Environment(TasksModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var title = ""
     @State private var planning: Planning
     @FocusState private var isTitleFocused: Bool
+    private let parent: OpenTask?
 
-    init(planning: Planning) { _planning = State(initialValue: planning) }
+    init(planning: Planning, parent: OpenTask? = nil) {
+        _planning = State(initialValue: planning)
+        self.parent = parent
+    }
 
     private var canAdd: Bool { !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
@@ -152,14 +184,16 @@ private struct NewTaskSheet: View {
                     .focused($isTitleFocused)
                     .onSubmit(add)
                     .accessibilityIdentifier("task-title")
-                Picker("List", selection: $planning) {
-                    Text("Active").tag(Planning.active)
-                    Text("Backlog").tag(Planning.backlog)
+                if parent == nil {
+                    Picker("List", selection: $planning) {
+                        Text("Active").tag(Planning.active)
+                        Text("Backlog").tag(Planning.backlog)
+                    }
+                    .pickerStyle(.segmented)
                 }
-                .pickerStyle(.segmented)
             }
             .formStyle(.grouped)
-            .navigationTitle("New Task")
+            .navigationTitle(parent == nil ? "New Task" : "New Subtask")
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
             #endif
@@ -178,7 +212,11 @@ private struct NewTaskSheet: View {
     }
 
     private func add() {
-        if model.add(title: title, planning: planning) { dismiss() }
+        let added =
+            if let parent { model.addSubtask(title: title, under: parent) } else {
+                model.add(title: title, planning: planning)
+            }
+        if added { dismiss() }
     }
 }
 

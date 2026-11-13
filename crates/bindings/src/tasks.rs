@@ -9,6 +9,7 @@ use pkm_tasks::{Closing, Error, Planning, Task, Tasks};
 pub enum TasksError {
     EmptyTitle,
     InvalidTag,
+    SubtaskNotPlannable,
     Failed(String),
 }
 
@@ -17,6 +18,7 @@ impl std::fmt::Display for TasksError {
         match self {
             Self::EmptyTitle => Error::EmptyTitle.fmt(f),
             Self::InvalidTag => Error::InvalidTag.fmt(f),
+            Self::SubtaskNotPlannable => Error::SubtaskNotPlannable.fmt(f),
             Self::Failed(message) => f.write_str(message),
         }
     }
@@ -33,6 +35,7 @@ impl From<Error> for TasksError {
         match e {
             Error::EmptyTitle => Self::EmptyTitle,
             Error::InvalidTag => Self::InvalidTag,
+            Error::SubtaskNotPlannable => Self::SubtaskNotPlannable,
             Error::Io(e) => e.into(),
         }
     }
@@ -52,7 +55,7 @@ pub enum Closing {
     Rejected,
 }
 
-/// An Open Task as the lists show it, see `pkm_tasks::Task` (named apart from
+/// A Task as the lists show it, see `pkm_tasks::Task` (named apart from
 /// Swift's `Task`).
 #[derive(uniffi::Record)]
 pub struct OpenTask {
@@ -67,6 +70,26 @@ pub struct OpenTask {
     pub tags: Vec<String>,
     /// Closed as Done, the Close still pending: shown in place, marked.
     pub done: bool,
+    /// A Closed Subtask of an Open Task: shown struck through.
+    pub closed: bool,
+    /// How deep it sits in the tree, 0 for a top-level Task.
+    pub depth: u32,
+    /// Whether it has Subtasks, which follow it in the list.
+    pub has_subtasks: bool,
+}
+
+impl OpenTask {
+    /// `task` and its Subtasks, each directly after its Parent.
+    fn flatten(mut task: Task, depth: u32, rows: &mut Vec<Self>) {
+        let subtasks = std::mem::take(&mut task.subtasks);
+        let mut row = Self::from(task);
+        row.depth = depth;
+        row.has_subtasks = !subtasks.is_empty();
+        rows.push(row);
+        for subtask in subtasks {
+            Self::flatten(subtask, depth + 1, rows);
+        }
+    }
 }
 
 impl From<Task> for OpenTask {
@@ -79,6 +102,9 @@ impl From<Task> for OpenTask {
             description: t.description,
             tags: t.tags,
             done: t.done,
+            closed: t.closed,
+            depth: 0,
+            has_subtasks: false,
         }
     }
 }
@@ -124,6 +150,12 @@ impl TaskStore {
         Ok(self.0.create(&title, planning)?.into())
     }
 
+    /// Creates a Subtask under a Task, refusing an empty Title; it follows its
+    /// top-level Task's Active or Backlog.
+    pub fn create_subtask(&self, parent: String, title: String) -> Result<OpenTask, TasksError> {
+        Ok(self.0.create_subtask(&parent, &title)?.into())
+    }
+
     /// Sets a Task's Title, Description and Priority, refusing an empty Title.
     pub fn edit(
         &self,
@@ -150,14 +182,14 @@ impl TaskStore {
         Ok(self.0.tags_with_prefix(&prefix)?)
     }
 
-    /// The Tasks planned as `planning`, in their order.
+    /// The Tasks planned as `planning`, in their order, as a pre-order walk of
+    /// the tree: each Task is followed by its Subtasks, marked by `depth`.
     pub fn tasks(&self, planning: Planning) -> Result<Vec<OpenTask>, TasksError> {
-        Ok(self
-            .0
-            .tasks(planning)?
-            .into_iter()
-            .map(Into::into)
-            .collect())
+        let mut rows = Vec::new();
+        for task in self.0.tasks(planning)? {
+            OpenTask::flatten(task, 0, &mut rows);
+        }
+        Ok(rows)
     }
 }
 

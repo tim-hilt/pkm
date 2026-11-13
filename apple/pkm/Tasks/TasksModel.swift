@@ -12,8 +12,30 @@ final class TasksModel {
     var planning: Planning = .active {
         didSet { reload() }
     }
-    /// The Open Tasks planned as `planning`, in their order.
+    /// The Tasks planned as `planning`, in their order, each followed by its Subtasks.
     private(set) var tasks: [OpenTask] = []
+    /// Parents whose Subtasks are hidden.
+    private var collapsed: Set<String> = []
+
+    /// `tasks` without the Subtasks of a collapsed Parent.
+    var rows: [OpenTask] {
+        var hiddenBelow: UInt32?
+        return tasks.filter { task in
+            if let depth = hiddenBelow {
+                if task.depth > depth { return false }
+                hiddenBelow = nil
+            }
+            if collapsed.contains(task.id) { hiddenBelow = task.depth }
+            return true
+        }
+    }
+
+    func isCollapsed(_ task: OpenTask) -> Bool { collapsed.contains(task.id) }
+
+    /// Hides or shows a Parent's Subtasks.
+    func toggleCollapsed(_ task: OpenTask) {
+        if !collapsed.insert(task.id).inserted { collapsed.remove(task.id) }
+    }
 
     /// The Close that can still be Reverted, for the toast.
     struct Closed: Equatable {
@@ -35,6 +57,15 @@ final class TasksModel {
     func add(title: String, planning: Planning) -> Bool {
         guard (try? store.create(title: title, planning: planning)) != nil else { return false }
         if self.planning == planning { reload() } else { self.planning = planning }
+        return true
+    }
+
+    /// Adds a Subtask under `parent` and shows it. False, adding nothing, if the Title is empty.
+    @discardableResult
+    func addSubtask(title: String, under parent: OpenTask) -> Bool {
+        guard (try? store.createSubtask(parent: parent.id, title: title)) != nil else { return false }
+        collapsed.remove(parent.id)
+        reload()
         return true
     }
 

@@ -7,9 +7,10 @@ use pkm_base::item_id::ItemId;
 use pkm_base::random::Entropy;
 use pkm_base::tag;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 const DEFAULT_PRIORITY: u8 = 4;
@@ -56,11 +57,12 @@ impl Closing {
 /// A Close not yet saved, which `revert` can still take back.
 #[derive(Debug, Clone)]
 struct Pending {
-    id: ItemId,
+    /// The Task and its Open Subtasks, which are Closed with it.
+    ids: Vec<ItemId>,
     closing: Closing,
 }
 
-/// An Open Task as the lists show it.
+/// A Task as the lists show it: Open, or a Closed Subtask of an Open one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Task {
     pub id: String,
@@ -75,6 +77,12 @@ pub struct Task {
     /// Closed as Done, but the Close is still pending: the list keeps the Task
     /// in place, marked.
     pub done: bool,
+    /// Already Closed: only Subtasks of an Open Task are listed so.
+    pub closed: bool,
+    /// The Parent's ID, if this is a Subtask.
+    pub parent: Option<String>,
+    /// In their order; empty for a Closed Task.
+    pub subtasks: Vec<Task>,
 }
 
 #[derive(Debug)]
@@ -83,6 +91,8 @@ pub enum Error {
     EmptyTitle,
     /// A Tag with a forbidden character, or empty, or a misplaced `/`.
     InvalidTag,
+    /// A Subtask follows its top-level Task's Active or Backlog.
+    SubtaskNotPlannable,
     Io(io::Error),
 }
 
@@ -104,6 +114,9 @@ impl std::fmt::Display for Error {
             Self::EmptyTitle => f.write_str("A Task needs a Title."),
             Self::InvalidTag => {
                 f.write_str("A Tag uses a-z, 0-9, - and /, and doesn't start or end with /.")
+            }
+            Self::SubtaskNotPlannable => {
+                f.write_str("A Subtask follows its Task's Active or Backlog.")
             }
             Self::Io(e) => e.fmt(f),
         }
@@ -141,36 +154,51 @@ impl Tasks {
     /// Creates a Task at the end of its list, with priority 4. The Title is
     /// trimmed and kept to one line (line breaks become spaces).
     pub fn create(&self, title: &str, planning: Planning) -> Result<Task, Error> {
-        let title = one_line(title);
-        if title.is_empty() {
-            return Err(Error::EmptyTitle);
-        }
-        let order = self
-            .list(planning)?
-            .last()
-            .map_or(1.0, |last| last.order + 1.0);
+        let title = checked_title(title)?;
+        let order = next_order(&self.load()?, None, planning);
+        self.insert(&title, planning, None, order)
+    }
+
+    /// Creates a Subtask at the end of the Open Task `parent`'s Subtasks. It
+    /// follows its top-level Task's Active or Backlog. Fails with `NotFound`
+    /// if there is no such Open Task.
+    pub fn create_subtask(&self, parent: &str, title: &str) -> Result<Task, Error> {
+        let title = checked_title(title)?;
+        let nodes = self.load()?;
+        let parent = nodes
+            .get(parent)
+            .filter(|n| !n.task.closed)
+            .ok_or(io::ErrorKind::NotFound)?;
+        let planning = parent.task.planning;
+        let order = next_order(&nodes, Some(&parent.task.id), planning);
+        self.insert(&title, planning, Some(&parent.task.id), order)
+    }
+
+    /// Saves a new Task under a fresh Item ID and records its creation.
+    fn insert(
+        &self,
+        title: &str,
+        planning: Planning,
+        parent: Option<&str>,
+        order: f64,
+    ) -> Result<Task, Error> {
         let mut entropy = Entropy::from_system();
         loop {
             let id = ItemId::new(&mut entropy);
             let mut file = Document::default();
             file.set_scalar("id", id.as_str());
-            file.set_scalar("title", &title);
+            file.set_scalar("title", title);
             file.set_scalar("priority", DEFAULT_PRIORITY.to_string());
             file.set_scalar("state", planning.state());
+            if let Some(parent) = parent {
+                file.set_scalar("parent", parent);
+            }
             file.set_scalar("order", order.to_string());
             file.set_scalar("updated", iso8601(now_ms()));
             match self.write(&id, &file.render(), Overwrite::No) {
                 Ok(()) => {
                     self.history.record(Event::Created, &id, now_ms())?;
-                    return Ok(Task {
-                        id: id.to_string(),
-                        title,
-                        priority: DEFAULT_PRIORITY,
-                        planning,
-                        description: String::new(),
-                        tags: Vec::new(),
-                        done: false,
-                    });
+                    return Ok(task_of(&file).ok_or(io::ErrorKind::InvalidData)?);
                 }
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
                 Err(e) => return Err(e.into()),
@@ -189,10 +217,7 @@ impl Tasks {
         description: &str,
         priority: u8,
     ) -> Result<Task, Error> {
-        let title = one_line(title);
-        if title.is_empty() {
-            return Err(Error::EmptyTitle);
-        }
+        let title = checked_title(title)?;
         let priority = priority.clamp(1, 4);
         let description = description.trim();
         self.modify(id, |file| {
@@ -206,40 +231,62 @@ impl Tasks {
         })
     }
 
-    /// Plans the Open Task `id` as `planning`, at the end of that list, and
-    /// records it in the History. A Task already planned so stays untouched.
-    /// Fails with `NotFound` if there is no such Task.
+    /// Plans the Open top-level Task `id` as `planning`, at the end of that
+    /// list, with its Open Subtasks, and records it in the History for each. A
+    /// Task already planned so stays untouched. Fails with `NotFound` if there
+    /// is no such Task and `SubtaskNotPlannable` for a Subtask.
     pub fn plan(&self, id: &str, planning: Planning) -> Result<Task, Error> {
-        let item = ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?;
-        let (_, current) = self.read_open(&item)?;
-        if current.planning == planning {
-            return Ok(current);
+        let nodes = self.load()?;
+        let task = &nodes
+            .get(id)
+            .filter(|n| !n.task.closed)
+            .ok_or(io::ErrorKind::NotFound)?
+            .task;
+        if task.parent.is_some() {
+            return Err(Error::SubtaskNotPlannable);
         }
-        let order = self
-            .list(planning)?
-            .last()
-            .map_or(1.0, |last| last.order + 1.0);
-        let task = self.modify(id, |file| {
-            file.set_scalar("state", planning.state());
-            file.set_scalar("order", order.to_string());
-        })?;
+        if task.planning == planning {
+            return Ok(task.clone());
+        }
+        let order = next_order(&nodes, None, planning);
         let event = match planning {
             Planning::Active => Event::MadeActive,
             Planning::Backlog => Event::MovedToBacklog,
         };
-        self.history.record(event, &item, now_ms())?;
-        Ok(task)
+        let mut planned = None;
+        for item in open_subtree(&nodes, id) {
+            let file = self.rewrite(&item, |file| {
+                file.set_scalar("state", planning.state());
+                if item.as_str() == id {
+                    file.set_scalar("order", order.to_string());
+                    file.remove("parent"); // a repaired orphan
+                }
+            })?;
+            self.history.record(event, &item, now_ms())?;
+            planned.get_or_insert(file);
+        }
+        Ok(planned
+            .as_ref()
+            .and_then(task_of)
+            .ok_or(io::ErrorKind::InvalidData)?)
     }
 
-    /// Closes the Open Task `id` as a pending change: nothing is saved until
-    /// `commit`, and `revert` leaves no trace. A Close still pending is
-    /// committed first. There is no way to Delete a Task. Fails with
+    /// Closes the Open Task `id` and its Open Subtasks as one pending change:
+    /// nothing is saved until `commit`, and `revert` leaves no trace. A Close
+    /// still pending is committed first. There is no way to Delete a Task. Fails with
     /// `NotFound` if there is no such Open Task.
     pub fn close(&self, id: &str, closing: Closing) -> Result<(), Error> {
         let id = ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?;
         self.commit()?;
-        self.read_open(&id)?;
-        *self.pending() = Some(Pending { id, closing });
+        let nodes = self.load()?;
+        nodes
+            .get(id.as_str())
+            .filter(|n| !n.task.closed)
+            .ok_or(io::ErrorKind::NotFound)?;
+        *self.pending() = Some(Pending {
+            ids: open_subtree(&nodes, id.as_str()),
+            closing,
+        });
         Ok(())
     }
 
@@ -248,14 +295,16 @@ impl Tasks {
         self.pending().take();
     }
 
-    /// Saves the pending Close, if any: sets the Task's `state` and appends
-    /// `done` or `rejected` to the History.
+    /// Saves the pending Close, if any: sets the `state` of the Task and its
+    /// Subtasks and appends `done` or `rejected` to the History for each.
     pub fn commit(&self) -> Result<(), Error> {
-        let Some(Pending { id, closing }) = self.pending().take() else {
+        let Some(Pending { ids, closing }) = self.pending().take() else {
             return Ok(());
         };
-        self.rewrite(&id, |file| file.set_scalar("state", closing.state()))?;
-        self.history.record(closing.event(), &id, now_ms())?;
+        for id in ids {
+            self.rewrite(&id, |file| file.set_scalar("state", closing.state()))?;
+            self.history.record(closing.event(), &id, now_ms())?;
+        }
         Ok(())
     }
 
@@ -332,37 +381,54 @@ impl Tasks {
         Ok(file)
     }
 
-    /// The Tasks planned as `planning`, in their order.
+    /// The Open top-level Tasks planned as `planning`, in their order, each
+    /// with its Subtasks. Closed Subtasks of an Open Task are included, marked
+    /// closed; a pending Done shows marked, a pending Rejected not at all.
+    /// Structure Sync left broken is repaired here, not in the files.
     pub fn tasks(&self, planning: Planning) -> io::Result<Vec<Task>> {
-        Ok(self.list(planning)?.into_iter().map(|e| e.task).collect())
+        let mut nodes = self.load()?;
+        if let Some(Pending { ids, closing }) = self.pending().clone() {
+            for id in ids {
+                match closing {
+                    Closing::Rejected => drop(nodes.remove(id.as_str())),
+                    Closing::Done => {
+                        if let Some(node) = nodes.get_mut(id.as_str()) {
+                            node.task.done = true;
+                        }
+                    }
+                }
+            }
+        }
+        let mut children: HashMap<String, Vec<Node>> = HashMap::new();
+        let mut roots = Vec::new();
+        for node in nodes.into_values() {
+            match node.task.parent.clone() {
+                Some(parent) => children.entry(parent).or_default().push(node),
+                None if !node.task.closed && node.task.planning == planning => roots.push(node),
+                None => {}
+            }
+        }
+        roots.sort_by(by_order);
+        Ok(roots
+            .into_iter()
+            .map(|root| attach(root, &mut children))
+            .collect())
     }
 
-    /// The Entries planned as `planning`, in their order. A pending Done shows
-    /// marked, a pending Rejected not at all.
-    fn list(&self, planning: Planning) -> io::Result<Vec<Entry>> {
-        let pending = self.pending().clone();
-        let mut entries = Vec::new();
+    /// Every Task in the folder, repaired.
+    fn load(&self) -> io::Result<Nodes> {
+        let mut nodes = Nodes::new();
         for item in fs::read_dir(&self.root)? {
             let path = item?.path();
             if path.extension().is_some_and(|e| e == "md")
-                && let Some(mut entry) = read(&path, planning)
+                && let Ok(text) = fs::read_to_string(&path)
+                && let Some(node) = Document::parse(&text).as_ref().and_then(node_of)
             {
-                if let Some(p) = pending.as_ref().filter(|p| p.id.as_str() == entry.task.id) {
-                    match p.closing {
-                        Closing::Rejected => continue,
-                        Closing::Done => entry.task.done = true,
-                    }
-                }
-                entries.push(entry);
+                nodes.insert(node.task.id.clone(), node);
             }
         }
-        entries.sort_by(|a, b| {
-            a.order
-                .partial_cmp(&b.order)
-                .unwrap_or(Ordering::Equal)
-                .then_with(|| a.task.id.cmp(&b.task.id))
-        });
-        Ok(entries)
+        repair(&mut nodes);
+        Ok(nodes)
     }
 
     fn path(&self, id: &ItemId) -> PathBuf {
@@ -391,30 +457,22 @@ enum Overwrite {
     No,
 }
 
-struct Entry {
+struct Node {
     task: Task,
     order: f64,
 }
 
-/// The Task in `path`, if it is one planned as `planning`.
-fn read(path: &Path, planning: Planning) -> Option<Entry> {
-    let file = Document::parse(&fs::read_to_string(path).ok()?)?;
-    let task = task_of(&file).filter(|t| t.planning == planning)?;
-    let order = file
-        .scalar("order")
-        .and_then(|o| o.parse().ok())
-        .unwrap_or(0.0);
-    Some(Entry { task, order })
-}
+type Nodes = HashMap<String, Node>;
 
-/// The Open Task a file describes; `None` for a closed or malformed one.
-fn task_of(file: &Document) -> Option<Task> {
-    let planning = match file.scalar("state")? {
-        "active" => Planning::Active,
-        "backlog" => Planning::Backlog,
+/// The Task a file describes, Open or Closed; `None` for a malformed one.
+fn node_of(file: &Document) -> Option<Node> {
+    let (closed, planning) = match file.scalar("state")? {
+        "active" => (false, Planning::Active),
+        "backlog" => (false, Planning::Backlog),
+        "done" | "rejected" => (true, Planning::Active), // set by `repair`
         _ => return None,
     };
-    Some(Task {
+    let task = Task {
         id: file.scalar("id")?.to_owned(),
         title: file.scalar("title")?.to_owned(),
         priority: file
@@ -426,7 +484,120 @@ fn task_of(file: &Document) -> Option<Task> {
         description: file.body.trim().to_owned(),
         tags: tags_of(file),
         done: false,
-    })
+        closed,
+        parent: file
+            .scalar("parent")
+            .filter(|p| !p.is_empty())
+            .map(str::to_owned),
+        subtasks: Vec::new(),
+    };
+    let order = file
+        .scalar("order")
+        .and_then(|o| o.parse().ok())
+        .unwrap_or(0.0);
+    Some(Node { task, order })
+}
+
+/// The Open Task a file describes; `None` for a closed or malformed one.
+fn task_of(file: &Document) -> Option<Task> {
+    node_of(file).map(|n| n.task).filter(|task| !task.closed)
+}
+
+/// Fixes what no Device allowed but Sync can leave (ADR-0021): an Open Task
+/// whose Parent is missing or Closed becomes top-level, a Parent cycle is cut
+/// at the smallest Item ID, and a Subtask is planned as its top-level Task.
+fn repair(nodes: &mut Nodes) {
+    let orphans: Vec<String> = nodes
+        .values()
+        .filter(|n| {
+            n.task.parent.as_ref().is_some_and(|p| {
+                nodes
+                    .get(p)
+                    .is_none_or(|parent| parent.task.closed && !n.task.closed)
+            })
+        })
+        .map(|n| n.task.id.clone())
+        .collect();
+    for id in orphans {
+        nodes.entry(id).and_modify(|n| n.task.parent = None);
+    }
+
+    let mut ids: Vec<String> = nodes.keys().cloned().collect();
+    ids.sort();
+    for start in ids {
+        let mut seen = vec![start];
+        while let Some(parent) = nodes[&seen[seen.len() - 1]].task.parent.clone() {
+            if let Some(at) = seen.iter().position(|s| *s == parent) {
+                let smallest = seen[at..].iter().min().cloned().unwrap_or_default();
+                nodes.entry(smallest).and_modify(|n| n.task.parent = None);
+                break;
+            }
+            seen.push(parent);
+        }
+    }
+
+    let planned: Vec<(String, Planning)> = nodes
+        .keys()
+        .map(|id| {
+            let mut root = &nodes[id];
+            while let Some(parent) = &root.task.parent {
+                root = &nodes[parent];
+            }
+            (id.clone(), root.task.planning)
+        })
+        .collect();
+    for (id, planning) in planned {
+        nodes.entry(id).and_modify(|n| n.task.planning = planning);
+    }
+}
+
+/// `root` and its Open Descendants, parents before their Subtasks.
+fn open_subtree(nodes: &Nodes, root: &str) -> Vec<ItemId> {
+    let mut ids = vec![root.to_owned()];
+    let mut next = 0;
+    while next < ids.len() {
+        let parent = ids[next].clone();
+        next += 1;
+        let mut subtasks: Vec<&Node> = nodes
+            .values()
+            .filter(|n| !n.task.closed && n.task.parent.as_deref() == Some(&parent))
+            .collect();
+        subtasks.sort_by(|a, b| by_order(a, b));
+        ids.extend(subtasks.into_iter().map(|n| n.task.id.clone()));
+    }
+    ids.iter().filter_map(|id| ItemId::parse(id)).collect()
+}
+
+/// Where a new Task goes: after its siblings, which are the Subtasks of
+/// `parent` or, top-level, the Open Tasks planned as `planning`.
+fn next_order(nodes: &Nodes, parent: Option<&str>, planning: Planning) -> f64 {
+    nodes
+        .values()
+        .filter(|n| {
+            n.task.parent.as_deref() == parent
+                && (parent.is_some() || (!n.task.closed && n.task.planning == planning))
+        })
+        .map(|n| n.order)
+        .fold(0.0, f64::max)
+        + 1.0
+}
+
+fn by_order(a: &Node, b: &Node) -> Ordering {
+    a.order
+        .partial_cmp(&b.order)
+        .unwrap_or(Ordering::Equal)
+        .then_with(|| a.task.id.cmp(&b.task.id))
+}
+
+/// `node` with its Subtasks taken from `children`; a Closed Task has none.
+fn attach(node: Node, children: &mut HashMap<String, Vec<Node>>) -> Task {
+    let mut task = node.task;
+    if !task.closed {
+        let mut subtasks = children.remove(&task.id).unwrap_or_default();
+        subtasks.sort_by(by_order);
+        task.subtasks = subtasks.into_iter().map(|s| attach(s, children)).collect();
+    }
+    task
 }
 
 /// The valid Tags in a file; others, which only other tools could have
@@ -442,6 +613,15 @@ fn set_tags(file: &mut Document, tags: Vec<String>) {
         file.remove("tags");
     } else {
         file.set("tags", Value::List(tags));
+    }
+}
+
+fn checked_title(title: &str) -> Result<String, Error> {
+    let title = one_line(title);
+    if title.is_empty() {
+        Err(Error::EmptyTitle)
+    } else {
+        Ok(title)
     }
 }
 
@@ -948,5 +1128,214 @@ mod tests {
             text.contains("title: Renamed") && text.contains("state: done"),
             "{text}"
         );
+    }
+
+    fn subtask(tasks: &Tasks, parent: &Task, title: &str) -> Task {
+        tasks.create_subtask(&parent.id, title).unwrap()
+    }
+
+    fn sub_titles(task: &Task) -> Vec<&str> {
+        task.subtasks.iter().map(|t| t.title.as_str()).collect()
+    }
+
+    /// A raw Task file, as Sync or another tool could leave it.
+    fn raw(dir: &Scratch, id: &str, state: &str, parent: Option<&str>, order: u8) {
+        let parent = parent.map_or(String::new(), |p| format!("parent: {p}\n"));
+        let text = format!(
+            "---\nid: {id}\ntitle: {id}\npriority: 4\nstate: {state}\n{parent}order: {order}\nupdated: 2000-01-01T00:00:00Z\n---\n"
+        );
+        fs::create_dir_all(&dir.0).unwrap();
+        fs::write(dir.0.join(format!("{id}.md")), text).unwrap();
+    }
+
+    #[test]
+    fn a_subtask_is_listed_under_its_parent_in_the_parents_list() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let parent = tasks.create("parent", Planning::Backlog).unwrap();
+        let child = subtask(&tasks, &parent, "child");
+        let grandchild = subtask(&tasks, &child, "grandchild");
+        subtask(&tasks, &parent, "second");
+        assert_eq!(child.planning, Planning::Backlog);
+        assert_eq!(grandchild.parent.as_deref(), Some(child.id.as_str()));
+        assert!(titles(&tasks, Planning::Active).is_empty());
+        let listed = tasks.tasks(Planning::Backlog).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(sub_titles(&listed[0]), ["child", "second"]);
+        assert_eq!(sub_titles(&listed[0].subtasks[0]), ["grandchild"]);
+    }
+
+    #[test]
+    fn a_subtask_needs_an_open_parent_and_a_title() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let parent = tasks.create("p", Planning::Active).unwrap();
+        assert!(matches!(
+            tasks.create_subtask(&parent.id, " "),
+            Err(Error::EmptyTitle)
+        ));
+        assert!(matches!(
+            tasks.create_subtask("aaaaaaaaaaaa", "x"),
+            Err(Error::Io(e)) if e.kind() == io::ErrorKind::NotFound
+        ));
+        raw(&dir, "bbbbbbbbbbbb", "done", None, 1);
+        assert!(tasks.create_subtask("bbbbbbbbbbbb", "x").is_err());
+    }
+
+    #[test]
+    fn planning_a_task_rewrites_its_open_subtasks_and_records_each() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let parent = tasks.create("p", Planning::Backlog).unwrap();
+        let child = subtask(&tasks, &parent, "c");
+        let grandchild = subtask(&tasks, &child, "g");
+        raw(&dir, "cccccccccccc", "done", Some(&parent.id), 9);
+        let before = history(&dir).len();
+        tasks.plan(&parent.id, Planning::Active).unwrap();
+        assert!(file_of(&dir, &child).contains("state: active"));
+        assert!(file_of(&dir, &grandchild).contains("state: active"));
+        let lines = history(&dir);
+        let made_active: Vec<_> = lines[before..]
+            .iter()
+            .map(|l| l.rsplit(' ').collect::<Vec<_>>())
+            .collect();
+        assert_eq!(made_active.len(), 3);
+        for id in [&parent.id, &child.id, &grandchild.id] {
+            assert!(
+                made_active
+                    .iter()
+                    .any(|l| l[0] == id && l[1] == "made-active")
+            );
+        }
+        assert_eq!(
+            fs::read_to_string(dir.0.join("cccccccccccc.md"))
+                .unwrap()
+                .matches("state: done")
+                .count(),
+            1
+        );
+        assert_eq!(
+            sub_titles(&tasks.tasks(Planning::Active).unwrap()[0]),
+            ["c", "cccccccccccc"]
+        );
+    }
+
+    #[test]
+    fn a_subtask_cannot_be_made_active_or_moved_by_itself() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let parent = tasks.create("p", Planning::Backlog).unwrap();
+        let child = subtask(&tasks, &parent, "c");
+        for planning in [Planning::Active, Planning::Backlog] {
+            assert!(matches!(
+                tasks.plan(&child.id, planning),
+                Err(Error::SubtaskNotPlannable)
+            ));
+        }
+        assert!(file_of(&dir, &child).contains("state: backlog"));
+    }
+
+    #[test]
+    fn closing_a_parent_closes_its_open_subtasks_in_one_pending_change() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let parent = tasks.create("p", Planning::Active).unwrap();
+        let child = subtask(&tasks, &parent, "c");
+        let grandchild = subtask(&tasks, &child, "g");
+        let before = (file_of(&dir, &child), history(&dir));
+        tasks.close(&parent.id, Closing::Done).unwrap();
+        let listed = tasks.tasks(Planning::Active).unwrap();
+        assert!(listed[0].done && listed[0].subtasks[0].done);
+        tasks.revert();
+        tasks.commit().unwrap();
+        assert_eq!((file_of(&dir, &child), history(&dir)), before);
+
+        tasks.close(&parent.id, Closing::Rejected).unwrap();
+        assert!(tasks.tasks(Planning::Active).unwrap().is_empty());
+        tasks.commit().unwrap();
+        for task in [&parent, &child, &grandchild] {
+            assert!(file_of(&dir, task).contains("state: rejected"));
+            assert!(
+                history(&dir)
+                    .iter()
+                    .any(|l| l.ends_with(&format!(" rejected {}", task.id)))
+            );
+        }
+    }
+
+    #[test]
+    fn a_closed_subtask_stays_listed_under_its_open_parent_marked_closed() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let parent = tasks.create("p", Planning::Active).unwrap();
+        let open = subtask(&tasks, &parent, "open");
+        let gone = subtask(&tasks, &parent, "gone");
+        tasks.close(&gone.id, Closing::Rejected).unwrap();
+        assert_eq!(
+            sub_titles(&tasks.tasks(Planning::Active).unwrap()[0]),
+            ["open"]
+        );
+        tasks.commit().unwrap();
+        let listed = tasks.tasks(Planning::Active).unwrap();
+        let flags: Vec<_> = listed[0].subtasks.iter().map(|t| t.closed).collect();
+        assert_eq!(flags, [false, true]);
+        assert_eq!(listed[0].subtasks[0].id, open.id);
+        tasks.close(&parent.id, Closing::Done).unwrap();
+        tasks.commit().unwrap();
+        assert!(tasks.tasks(Planning::Active).unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_orphan_becomes_top_level() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        raw(&dir, "aaaaaaaaaaaa", "backlog", Some("zzzzzzzzzzzz"), 1);
+        assert_eq!(titles(&tasks, Planning::Backlog), ["aaaaaaaaaaaa"]);
+        tasks.plan("aaaaaaaaaaaa", Planning::Active).unwrap();
+        assert!(
+            !fs::read_to_string(dir.0.join("aaaaaaaaaaaa.md"))
+                .unwrap()
+                .contains("parent")
+        );
+    }
+
+    #[test]
+    fn a_parent_cycle_is_cut_at_the_smallest_item_id() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        raw(&dir, "bbbbbbbbbbbb", "active", Some("cccccccccccc"), 1);
+        raw(&dir, "cccccccccccc", "active", Some("aaaaaaaaaaaa"), 1);
+        raw(&dir, "aaaaaaaaaaaa", "active", Some("bbbbbbbbbbbb"), 1);
+        raw(&dir, "dddddddddddd", "active", Some("dddddddddddd"), 1);
+        let listed = tasks.tasks(Planning::Active).unwrap();
+        let roots: Vec<_> = listed.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(roots, ["aaaaaaaaaaaa", "dddddddddddd"]);
+        assert_eq!(sub_titles(&listed[0]), ["cccccccccccc"]);
+        assert_eq!(sub_titles(&listed[0].subtasks[0]), ["bbbbbbbbbbbb"]);
+    }
+
+    #[test]
+    fn a_subtask_is_planned_as_its_top_level_task() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        raw(&dir, "aaaaaaaaaaaa", "backlog", None, 1);
+        raw(&dir, "bbbbbbbbbbbb", "active", Some("aaaaaaaaaaaa"), 1);
+        raw(&dir, "cccccccccccc", "active", Some("bbbbbbbbbbbb"), 1);
+        assert!(titles(&tasks, Planning::Active).is_empty());
+        let listed = tasks.tasks(Planning::Backlog).unwrap();
+        assert_eq!(listed[0].subtasks[0].planning, Planning::Backlog);
+        assert_eq!(
+            listed[0].subtasks[0].subtasks[0].planning,
+            Planning::Backlog
+        );
+    }
+
+    #[test]
+    fn an_open_subtask_of_a_closed_parent_becomes_top_level() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        raw(&dir, "aaaaaaaaaaaa", "done", None, 1);
+        raw(&dir, "bbbbbbbbbbbb", "active", Some("aaaaaaaaaaaa"), 1);
+        assert_eq!(titles(&tasks, Planning::Active), ["bbbbbbbbbbbb"]);
     }
 }

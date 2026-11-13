@@ -136,4 +136,53 @@ import Testing
     @Test func forbiddenTagCharactersAreStripped() {
         #expect(TasksModel.allowedTagText("Work 1/x") == "ork1/x")
     }
+
+    @Test func aSubtaskIsListedAfterItsParentOneLevelDeeper() throws {
+        let model = try openModel()
+        model.add(title: "Parent", planning: .backlog)
+        #expect(model.addSubtask(title: "Child", under: model.tasks[0]))
+        #expect(!model.addSubtask(title: " ", under: model.tasks[0]))
+        #expect(model.tasks.map(\.title) == ["Parent", "Child"])
+        #expect(model.tasks.map(\.depth) == [0, 1])
+        #expect(model.tasks.map(\.hasSubtasks) == [true, false])
+    }
+
+    @Test func collapsingAParentHidesItsWholeSubtree() throws {
+        let model = try openModel()
+        model.add(title: "Parent", planning: .active)
+        model.addSubtask(title: "Child", under: model.tasks[0])
+        model.addSubtask(title: "Grandchild", under: model.tasks[1])
+        model.add(title: "Other", planning: .active)
+        model.toggleCollapsed(model.tasks[0])
+        #expect(model.rows.map(\.title) == ["Parent", "Other"])
+        model.toggleCollapsed(model.tasks[0])
+        #expect(model.rows.map(\.title) == ["Parent", "Child", "Grandchild", "Other"])
+    }
+
+    @Test func aSubtaskCannotBeMadeActiveByItself() throws {
+        let model = try openModel()
+        model.add(title: "Parent", planning: .backlog)
+        model.addSubtask(title: "Child", under: model.tasks[0])
+        model.plan(model.tasks[1], as: .active)
+        #expect(model.tasks.map(\.planning) == [.backlog, .backlog])
+    }
+
+    @Test func closingAParentClosesItsSubtasksAndRevertBringsThemBack() throws {
+        let model = try openModel()
+        model.add(title: "Parent", planning: .active)
+        model.addSubtask(title: "Child", under: model.tasks[0])
+        model.toggleDone(model.tasks[0])
+        #expect(model.tasks.map(\.done) == [true, true])
+        model.revert()
+        #expect(model.tasks.map(\.done) == [false, false])
+    }
+
+    @Test func aClosedSubtaskStaysListedMarkedClosed() throws {
+        let model = try openModel()
+        model.add(title: "Parent", planning: .active)
+        model.addSubtask(title: "Child", under: model.tasks[0])
+        model.close(model.tasks[1], as: .rejected)
+        model.commit()
+        #expect(model.tasks.map(\.closed) == [false, true])
+    }
 }
