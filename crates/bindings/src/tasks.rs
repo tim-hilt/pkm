@@ -1,7 +1,7 @@
 //! The Tasks surface of the UniFFI library (ADR-0007): the Tasks store. The
 //! logic lives in `pkm-tasks`.
 
-use pkm_tasks::{Closing, Error, Planning, Task, Tasks};
+use pkm_tasks::{Blocker, Closing, Error, Planning, Task, Tasks};
 
 /// Why a Task wasn't saved or the Tasks couldn't be read.
 #[derive(Debug, uniffi::Error)]
@@ -11,6 +11,10 @@ pub enum TasksError {
     InvalidTag,
     SubtaskNotPlannable,
     MoveIntoOwnSubtree,
+    BlockedByItself,
+    BlockedByParent,
+    BlockedBySubtask,
+    BlockedByLoop,
     Failed(String),
 }
 
@@ -21,6 +25,10 @@ impl std::fmt::Display for TasksError {
             Self::InvalidTag => Error::InvalidTag.fmt(f),
             Self::SubtaskNotPlannable => Error::SubtaskNotPlannable.fmt(f),
             Self::MoveIntoOwnSubtree => Error::MoveIntoOwnSubtree.fmt(f),
+            Self::BlockedByItself => Error::BlockedByItself.fmt(f),
+            Self::BlockedByParent => Error::BlockedByParent.fmt(f),
+            Self::BlockedBySubtask => Error::BlockedBySubtask.fmt(f),
+            Self::BlockedByLoop => Error::BlockedByLoop.fmt(f),
             Self::Failed(message) => f.write_str(message),
         }
     }
@@ -39,6 +47,10 @@ impl From<Error> for TasksError {
             Error::InvalidTag => Self::InvalidTag,
             Error::SubtaskNotPlannable => Self::SubtaskNotPlannable,
             Error::MoveIntoOwnSubtree => Self::MoveIntoOwnSubtree,
+            Error::BlockedByItself => Self::BlockedByItself,
+            Error::BlockedByParent => Self::BlockedByParent,
+            Error::BlockedBySubtask => Self::BlockedBySubtask,
+            Error::BlockedByLoop => Self::BlockedByLoop,
             Error::Io(e) => e.into(),
         }
     }
@@ -56,6 +68,14 @@ pub enum Planning {
 pub enum Closing {
     Done,
     Rejected,
+}
+
+/// A Task another Task is Blocked by; `closed` ones no longer block.
+#[uniffi::remote(Record)]
+pub struct Blocker {
+    pub id: String,
+    pub title: String,
+    pub closed: bool,
 }
 
 /// A Task as the lists show it, one row of the flattened tree, see
@@ -81,6 +101,10 @@ pub struct ListedTask {
     pub depth: u32,
     /// Whether it has Subtasks, which follow it in the list.
     pub has_subtasks: bool,
+    /// Whether any Task it's Blocked by is Open.
+    pub blocked: bool,
+    /// The Tasks it's Blocked by, Open or Closed.
+    pub blocked_by: Vec<Blocker>,
 }
 
 impl ListedTask {
@@ -111,6 +135,8 @@ impl From<Task> for ListedTask {
             parent: t.parent,
             depth: 0,
             has_subtasks: false,
+            blocked: t.blocked,
+            blocked_by: t.blocked_by,
         }
     }
 }
@@ -196,6 +222,17 @@ impl TaskStore {
     /// Removes a Tag from a Task.
     pub fn remove_tag(&self, id: String, tag: String) -> Result<ListedTask, TasksError> {
         Ok(self.0.remove_tag(&id, &tag)?.into())
+    }
+
+    /// Marks a Task as Blocked by another Open Task; refused for itself, its
+    /// Parent, its Subtask and a loop.
+    pub fn add_blocker(&self, id: String, blocker: String) -> Result<ListedTask, TasksError> {
+        Ok(self.0.add_blocker(&id, &blocker)?.into())
+    }
+
+    /// Removes a Blocked by from a Task.
+    pub fn remove_blocker(&self, id: String, blocker: String) -> Result<ListedTask, TasksError> {
+        Ok(self.0.remove_blocker(&id, &blocker)?.into())
     }
 
     /// The known Tags starting with `prefix`, sorted.

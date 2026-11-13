@@ -115,7 +115,7 @@ private struct ClosedToast: View {
 /// One Task: a circle, coloured by Priority and filled while Done, and beside
 /// it the Title, the Description faded on one line, and the Tags fainter still.
 /// A Subtask is indented, a Parent has a chevron to collapse it, a Closed Subtask
-/// is struck through. `onCircle` is a tap on the circle.
+/// is struck through, a Blocked Task has a lock at the end. `onCircle` is a tap on the circle.
 private struct TaskRow: View {
     let task: ListedTask
     let isCollapsed: Bool
@@ -159,6 +159,12 @@ private struct TaskRow: View {
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                 }
+            }
+            if task.blocked {
+                Spacer()
+                Image(systemName: "lock.fill")
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Blocked")
             }
         }
         .padding(.vertical, 4)
@@ -248,6 +254,8 @@ private struct EditTaskSheet: View {
     @State private var tags: [String]
     @State private var newTag = ""
     @State private var refusedTagText = false
+    @State private var blockedBy: [Blocker]
+    @State private var refusedBlockedBy = false
 
     init(task: ListedTask) {
         self.task = task
@@ -255,6 +263,7 @@ private struct EditTaskSheet: View {
         _description = State(initialValue: task.description)
         _priority = State(initialValue: task.priority)
         _tags = State(initialValue: task.tags)
+        _blockedBy = State(initialValue: task.blockedBy)
     }
 
     /// Existing Tags matching what is typed, not yet on the Task.
@@ -268,6 +277,12 @@ private struct EditTaskSheet: View {
         if !tags.contains(tag) { tags.append(tag) }
         newTag = ""
         refusedTagText = false
+    }
+
+    /// Open Tasks it could be Blocked by, not yet chosen here.
+    private var blockerCandidates: [ListedTask] {
+        let chosen = Set(blockedBy.map(\.id))
+        return model.blockerCandidates(for: task).filter { !chosen.contains($0.id) }
     }
 
     private var canSave: Bool { !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -316,6 +331,37 @@ private struct EditTaskSheet: View {
                         Button(tag) { addTag(tag) }
                     }
                 }
+                Section("Blocked by") {
+                    ForEach(blockedBy, id: \.id) { blocker in
+                        HStack {
+                            Text(blocker.title)
+                                .strikethrough(blocker.closed)
+                                .foregroundStyle(blocker.closed ? .secondary : .primary)
+                            Spacer()
+                            Button("Remove \(blocker.title)", systemImage: "minus.circle") {
+                                blockedBy.removeAll { $0.id == blocker.id }
+                            }
+                            .labelStyle(.iconOnly)
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                    if !blockerCandidates.isEmpty {
+                        Menu("Add Blocked by") {
+                            ForEach(blockerCandidates) { candidate in
+                                Button(candidate.title) {
+                                    blockedBy.append(Blocker(id: candidate.id, title: candidate.title, closed: false))
+                                    refusedBlockedBy = false
+                                }
+                            }
+                        }
+                        .accessibilityIdentifier("task-add-blocker")
+                    }
+                    if refusedBlockedBy {
+                        Text("That would make Tasks wait on each other.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             .formStyle(.grouped)
             .navigationTitle("Task")
@@ -338,6 +384,10 @@ private struct EditTaskSheet: View {
     private func save() {
         var saved = tags
         if isValidTag(tag: newTag), !saved.contains(newTag) { saved.append(newTag) }
+        guard model.setBlockedBy(task, to: blockedBy.map(\.id)) else {
+            refusedBlockedBy = true
+            return
+        }
         if model.edit(task, title: title, description: description, priority: priority, tags: saved) { dismiss() }
     }
 }

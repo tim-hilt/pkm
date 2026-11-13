@@ -14,6 +14,8 @@ use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 const DEFAULT_PRIORITY: u8 = 4;
+const TAGS: &str = "tags";
+const BLOCKED_BY: &str = "blocked-by";
 
 /// Where an Open Task is planned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +66,15 @@ struct Pending {
     at_ms: f64,
 }
 
+/// A Task another Task is Blocked by.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Blocker {
+    pub id: String,
+    pub title: String,
+    /// Closed (a pending Done counts): it no longer blocks.
+    pub closed: bool,
+}
+
 /// A Task as the lists show it: Open, or a Closed Subtask of an Open one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Task {
@@ -85,6 +96,12 @@ pub struct Task {
     pub parent: Option<String>,
     /// In their order; empty for a Closed Task.
     pub subtasks: Vec<Task>,
+    /// Whether any Task it's Blocked by is Open. Only listings fill this and
+    /// `blocked_by`; a Task a change returns has neither.
+    pub blocked: bool,
+    /// The Tasks it's Blocked by, Open or Closed, in the order they were added;
+    /// one that is missing is left out.
+    pub blocked_by: Vec<Blocker>,
 }
 
 #[derive(Debug)]
@@ -97,6 +114,14 @@ pub enum Error {
     SubtaskNotPlannable,
     /// A Task can't move under itself or one of its Subtasks.
     MoveIntoOwnSubtree,
+    /// A Task can't be Blocked by itself.
+    BlockedByItself,
+    /// A Task can't be Blocked by its Parent.
+    BlockedByParent,
+    /// A Task can't be Blocked by one of its Subtasks.
+    BlockedBySubtask,
+    /// The Blocked by would make Tasks wait on each other.
+    BlockedByLoop,
     Io(io::Error),
 }
 
@@ -125,6 +150,10 @@ impl std::fmt::Display for Error {
             Self::MoveIntoOwnSubtree => {
                 f.write_str("A Task can't move under itself or its Subtasks.")
             }
+            Self::BlockedByItself => f.write_str("A Task can't be Blocked by itself."),
+            Self::BlockedByParent => f.write_str("A Task can't be Blocked by its Parent."),
+            Self::BlockedBySubtask => f.write_str("A Task can't be Blocked by its Subtask."),
+            Self::BlockedByLoop => f.write_str("Tasks can't be Blocked by each other in a loop."),
             Self::Io(e) => e.fmt(f),
         }
     }
@@ -415,7 +444,7 @@ impl Tasks {
             let mut tags = tags_of(file);
             if !tags.iter().any(|t| t == tag) {
                 tags.push(tag.to_owned());
-                set_tags(file, tags);
+                set_list(file, TAGS, tags);
             }
         })
     }
@@ -426,7 +455,49 @@ impl Tasks {
         self.modify(id, |file| {
             let mut tags = tags_of(file);
             tags.retain(|t| t != tag);
-            set_tags(file, tags);
+            set_list(file, TAGS, tags);
+        })
+    }
+
+    /// Marks the Open Task `id` as Blocked by the Open Task `blocker`; one it
+    /// is Blocked by already stays as it is. Fails with `NotFound` if either is
+    /// no Open Task, and with `BlockedByItself`, `BlockedByParent`,
+    /// `BlockedBySubtask` or `BlockedByLoop` (`blocker` is itself Blocked by
+    /// `id`, directly or through others) for a Blocked by that makes no sense.
+    pub fn add_blocker(&self, id: &str, blocker: &str) -> Result<Task, Error> {
+        let nodes = self.load()?;
+        let open = |id: &str| nodes.get(id).filter(|n| !n.task.closed);
+        let task = open(id).ok_or(io::ErrorKind::NotFound)?;
+        let blocking = open(blocker).ok_or(io::ErrorKind::NotFound)?;
+        if id == blocker {
+            return Err(Error::BlockedByItself);
+        }
+        if task.task.parent.as_deref() == Some(blocker) {
+            return Err(Error::BlockedByParent);
+        }
+        if blocking.task.parent.as_deref() == Some(id) {
+            return Err(Error::BlockedBySubtask);
+        }
+        if waits_for(&nodes, blocker, id) {
+            return Err(Error::BlockedByLoop);
+        }
+        self.modify(id, |file| {
+            let mut blockers = blockers_of(file);
+            if !blockers.iter().any(|b| b == blocker) {
+                blockers.push(blocker.to_owned());
+                set_list(file, BLOCKED_BY, blockers);
+            }
+        })
+    }
+
+    /// Removes `blocker` from what the Open Task `id` is Blocked by; one it
+    /// isn't Blocked by is ignored. Fails with `NotFound` if there is no such
+    /// Task.
+    pub fn remove_blocker(&self, id: &str, blocker: &str) -> Result<Task, Error> {
+        self.modify(id, |file| {
+            let mut blockers = blockers_of(file);
+            blockers.retain(|b| b != blocker);
+            set_list(file, BLOCKED_BY, blockers);
         })
     }
 
@@ -468,9 +539,23 @@ impl Tasks {
     fn rewrite(&self, id: &ItemId, change: impl FnOnce(&mut Document)) -> Result<Document, Error> {
         let (mut file, _) = self.read_open(id)?;
         change(&mut file);
+        self.drop_missing_blockers(&mut file);
         file.set_scalar("updated", iso8601(now_ms()));
         self.write(id, &file.render(), Overwrite::Yes)?;
         Ok(file)
+    }
+
+    /// Forgets the Blocked by that point at a Task that no longer exists.
+    fn drop_missing_blockers(&self, file: &mut Document) {
+        let blockers = blockers_of(file);
+        let kept: Vec<String> = blockers
+            .iter()
+            .filter(|b| ItemId::parse(b).is_some_and(|b| self.path(&b).exists()))
+            .cloned()
+            .collect();
+        if kept.len() != blockers.len() {
+            set_list(file, BLOCKED_BY, kept);
+        }
     }
 
     /// The Open top-level Tasks planned as `planning`, in their order, each
@@ -491,6 +576,7 @@ impl Tasks {
                 }
             }
         }
+        resolve_blockers(&mut nodes);
         let mut children: HashMap<String, Vec<Node>> = HashMap::new();
         let mut roots = Vec::new();
         for node in nodes.into_values() {
@@ -554,6 +640,8 @@ enum Overwrite {
 struct Node {
     task: Task,
     order: f64,
+    /// The IDs the file lists, whether or not such a Task exists.
+    blocked_by: Vec<String>,
 }
 
 type Nodes = HashMap<String, Node>;
@@ -584,12 +672,18 @@ fn node_of(file: &Document) -> Option<Node> {
             .filter(|p| !p.is_empty())
             .map(str::to_owned),
         subtasks: Vec::new(),
+        blocked: false,
+        blocked_by: Vec::new(),
     };
     let order = file
         .scalar("order")
         .and_then(|o| o.parse().ok())
         .unwrap_or(0.0);
-    Some(Node { task, order })
+    Some(Node {
+        task,
+        order,
+        blocked_by: blockers_of(file),
+    })
 }
 
 /// The Open Task a file describes; `None` for a closed or malformed one.
@@ -643,6 +737,50 @@ fn repair(nodes: &mut Nodes) {
     for (id, planning) in planned {
         nodes.entry(id).and_modify(|n| n.task.planning = planning);
     }
+}
+
+/// Fills `blocked` and `blocked_by` of every Task. A Blocked by pointing at a
+/// missing Task is left out. Loops need no repair: each Task looks only at the
+/// Tasks it is Blocked by.
+fn resolve_blockers(nodes: &mut Nodes) {
+    let known: HashMap<String, Blocker> = nodes
+        .values()
+        .map(|n| {
+            let blocker = Blocker {
+                id: n.task.id.clone(),
+                title: n.task.title.clone(),
+                closed: n.task.closed || n.task.done,
+            };
+            (blocker.id.clone(), blocker)
+        })
+        .collect();
+    for node in nodes.values_mut() {
+        node.task.blocked_by = node
+            .blocked_by
+            .iter()
+            .filter_map(|id| known.get(id).cloned())
+            .collect();
+        node.task.blocked = node.task.blocked_by.iter().any(|b| !b.closed);
+    }
+}
+
+/// Whether `from` is Blocked by `target`, directly or through other Tasks.
+fn waits_for(nodes: &Nodes, from: &str, target: &str) -> bool {
+    let mut seen = vec![from];
+    while let Some(current) = seen.pop() {
+        let Some(node) = nodes.get(current) else {
+            continue;
+        };
+        for next in &node.blocked_by {
+            if next == target {
+                return true;
+            }
+            if !seen.contains(&next.as_str()) {
+                seen.push(next);
+            }
+        }
+    }
+    false
 }
 
 /// `root` and its Open Descendants, parents before their Subtasks.
@@ -720,12 +858,17 @@ fn tags_of(file: &Document) -> Vec<String> {
     tags.iter().filter(|t| tag::is_valid(t)).cloned().collect()
 }
 
+/// The IDs a file is Blocked by, whether or not such Tasks exist.
+fn blockers_of(file: &Document) -> Vec<String> {
+    file.list(BLOCKED_BY).unwrap_or_default().to_vec()
+}
+
 /// An empty list is no property at all.
-fn set_tags(file: &mut Document, tags: Vec<String>) {
-    if tags.is_empty() {
-        file.remove("tags");
+fn set_list(file: &mut Document, key: &str, items: Vec<String>) {
+    if items.is_empty() {
+        file.remove(key);
     } else {
-        file.set("tags", Value::List(tags));
+        file.set(key, Value::List(items));
     }
 }
 
@@ -1628,5 +1771,170 @@ mod tests {
                 "{id} {parent:?} {before:?}"
             );
         }
+    }
+
+    fn two_tasks(tasks: &Tasks) -> (Task, Task) {
+        (
+            tasks.create("a", Planning::Active).unwrap(),
+            tasks.create("b", Planning::Backlog).unwrap(),
+        )
+    }
+
+    fn listed(tasks: &Tasks, id: &str) -> Task {
+        [Planning::Active, Planning::Backlog]
+            .into_iter()
+            .flat_map(|p| tasks.tasks(p).unwrap())
+            .find(|t| t.id == id)
+            .unwrap()
+    }
+
+    #[test]
+    fn blocked_by_is_stored_as_a_block_list_and_listed_with_its_blockers() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let (a, b) = two_tasks(&tasks);
+        tasks.add_blocker(&a.id, &b.id).unwrap();
+        tasks.add_blocker(&a.id, &b.id).unwrap(); // twice keeps one
+        assert!(file_of(&dir, &a).contains(&format!("blocked-by:\n  - {}\n", b.id)));
+        let a = listed(&dir.store(), &a.id);
+        assert!(a.blocked);
+        assert_eq!(
+            a.blocked_by,
+            [Blocker {
+                id: b.id.clone(),
+                title: "b".into(),
+                closed: false
+            }]
+        );
+        assert!(!listed(&tasks, &b.id).blocked);
+    }
+
+    #[test]
+    fn removing_a_blocker_unblocks_and_drops_the_property() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let (a, b) = two_tasks(&tasks);
+        tasks.add_blocker(&a.id, &b.id).unwrap();
+        tasks.remove_blocker(&a.id, "zzzzzzzzzzzz").unwrap(); // not blocked by: ignored
+        tasks.remove_blocker(&a.id, &b.id).unwrap();
+        assert!(!listed(&tasks, &a.id).blocked);
+        assert!(!file_of(&dir, &a).contains("blocked-by"));
+    }
+
+    #[test]
+    fn a_task_stays_blocked_until_every_blocker_is_closed() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let (a, b) = two_tasks(&tasks);
+        let c = tasks.create("c", Planning::Active).unwrap();
+        tasks.add_blocker(&a.id, &b.id).unwrap();
+        tasks.add_blocker(&a.id, &c.id).unwrap();
+        tasks.close(&b.id, Closing::Done).unwrap();
+        assert!(listed(&tasks, &a.id).blocked);
+        tasks.commit().unwrap();
+        assert!(listed(&tasks, &a.id).blocked);
+        tasks.close(&c.id, Closing::Rejected).unwrap();
+        assert!(!listed(&tasks, &a.id).blocked);
+        tasks.revert();
+        assert!(listed(&tasks, &a.id).blocked);
+        tasks.close(&c.id, Closing::Done).unwrap();
+        tasks.commit().unwrap();
+        let a = listed(&tasks, &a.id);
+        assert!(!a.blocked);
+        assert_eq!(a.blocked_by.len(), 2);
+        assert!(a.blocked_by.iter().all(|b| b.closed));
+    }
+
+    #[test]
+    fn a_blocked_task_can_still_be_closed() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let (a, b) = two_tasks(&tasks);
+        tasks.add_blocker(&a.id, &b.id).unwrap();
+        tasks.close(&a.id, Closing::Done).unwrap();
+        tasks.commit().unwrap();
+        assert!(file_of(&dir, &a).contains("state: done"));
+    }
+
+    #[test]
+    fn senseless_blocked_by_is_refused_and_changes_nothing() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let (a, b) = two_tasks(&tasks);
+        let sub = subtask(&tasks, &a, "sub");
+        tasks.add_blocker(&a.id, &b.id).unwrap();
+        let before = file_of(&dir, &a);
+        assert!(matches!(
+            tasks.add_blocker(&a.id, &a.id),
+            Err(Error::BlockedByItself)
+        ));
+        assert!(matches!(
+            tasks.add_blocker(&sub.id, &a.id),
+            Err(Error::BlockedByParent)
+        ));
+        assert!(matches!(
+            tasks.add_blocker(&a.id, &sub.id),
+            Err(Error::BlockedBySubtask)
+        ));
+        assert!(matches!(
+            tasks.add_blocker(&b.id, &a.id),
+            Err(Error::BlockedByLoop)
+        ));
+        let c = tasks.create("c", Planning::Active).unwrap();
+        tasks.add_blocker(&b.id, &c.id).unwrap();
+        assert!(matches!(
+            tasks.add_blocker(&c.id, &a.id),
+            Err(Error::BlockedByLoop)
+        ));
+        assert_eq!(file_of(&dir, &a), before);
+    }
+
+    #[test]
+    fn blocking_by_an_unknown_or_closed_task_fails() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let (a, _) = two_tasks(&tasks);
+        raw(&dir, "dddddddddddd", "done", None, 1);
+        for blocker in ["aaaaaaaaaaaa", "dddddddddddd"] {
+            assert!(matches!(
+                tasks.add_blocker(&a.id, blocker),
+                Err(Error::Io(e)) if e.kind() == io::ErrorKind::NotFound
+            ));
+        }
+    }
+
+    /// `raw` with a `blocked-by` list.
+    fn raw_blocked(dir: &Scratch, id: &str, state: &str, blockers: &[&str]) {
+        raw(dir, id, state, None, 1);
+        let path = dir.0.join(format!("{id}.md"));
+        let list: String = blockers.iter().map(|b| format!("  - {b}\n")).collect();
+        let text = fs::read_to_string(&path)
+            .unwrap()
+            .replace("order: 1\n", &format!("order: 1\nblocked-by:\n{list}"));
+        fs::write(path, text).unwrap();
+    }
+
+    #[test]
+    fn a_blocked_by_pointing_at_a_missing_task_is_ignored_and_dropped_at_the_next_save() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        raw_blocked(&dir, "aaaaaaaaaaaa", "active", &["zzzzzzzzzzzz"]);
+        let a = listed(&tasks, "aaaaaaaaaaaa");
+        assert!(!a.blocked && a.blocked_by.is_empty());
+        assert!(file_of(&dir, &a).contains("zzzzzzzzzzzz"));
+        tasks.edit("aaaaaaaaaaaa", "t", "", 4).unwrap();
+        assert!(!file_of(&dir, &a).contains("blocked-by"));
+    }
+
+    #[test]
+    fn a_blocked_by_loop_left_by_sync_is_tolerated() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        raw_blocked(&dir, "aaaaaaaaaaaa", "active", &["bbbbbbbbbbbb"]);
+        raw_blocked(&dir, "bbbbbbbbbbbb", "active", &["aaaaaaaaaaaa"]);
+        raw_blocked(&dir, "cccccccccccc", "active", &["cccccccccccc"]);
+        let listed = tasks.tasks(Planning::Active).unwrap();
+        assert_eq!(listed.len(), 3);
+        assert!(listed.iter().all(|t| t.blocked));
     }
 }

@@ -8,4 +8,4 @@
 mod history;
 mod store;
 
-pub use store::{Closing, Error, Planning, Task, Tasks};
+pub use store::{Blocker, Closing, Error, Planning, Task, Tasks};

@@ -89,6 +89,17 @@
         }
       }
     },
+    "Add Blocked by": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add Blocked by"
+          }
+        }
+      }
+    },
     "Add Comment": {
       "extractionState": "manual",
       "localizations": {
@@ -316,6 +327,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Black"
+          }
+        }
+      }
+    },
+    "Blocked": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Blocked"
+          }
+        }
+      }
+    },
+    "Blocked by": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Blocked by"
           }
         }
       }
@@ -2153,6 +2186,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "That name cannot be used. Choose another name."
+          }
+        }
+      }
+    },
+    "That would make Tasks wait on each other.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That would make Tasks wait on each other."
           }
         }
       }

@@ -212,4 +212,36 @@ import Testing
         model.move(model.tasks[0], under: model.tasks[1])
         #expect(model.tasks.map(\.depth) == [0, 1])
     }
+
+    @Test func aTaskIsBlockedWhileATaskItIsBlockedByIsOpen() throws {
+        let model = try openModel()
+        for title in ["a", "b"] { model.add(title: title, planning: .active) }
+        #expect(model.setBlockedBy(model.tasks[0], to: [model.tasks[1].id]))
+        #expect(model.tasks.map(\.blocked) == [true, false])
+        #expect(model.tasks[0].blockedBy.map(\.title) == ["b"])
+        model.toggleDone(model.tasks[1])
+        model.commit()
+        #expect(model.tasks.map(\.blocked) == [false])
+    }
+
+    @Test func aBlockedByIsRemovedAndRefusedWhenItClosesALoop() throws {
+        let model = try openModel()
+        for title in ["a", "b"] { model.add(title: title, planning: .active) }
+        let (a, b) = (model.tasks[0], model.tasks[1])
+        #expect(model.setBlockedBy(a, to: [b.id]))
+        #expect(!model.setBlockedBy(model.tasks[1], to: [a.id]))
+        #expect(model.setBlockedBy(model.tasks[0], to: []))
+        #expect(model.tasks.map(\.blocked) == [false, false])
+    }
+
+    @Test func candidatesLeaveOutTheTaskItsParentItsSubtasksAndExistingBlockers() throws {
+        let model = try openModel()
+        for title in ["a", "b"] { model.add(title: title, planning: .active) }
+        model.add(title: "later", planning: .backlog)
+        model.planning = .active
+        model.addSubtask(title: "sub", under: model.tasks[0])
+        model.setBlockedBy(model.tasks[0], to: [model.tasks[2].id])
+        #expect(model.blockerCandidates(for: model.tasks[0]).map(\.title) == ["later"])
+        #expect(model.blockerCandidates(for: model.tasks[2]).map(\.title) == ["a", "sub", "later"])
+    }
 }
