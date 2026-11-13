@@ -1,0 +1,310 @@
+//! The Tasks store: a folder of `<id>.md` files.
+
+use pkm_base::clock::{iso8601, now_ms};
+use pkm_base::front_matter::Document;
+use pkm_base::item_id::ItemId;
+use pkm_base::random::Entropy;
+use std::cmp::Ordering;
+use std::fs;
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+
+const DEFAULT_PRIORITY: u8 = 4;
+
+/// Where an Open Task is planned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Planning {
+    Active,
+    Backlog,
+}
+
+impl Planning {
+    fn state(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Backlog => "backlog",
+        }
+    }
+}
+
+/// An Open Task as the lists show it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Task {
+    pub id: String,
+    pub title: String,
+    /// 1 (highest) to 4, the default.
+    pub priority: u8,
+    pub planning: Planning,
+}
+
+#[derive(Debug)]
+pub enum Error {
+    /// The Title is empty or only whitespace.
+    EmptyTitle,
+    Io(io::Error),
+}
+
+impl From<io::Error> for Error {
+    fn from(e: io::Error) -> Self {
+        Self::Io(e)
+    }
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyTitle => f.write_str("A Task needs a Title."),
+            Self::Io(e) => e.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+/// The Tasks in one folder (`Tasks` in the app's storage).
+#[derive(Debug)]
+pub struct Tasks {
+    root: PathBuf,
+}
+
+impl Tasks {
+    /// The folder's name, in the app's storage and in the cloud.
+    pub const FOLDER: &'static str = "Tasks";
+
+    /// Opens the Tasks in `root`, creating the folder if needed.
+    pub fn open(root: impl Into<PathBuf>) -> io::Result<Self> {
+        let root = root.into();
+        fs::create_dir_all(&root)?;
+        Ok(Self { root })
+    }
+
+    /// Creates a Task at the end of its list, with priority 4. The Title is
+    /// trimmed and kept to one line (line breaks become spaces).
+    pub fn create(&self, title: &str, planning: Planning) -> Result<Task, Error> {
+        let title = one_line(title);
+        if title.is_empty() {
+            return Err(Error::EmptyTitle);
+        }
+        let order = self
+            .list(planning)?
+            .last()
+            .map_or(1.0, |last| last.order + 1.0);
+        let mut entropy = Entropy::from_system();
+        loop {
+            let id = ItemId::new(&mut entropy);
+            let mut file = Document::default();
+            file.set_scalar("id", id.as_str());
+            file.set_scalar("title", &title);
+            file.set_scalar("priority", DEFAULT_PRIORITY.to_string());
+            file.set_scalar("state", planning.state());
+            file.set_scalar("order", order.to_string());
+            file.set_scalar("updated", iso8601(now_ms()));
+            match self.write_new(&id, &file.render()) {
+                Ok(()) => {
+                    return Ok(Task {
+                        id: id.to_string(),
+                        title,
+                        priority: DEFAULT_PRIORITY,
+                        planning,
+                    });
+                }
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+
+    /// The Tasks planned as `planning`, in their order.
+    pub fn tasks(&self, planning: Planning) -> io::Result<Vec<Task>> {
+        Ok(self.list(planning)?.into_iter().map(|e| e.task).collect())
+    }
+
+    fn list(&self, planning: Planning) -> io::Result<Vec<Entry>> {
+        let mut entries = Vec::new();
+        for item in fs::read_dir(&self.root)? {
+            let path = item?.path();
+            if path.extension().is_some_and(|e| e == "md")
+                && let Some(entry) = read(&path, planning)
+            {
+                entries.push(entry);
+            }
+        }
+        entries.sort_by(|a, b| {
+            a.order
+                .partial_cmp(&b.order)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| a.task.id.cmp(&b.task.id))
+        });
+        Ok(entries)
+    }
+
+    /// Writes `<id>.md` through a hidden scratch file, so a crash leaves no
+    /// torn Task and Sync never sees half of one. Fails with `AlreadyExists`
+    /// rather than replacing a Task.
+    fn write_new(&self, id: &ItemId, text: &str) -> io::Result<()> {
+        let path = self.root.join(format!("{id}.md"));
+        let scratch = self.root.join(format!(".{id}.tmp"));
+        if path.exists() {
+            return Err(io::ErrorKind::AlreadyExists.into());
+        }
+        let written = fs::File::create(&scratch).and_then(|mut f| f.write_all(text.as_bytes()));
+        written
+            .and_then(|()| fs::rename(&scratch, &path))
+            .inspect_err(|_| drop(fs::remove_file(&scratch)))
+    }
+}
+
+struct Entry {
+    task: Task,
+    order: f64,
+}
+
+/// The Task in `path`, if it is one planned as `planning`.
+fn read(path: &Path, planning: Planning) -> Option<Entry> {
+    let file = Document::parse(&fs::read_to_string(path).ok()?)?;
+    if file.scalar("state")? != planning.state() {
+        return None;
+    }
+    Some(Entry {
+        task: Task {
+            id: file.scalar("id")?.to_owned(),
+            title: file.scalar("title")?.to_owned(),
+            priority: file
+                .scalar("priority")
+                .and_then(|p| p.parse().ok())
+                .filter(|p| (1..=4).contains(p))
+                .unwrap_or(DEFAULT_PRIORITY),
+            planning,
+        },
+        order: file
+            .scalar("order")
+            .and_then(|o| o.parse().ok())
+            .unwrap_or(0.0),
+    })
+}
+
+fn one_line(title: &str) -> String {
+    title
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fresh, empty folder that removes itself.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new() -> Self {
+            let mut entropy = Entropy::from_system();
+            let dir = std::env::temp_dir().join(format!("pkm-tasks-{}", ItemId::new(&mut entropy)));
+            Self(dir.join("Tasks"))
+        }
+
+        fn store(&self) -> Tasks {
+            Tasks::open(&self.0).unwrap()
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            drop(fs::remove_dir_all(self.0.parent().unwrap()));
+        }
+    }
+
+    fn titles(tasks: &Tasks, planning: Planning) -> Vec<String> {
+        tasks
+            .tasks(planning)
+            .unwrap()
+            .into_iter()
+            .map(|t| t.title)
+            .collect()
+    }
+
+    #[test]
+    fn a_new_task_is_listed_where_it_was_planned() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        tasks.create("Buy milk", Planning::Active).unwrap();
+        tasks.create("Learn Rust", Planning::Backlog).unwrap();
+        assert_eq!(titles(&tasks, Planning::Active), ["Buy milk"]);
+        assert_eq!(titles(&tasks, Planning::Backlog), ["Learn Rust"]);
+    }
+
+    #[test]
+    fn tasks_are_listed_in_the_order_they_were_created() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        for title in ["one", "two", "three"] {
+            tasks.create(title, Planning::Active).unwrap();
+        }
+        assert_eq!(titles(&tasks, Planning::Active), ["one", "two", "three"]);
+    }
+
+    #[test]
+    fn a_new_task_has_priority_4() {
+        let dir = Scratch::new();
+        let task = dir.store().create("x", Planning::Active).unwrap();
+        assert_eq!(task.priority, 4);
+    }
+
+    #[test]
+    fn an_empty_or_blank_title_is_refused() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        for title in ["", "   ", "\n\t \n"] {
+            assert!(matches!(
+                tasks.create(title, Planning::Active),
+                Err(Error::EmptyTitle)
+            ));
+        }
+        assert!(titles(&tasks, Planning::Active).is_empty());
+    }
+
+    #[test]
+    fn the_title_is_trimmed_and_kept_to_one_line() {
+        let dir = Scratch::new();
+        let task = dir
+            .store()
+            .create("  Buy\n  milk \r\n\n and eggs ", Planning::Active)
+            .unwrap();
+        assert_eq!(task.title, "Buy milk and eggs");
+    }
+
+    #[test]
+    fn a_task_is_a_markdown_file_named_by_its_id_with_front_matter() {
+        let dir = Scratch::new();
+        let task = dir.store().create("Buy: milk", Planning::Backlog).unwrap();
+        let text = fs::read_to_string(dir.0.join(format!("{}.md", task.id))).unwrap();
+        let file = Document::parse(&text).unwrap();
+        assert_eq!(file.scalar("id"), Some(task.id.as_str()));
+        assert_eq!(file.scalar("title"), Some("Buy: milk"));
+        assert_eq!(file.scalar("priority"), Some("4"));
+        assert_eq!(file.scalar("state"), Some("backlog"));
+        assert!(file.scalar("order").is_some());
+        let updated = file.scalar("updated").unwrap();
+        assert!(updated.len() == 20 && updated.ends_with('Z'), "{updated}");
+    }
+
+    #[test]
+    fn tasks_persist_across_opens() {
+        let dir = Scratch::new();
+        dir.store().create("kept", Planning::Active).unwrap();
+        assert_eq!(titles(&dir.store(), Planning::Active), ["kept"]);
+    }
+
+    #[test]
+    fn files_that_are_no_tasks_are_not_listed() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        fs::write(dir.0.join("notes.txt"), "x").unwrap();
+        fs::write(dir.0.join("broken.md"), "---\ntitle: no end").unwrap();
+        fs::write(dir.0.join("plain.md"), "no front matter").unwrap();
+        assert!(titles(&tasks, Planning::Active).is_empty());
+    }
+}

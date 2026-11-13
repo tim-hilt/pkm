@@ -1,0 +1,11 @@
+# The Tasks Context: Tasks planned as Active or in the Backlog, kept as
+# Markdown files.
+[package]
+name = "pkm-tasks"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Front matter, Item IDs, the clock and the random generator.
+pkm-base = { path = "../base" }

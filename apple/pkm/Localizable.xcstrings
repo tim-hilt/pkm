@@ -45,6 +45,28 @@
         }
       }
     },
+    "Active": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Active"
+          }
+        }
+      }
+    },
+    "Add": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add"
+          }
+        }
+      }
+    },
     "Add Comment": {
       "extractionState": "manual",
       "localizations": {
@@ -228,6 +250,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Background"
+          }
+        }
+      }
+    },
+    "Backlog": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Backlog"
           }
         }
       }
@@ -1200,6 +1233,17 @@
         }
       }
     },
+    "List": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "List"
+          }
+        }
+      }
+    },
     "M": {
       "extractionState": "manual",
       "localizations": {
@@ -1277,6 +1321,17 @@
         }
       }
     },
+    "New Task": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Task"
+          }
+        }
+      }
+    },
     "No Drawings": {
       "extractionState": "manual",
       "localizations": {
@@ -1328,6 +1383,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Notes"
+          }
+        }
+      }
+    },
+    "Nothing active.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing active."
           }
         }
       }
@@ -1878,6 +1944,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "That name cannot be used. Choose another name."
+          }
+        }
+      }
+    },
+    "The Backlog is empty.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Backlog is empty."
           }
         }
       }

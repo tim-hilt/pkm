@@ -2,6 +2,7 @@
 //! exported here; the logic itself lives in `pkm-drawing` and `pkm-cloud`.
 
 mod books;
+mod tasks;
 
 use std::fmt;
 use std::path::Path;

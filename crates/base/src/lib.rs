@@ -3,6 +3,7 @@
 
 pub mod base64;
 pub mod clock;
+pub mod front_matter;
 pub mod item_id;
 pub mod json;
 pub mod random;

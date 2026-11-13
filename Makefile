@@ -111,11 +111,13 @@ lint:
 	swift format lint --strict -r $(SWIFT_SRC)
 	cargo fmt --all --check
 	cargo clippy --workspace --all-targets --locked -q -- -D warnings
-	@# ADR-0009, ADR-0017: pkm-base has no dependencies, pkm-drawing only pkm-base.
+	@# ADR-0009, ADR-0017: pkm-base has no dependencies, pkm-drawing and pkm-tasks only pkm-base.
 	@test "$$(cargo tree -p pkm-base -e normal --depth 1 --prefix none --locked | wc -l)" -eq 1 \
 		|| { echo 'error: crates/base must not have dependencies (ADR-0009)'; exit 1; }
 	@test "$$(cargo tree -p pkm-drawing -e normal --depth 1 --prefix none --locked | cut -d' ' -f1 | sort | tr '\n' ' ')" = "pkm-base pkm-drawing " \
 		|| { echo 'error: crates/drawing may only depend on pkm-base (ADR-0009)'; exit 1; }
+	@test "$$(cargo tree -p pkm-tasks -e normal --depth 1 --prefix none --locked | cut -d' ' -f1 | sort | tr '\n' ' ')" = "pkm-base pkm-tasks " \
+		|| { echo 'error: crates/tasks may only depend on pkm-base (ADR-0017)'; exit 1; }
 
 fmt: web-fmt
 	swift format -i -r $(SWIFT_SRC)
@@ -169,7 +171,7 @@ clean:
 	rm -rf apple/pkm.xcodeproj apple/build apple/Generated target web/generated web/dist
 
 # Screenshot of the Canvas with the sample Drawing open, for looking at layout:
-# make screenshot DEVICE=mac|ipad|iphone|web [SCREEN=canvas|settings|books|reader] [OUT=/tmp/wt-<device>.png]
+# make screenshot DEVICE=mac|ipad|iphone|web [SCREEN=canvas|settings|books|reader|tasks] [OUT=/tmp/wt-<device>.png]
 DEVICE ?= iphone
 screenshot: $(if $(filter web,$(DEVICE)),web-install web-wasm,apple-project)
 	DEVICE=$(DEVICE) SCREEN='$(SCREEN)' OUT='$(OUT)' scripts/screenshot.sh

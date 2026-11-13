@@ -31,6 +31,7 @@ struct ContentView: View {
                         Tab(value: context) {
                             switch context {
                             case .drawings: GalleryView(gallery: gallery)
+                            case .tasks: TasksView()
                             case .books: BooksView()
                             default: ComingSoonView(context: context)
                             }
@@ -83,7 +84,7 @@ extension AppNavigation {
 
     /// The navigation for this launch. The `-UITesting…` launch arguments
     /// (temporary stores, `make screenshot`) start on Drawings (Books for
-    /// `-UITestingOpenBooks` and `-UITestingOpenReader`) and leave the Device's last AppContext alone.
+    /// `-UITestingOpenBooks` and `-UITestingOpenReader`, Tasks for `-UITestingOpenTasks`) and leave the Device's last AppContext alone.
     @MainActor
     static func forLaunch() -> AppNavigation {
         guard ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("-UITesting") }) else {
@@ -93,6 +94,8 @@ extension AppNavigation {
         let arguments = ProcessInfo.processInfo.arguments
         if opensSettingsAtLaunch || arguments.contains("-UITestingOpenSampleDrawing") {
             navigation.selected = .drawings
+        } else if arguments.contains("-UITestingOpenTasks") {
+            navigation.selected = .tasks
         } else if arguments.contains("-UITestingOpenBooks") || arguments.contains("-UITestingOpenReader") {
             navigation.selected = .books
         }
