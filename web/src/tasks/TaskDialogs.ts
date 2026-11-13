@@ -11,7 +11,7 @@ function openDialog(
   fields: HTMLElement[],
   save: () => boolean,
   canSave: () => boolean = () => true,
-): void {
+): HTMLDialogElement {
   const dialog = make("dialog", "tasks-dialog");
   const heading = make("h2", "", [title]);
   dialog.setAttribute("aria-labelledby", (heading.id = `tasks-dialog-${nextId++}`));
@@ -33,6 +33,7 @@ function openDialog(
   dialog.addEventListener("close", () => dialog.remove());
   parent.append(dialog);
   dialog.showModal();
+  return dialog;
 }
 
 function field(label: string, control: HTMLElement): HTMLLabelElement {
@@ -82,7 +83,10 @@ export function newTaskDialog(model: TasksModel, host: HTMLElement, under?: List
     : [
         choice(
           "List",
-          lists.map(({ planning, title }) => ({ value: planning, text: title })),
+          lists.map(({ planning, title }) => ({
+            value: planning,
+            text: title,
+          })),
           planning,
           (value) => (planning = value),
         ),
@@ -99,16 +103,23 @@ export function newTaskDialog(model: TasksModel, host: HTMLElement, under?: List
 }
 
 /** Edits a Task's Title, Description, Priority, Tags and Blocked by; Save is off while the Title is empty. */
-export function editTaskDialog(model: TasksModel, task: ListedTask, parent: HTMLElement): void {
+export function editTaskDialog(
+  model: TasksModel,
+  task: ListedTask,
+  parent: HTMLElement,
+): HTMLDialogElement {
   const title = textInput(task.title);
   const description = make("textarea", "tasks-input");
   description.rows = 4;
   description.value = task.description;
   let priority = task.priority;
-  const priorities = [1, 2, 3, 4].map((value) => ({ value, text: `P${value}` }));
+  const priorities = [1, 2, 3, 4].map((value) => ({
+    value,
+    text: `P${value}`,
+  }));
   const tags = new TagField(model, [...task.tags]);
   const blockers = new BlockedByField(model.blockerCandidates(task), [...task.blockedBy]);
-  openDialog(
+  return openDialog(
     parent,
     "Task",
     "Save",

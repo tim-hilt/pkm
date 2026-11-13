@@ -44,7 +44,11 @@ export interface PendingClose {
 /** The two lists, in the order they are offered, and what an empty one says. */
 export const lists = [
   { planning: Planning.Active, title: "Active", empty: "Nothing active." },
-  { planning: Planning.Backlog, title: "Backlog", empty: "The Backlog is empty." },
+  {
+    planning: Planning.Backlog,
+    title: "Backlog",
+    empty: "The Backlog is empty.",
+  },
 ];
 
 /** What the edit view changes of a Task. */
@@ -67,6 +71,10 @@ export class TasksModel {
   onChange: () => void = () => {};
   /** Why the last save failed; `undefined` while saves go through. */
   failure: string | undefined;
+  /** Called after a change was written to storage, so that Sync follows. */
+  onSaved: () => void = () => {};
+  /** The Open Task whose edit view is shown, if any. */
+  editing: ListedTask | undefined;
   /** The Close the toast offers to Revert. */
   pendingClose: PendingClose | undefined;
   /** The Tasks planned as `planning`, in their order, each followed by its Subtasks. */
@@ -110,6 +118,36 @@ export class TasksModel {
       if (this.collapsed.has(task.id)) hiddenBelow = task.depth;
       return true;
     });
+  }
+
+  /**
+   * Shows the edit view of the Open Task `id`, over the list it is in;
+   * `undefined` shows none. An unknown or Closed `id` shows the Active list.
+   */
+  open(id: string | undefined): void {
+    this.editing = undefined;
+    if (id !== undefined) {
+      const isTask = (task: ListedTask) => task.id === id && !task.closed;
+      const found = lists
+        .map(({ planning }) => ({
+          planning,
+          task: this.read(planning).find(isTask),
+        }))
+        .find(({ task }) => task);
+      this.list = found?.planning ?? Planning.Active;
+      this.editing = found?.task;
+    }
+    this.reload();
+    this.onChange();
+  }
+
+  /** Sync wrote or deleted Task files: reads them again, after committing a pending Close so that it isn't lost. */
+  async syncDidChange(): Promise<void> {
+    this.commit();
+    await this.saving;
+    await this.files.reload();
+    this.reload();
+    this.onChange();
   }
 
   isCollapsed(task: ListedTask): boolean {
@@ -284,6 +322,7 @@ export class TasksModel {
   private save(): void {
     this.saving = this.files.save().then(
       () => {
+        this.onSaved();
         if (this.failure === undefined) return;
         this.failure = undefined;
         this.onChange();

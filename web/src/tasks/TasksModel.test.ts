@@ -71,8 +71,18 @@ describe("the Tasks list", () => {
 
   it("removes the Tags an edit leaves out", () => {
     model.add("Buy milk");
-    model.edit(first(), { title: "Buy milk", description: "", priority: 4, tags: ["a", "b"] });
-    model.edit(first(), { title: "Buy milk", description: "", priority: 4, tags: ["b"] });
+    model.edit(first(), {
+      title: "Buy milk",
+      description: "",
+      priority: 4,
+      tags: ["a", "b"],
+    });
+    model.edit(first(), {
+      title: "Buy milk",
+      description: "",
+      priority: 4,
+      tags: ["b"],
+    });
     expect(first().tags).toEqual(["b"]);
   });
 
@@ -80,10 +90,19 @@ describe("the Tasks list", () => {
     model.add("Buy milk");
     const task = first();
     expect(model.edit(task, { title: " ", description: "x", priority: 1, tags: [] })).toBe(false);
-    expect(model.edit(task, { title: "New", description: "x", priority: 1, tags: ["No!"] })).toBe(
-      false,
-    );
-    expect(first()).toMatchObject({ title: "Buy milk", description: "", priority: 4 });
+    expect(
+      model.edit(task, {
+        title: "New",
+        description: "x",
+        priority: 1,
+        tags: ["No!"],
+      }),
+    ).toBe(false);
+    expect(first()).toMatchObject({
+      title: "Buy milk",
+      description: "",
+      priority: 4,
+    });
   });
 
   it("moves a Task between the lists; it leaves the one shown", () => {
@@ -124,10 +143,19 @@ describe("the Tasks list", () => {
 
   it("saves every change to storage", async () => {
     model.add("Buy milk");
-    model.edit(first(), { title: "Buy milk", description: "", priority: 2, tags: ["home"] });
+    model.edit(first(), {
+      title: "Buy milk",
+      description: "",
+      priority: 2,
+      tags: ["home"],
+    });
     await model.saved();
     const reopened = new TasksModel(await TaskFiles.open(core, storage));
-    expect(reopened.tasks[0]).toMatchObject({ title: "Buy milk", priority: 2, tags: ["home"] });
+    expect(reopened.tasks[0]).toMatchObject({
+      title: "Buy milk",
+      priority: 2,
+      tags: ["home"],
+    });
   });
 
   it("reports a failed save", async () => {
@@ -155,7 +183,10 @@ describe("Done, Reject and Revert", () => {
     model.add("a");
     model.close(first(), Closing.Rejected);
     expect(titles()).toEqual([]);
-    expect(model.pendingClose).toEqual({ title: "a", closing: Closing.Rejected });
+    expect(model.pendingClose).toEqual({
+      title: "a",
+      closing: Closing.Rejected,
+    });
   });
 
   it("lets a Done Task leave once the toast goes away, and saves it", async () => {
@@ -351,5 +382,79 @@ describe("Blocked by", () => {
     model.setBlockedBy(task("a"), [task("b").id]);
     model.close(task("b"), Closing.Done);
     expect(task("a").blocked).toBe(false);
+  });
+});
+
+describe("opening a Task by its id", () => {
+  it("shows the list the Task is in, with the Task to edit", () => {
+    model.add("Later", Planning.Backlog);
+    const { id } = first();
+    model.planning = Planning.Active;
+    model.open(id);
+    expect(model.planning).toBe(Planning.Backlog);
+    expect(model.editing?.id).toBe(id);
+    model.open(undefined);
+    expect(model.editing).toBeUndefined();
+  });
+
+  it("shows the Active list for an unknown id", () => {
+    model.add("Later", Planning.Backlog);
+    model.open("unknown");
+    expect(model.planning).toBe(Planning.Active);
+    expect(model.editing).toBeUndefined();
+  });
+
+  it("opens no Closed Task", () => {
+    model.add("Parent");
+    model.addSubtask("Sub", first());
+    const sub = model.tasks[1];
+    model.close(sub, Closing.Done);
+    model.commit();
+    model.open(sub.id);
+    expect(model.planning).toBe(Planning.Active);
+    expect(model.editing).toBeUndefined();
+  });
+
+  it("tells its listener", () => {
+    model.add("Now");
+    let changes = 0;
+    model.onChange = () => changes++;
+    model.open(first().id);
+    expect(changes).toBe(1);
+  });
+});
+
+describe("Sync", () => {
+  it("shows the Tasks Sync wrote, and none it deleted", async () => {
+    model.add("Mine");
+    await model.saved();
+    const other = await TaskFiles.open(core, new MemoryStorage());
+    other.store.create("Theirs", Planning.Active);
+    const [path] = other.store.takeChanges().filter((p) => p.endsWith(".md"));
+    await storage.write(path, new TextEncoder().encode(other.store.file(path)));
+    await model.syncDidChange();
+    expect(titles().sort()).toEqual(["Mine", "Theirs"]);
+
+    await storage.remove(path);
+    await model.syncDidChange();
+    expect(titles()).toEqual(["Mine"]);
+  });
+
+  it("keeps a pending Close", async () => {
+    model.add("Now");
+    model.close(first(), Closing.Done);
+    await model.syncDidChange();
+    expect(model.tasks).toEqual([]);
+    expect(model.pendingClose).toBeUndefined();
+    await model.saved();
+    expect(titles()).toEqual([]);
+  });
+
+  it("tells when a change was saved", async () => {
+    let saved = 0;
+    model.onSaved = () => saved++;
+    model.add("Now");
+    await model.saved();
+    expect(saved).toBe(1);
   });
 });

@@ -62,7 +62,14 @@ export async function startApp(
   const shell = new Shell(navigation, new SettingsView(appearance, cloud));
   root.replaceChildren(shell.element);
   const tasks = new TasksModel(await TaskFiles.open(core, storage));
-  shell.pane("tasks").append(new TasksView(tasks).element);
+  tasks.onSaved = () => cloud.localChange();
+  cloud.onTasksSynced(() => void tasks.syncDidChange());
+  shell.pane("tasks").append(
+    new TasksView(tasks, {
+      open: (id) => navigation.openItem(id),
+      close: () => navigation.closeItem(),
+    }).element,
+  );
   const pane = shell.pane("drawings");
 
   let canvas: { drawing: OpenDrawing; stop: () => void } | undefined;
@@ -110,14 +117,19 @@ export async function startApp(
     galleryView?.appearanceChanged();
   });
   gallery.onChange = show;
-  // The address decides what is open: no Item (or another Context) is the Gallery, and an
-  // Item ID the Device does not have is dropped from the address.
+  // The address decides what is open: no Item (or another Context) is the Gallery and the
+  // Tasks list, and an Item ID the Device does not have is dropped from the address.
   const followAddress = () => {
     shell.update();
-    const { item } = navigation;
-    if (item === undefined) void gallery.close();
-    else if (gallery.openId === item) return;
-    else if (gallery.drawings.some((entry) => entry.id === item)) void gallery.openDrawing(item);
+    const { selected, item } = navigation;
+    const task = selected === "tasks" ? item : undefined;
+    const drawing = selected === "drawings" ? item : undefined;
+    tasks.open(task);
+    if (task !== undefined && !tasks.editing) return navigation.closeItem();
+    if (drawing === undefined) void gallery.close();
+    else if (gallery.openId === drawing) return;
+    else if (gallery.drawings.some((entry) => entry.id === drawing))
+      void gallery.openDrawing(drawing);
     else navigation.closeItem();
   };
   navigation.onChange = followAddress;

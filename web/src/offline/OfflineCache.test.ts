@@ -84,6 +84,16 @@ describe("OfflineCache", () => {
     expect(await text(offline.respond(navigate("drawings")))).toBe(`<app v1>${buildMarker("v1")}`);
   });
 
+  it("opens the app at the link of a Task, offline", async () => {
+    const network = new FakeNetwork(files);
+    const { offline } = setup("v1", network);
+    await offline.install();
+    network.online = false;
+    expect(await text(offline.respond(navigate("tasks/abc123abc123")))).toBe(
+      `<app v1>${buildMarker("v1")}`,
+    );
+  });
+
   it("serves assets from the cache without the network", async () => {
     const network = new FakeNetwork(files);
     const { offline } = setup("v1", network);

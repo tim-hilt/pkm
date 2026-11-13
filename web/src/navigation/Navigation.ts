@@ -2,6 +2,9 @@
 export const contexts = ["tasks", "notes", "drawings", "bookmarks", "books"] as const;
 export type Context = (typeof contexts)[number];
 
+/** The Contexts whose Items have a path of their own, `/<context>/<id>`. */
+const addressed: readonly Context[] = ["tasks", "drawings"];
+
 /** The browser's History, as far as navigation needs it. */
 export interface BrowserHistory {
   /** The path of the current entry. */
@@ -18,7 +21,7 @@ export interface BrowserHistory {
 
 const lastContextKey = "lastContext";
 
-/** Where a path points: its Context and, in Drawings, the Item ID after it. */
+/** Where a path points: its Context and, in Tasks and Drawings, the Item ID after it. */
 interface Place {
   context: Context;
   item?: string;
@@ -29,15 +32,14 @@ function placeAt(path: string): Place | undefined {
   const [, first, item, ...deeper] = path.split("/");
   const context = contexts.find((context) => context === first);
   if (!context) return undefined;
-  // Only Drawings are addressed by Item ID so far.
-  const isItem = context === "drawings" && item && deeper.length === 0;
+  const isItem = addressed.includes(context) && item && deeper.length === 0;
   return isItem ? { context, item } : { context };
 }
 
 const pathOf = ({ context, item }: Place) => (item ? `/${context}/${item}` : `/${context}`);
 
 /**
- * Where the user is: the selected Context and, in Drawings, the open Item,
+ * Where the user is: the selected Context and, in Tasks and Drawings, the open Item,
  * kept in step with the address bar. Switching a Context or opening an Item
  * pushes a History entry and back and forward restore both; a path that is
  * none is replaced by the Context's own path (or the last Context's), so no

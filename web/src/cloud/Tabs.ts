@@ -1,6 +1,6 @@
 /** What a tab tells the others (ADR-0016). */
 export type TabMessage =
-  | { kind: "changed"; names: string[] }
+  | { kind: "changed"; names: string[]; tasks: boolean }
   | { kind: "connected" }
   | { kind: "disconnected" };
 

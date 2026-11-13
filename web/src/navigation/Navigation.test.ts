@@ -82,8 +82,16 @@ describe("Navigation", () => {
     expect(history.entries).toEqual(["/drawings/abc123abc123"]);
   });
 
+  it("opens the Item of a Tasks path, keeping the path", () => {
+    const { navigation, history } = open("/tasks/abc123abc123");
+    expect(navigation.selected).toBe("tasks");
+    expect(navigation.item).toBe("abc123abc123");
+    expect(history.entries).toEqual(["/tasks/abc123abc123"]);
+  });
+
   it("replaces a path below a Context without an Item list, or with a deeper path, by the Context's own", () => {
-    expect(open("/tasks/abc").history.path).toBe("/tasks");
+    expect(open("/books/abc").history.path).toBe("/books");
+    expect(open("/tasks/abc/def").history.path).toBe("/tasks");
     expect(open("/drawings/abc/def").history.path).toBe("/drawings");
     expect(open("/drawings/").history.path).toBe("/drawings");
   });

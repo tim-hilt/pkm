@@ -1299,6 +1299,19 @@ impl WebDavProtocol {
             .map_err(|_| JsError::new("notHttps"))
     }
 
+    /// The requests for the folder of Tasks (and their History). Throws
+    /// `notHttps` for a URL that is not https.
+    #[wasm_bindgen(js_name = newForTasks)]
+    pub fn new_for_tasks(
+        url: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<WebDavProtocol, JsError> {
+        WebDav::new(url, username, password, Tasks::FOLDER)
+            .map(Self)
+            .map_err(|_| JsError::new("notHttps"))
+    }
+
     /// Checks the server and makes its `pkm/Drawings` folder.
     pub fn connect(&self) -> DavExchange {
         DavExchange::new(self.0.connect(), DavOutcome::connect)
@@ -1339,7 +1352,7 @@ impl WebDavProtocol {
 use pkm_cloud::step::{LocalFile, Marks, Synced};
 use pkm_cloud::{
     Blob, BookStates, Books, Drawings, Next, Request, Response, Schedule, Status, StepOutcome,
-    SyncStep, Timing,
+    SyncStep, TaskHistory, Tasks, Timing,
 };
 use std::time::Duration;
 
@@ -1512,6 +1525,18 @@ impl SyncRun {
     #[wasm_bindgen(js_name = newForBookStates)]
     pub fn new_for_book_states(now_ms: f64) -> SyncRun {
         SyncRun::with_merge(now_ms, Arc::new(BookStates))
+    }
+
+    /// A step over the Task files, merged field by field (ADR-0021).
+    #[wasm_bindgen(js_name = newForTasks)]
+    pub fn new_for_tasks(now_ms: f64) -> SyncRun {
+        SyncRun::with_merge(now_ms, Arc::new(Tasks))
+    }
+
+    /// A step over the Tasks' History files: transferred, never merged.
+    #[wasm_bindgen(js_name = newForTaskHistory)]
+    pub fn new_for_task_history(now_ms: f64) -> SyncRun {
+        SyncRun::with_merge(now_ms, Arc::new(TaskHistory))
     }
 
     pub fn start(&mut self) -> Option<SyncRequest> {

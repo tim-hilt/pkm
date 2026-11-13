@@ -95,11 +95,16 @@ export class CloudBacking {
   private current: Credentials | undefined;
   private readonly listeners = new Set<(connection: Connection | undefined) => void>();
   private readonly syncedListeners = new Set<(names: string[]) => void>();
+  private readonly tasksListeners = new Set<() => void>();
   private readonly state: SyncState;
   private readonly books: FileFolder;
   private readonly bookStates: FileFolder;
   private readonly booksState: SyncState;
   private readonly bookStateStates: SyncState;
+  private readonly tasks: FileFolder;
+  private readonly taskHistory: FileFolder;
+  private readonly tasksState: SyncState;
+  private readonly taskHistoryState: SyncState;
   private report: SyncReport = {};
   private readonly reportListeners = new Set<(report: SyncReport) => void>();
   private visible = true;
@@ -111,6 +116,7 @@ export class CloudBacking {
   private step: Promise<void> | undefined;
   private readonly incoming = { known: false };
   private readonly booksIncoming = { known: false };
+  private readonly tasksIncoming = { known: false };
 
   private constructor(
     private readonly core: Core,
@@ -124,6 +130,10 @@ export class CloudBacking {
     this.bookStates = new FileFolder(storage, "Books/.state");
     this.booksState = new SyncState(storage, "Books");
     this.bookStateStates = new SyncState(storage, "BooksState");
+    this.tasks = new FileFolder(storage, "Tasks");
+    this.taskHistory = new FileFolder(storage, "Tasks/.history");
+    this.tasksState = new SyncState(storage, "Tasks");
+    this.taskHistoryState = new SyncState(storage, "TasksHistory");
     tabs.listen((message) => void this.heard(message));
   }
 
@@ -146,24 +156,27 @@ export class CloudBacking {
     return data && JSON.parse(new TextDecoder().decode(data));
   }
 
-  /** Throws `ConnectFailed` unless the server takes `credentials` and has (or now has) its `pkm/Drawings` and `pkm/Books` folders. */
+  /** Throws `ConnectFailed` unless the server takes `credentials` and has (or now has) its `pkm/Drawings`, `pkm/Books` and `pkm/Tasks` folders. */
   private async check({ url, username, password }: Credentials): Promise<void> {
     let drawings;
     let books;
+    let tasks;
     try {
       drawings = this.core.webDav(url, username, password);
       books = this.core.webDavForBooks(url, username, password);
+      tasks = this.core.webDavForTasks(url, username, password);
     } catch {
       throw new ConnectFailed("notHttps");
     }
     try {
-      for (const protocol of [drawings, books]) {
+      for (const protocol of [drawings, books, tasks]) {
         const result = await runExchange(protocol.connect(), this.send);
         if (result.error) throw new ConnectFailed(result.error as ConnectReason);
       }
     } finally {
       drawings.free();
       books.free();
+      tasks.free();
     }
   }
 
@@ -211,7 +224,11 @@ export class CloudBacking {
     await this.check({ url, username, password });
     await this.stopLoop();
     this.setReport({});
-    await this.keep({ url: url.trim().replace(/\/+$/, ""), username, password });
+    await this.keep({
+      url: url.trim().replace(/\/+$/, ""),
+      username,
+      password,
+    });
     this.startLoop();
     this.changed();
     this.tabs.post({ kind: "connected" });
@@ -242,6 +259,7 @@ export class CloudBacking {
     await this.tabs.exclusive(() => this.storage.remove("Cloud"));
     this.incoming.known = false;
     this.booksIncoming.known = false;
+    this.tasksIncoming.known = false;
     this.setReport({});
     this.changed();
     this.tabs.post({ kind: "disconnected" });
@@ -266,7 +284,11 @@ export class CloudBacking {
     this.online = online;
     this.schedule?.setOnline(online, Date.now());
     if (!online && this.schedule && !this.hasProblem && this.report.status !== undefined)
-      this.setReport({ ...this.report, status: "offline", progress: undefined });
+      this.setReport({
+        ...this.report,
+        status: "offline",
+        progress: undefined,
+      });
     this.arm();
   }
 
@@ -276,10 +298,16 @@ export class CloudBacking {
     return () => this.syncedListeners.delete(listener);
   }
 
+  /** Calls `listener` whenever a step changed Task files or History files here. Returns a function that stops it. */
+  onTasksSynced(listener: () => void): () => void {
+    this.tasksListeners.add(listener);
+    return () => this.tasksListeners.delete(listener);
+  }
+
   /** Follows what another tab did: the storage already holds the new connection (or none). */
   private async heard(message: TabMessage): Promise<void> {
     if (message.kind === "changed") {
-      for (const listener of this.syncedListeners) listener(message.names);
+      this.tell(message.names, message.tasks);
       return;
     }
     const saved = message.kind === "connected" ? await this.saved() : undefined;
@@ -287,6 +315,7 @@ export class CloudBacking {
     this.current = saved;
     this.incoming.known = false;
     this.booksIncoming.known = false;
+    this.tasksIncoming.known = false;
     this.setReport({});
     if (saved) this.startLoop();
     this.changed();
@@ -343,9 +372,15 @@ export class CloudBacking {
       credentials.username,
       credentials.password,
     );
+    const tasksProtocol = this.core.webDavForTasks(
+      credentials.url,
+      credentials.username,
+      credentials.password,
+    );
     const now = Date.now();
     // One step per folder, in order, all against the same server: Drawings,
-    // the Book Files, then their state, which the core's Books merge merges.
+    // the Book Files, then their state, which the core's Books merge merges,
+    // and the Task files and their History, which is only transferred.
     const plans = [
       {
         run: this.core.syncRun(now),
@@ -353,7 +388,7 @@ export class CloudBacking {
         files: this.drawings,
         state: this.state,
         incoming: this.incoming,
-        drawings: true,
+        reports: "drawings" as const,
       },
       {
         run: this.core.syncRunForBooks(now),
@@ -361,7 +396,7 @@ export class CloudBacking {
         files: this.books,
         state: this.booksState,
         incoming: this.booksIncoming,
-        drawings: false,
+        reports: undefined,
       },
       {
         run: this.core.syncRunForBookStates(now),
@@ -369,15 +404,32 @@ export class CloudBacking {
         files: this.bookStates,
         state: this.bookStateStates,
         incoming: this.booksIncoming,
-        drawings: false,
+        reports: undefined,
+      },
+      {
+        run: this.core.syncRunForTasks(now),
+        protocol: tasksProtocol,
+        files: this.tasks,
+        state: this.tasksState,
+        incoming: this.tasksIncoming,
+        reports: "tasks" as const,
+      },
+      {
+        run: this.core.syncRunForTaskHistory(now),
+        protocol: tasksProtocol,
+        files: this.taskHistory,
+        state: this.taskHistoryState,
+        incoming: this.tasksIncoming,
+        reports: "tasks" as const,
       },
     ];
     const results: StepResult[] = [];
     const changed: string[] = [];
+    let tasksChanged = false;
     let finished = 0;
     let planned = 0;
     try {
-      for (const { drawings, ...plan } of plans) {
+      for (const { reports, ...plan } of plans) {
         const latest = { done: 0, total: 0, seen: false };
         const result = await runSyncStep({
           ...plan,
@@ -397,7 +449,8 @@ export class CloudBacking {
         });
         if (!result) return;
         results.push(result);
-        if (drawings) changed.push(...result.changed);
+        if (reports === "drawings") changed.push(...result.changed);
+        if (reports === "tasks" && result.changed.length > 0) tasksChanged = true;
         if (latest.seen) {
           finished += latest.done;
           planned += latest.total;
@@ -417,6 +470,7 @@ export class CloudBacking {
       for (const { run } of plans) run.free();
       drawingsProtocol.free();
       booksProtocol.free();
+      tasksProtocol.free();
     }
     if (this.schedule !== schedule) return;
     const status: SyncStatus = results.some((r) => r.accessLost)
@@ -434,10 +488,16 @@ export class CloudBacking {
       progress: undefined,
       lastSync: wentThrough ? Date.now() : this.report.lastSync,
     });
-    if (changed.length > 0) {
-      for (const listener of this.syncedListeners) listener(changed);
-      this.tabs.post({ kind: "changed", names: changed });
+    if (changed.length > 0 || tasksChanged) {
+      this.tell(changed, tasksChanged);
+      this.tabs.post({ kind: "changed", names: changed, tasks: tasksChanged });
     }
+  }
+
+  /** Tells the listeners what a step, here or in another tab, changed. */
+  private tell(names: string[], tasks: boolean): void {
+    if (names.length > 0) for (const listener of this.syncedListeners) listener(names);
+    if (tasks) for (const listener of this.tasksListeners) listener();
   }
 
   private setReport(report: SyncReport): void {

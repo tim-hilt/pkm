@@ -207,14 +207,14 @@ describe("changes made on one side only", () => {
 });
 
 describe("an idle poll", () => {
-  it("costs one listing and transfers nothing", async () => {
+  it("costs one listing per folder and transfers nothing", async () => {
     const browser = await device();
     await browser.store.save(bytes("one"), "Sketch");
     await browser.store.save(bytes("two"), "Other");
     await settle(40_000); // until the files are known to be unchanged
     server.requests.length = 0;
     await advance(10_000);
-    expect(server.requests).toHaveLength(3);
+    expect(server.requests).toHaveLength(5);
     expect(server.requests.every((request) => request.startsWith("PROPFIND "))).toBe(true);
   });
 });
@@ -349,7 +349,9 @@ describe("Disconnect", () => {
 /** A Drawing with full control of the Elements, `files` and `appState`. */
 const full = (elements: string[], files = "{}", appState = "{}") =>
   bytes(
-    `{"type":"excalidraw","version":2,"elements":[${elements.join(",")}],"appState":${appState},"files":${files}}`,
+    `{"type":"excalidraw","version":2,"elements":[${elements.join(
+      ",",
+    )}],"appState":${appState},"files":${files}}`,
   );
 const erased = (id: string, version: number, index: string) =>
   element(id, version, index, 0).replace('"isDeleted":false', '"isDeleted":true');

@@ -238,12 +238,18 @@ export interface Core {
   webDav(url: string, username: string, password: string): WebDavProtocol;
   /** The WebDAV protocol for the server's Books folder; throws if the URL is not https. Free it when done. */
   webDavForBooks(url: string, username: string, password: string): WebDavProtocol;
+  /** The WebDAV protocol for the server's Tasks folder; throws if the URL is not https. Free it when done. */
+  webDavForTasks(url: string, username: string, password: string): WebDavProtocol;
   /** A Sync step over the Drawings, starting at `nowMs` (milliseconds since the epoch). Free it when done. */
   syncRun(nowMs: number): SyncRun;
   /** A Sync step over the Book Files, which are transferred but never merged. Free it when done. */
   syncRunForBooks(nowMs: number): SyncRun;
   /** A Sync step over the Books' state files, merged by the Books merge hook. Free it when done. */
   syncRunForBookStates(nowMs: number): SyncRun;
+  /** A Sync step over the Task files, merged field by field. Free it when done. */
+  syncRunForTasks(nowMs: number): SyncRun;
+  /** A Sync step over the Tasks' History files, which are transferred but never merged. Free it when done. */
+  syncRunForTaskHistory(nowMs: number): SyncRun;
   /** When Sync steps run, in front with a step due at `now` (milliseconds on any clock). Free it when done. */
   syncSchedule(now: number): SyncSchedule;
 }
@@ -273,9 +279,13 @@ export async function loadCore(
     webDav: (url, username, password) => new WebDavProtocol(url, username, password),
     webDavForBooks: (url, username, password) =>
       WebDavProtocol.newForBooks(url, username, password),
+    webDavForTasks: (url, username, password) =>
+      WebDavProtocol.newForTasks(url, username, password),
     syncRun: (nowMs) => new SyncRun(nowMs),
     syncRunForBooks: (nowMs) => SyncRun.newForBooks(nowMs),
     syncRunForBookStates: (nowMs) => SyncRun.newForBookStates(nowMs),
+    syncRunForTasks: (nowMs) => SyncRun.newForTasks(nowMs),
+    syncRunForTaskHistory: (nowMs) => SyncRun.newForTaskHistory(nowMs),
     syncSchedule: (now) => new SyncSchedule(now),
   };
 }
@@ -316,7 +326,11 @@ export class Editor {
 
   viewport(): Viewport {
     const state = this.inner.viewport();
-    const viewport = { originX: state.originX, originY: state.originY, zoom: state.zoom };
+    const viewport = {
+      originX: state.originX,
+      originY: state.originY,
+      zoom: state.zoom,
+    };
     state.free();
     return viewport;
   }

@@ -9,6 +9,12 @@ const chevronGlyph = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none
 const lockGlyph = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M7 10V8a5 5 0 0 1 10 0v2h1a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1zm2 0h6V8a3 3 0 0 0-6 0z"/></svg>`;
 const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
 
+/** How the view opens and leaves a Task's edit view, which has an address of its own. */
+export interface TaskPlaces {
+  open(id: string): void;
+  close(): void;
+}
+
 /**
  * The Tasks Context: the Active list and the Backlog as Todoist-style rows: a
  * circle coloured by Priority, the Title, the Description faded on one line
@@ -28,8 +34,13 @@ export class TasksView {
   private readonly toast = make("div", "tasks-toast");
   private readonly menu: RowMenu;
   private readonly drag: RowDrag;
+  /** The edit view, while shown. */
+  private editor: HTMLDialogElement | undefined;
 
-  constructor(private readonly model: TasksModel) {
+  constructor(
+    private readonly model: TasksModel,
+    private readonly places: TaskPlaces,
+  ) {
     this.switch.setAttribute("role", "radiogroup");
     this.switch.setAttribute("aria-label", "List");
     for (const { planning, title } of lists) {
@@ -78,6 +89,26 @@ export class TasksView {
     );
     this.failure.hidden = model.failure === undefined;
     this.failure.textContent = model.failure ?? "";
+    this.showEditor();
+  }
+
+  /** The edit view is shown while the model has a Task to edit; leaving it, however, leaves the Task's address. */
+  private showEditor(): void {
+    const { editing } = this.model;
+    if (!editing) {
+      const shown = this.editor;
+      this.editor = undefined;
+      return shown?.close();
+    }
+    if (this.editor) return;
+    const editor = editTaskDialog(this.model, editing, this.element);
+    editor.addEventListener("close", () => {
+      // Closed by the model's say-so (the address left the Task): nothing to tell.
+      if (this.editor !== editor) return;
+      this.editor = undefined;
+      this.places.close();
+    });
+    this.editor = editor;
   }
 
   /** Names the Task just Closed and offers to Revert it. */
@@ -115,7 +146,7 @@ export class TasksView {
     const open = make("button", "task-open", [text]);
     open.type = "button";
     open.setAttribute("aria-haspopup", "menu");
-    open.addEventListener("click", () => editTaskDialog(model, task, this.element));
+    open.addEventListener("click", () => this.places.open(task.id));
     open.disabled = task.closed;
     const line = make("div", "task-line", [disclose, circle, open]);
     if (task.blocked) {
@@ -138,19 +169,35 @@ export class TasksView {
     if (task.closed || task.done) return [];
     const { model } = this;
     const items: RowMenuItem[] = [
-      { label: "Add Subtask", run: () => newTaskDialog(model, this.element, task) },
+      {
+        label: "Add Subtask",
+        run: () => newTaskDialog(model, this.element, task),
+      },
     ];
     // A Subtask follows its top-level Task's list.
     if (task.depth === 0) {
       items.push(
         task.planning === Planning.Backlog
-          ? { label: "Make Active", run: () => model.plan(task, Planning.Active) }
-          : { label: "Move to Backlog", run: () => model.plan(task, Planning.Backlog) },
+          ? {
+              label: "Make Active",
+              run: () => model.plan(task, Planning.Active),
+            }
+          : {
+              label: "Move to Backlog",
+              run: () => model.plan(task, Planning.Backlog),
+            },
       );
     } else {
-      items.push({ label: "Make Top-Level", run: () => model.moveBefore(task, undefined) });
+      items.push({
+        label: "Make Top-Level",
+        run: () => model.moveBefore(task, undefined),
+      });
     }
-    items.push({ label: "Reject", run: () => model.close(task, Closing.Rejected), danger: true });
+    items.push({
+      label: "Reject",
+      run: () => model.close(task, Closing.Rejected),
+      danger: true,
+    });
     return items;
   }
 }

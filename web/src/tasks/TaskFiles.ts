@@ -18,26 +18,30 @@ export class TaskFiles {
   private writing: Promise<void> = Promise.resolve();
 
   private constructor(
-    readonly store: TaskStore,
+    private current: TaskStore,
+    private readonly device: string,
     private readonly storage: FileStorage,
   ) {}
 
   static async open(core: Pick<Core, "newItemId">, storage: FileStorage): Promise<TaskFiles> {
     const device = await deviceId(core, storage);
-    const folder = TaskStore.folder();
-    const paths: string[] = [];
-    const texts: string[] = [];
-    const take = async (folder: string, wanted: (name: string) => boolean) => {
-      for (const { name } of await storage.files(folder)) {
-        const bytes = wanted(name) ? await storage.read(`${folder}/${name}`) : undefined;
-        if (!bytes) continue;
-        paths.push(`${folder}/${name}`);
-        texts.push(decode(bytes));
-      }
-    };
-    await take(folder, (name) => name.endsWith(".md"));
-    await take(`${folder}/.history`, (name) => name.startsWith(`${device}-`));
-    return new TaskFiles(new TaskStore(device, paths, texts), storage);
+    return new TaskFiles(await load(device, storage), device, storage);
+  }
+
+  /** The store; a new one after `reload`. */
+  get store(): TaskStore {
+    return this.current;
+  }
+
+  /**
+   * Starts over from what the files hold now, after Sync wrote or deleted
+   * some. What the store changed is saved first; the old store is freed.
+   */
+  async reload(): Promise<void> {
+    await this.save().catch(() => {});
+    const reloaded = await load(this.device, this.storage);
+    this.current.free();
+    this.current = reloaded;
   }
 
   /**
@@ -56,6 +60,24 @@ export class TaskFiles {
     this.writing = written.catch(() => {});
     return written;
   }
+}
+
+/** A store opened on the Task files and this Device's History files. */
+async function load(device: string, storage: FileStorage): Promise<TaskStore> {
+  const folder = TaskStore.folder();
+  const paths: string[] = [];
+  const texts: string[] = [];
+  const take = async (folder: string, wanted: (name: string) => boolean) => {
+    for (const { name } of await storage.files(folder)) {
+      const bytes = wanted(name) ? await storage.read(`${folder}/${name}`) : undefined;
+      if (!bytes) continue;
+      paths.push(`${folder}/${name}`);
+      texts.push(decode(bytes));
+    }
+  };
+  await take(folder, (name) => name.endsWith(".md"));
+  await take(`${folder}/.history`, (name) => name.startsWith(`${device}-`));
+  return new TaskStore(device, paths, texts);
 }
 
 async function deviceId(core: Pick<Core, "newItemId">, storage: FileStorage): Promise<string> {
