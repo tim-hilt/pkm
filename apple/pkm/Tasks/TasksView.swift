@@ -4,7 +4,6 @@ import SwiftUI
 struct TasksView: View {
     @Environment(TasksModel.self) private var model
     @State private var isAdding = false
-    @State private var editing: ListedTask?
     @State private var subtaskParent: ListedTask?
 
     var body: some View {
@@ -33,7 +32,7 @@ struct TasksView: View {
                                 model.move(moved, under: task)
                                 return true
                             }
-                            .onTapGesture { if !task.closed { editing = task } }
+                            .onTapGesture { if !task.closed { model.editing = task } }
                             .contextMenu {
                                 if !task.closed && !task.done {  // a pending Done is Reverted at its circle
                                     Button("Add Subtask", systemImage: "plus.circle") { subtaskParent = task }
@@ -82,7 +81,7 @@ struct TasksView: View {
             .addButton("New Task", identifier: "add-task") { isAdding = true }
             .sheet(isPresented: $isAdding) { NewTaskSheet(planning: model.planning) }
             .sheet(item: $subtaskParent) { NewTaskSheet(planning: $0.planning, parent: $0) }
-            .sheet(item: $editing) { EditTaskSheet(task: $0) }
+            .sheet(item: $model.editing) { EditTaskSheet(task: $0) }
         }
     }
 }

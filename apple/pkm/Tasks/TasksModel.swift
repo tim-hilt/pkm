@@ -12,6 +12,8 @@ final class TasksModel {
     var planning: Planning = .active {
         didSet { reload() }
     }
+    /// The Task whose sheet is open, over the list shown.
+    var editing: ListedTask?
     /// The Tasks planned as `planning`, in their order, each followed by its Subtasks.
     private(set) var tasks: [ListedTask] = []
     /// Parents whose Subtasks are hidden.
@@ -28,6 +30,18 @@ final class TasksModel {
             if collapsed.contains(task.id) { hiddenBelow = task.depth }
             return true
         }
+    }
+
+    /// Opens the sheet of the Task `id`, over the list it is in. An unknown `id`
+    /// (or `nil`) opens no sheet; an unknown one shows the Active list.
+    func open(id: String?) {
+        editing = nil
+        guard let id else { return }
+        let list = [Planning.active, .backlog].first {
+            ((try? store.tasks(planning: $0)) ?? []).contains { $0.id == id }
+        }
+        planning = list ?? .active
+        editing = tasks.first { $0.id == id }
     }
 
     func isCollapsed(_ task: ListedTask) -> Bool { collapsed.contains(task.id) }

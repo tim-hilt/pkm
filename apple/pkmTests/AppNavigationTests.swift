@@ -84,7 +84,7 @@ import Testing
 
 extension AppNavigationTests {
     /// A window's link handling over a temporary Drawings folder and Library.
-    private func makeLinks() throws -> (links: AppLinks, gallery: Gallery, library: LibraryModel) {
+    private func makeLinks() throws -> (links: AppLinks, gallery: Gallery, library: LibraryModel, tasks: TasksModel) {
         let root = FileManager.default.temporaryDirectory
             .appending(path: "AppNavigationTests-\(UUID().uuidString)", directoryHint: .isDirectory)
         let drawings = root.appending(path: "Drawings", directoryHint: .isDirectory)
@@ -96,12 +96,16 @@ extension AppNavigationTests {
             core: try Library.open(root: root.appending(path: "Books").path),
             coversFolder: root.appending(path: "Covers"),
             defaults: UserDefaults(suiteName: root.lastPathComponent)!)
-        let links = AppLinks(navigation: AppNavigation(remembering: device()), gallery: gallery, library: library)
-        return (links, gallery, library)
+        let tasks = TasksModel(
+            store: try TaskStore.open(
+                root: root.appending(path: "Tasks").path, deviceFolder: root.appending(path: "Device").path))
+        let links = AppLinks(
+            navigation: AppNavigation(remembering: device()), gallery: gallery, library: library, tasks: tasks)
+        return (links, gallery, library, tasks)
     }
 
     @Test func aDrawingLinkOpensTheDrawingAndAnUnknownOneShowsTheGallery() throws {
-        let (links, gallery, _) = try makeLinks()
+        let (links, gallery, _, _) = try makeLinks()
         let id = try #require(gallery.drawings.first?.id)
 
         links.follow(URL(string: "pkm://drawings/\(id)")!)
@@ -114,7 +118,7 @@ extension AppNavigationTests {
     }
 
     @Test func aBookLinkOpensTheBookAndAnUnknownOneShowsTheGallery() async throws {
-        let (links, gallery, library) = try makeLinks()
+        let (links, gallery, library, _) = try makeLinks()
         guard case .imported(let book) = await library.import(try writePDF(named: "book.pdf")) else {
             Issue.record("expected the Book to be imported")
             return
@@ -128,5 +132,28 @@ extension AppNavigationTests {
         #expect(links.navigation.selected == .books)
         #expect(library.open == nil)
         #expect(gallery.open == nil)
+    }
+
+    @Test func aTaskLinkOpensTheTaskOverItsListAndAnUnknownOneShowsTheActiveList() throws {
+        let (links, _, _, tasks) = try makeLinks()
+        tasks.add(title: "Later", planning: .backlog)
+        let id = try #require(tasks.tasks.first?.id)
+
+        links.follow(URL(string: "pkm://tasks/\(id)")!)
+        #expect(links.navigation.selected == .tasks)
+        #expect(tasks.planning == .backlog)
+        #expect(tasks.editing?.id == id)
+
+        links.follow(URL(string: "pkm://tasks/unknown")!)
+        #expect(tasks.planning == .active)
+        #expect(tasks.editing == nil)
+    }
+
+    @Test func aContextLinkToTasksClosesAnOpenTask() throws {
+        let (links, _, _, tasks) = try makeLinks()
+        tasks.add(title: "Now", planning: .active)
+        links.follow(URL(string: "pkm://tasks/\(tasks.tasks[0].id)")!)
+        links.follow(URL(string: "pkm://tasks")!)
+        #expect(tasks.editing == nil)
     }
 }

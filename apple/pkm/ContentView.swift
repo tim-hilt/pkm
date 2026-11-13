@@ -47,7 +47,7 @@ struct ContentView: View {
         #if os(iOS)
             .sheet(isPresented: $navigation.isShowingSettings) { SettingsSheet() }
         #endif
-        .onOpenURL { AppLinks(navigation: navigation, gallery: gallery, library: library).follow($0) }
+        .onOpenURL { AppLinks(navigation: navigation, gallery: gallery, library: library, tasks: tasks).follow($0) }
         .task { attachCloudBacking() }
         .onChange(of: gallery.open != nil || library.open != nil, initial: true) {
             navigation.isItemOpen = gallery.open != nil || library.open != nil
