@@ -5,6 +5,7 @@
 //! plain Rust with no FFI concerns; foreign-language clients go through
 //! `pkm-bindings`.
 
+mod cache;
 mod history;
 mod store;
 pub mod sync;

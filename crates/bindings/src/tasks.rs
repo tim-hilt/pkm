@@ -1,6 +1,8 @@
 //! The Tasks surface of the UniFFI library (ADR-0007): the Tasks store. The
 //! logic lives in `pkm-tasks`.
 
+use std::path::Path;
+
 use pkm_tasks::{Blocker, Closing, Error, Planning, Task, Tasks};
 
 /// Why a Task wasn't saved or the Tasks couldn't be read.
@@ -149,11 +151,13 @@ pub struct TaskStore(Tasks);
 impl TaskStore {
     /// Opens the Tasks in the folder `root`, creating it if needed.
     /// `device_folder` is local to the Device and never Synced: it keeps the
-    /// Device ID, which names this Device's History files.
+    /// Device ID, which names this Device's History files, and the cache of
+    /// Closed Tasks.
     #[uniffi::constructor]
     pub fn open(root: String, device_folder: String) -> Result<Self, TasksError> {
         let device = pkm_base::device::id(device_folder.as_ref())?;
-        Ok(Self(Tasks::open(root, device)?))
+        let cache = Path::new(&device_folder).join("tasks-cache");
+        Ok(Self(Tasks::open(root, device, cache)?))
     }
 
     /// Makes a Task Active or moves it to the Backlog, at the end of that list.

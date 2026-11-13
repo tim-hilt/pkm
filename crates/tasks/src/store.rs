@@ -1,5 +1,6 @@
 //! The Tasks store: a folder of `<id>.md` files.
 
+use crate::cache::Cache;
 use crate::history::{Event, History};
 use pkm_base::clock::{iso8601, now_ms};
 use pkm_base::front_matter::{Document, Value};
@@ -10,7 +11,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 const DEFAULT_PRIORITY: u8 = 4;
@@ -166,6 +167,8 @@ impl std::error::Error for Error {}
 pub struct Tasks {
     root: PathBuf,
     history: History,
+    /// What the files last said, so a launch reads only those that changed.
+    cache: Mutex<Cache>,
     /// The one Close that can still be reverted.
     pending: Mutex<Option<Pending>>,
 }
@@ -176,13 +179,21 @@ impl Tasks {
 
     /// Opens the Tasks in `root`, creating the folder if needed. `device` is
     /// this Device's ID, which names its History files in `root/.history`.
-    pub fn open(root: impl Into<PathBuf>, device: ItemId) -> io::Result<Self> {
+    /// `cache` is a file local to the Device and never Synced (ADR-0021): it
+    /// remembers the Closed Tasks between launches. Missing or unreadable, it
+    /// is rebuilt from the Task files.
+    pub fn open(
+        root: impl Into<PathBuf>,
+        device: ItemId,
+        cache: impl Into<PathBuf>,
+    ) -> io::Result<Self> {
         let root = root.into();
         fs::create_dir_all(&root)?;
         let history = History::new(root.join(".history"), device);
         Ok(Self {
             root,
             history,
+            cache: Mutex::new(Cache::new(cache.into())),
             pending: Mutex::new(None),
         })
     }
@@ -594,19 +605,14 @@ impl Tasks {
     }
 
     /// Every Task in the folder, repaired. Only `<id>.md` is the Task `id`: a
-    /// copy under another name (`<id> 1.md`) would shadow it.
+    /// copy under another name (`<id> 1.md`) would shadow it. Reads only the
+    /// files that changed since the cache last saw them.
     fn load(&self) -> io::Result<Nodes> {
-        let mut nodes = Nodes::new();
-        for item in fs::read_dir(&self.root)? {
-            let path = item?.path();
-            if path.extension().is_some_and(|e| e == "md")
-                && let Ok(text) = fs::read_to_string(&path)
-                && let Some(node) = Document::parse(&text).as_ref().and_then(node_of)
-                && path.file_stem().is_some_and(|stem| *stem == *node.task.id)
-            {
-                nodes.insert(node.task.id.clone(), node);
-            }
-        }
+        let mut nodes = self
+            .cache
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .nodes(&self.root, read_node)?;
         repair(&mut nodes);
         Ok(nodes)
     }
@@ -624,6 +630,10 @@ impl Tasks {
         if overwrite == Overwrite::No && path.exists() {
             return Err(io::ErrorKind::AlreadyExists.into());
         }
+        self.cache
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .forget(&format!("{id}.md"));
         let written = fs::File::create(&scratch).and_then(|mut f| f.write_all(text.as_bytes()));
         written
             .and_then(|()| fs::rename(&scratch, &path))
@@ -637,14 +647,48 @@ enum Overwrite {
     No,
 }
 
-struct Node {
-    task: Task,
-    order: f64,
+#[derive(Debug, Clone)]
+pub(crate) struct Node {
+    pub(crate) task: Task,
+    pub(crate) order: f64,
     /// The IDs the file lists, whether or not such a Task exists.
     blocked_by: Vec<String>,
 }
 
+impl Node {
+    /// A Closed Task as the cache keeps it: what Open Tasks and lists need of
+    /// it (its place, Title and Parent), nothing more.
+    pub(crate) fn closed(id: String, title: String, parent: Option<String>, order: f64) -> Self {
+        let task = Task {
+            id,
+            title,
+            priority: DEFAULT_PRIORITY,
+            planning: Planning::Active, // set by `repair`
+            description: String::new(),
+            tags: Vec::new(),
+            done: false,
+            closed: true,
+            parent,
+            subtasks: Vec::new(),
+            blocked: false,
+            blocked_by: Vec::new(),
+        };
+        Self {
+            task,
+            order,
+            blocked_by: Vec::new(),
+        }
+    }
+}
+
 type Nodes = HashMap<String, Node>;
+
+/// The Task in the file at `path`, if it is one and is named by its id.
+fn read_node(path: &Path) -> Option<Node> {
+    let text = fs::read_to_string(path).ok()?;
+    let node = node_of(&Document::parse(&text)?)?;
+    (path.file_stem()? == node.task.id.as_str()).then_some(node)
+}
 
 /// The Task a file describes, Open or Closed; `None` for a malformed one.
 fn node_of(file: &Document) -> Option<Node> {
@@ -679,6 +723,9 @@ fn node_of(file: &Document) -> Option<Node> {
         .scalar("order")
         .and_then(|o| o.parse().ok())
         .unwrap_or(0.0);
+    if closed {
+        return Some(Node::closed(task.id, task.title, task.parent, order));
+    }
     Some(Node {
         task,
         order,
@@ -910,7 +957,8 @@ mod tests {
         }
 
         fn store(&self) -> Tasks {
-            Tasks::open(&self.0, ItemId::parse("dddddddddddd").unwrap()).unwrap()
+            let cache = self.0.parent().unwrap().join("cache");
+            Tasks::open(&self.0, ItemId::parse("dddddddddddd").unwrap(), cache).unwrap()
         }
     }
 
@@ -1941,5 +1989,130 @@ mod tests {
         let listed = tasks.tasks(Planning::Active).unwrap();
         assert_eq!(listed.len(), 3);
         assert!(listed.iter().all(|t| t.blocked));
+    }
+
+    /// Makes every Task file unreadable, so a listing that still works read
+    /// none of them. The modification date stays.
+    #[cfg(unix)]
+    fn lock_files(dir: &Scratch) {
+        for item in fs::read_dir(&dir.0).unwrap() {
+            let path = item.unwrap().path();
+            if path.extension().is_some_and(|e| e == "md") {
+                lock_file(&path);
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn lock_file(path: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o000)).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn cache_fixture(dir: &Scratch) -> (Tasks, Task) {
+        let tasks = dir.store();
+        let parent = tasks.create("parent", Planning::Active).unwrap();
+        let gone = subtask(&tasks, &parent, "gone");
+        subtask(&tasks, &parent, "open");
+        tasks.close(&gone.id, Closing::Done).unwrap();
+        tasks.commit().unwrap();
+        (tasks, gone)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn listing_an_unchanged_folder_reads_no_task_file() {
+        let dir = Scratch::new();
+        let (tasks, _) = cache_fixture(&dir);
+        let before = tasks.tasks(Planning::Active).unwrap();
+        lock_files(&dir);
+        assert_eq!(tasks.tasks(Planning::Active).unwrap(), before);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn closed_tasks_are_remembered_across_launches() {
+        let dir = Scratch::new();
+        let (tasks, gone) = cache_fixture(&dir);
+        tasks.tasks(Planning::Active).unwrap();
+        lock_file(&dir.0.join(format!("{}.md", gone.id)));
+        let listed = dir.store().tasks(Planning::Active).unwrap();
+        let closed = &listed[0].subtasks[0];
+        assert_eq!(
+            (closed.id.as_str(), closed.title.as_str()),
+            (&*gone.id, "gone")
+        );
+        assert!(closed.closed);
+    }
+
+    #[test]
+    fn a_file_changed_added_or_removed_outside_the_app_shows_up() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let kept = tasks.create("kept", Planning::Active).unwrap();
+        let other = tasks.create("other", Planning::Active).unwrap();
+        assert_eq!(titles(&tasks, Planning::Active), ["kept", "other"]);
+
+        let path = dir.0.join(format!("{}.md", kept.id));
+        let text = fs::read_to_string(&path)
+            .unwrap()
+            .replace("kept", "changed");
+        fs::write(&path, text).unwrap();
+        raw(&dir, "aaaaaaaaaaaa", "active", None, 0);
+        fs::remove_file(dir.0.join(format!("{}.md", other.id))).unwrap();
+        assert_eq!(
+            titles(&tasks, Planning::Active),
+            ["aaaaaaaaaaaa", "changed"]
+        );
+        assert_eq!(
+            titles(&dir.store(), Planning::Active),
+            ["aaaaaaaaaaaa", "changed"]
+        );
+    }
+
+    #[test]
+    fn a_task_closed_by_another_device_is_no_longer_open() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let task = tasks.create("t", Planning::Active).unwrap();
+        assert_eq!(titles(&tasks, Planning::Active), ["t"]);
+        let path = dir.0.join(format!("{}.md", task.id));
+        let text = fs::read_to_string(&path)
+            .unwrap()
+            .replace("state: active", "state: rejected");
+        fs::write(&path, text).unwrap();
+        assert!(titles(&tasks, Planning::Active).is_empty());
+    }
+
+    #[test]
+    fn a_garbled_cache_is_rebuilt_from_the_files() {
+        let dir = Scratch::new();
+        let (tasks, _) = cache_fixture(&dir);
+        tasks.tasks(Planning::Active).unwrap();
+        let cache = dir.0.parent().unwrap().join("cache");
+        fs::write(&cache, "nonsense\n\t\t\n").unwrap();
+        assert_eq!(dir.store().tasks(Planning::Active).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn the_cache_is_not_in_the_synced_folder() {
+        let dir = Scratch::new();
+        cache_fixture_any(&dir);
+        let cache = dir.0.parent().unwrap().join("cache");
+        assert!(cache.exists());
+        let names: Vec<_> = fs::read_dir(&dir.0)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert!(names.iter().all(|n| n.to_str().unwrap() != "cache"));
+    }
+
+    fn cache_fixture_any(dir: &Scratch) {
+        let tasks = dir.store();
+        let task = tasks.create("t", Planning::Active).unwrap();
+        tasks.close(&task.id, Closing::Done).unwrap();
+        tasks.commit().unwrap();
+        tasks.tasks(Planning::Active).unwrap();
     }
 }
