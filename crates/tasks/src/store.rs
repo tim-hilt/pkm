@@ -95,6 +95,8 @@ pub enum Error {
     InvalidTag,
     /// A Subtask follows its top-level Task's Active or Backlog.
     SubtaskNotPlannable,
+    /// A Task can't move under itself or one of its Subtasks.
+    MoveIntoOwnSubtree,
     Io(io::Error),
 }
 
@@ -119,6 +121,9 @@ impl std::fmt::Display for Error {
             }
             Self::SubtaskNotPlannable => {
                 f.write_str("A Subtask follows its Task's Active or Backlog.")
+            }
+            Self::MoveIntoOwnSubtree => {
+                f.write_str("A Task can't move under itself or its Subtasks.")
             }
             Self::Io(e) => e.fmt(f),
         }
@@ -251,23 +256,98 @@ impl Tasks {
             return Ok(task.clone());
         }
         let order = next_order(&nodes, None, planning);
+        self.place(&nodes, id, None, planning, order)
+    }
+
+    /// Moves the Open Task `id` under the Open Task `parent`, or to the top
+    /// level of the `planning` list if `parent` is `None` (`planning` is then
+    /// the list it joins; under a Parent the Task follows its top-level Task's).
+    /// It lands before its sibling `before`, or last if that is `None`. Only
+    /// the moved Task is rewritten, unless its Active or Backlog changes: then
+    /// its Open Subtasks follow, and each records it in the History. Where
+    /// siblings share a key there is no room between them: the Task lands
+    /// beside them, ordered by Item ID. Fails with `NotFound` for an unknown or
+    /// Closed Task, Parent or `before` that is no sibling, and
+    /// `MoveIntoOwnSubtree` for a Parent that is the Task or its Subtask.
+    pub fn move_to(
+        &self,
+        id: &str,
+        parent: Option<&str>,
+        planning: Planning,
+        before: Option<&str>,
+    ) -> Result<Task, Error> {
+        let nodes = self.load()?;
+        let open = |id: &str| nodes.get(id).filter(|n| !n.task.closed);
+        open(id).ok_or(io::ErrorKind::NotFound)?;
+        let planning = match parent {
+            Some(parent) => {
+                let parent = open(parent).ok_or(io::ErrorKind::NotFound)?;
+                if is_within(&nodes, &parent.task.id, id) {
+                    return Err(Error::MoveIntoOwnSubtree);
+                }
+                parent.task.planning
+            }
+            None => planning,
+        };
+        let mut siblings = siblings(&nodes, parent, planning);
+        siblings.retain(|n| n.task.id != id);
+        let order = match before {
+            None => siblings.last().map_or(1.0, |n| n.order + 1.0),
+            Some(before) => {
+                let at = siblings
+                    .iter()
+                    .position(|n| n.task.id == before)
+                    .ok_or(io::ErrorKind::NotFound)?;
+                match at.checked_sub(1) {
+                    Some(prev) => f64::midpoint(siblings[prev].order, siblings[at].order),
+                    None => siblings[at].order - 1.0,
+                }
+            }
+        };
+        self.place(&nodes, id, parent, planning, order)
+    }
+
+    /// Saves the Open Task `id` as a child of `parent` (top-level if `None`)
+    /// with key `order`, planned as `planning`. If that changes its Active or
+    /// Backlog its Open Subtasks follow, and each records it in the History.
+    /// Returns the Task as saved.
+    fn place(
+        &self,
+        nodes: &Nodes,
+        id: &str,
+        parent: Option<&str>,
+        planning: Planning,
+        order: f64,
+    ) -> Result<Task, Error> {
+        let replanned = nodes[id].task.planning != planning;
         let event = match planning {
             Planning::Active => Event::MadeActive,
             Planning::Backlog => Event::MovedToBacklog,
         };
-        let mut planned = None;
-        for item in open_subtree(&nodes, id) {
+        let mut placed = None;
+        for item in open_subtree(nodes, id) {
+            let moved = item.as_str() == id;
+            if !moved && !replanned {
+                continue;
+            }
             let file = self.rewrite(&item, |file| {
                 file.set_scalar("state", planning.state());
-                if item.as_str() == id {
+                if moved {
                     file.set_scalar("order", order.to_string());
-                    file.remove("parent"); // a repaired orphan
+                    match parent {
+                        Some(parent) => file.set_scalar("parent", parent),
+                        None => file.remove("parent"),
+                    }
                 }
             })?;
-            self.history.record(event, &item, now_ms())?;
-            planned.get_or_insert(file);
+            if replanned {
+                self.history.record(event, &item, now_ms())?;
+            }
+            if moved {
+                placed = Some(file);
+            }
         }
-        Ok(planned
+        Ok(placed
             .as_ref()
             .and_then(task_of)
             .ok_or(io::ErrorKind::InvalidData)?)
@@ -582,18 +662,37 @@ fn open_subtree(nodes: &Nodes, root: &str) -> Vec<ItemId> {
     ids.iter().filter_map(|id| ItemId::parse(id)).collect()
 }
 
-/// Where a new Task goes: after its siblings, which are the Subtasks of
-/// `parent` or, top-level, the Open Tasks planned as `planning`.
-fn next_order(nodes: &Nodes, parent: Option<&str>, planning: Planning) -> f64 {
-    nodes
+/// The Tasks sharing a list, in their order: the Subtasks of `parent` or,
+/// top-level, the Open Tasks planned as `planning`.
+fn siblings<'a>(nodes: &'a Nodes, parent: Option<&str>, planning: Planning) -> Vec<&'a Node> {
+    let mut found: Vec<&Node> = nodes
         .values()
         .filter(|n| {
             n.task.parent.as_deref() == parent
                 && (parent.is_some() || (!n.task.closed && n.task.planning == planning))
         })
-        .map(|n| n.order)
-        .fold(0.0, f64::max)
-        + 1.0
+        .collect();
+    found.sort_by(|a, b| by_order(a, b));
+    found
+}
+
+/// Where a new Task goes: after its siblings.
+fn next_order(nodes: &Nodes, parent: Option<&str>, planning: Planning) -> f64 {
+    siblings(nodes, parent, planning)
+        .last()
+        .map_or(1.0, |n| n.order + 1.0)
+}
+
+/// Whether `id` is `ancestor` or sits below it.
+fn is_within(nodes: &Nodes, id: &str, ancestor: &str) -> bool {
+    let mut at = Some(id);
+    while let Some(current) = at {
+        if current == ancestor {
+            return true;
+        }
+        at = nodes.get(current).and_then(|n| n.task.parent.as_deref());
+    }
+    false
 }
 
 fn by_order(a: &Node, b: &Node) -> Ordering {
@@ -1379,5 +1478,155 @@ mod tests {
         raw(&dir, "aaaaaaaaaaaa", "done", None, 1);
         raw(&dir, "bbbbbbbbbbbb", "active", Some("aaaaaaaaaaaa"), 1);
         assert_eq!(titles(&tasks, Planning::Active), ["bbbbbbbbbbbb"]);
+    }
+
+    fn move_fixture(dir: &Scratch) -> (Tasks, [Task; 3]) {
+        let tasks = dir.store();
+        let [a, b, c] = ["a", "b", "c"].map(|t| tasks.create(t, Planning::Active).unwrap());
+        (tasks, [a, b, c])
+    }
+
+    #[test]
+    fn a_task_moves_before_a_sibling_or_to_the_end() {
+        let dir = Scratch::new();
+        let (tasks, [a, b, c]) = move_fixture(&dir);
+        tasks
+            .move_to(&c.id, None, Planning::Active, Some(&a.id))
+            .unwrap();
+        assert_eq!(titles(&tasks, Planning::Active), ["c", "a", "b"]);
+        tasks
+            .move_to(&b.id, None, Planning::Active, Some(&a.id))
+            .unwrap();
+        assert_eq!(titles(&tasks, Planning::Active), ["c", "b", "a"]);
+        tasks.move_to(&c.id, None, Planning::Active, None).unwrap();
+        assert_eq!(titles(&tasks, Planning::Active), ["b", "a", "c"]);
+        assert_eq!(titles(&dir.store(), Planning::Active), ["b", "a", "c"]);
+    }
+
+    #[test]
+    fn a_move_within_a_list_rewrites_only_the_moved_task() {
+        let dir = Scratch::new();
+        let (tasks, [a, b, c]) = move_fixture(&dir);
+        let before = (file_of(&dir, &a), file_of(&dir, &b), history(&dir));
+        tasks
+            .move_to(&c.id, None, Planning::Active, Some(&b.id))
+            .unwrap();
+        assert_eq!(
+            (file_of(&dir, &a), file_of(&dir, &b), history(&dir)),
+            before
+        );
+    }
+
+    #[test]
+    fn equal_keys_sort_by_item_id() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        raw(&dir, "cccccccccccc", "active", None, 1);
+        raw(&dir, "aaaaaaaaaaaa", "active", None, 1);
+        raw(&dir, "bbbbbbbbbbbb", "active", None, 1);
+        assert_eq!(
+            titles(&tasks, Planning::Active),
+            ["aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc"]
+        );
+    }
+
+    #[test]
+    fn a_task_moves_under_another_and_out_again() {
+        let dir = Scratch::new();
+        let (tasks, [a, b, c]) = move_fixture(&dir);
+        let sub = subtask(&tasks, &a, "sub");
+        tasks
+            .move_to(&c.id, Some(&a.id), Planning::Active, Some(&sub.id))
+            .unwrap();
+        let listed = tasks.tasks(Planning::Active).unwrap();
+        assert_eq!(
+            listed.iter().map(|t| &*t.title).collect::<Vec<_>>(),
+            ["a", "b"]
+        );
+        assert_eq!(sub_titles(&listed[0]), ["c", "sub"]);
+        assert_eq!(listed[0].subtasks[0].parent.as_deref(), Some(a.id.as_str()));
+        tasks
+            .move_to(&sub.id, None, Planning::Active, Some(&b.id))
+            .unwrap();
+        let listed = tasks.tasks(Planning::Active).unwrap();
+        assert_eq!(
+            listed.iter().map(|t| &*t.title).collect::<Vec<_>>(),
+            ["a", "sub", "b"]
+        );
+        assert_eq!(listed[1].parent, None);
+        assert!(!file_of(&dir, &sub).contains("parent"));
+    }
+
+    #[test]
+    fn moving_into_its_own_subtree_is_refused_and_changes_nothing() {
+        let dir = Scratch::new();
+        let (tasks, [a, ..]) = move_fixture(&dir);
+        let child = subtask(&tasks, &a, "child");
+        let grandchild = subtask(&tasks, &child, "grandchild");
+        let before = (file_of(&dir, &a), history(&dir));
+        for under in [&a, &child, &grandchild] {
+            assert!(matches!(
+                tasks.move_to(&a.id, Some(&under.id), Planning::Active, None),
+                Err(Error::MoveIntoOwnSubtree)
+            ));
+        }
+        assert_eq!((file_of(&dir, &a), history(&dir)), before);
+    }
+
+    #[test]
+    fn a_moved_task_takes_its_new_top_level_tasks_list_and_records_it() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let active = tasks.create("active", Planning::Active).unwrap();
+        let backlog = tasks.create("backlog", Planning::Backlog).unwrap();
+        let own = subtask(&tasks, &active, "own");
+        let before = history(&dir).len();
+        tasks
+            .move_to(&active.id, Some(&backlog.id), Planning::Active, None)
+            .unwrap();
+        for task in [&active, &own] {
+            assert!(file_of(&dir, task).contains("state: backlog"));
+        }
+        let lines = history(&dir);
+        assert_eq!(lines.len(), before + 2);
+        assert!(
+            lines[before..]
+                .iter()
+                .all(|l| l.contains(" moved-to-backlog "))
+        );
+        let listed = tasks.tasks(Planning::Backlog).unwrap();
+        assert_eq!(sub_titles(&listed[0]), ["active"]);
+        assert_eq!(sub_titles(&listed[0].subtasks[0]), ["own"]);
+
+        tasks
+            .move_to(&active.id, None, Planning::Active, None)
+            .unwrap();
+        assert_eq!(titles(&tasks, Planning::Active), ["active"]);
+        assert!(file_of(&dir, &own).contains("state: active"));
+        assert_eq!(history(&dir).len(), before + 4);
+    }
+
+    #[test]
+    fn moving_with_an_unknown_or_foreign_target_fails() {
+        let dir = Scratch::new();
+        let (tasks, [a, b, _]) = move_fixture(&dir);
+        let sub = subtask(&tasks, &a, "sub");
+        raw(&dir, "dddddddddddd", "done", None, 1);
+        for (id, parent, before) in [
+            ("aaaaaaaaaaaa", None, None),
+            ("dddddddddddd", None, None),
+            (&b.id[..], Some("aaaaaaaaaaaa"), None),
+            (&b.id[..], Some("dddddddddddd"), None),
+            (&b.id[..], None, Some(&sub.id[..])),
+            (&b.id[..], None, Some(&b.id[..])),
+        ] {
+            assert!(
+                matches!(
+                    tasks.move_to(id, parent, Planning::Active, before),
+                    Err(Error::Io(e)) if e.kind() == io::ErrorKind::NotFound
+                ),
+                "{id} {parent:?} {before:?}"
+            );
+        }
     }
 }

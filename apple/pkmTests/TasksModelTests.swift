@@ -185,4 +185,31 @@ import Testing
         model.commit()
         #expect(model.tasks.map(\.closed) == [false, true])
     }
+
+    @Test func aTaskIsDraggedBeforeAnotherAndToTheEnd() throws {
+        let model = try openModel()
+        for title in ["a", "b", "c"] { model.add(title: title, planning: .active) }
+        model.move(from: [2], to: 0)
+        #expect(model.tasks.map(\.title) == ["c", "a", "b"])
+        model.move(from: [0], to: 3)
+        #expect(model.tasks.map(\.title) == ["a", "b", "c"])
+        #expect(try openModel().tasks.map(\.title) == ["a", "b", "c"])
+    }
+
+    @Test func aTaskIsDroppedUnderAnotherAndOutAgain() throws {
+        let model = try openModel()
+        for title in ["a", "b"] { model.add(title: title, planning: .active) }
+        model.move(model.tasks[1], under: model.tasks[0])
+        #expect(model.tasks.map(\.title) == ["a", "b"] && model.tasks.map(\.depth) == [0, 1])
+        model.move(from: [1], to: 2)
+        #expect(model.tasks.map(\.depth) == [0, 0])
+    }
+
+    @Test func aTaskCannotBeDroppedUnderItsOwnSubtask() throws {
+        let model = try openModel()
+        model.add(title: "a", planning: .active)
+        model.addSubtask(title: "b", under: model.tasks[0])
+        model.move(model.tasks[0], under: model.tasks[1])
+        #expect(model.tasks.map(\.depth) == [0, 1])
+    }
 }

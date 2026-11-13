@@ -10,6 +10,7 @@ pub enum TasksError {
     EmptyTitle,
     InvalidTag,
     SubtaskNotPlannable,
+    MoveIntoOwnSubtree,
     Failed(String),
 }
 
@@ -19,6 +20,7 @@ impl std::fmt::Display for TasksError {
             Self::EmptyTitle => Error::EmptyTitle.fmt(f),
             Self::InvalidTag => Error::InvalidTag.fmt(f),
             Self::SubtaskNotPlannable => Error::SubtaskNotPlannable.fmt(f),
+            Self::MoveIntoOwnSubtree => Error::MoveIntoOwnSubtree.fmt(f),
             Self::Failed(message) => f.write_str(message),
         }
     }
@@ -36,6 +38,7 @@ impl From<Error> for TasksError {
             Error::EmptyTitle => Self::EmptyTitle,
             Error::InvalidTag => Self::InvalidTag,
             Error::SubtaskNotPlannable => Self::SubtaskNotPlannable,
+            Error::MoveIntoOwnSubtree => Self::MoveIntoOwnSubtree,
             Error::Io(e) => e.into(),
         }
     }
@@ -72,6 +75,8 @@ pub struct ListedTask {
     pub done: bool,
     /// A Closed Subtask of an Open Task: shown struck through.
     pub closed: bool,
+    /// The Parent's ID, if it is a Subtask.
+    pub parent: Option<String>,
     /// How deep it sits in the tree, 0 for a top-level Task.
     pub depth: u32,
     /// Whether it has Subtasks, which follow it in the list.
@@ -103,6 +108,7 @@ impl From<Task> for ListedTask {
             tags: t.tags,
             done: t.done,
             closed: t.closed,
+            parent: t.parent,
             depth: 0,
             has_subtasks: false,
         }
@@ -127,6 +133,21 @@ impl TaskStore {
     /// Makes a Task Active or moves it to the Backlog, at the end of that list.
     pub fn plan(&self, id: String, planning: Planning) -> Result<ListedTask, TasksError> {
         Ok(self.0.plan(&id, planning)?.into())
+    }
+
+    /// Moves a Task under `parent`, or to the top level of the `planning` list,
+    /// before its sibling `before` or last; see `pkm_tasks::Tasks::move_to`.
+    pub fn move_to(
+        &self,
+        id: String,
+        parent: Option<String>,
+        planning: Planning,
+        before: Option<String>,
+    ) -> Result<ListedTask, TasksError> {
+        Ok(self
+            .0
+            .move_to(&id, parent.as_deref(), planning, before.as_deref())?
+            .into())
     }
 
     /// Closes a Task as a pending change, committing the previous one first.

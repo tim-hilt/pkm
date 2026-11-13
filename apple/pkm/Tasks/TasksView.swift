@@ -18,32 +18,43 @@ struct TasksView: View {
                         Text(model.planning == .active ? "Nothing active." : "The Backlog is empty.")
                     }
                 } else {
-                    List(model.rows) { task in
-                        TaskRow(
-                            task: task, isCollapsed: model.isCollapsed(task),
-                            onCircle: { model.toggleDone(task) }, onDisclose: { model.toggleCollapsed(task) }
-                        )
-                        .contentShape(Rectangle())
-                        .onTapGesture { if !task.closed { editing = task } }
-                        .contextMenu {
-                            if !task.closed && !task.done {  // a pending Done is Reverted at its circle
-                                Button("Add Subtask", systemImage: "plus.circle") { subtaskParent = task }
-                                if task.depth == 0 {  // a Subtask follows its top-level Task
-                                    if task.planning == .backlog {
-                                        Button("Make Active", systemImage: "arrow.up.circle") {
-                                            model.plan(task, as: .active)
-                                        }
-                                    } else {
-                                        Button("Move to Backlog", systemImage: "tray") {
-                                            model.plan(task, as: .backlog)
+                    List {
+                        ForEach(model.rows) { task in
+                            TaskRow(
+                                task: task, isCollapsed: model.isCollapsed(task),
+                                onCircle: { model.toggleDone(task) }, onDisclose: { model.toggleCollapsed(task) }
+                            )
+                            .contentShape(Rectangle())
+                            .draggable(task.id)
+                            .dropDestination(for: String.self) { ids, _ in
+                                guard !task.closed, let moved = model.tasks.first(where: { $0.id == ids.first }) else {
+                                    return false
+                                }
+                                model.move(moved, under: task)
+                                return true
+                            }
+                            .onTapGesture { if !task.closed { editing = task } }
+                            .contextMenu {
+                                if !task.closed && !task.done {  // a pending Done is Reverted at its circle
+                                    Button("Add Subtask", systemImage: "plus.circle") { subtaskParent = task }
+                                    if task.depth == 0 {  // a Subtask follows its top-level Task
+                                        if task.planning == .backlog {
+                                            Button("Make Active", systemImage: "arrow.up.circle") {
+                                                model.plan(task, as: .active)
+                                            }
+                                        } else {
+                                            Button("Move to Backlog", systemImage: "tray") {
+                                                model.plan(task, as: .backlog)
+                                            }
                                         }
                                     }
-                                }
-                                Button("Reject", systemImage: "xmark.circle", role: .destructive) {
-                                    model.close(task, as: .rejected)
+                                    Button("Reject", systemImage: "xmark.circle", role: .destructive) {
+                                        model.close(task, as: .rejected)
+                                    }
                                 }
                             }
                         }
+                        .onMove { model.move(from: $0, to: $1) }
                     }
                     .listStyle(.plain)
                 }
@@ -60,6 +71,7 @@ struct TasksView: View {
                     .accessibilityIdentifier("tasks-planning")
                 }
                 #if os(iOS)
+                    ToolbarItem(placement: .topBarLeading) { EditButton() }  // reordering
                     ToolbarItem(placement: .topBarTrailing) { SettingsButton() }
                 #endif
             }

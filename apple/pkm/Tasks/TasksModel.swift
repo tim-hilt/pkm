@@ -88,6 +88,26 @@ final class TasksModel {
         reload()
     }
 
+    /// Moves the rows at `source` to land before the row at `destination` of `rows`
+    /// (`onMove`'s meaning), as a sibling of that row; past the last row, to the end
+    /// of the top level. Refused moves, e.g. under the Task's own Subtask, change nothing.
+    func move(from source: IndexSet, to destination: Int) {
+        let rows = rows
+        guard let index = source.first, index != destination else { return }
+        let target = destination < rows.count ? rows[destination] : nil
+        move(rows[index], under: target?.parent, before: target)
+    }
+
+    /// Moves a Task to be the last Subtask of `parent`.
+    func move(_ task: ListedTask, under parent: ListedTask) {
+        move(task, under: parent.id, before: nil)
+    }
+
+    private func move(_ task: ListedTask, under parent: String?, before: ListedTask?) {
+        _ = try? store.moveTo(id: task.id, parent: parent, planning: planning, before: before?.id)
+        reload()
+    }
+
     /// Closes a Task, committing the previous Close first. Done leaves it in
     /// place, marked, Rejected removes it; either way nothing is saved until
     /// `commit`, which follows `revertWindow` later.
