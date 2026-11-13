@@ -19,6 +19,20 @@ import Testing
         #expect(model.tasks.map(\.title) == ["Buy milk"])
     }
 
+    @Test func aTaskThatSyncWroteAppearsOnceTheListIsToldSoAndOneItDeletedLeaves() throws {
+        let model = try openModel()
+        let file = root.appending(path: "Tasks/aaaaaaaaaaaa.md")
+        try
+            "---\nid: aaaaaaaaaaaa\ntitle: From afar\npriority: 4\nstate: active\norder: 1\nupdated: 2024-01-01T00:00:00Z\n---\n"
+            .write(to: file, atomically: true, encoding: .utf8)
+        #expect(model.tasks.isEmpty)
+        model.syncDidChange()
+        #expect(model.tasks.map(\.title) == ["From afar"])
+        try FileManager.default.removeItem(at: file)
+        model.syncDidChange()
+        #expect(model.tasks.isEmpty)
+    }
+
     @Test func aTaskMovesBetweenTheBacklogAndActive() throws {
         let model = try openModel()
         model.add(title: "Later", planning: .backlog)

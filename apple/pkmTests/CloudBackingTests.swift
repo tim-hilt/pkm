@@ -228,8 +228,9 @@ import Testing
         cloud.startSyncing(
             drawings: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
             books: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
+            tasks: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
             stateDirectory: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
-            onChanged: { _ in }, onBooksChanged: { _ in })
+            onChanged: { _ in }, onBooksChanged: { _ in }, onTasksChanged: { _ in })
 
         #expect(cloud.status == .accessLost)
         #expect(cloud.hasProblem)
@@ -326,7 +327,8 @@ import Testing
         cloud.startSyncing(
             drawings: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
             books: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
-            stateDirectory: state.directory, onChanged: { _ in }, onBooksChanged: { _ in })
+            tasks: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
+            stateDirectory: state.directory, onChanged: { _ in }, onBooksChanged: { _ in }, onTasksChanged: { _ in })
 
         try await cloud.connect(url: "https://dav.example.com", username: "me", password: "pw")
 
@@ -341,7 +343,8 @@ import Testing
         cloud.startSyncing(
             drawings: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
             books: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
-            stateDirectory: state.directory, onChanged: { _ in }, onBooksChanged: { _ in })
+            tasks: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
+            stateDirectory: state.directory, onChanged: { _ in }, onBooksChanged: { _ in }, onTasksChanged: { _ in })
 
         try await cloud.reconnect(password: "new")
 

@@ -7,5 +7,6 @@
 
 mod history;
 mod store;
+pub mod sync;
 
 pub use store::{Blocker, Closing, Error, Planning, Task, Tasks};

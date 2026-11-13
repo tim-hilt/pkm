@@ -686,6 +686,11 @@ fn node_of(file: &Document) -> Option<Node> {
     })
 }
 
+/// Whether `file` is a Task, Open or Closed.
+pub(crate) fn is_task(file: &Document) -> bool {
+    node_of(file).is_some()
+}
+
 /// The Open Task a file describes; `None` for a closed or malformed one.
 fn task_of(file: &Document) -> Option<Task> {
     node_of(file).map(|n| n.task).filter(|task| !task.closed)

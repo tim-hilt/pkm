@@ -103,17 +103,19 @@ struct SyncProgress: Equatable {
 private final class SyncEvents: SyncObserver, @unchecked Sendable {
     private let onChanged: @MainActor @Sendable ([String]) -> Void
     private let onBooksChanged: @MainActor @Sendable ([String]) -> Void
+    private let onTasksChanged: @MainActor @Sendable ([String]) -> Void
     private let onProgress: @MainActor @Sendable (SyncProgress?) -> Void
     private let onStatus: @MainActor @Sendable (SyncStatus) -> Void
 
     init(
         onChanged: @escaping @MainActor @Sendable ([String]) -> Void,
         onBooksChanged: @escaping @MainActor @Sendable ([String]) -> Void,
+        onTasksChanged: @escaping @MainActor @Sendable ([String]) -> Void,
         onProgress: @escaping @MainActor @Sendable (SyncProgress?) -> Void,
         onStatus: @escaping @MainActor @Sendable (SyncStatus) -> Void
     ) {
-        (self.onChanged, self.onBooksChanged, self.onProgress, self.onStatus) =
-            (onChanged, onBooksChanged, onProgress, onStatus)
+        (self.onChanged, self.onBooksChanged, self.onTasksChanged, self.onProgress, self.onStatus) =
+            (onChanged, onBooksChanged, onTasksChanged, onProgress, onStatus)
     }
 
     func changed(names: [String]) {
@@ -122,6 +124,10 @@ private final class SyncEvents: SyncObserver, @unchecked Sendable {
 
     func booksChanged(names: [String]) {
         Task { @MainActor [onBooksChanged] in onBooksChanged(names) }
+    }
+
+    func tasksChanged(names: [String]) {
+        Task { @MainActor [onTasksChanged] in onTasksChanged(names) }
     }
 
     func progress(done: UInt32, total: UInt32) {
@@ -193,10 +199,18 @@ final class CloudBackingModel {
     private struct SyncTarget {
         let drawings: URL
         let books: URL
+        let tasks: URL
         /// What was Synced, outside the Context folders; never Synced itself.
         let stateDirectory: URL
         let onChanged: @MainActor @Sendable ([String]) -> Void
         let onBooksChanged: @MainActor @Sendable ([String]) -> Void
+        let onTasksChanged: @MainActor @Sendable ([String]) -> Void
+
+        var directories: SyncDirectories {
+            SyncDirectories(
+                drawings: drawings.path(percentEncoded: false), books: books.path(percentEncoded: false),
+                tasks: tasks.path(percentEncoded: false), state: stateDirectory.path(percentEncoded: false))
+        }
     }
     @ObservationIgnored private var target: SyncTarget?
     /// The running Sync; nil while not Connected or not attached.
@@ -352,18 +366,19 @@ final class CloudBackingModel {
             save: { credentials.save(account) })
     }
 
-    /// Syncs the Drawings in `drawings` and the Books in `books` while
-    /// Connected, calling `onChanged` and `onBooksChanged` (on the main actor)
-    /// with the names of what Sync wrote or deleted here. `stateDirectory`
+    /// Syncs the Drawings in `drawings`, the Books in `books` and the Tasks in
+    /// `tasks` while Connected, calling `onChanged`, `onBooksChanged` and
+    /// `onTasksChanged` (on the main actor) with the names of what Sync wrote or deleted here. `stateDirectory`
     /// holds what Sync remembers: not in the Context folders.
     func startSyncing(
-        drawings: URL, books: URL, stateDirectory: URL,
+        drawings: URL, books: URL, tasks: URL, stateDirectory: URL,
         onChanged: @escaping @MainActor @Sendable ([String]) -> Void,
-        onBooksChanged: @escaping @MainActor @Sendable ([String]) -> Void
+        onBooksChanged: @escaping @MainActor @Sendable ([String]) -> Void,
+        onTasksChanged: @escaping @MainActor @Sendable ([String]) -> Void
     ) {
         target = SyncTarget(
-            drawings: drawings, books: books, stateDirectory: stateDirectory,
-            onChanged: onChanged, onBooksChanged: onBooksChanged)
+            drawings: drawings, books: books, tasks: tasks, stateDirectory: stateDirectory,
+            onChanged: onChanged, onBooksChanged: onBooksChanged, onTasksChanged: onTasksChanged)
         network = NetworkMonitor { [weak self] online in self?.networkChanged(online: online) }
         restartSync()
     }
@@ -417,6 +432,7 @@ final class CloudBackingModel {
         SyncEvents(
             onChanged: target.onChanged,
             onBooksChanged: target.onBooksChanged,
+            onTasksChanged: target.onTasksChanged,
             onProgress: { [weak self] in self?.progress = $0 },
             onStatus: { [weak self] in self?.apply(status: $0) })
     }
@@ -433,9 +449,7 @@ final class CloudBackingModel {
         let sync = try? CloudSync.startIcloudDrive(
             folder: grant.folder.appending(path: Self.iCloudFolder).path(percentEncoded: false),
             downloader: ICloudDownloader(),
-            drawingsDirectory: target.drawings.path(percentEncoded: false),
-            booksDirectory: target.books.path(percentEncoded: false),
-            stateDirectory: target.stateDirectory.path(percentEncoded: false),
+            directories: target.directories,
             observer: observer(for: target))
         if sync == nil { status = .accessLost }
         return sync
@@ -445,9 +459,7 @@ final class CloudBackingModel {
         try? CloudSync.startGoogleDrive(
             clientId: GoogleOAuth.clientID, refreshToken: account.refreshToken,
             tokens: RotatedTokens.google(credentials),
-            drawingsDirectory: target.drawings.path(percentEncoded: false),
-            booksDirectory: target.books.path(percentEncoded: false),
-            stateDirectory: target.stateDirectory.path(percentEncoded: false),
+            directories: target.directories,
             observer: observer(for: target))
     }
 
@@ -455,18 +467,14 @@ final class CloudBackingModel {
         try? CloudSync.startOneDrive(
             clientId: OneDriveOAuth.clientID, refreshToken: account.refreshToken,
             tokens: RotatedTokens.oneDrive(credentials),
-            drawingsDirectory: target.drawings.path(percentEncoded: false),
-            booksDirectory: target.books.path(percentEncoded: false),
-            stateDirectory: target.stateDirectory.path(percentEncoded: false),
+            directories: target.directories,
             observer: observer(for: target))
     }
 
     private func startWebDAVSync(account: WebDAVAccount, target: SyncTarget) -> CloudSync? {
         try? CloudSync.startWebdav(
             url: account.url, username: account.username, password: account.password,
-            drawingsDirectory: target.drawings.path(percentEncoded: false),
-            booksDirectory: target.books.path(percentEncoded: false),
-            stateDirectory: target.stateDirectory.path(percentEncoded: false),
+            directories: target.directories,
             observer: observer(for: target))
     }
 

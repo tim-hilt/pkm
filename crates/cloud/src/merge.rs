@@ -4,6 +4,7 @@
 
 use pkm_books::sync as books;
 use pkm_drawing::{are_same_drawing, is_drawing, merge_drawings};
+use pkm_tasks::sync as tasks;
 
 /// The merge hook of one Context folder.
 pub trait Merge: Send + Sync {
@@ -56,6 +57,20 @@ pub trait Merge: Send + Sync {
     }
 }
 
+/// The merge of a Context whose files are opaque: the side that changed one
+/// since `base` wins, and two different changes never merge.
+fn transfer(base: Option<&[u8]>, local: &[u8], remote: &[u8]) -> Option<Vec<u8>> {
+    if local == remote || base == Some(remote) {
+        // Same, or only this Device changed the file: the cloud takes it.
+        Some(local.to_vec())
+    } else if base == Some(local) {
+        // Only the cloud's file changed: this Device takes it.
+        Some(remote.to_vec())
+    } else {
+        None
+    }
+}
+
 /// Drawings: `.excalidraw` files, merged Element by Element (ADR-0011).
 pub struct Drawings;
 
@@ -98,18 +113,7 @@ impl Merge for Books {
     }
 
     fn merge(&self, base: Option<&[u8]>, local: &[u8], remote: &[u8]) -> Option<Vec<u8>> {
-        if local == remote {
-            Some(local.to_vec())
-        } else if base == Some(remote) {
-            // Only this Device changed the File: the cloud takes it.
-            Some(local.to_vec())
-        } else if base == Some(local) {
-            // Only the cloud's File changed: this Device takes it.
-            Some(remote.to_vec())
-        } else {
-            // Both changed differently: never merged.
-            None
-        }
+        transfer(base, local, remote)
     }
 
     fn is_item(&self, bytes: &[u8]) -> bool {
@@ -166,5 +170,61 @@ impl Merge for BookStates {
 
     fn transfers_unparseable(&self) -> bool {
         false
+    }
+}
+
+/// Tasks: `<id>.md` files, merged three-way by field (ADR-0021). A file that
+/// isn't a Task is left where it is, and two versions that can't merge are
+/// not both kept: one Task has one file.
+pub struct Tasks;
+
+impl Tasks {
+    /// The Context's folder on the Device and in the cloud (`pkm/Tasks`).
+    pub const FOLDER: &str = pkm_tasks::Tasks::FOLDER;
+}
+
+impl Merge for Tasks {
+    fn extension(&self) -> &str {
+        ".md"
+    }
+
+    fn merge(&self, base: Option<&[u8]>, local: &[u8], remote: &[u8]) -> Option<Vec<u8>> {
+        tasks::merge(base, local, remote)
+    }
+
+    fn is_item(&self, bytes: &[u8]) -> bool {
+        tasks::is_item(bytes)
+    }
+
+    fn same_item(&self, a: &[u8], b: &[u8]) -> Option<bool> {
+        tasks::same_item(a, b)
+    }
+
+    fn transfers_unparseable(&self) -> bool {
+        false
+    }
+}
+
+/// The Tasks' History files: `.history/<device>-<yyyy-mm>.log` in the Tasks
+/// folder (ADR-0022). Each Device writes only its own, so they are
+/// transferred as they are and never merged. Like the Books' state files they
+/// sit at the root of `pkm/Tasks` in the cloud, with their own Sync history.
+pub struct TaskHistory;
+
+impl Merge for TaskHistory {
+    fn extension(&self) -> &str {
+        ".log"
+    }
+
+    fn merge(&self, base: Option<&[u8]>, local: &[u8], remote: &[u8]) -> Option<Vec<u8>> {
+        transfer(base, local, remote)
+    }
+
+    fn is_item(&self, _bytes: &[u8]) -> bool {
+        true
+    }
+
+    fn same_item(&self, a: &[u8], b: &[u8]) -> Option<bool> {
+        Some(a == b)
     }
 }

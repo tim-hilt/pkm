@@ -11,7 +11,7 @@ use pkm_base::json;
 use pkm_books::library::Library;
 use pkm_cloud::{
     Blob, BookStates, Books as BookFiles, DirStorage, Drawings, Folder, Merge, Progress, Storage,
-    SyncState, sync_folders, sync_step,
+    SyncState, TaskHistory, Tasks, sync_folders, sync_step,
 };
 
 struct Scratch(PathBuf);
@@ -131,13 +131,18 @@ struct Device {
     notes: Notes,
     /// The Books Context: Book Files, with their state hidden in `.state`.
     books: Scratch,
+    /// The Tasks Context: Task files, with their History hidden in `.history`.
+    tasks: Scratch,
 }
 
 impl Device {
     fn new() -> Self {
         let books = Scratch::new("books");
         fs::create_dir_all(books.0.join(".state")).unwrap();
+        let tasks = Scratch::new("tasks");
+        fs::create_dir_all(tasks.0.join(".history")).unwrap();
         Device {
+            tasks,
             drawings: Scratch::new("drawings"),
             state: Scratch::new("state"),
             notes: Notes::new(),
@@ -207,6 +212,55 @@ impl Device {
             .into_iter()
             .filter(|name| !name.starts_with('.'))
             .collect()
+    }
+
+    fn write_task(&self, file: &str, bytes: &[u8]) {
+        fs::write(self.tasks.0.join(file), bytes).unwrap();
+    }
+
+    fn read_task(&self, file: &str) -> Option<Vec<u8>> {
+        fs::read(self.tasks.0.join(file)).ok()
+    }
+
+    fn remove_task(&self, file: &str) {
+        fs::remove_file(self.tasks.0.join(file)).unwrap();
+    }
+
+    fn write_history(&self, file: &str, bytes: &[u8]) {
+        fs::write(self.tasks.0.join(".history").join(file), bytes).unwrap();
+    }
+
+    fn read_history(&self, file: &str) -> Option<Vec<u8>> {
+        fs::read(self.tasks.0.join(".history").join(file)).ok()
+    }
+
+    /// One Sync step over the Tasks Context: the Task files and their
+    /// History, each with its own history. Returns the names it changed here.
+    fn sync_tasks(&self, cloud: &Cloud) -> Vec<String> {
+        let tasks_state = SyncState::open(self.state.0.join("Tasks")).unwrap();
+        let history_state = SyncState::open(self.state.0.join("TasksHistory")).unwrap();
+        let folders = [
+            Folder {
+                dir: &self.tasks.0,
+                state: &tasks_state,
+                storage: &cloud.storage,
+                merge: Arc::new(Tasks),
+            },
+            Folder {
+                dir: &self.tasks.0.join(".history"),
+                state: &history_state,
+                storage: &cloud.storage,
+                merge: Arc::new(TaskHistory),
+            },
+        ];
+        let outcomes = sync_folders(&folders, &AtomicBool::new(false), &|_| {});
+        let mut changed = Vec::new();
+        for outcome in outcomes {
+            assert!(outcome.error.is_none(), "{:?}", outcome.error);
+            changed.extend(outcome.changed);
+        }
+        changed.sort();
+        changed
     }
 
     /// One Sync step over the Books Context: the Book Files and their state
@@ -2070,4 +2124,167 @@ fn three_devices_converge_on_one_state_with_every_highlight_and_the_latest_field
         .find(|h| h.get("id").unwrap().as_str() == Some("h"))
         .unwrap();
     assert_eq!(common.get("comment").unwrap().as_str(), Some("third"));
+}
+
+// ---- Tasks (ADR-0020, ADR-0021, ADR-0022) ----
+
+fn task(title: &str, priority: u8, tags: &[&str], updated: &str) -> Vec<u8> {
+    let tags: String = tags.iter().map(|t| format!("  - {t}\n")).collect();
+    let tags = if tags.is_empty() {
+        tags
+    } else {
+        format!("tags:\n{tags}")
+    };
+    format!(
+        "---\nid: aaaaaaaaaaaa\ntitle: {title}\npriority: {priority}\nstate: active\norder: 1\n{tags}updated: {updated}\n---\n"
+    )
+    .into_bytes()
+}
+
+fn text(bytes: Vec<u8>) -> String {
+    String::from_utf8(bytes).unwrap()
+}
+
+#[test]
+fn a_task_and_its_history_reach_the_other_device() {
+    let cloud = Cloud::new();
+    let (phone, tablet) = (Device::new(), Device::new());
+    let file = task("Milk", 4, &[], "2024-01-01T00:00:00Z");
+    phone.write_task("aaaaaaaaaaaa.md", &file);
+    phone.write_history(
+        "phone-2024-01.log",
+        b"2024-01-01T00:00:00Z created aaaaaaaaaaaa\n",
+    );
+
+    phone.sync_tasks(&cloud);
+    let changed = tablet.sync_tasks(&cloud);
+
+    assert_eq!(changed, ["aaaaaaaaaaaa", "phone-2024-01"]);
+    assert_eq!(tablet.read_task("aaaaaaaaaaaa.md").unwrap(), file);
+    assert_eq!(
+        tablet.read_history("phone-2024-01.log").unwrap(),
+        b"2024-01-01T00:00:00Z created aaaaaaaaaaaa\n"
+    );
+    // The History never lands among the Task files, nor Tasks among History.
+    assert!(tablet.read_task("phone-2024-01.log").is_none());
+    assert!(tablet.read_history("aaaaaaaaaaaa.md").is_none());
+}
+
+#[test]
+fn edits_to_different_fields_on_two_devices_are_both_kept() {
+    let cloud = Cloud::new();
+    let (phone, tablet) = (Device::new(), Device::new());
+    phone.write_task(
+        "aaaaaaaaaaaa.md",
+        &task("Milk", 4, &["home"], "2024-01-01T00:00:00Z"),
+    );
+    phone.sync_tasks(&cloud);
+    tablet.sync_tasks(&cloud);
+
+    phone.write_task(
+        "aaaaaaaaaaaa.md",
+        &task("Oat milk", 4, &["home", "shop"], "2024-01-02T00:00:00Z"),
+    );
+    tablet.write_task(
+        "aaaaaaaaaaaa.md",
+        &task("Milk", 1, &["home", "food"], "2024-01-03T00:00:00Z"),
+    );
+    phone.sync_tasks(&cloud);
+    tablet.sync_tasks(&cloud);
+    phone.sync_tasks(&cloud);
+
+    let merged = text(phone.read_task("aaaaaaaaaaaa.md").unwrap());
+    assert!(merged.contains("title: Oat milk\n"), "{merged}");
+    assert!(merged.contains("priority: 1\n"), "{merged}");
+    for tag in ["home", "shop", "food"] {
+        assert!(merged.contains(&format!("  - {tag}\n")), "{merged}");
+    }
+    assert_eq!(
+        tablet.read_task("aaaaaaaaaaaa.md"),
+        phone.read_task("aaaaaaaaaaaa.md")
+    );
+    assert_eq!(
+        cloud.read("aaaaaaaaaaaa.md"),
+        phone.read_task("aaaaaaaaaaaa.md")
+    );
+}
+
+#[test]
+fn a_task_file_removed_on_one_device_is_deleted_everywhere() {
+    let cloud = Cloud::new();
+    let (phone, tablet) = (Device::new(), Device::new());
+    phone.write_task(
+        "aaaaaaaaaaaa.md",
+        &task("Milk", 4, &[], "2024-01-01T00:00:00Z"),
+    );
+    phone.sync_tasks(&cloud);
+    tablet.sync_tasks(&cloud);
+
+    phone.remove_task("aaaaaaaaaaaa.md");
+    tablet.write_task(
+        "aaaaaaaaaaaa.md",
+        &task("Milk", 1, &[], "2024-01-02T00:00:00Z"),
+    );
+    phone.sync_tasks(&cloud);
+    tablet.sync_tasks(&cloud);
+
+    assert!(cloud.read("aaaaaaaaaaaa.md").is_none());
+    assert!(tablet.read_task("aaaaaaaaaaaa.md").is_none());
+}
+
+#[test]
+fn a_file_that_is_no_task_is_neither_transferred_nor_overwritten() {
+    let cloud = Cloud::new();
+    let (phone, tablet) = (Device::new(), Device::new());
+    phone.write_task("bbbbbbbbbbbb.md", b"not a task");
+    phone.sync_tasks(&cloud);
+    assert!(cloud.read("bbbbbbbbbbbb.md").is_none());
+
+    cloud.write("cccccccccccc.md", b"---\nbroken");
+    tablet.sync_tasks(&cloud);
+    assert!(tablet.read_task("cccccccccccc.md").is_none());
+}
+
+#[test]
+fn history_files_are_transferred_as_they_are_never_merged() {
+    let cloud = Cloud::new();
+    let (phone, tablet) = (Device::new(), Device::new());
+    phone.write_history("phone-2024-01.log", b"one\n");
+    tablet.write_history("tablet-2024-01.log", b"two\n");
+    phone.sync_tasks(&cloud);
+    tablet.sync_tasks(&cloud);
+
+    phone.write_history("phone-2024-01.log", b"one\nmore\n");
+    phone.sync_tasks(&cloud);
+    tablet.sync_tasks(&cloud);
+    phone.sync_tasks(&cloud);
+
+    for device in [&phone, &tablet] {
+        assert_eq!(
+            device.read_history("phone-2024-01.log").unwrap(),
+            b"one\nmore\n"
+        );
+        assert_eq!(device.read_history("tablet-2024-01.log").unwrap(), b"two\n");
+    }
+}
+
+#[test]
+fn tasks_sync_alongside_drawings_and_books() {
+    let (drawings, books, tasks) = (Cloud::new(), Cloud::new(), Cloud::new());
+    let (phone, tablet) = (Device::new(), Device::new());
+    phone.write_task(
+        "aaaaaaaaaaaa.md",
+        &task("Milk", 4, &[], "2024-01-01T00:00:00Z"),
+    );
+    phone.write_book("Book.pdf", b"%PDF-one");
+    phone.write("Sketch.excalidraw", b"{}");
+    for device in [&phone, &tablet] {
+        device.sync(&drawings);
+        device.sync_books(&books);
+        device.sync_tasks(&tasks);
+    }
+
+    assert!(tablet.read_task("aaaaaaaaaaaa.md").is_some());
+    assert_eq!(tablet.read_book("Book.pdf").unwrap(), b"%PDF-one");
+    assert_eq!(tablet.files(), ["Sketch.excalidraw"]);
 }

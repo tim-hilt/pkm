@@ -180,6 +180,9 @@ final class TasksModel {
     /// `text` without the characters a Tag can never contain.
     static func allowedTagText(_ text: String) -> String { stripForbiddenTagCharacters(text: text) }
 
+    /// Sync wrote or deleted Task files: the list shows what is there now.
+    func syncDidChange() { reload() }
+
     private func reload() {
         tasks = (try? store.tasks(planning: planning)) ?? []
     }

@@ -131,7 +131,12 @@ impl Document {
         out
     }
 
-    fn get(&self, key: &str) -> Option<&Value> {
+    /// The property keys, in file order.
+    pub fn keys(&self) -> impl Iterator<Item = &str> {
+        self.entries.iter().map(|(key, _)| key.as_str())
+    }
+
+    pub fn get(&self, key: &str) -> Option<&Value> {
         self.entries.iter().find(|(k, _)| k == key).map(|(_, v)| v)
     }
 }
