@@ -19,9 +19,12 @@ import type { Excalifont } from "./drawings/text/Excalifont";
 import { browserHistory } from "./navigation/browserHistory";
 import { Navigation } from "./navigation/Navigation";
 import { Shell } from "./shell/Shell";
+import { TaskFiles } from "./tasks/TaskFiles";
+import { TasksModel } from "./tasks/TasksModel";
+import { TasksView } from "./tasks/TasksView";
 
 /**
- * The app: the shell with its five Contexts; in Drawings the Gallery, from
+ * The app: the shell with its five Contexts; Tasks are listed in their pane, and in Drawings the Gallery, from
  * which a Drawing is opened into the Canvas, and back. Drawings are kept
  * saved as they change (autosave), and when the page goes to the background.
  */
@@ -58,6 +61,9 @@ export async function startApp(
   const navigation = new Navigation(browserHistory(window), localStorage);
   const shell = new Shell(navigation, new SettingsView(appearance, cloud));
   root.replaceChildren(shell.element);
+  shell
+    .pane("tasks")
+    .append(new TasksView(new TasksModel(await TaskFiles.open(core, storage))).element);
   const pane = shell.pane("drawings");
 
   let canvas: { drawing: OpenDrawing; stop: () => void } | undefined;

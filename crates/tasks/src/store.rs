@@ -1,6 +1,7 @@
 //! The Tasks store: a folder of `<id>.md` files.
 
 use crate::cache::Cache;
+use crate::files::{DiskFiles, Files};
 use crate::history::{Event, History};
 use pkm_base::clock::{iso8601, now_ms};
 use pkm_base::front_matter::{Document, Value};
@@ -10,9 +11,9 @@ use pkm_base::tag;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 const DEFAULT_PRIORITY: u8 = 4;
 const TAGS: &str = "tags";
@@ -105,6 +106,30 @@ pub struct Task {
     pub blocked_by: Vec<Blocker>,
 }
 
+/// A Task as one row of a flattened list: its Subtasks follow it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Row {
+    /// Without its `subtasks`, which are rows of their own.
+    pub task: Task,
+    /// How deep it sits in the tree, 0 for a top-level Task.
+    pub depth: u32,
+    pub has_subtasks: bool,
+}
+
+impl Row {
+    fn flatten(mut task: Task, depth: u32, rows: &mut Vec<Self>) {
+        let subtasks = std::mem::take(&mut task.subtasks);
+        rows.push(Self {
+            task,
+            depth,
+            has_subtasks: !subtasks.is_empty(),
+        });
+        for subtask in subtasks {
+            Self::flatten(subtask, depth + 1, rows);
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum Error {
     /// The Title is empty or only whitespace.
@@ -165,6 +190,7 @@ impl std::error::Error for Error {}
 /// The Tasks in one folder (`Tasks` in the app's storage).
 #[derive(Debug)]
 pub struct Tasks {
+    files: Arc<dyn Files>,
     root: PathBuf,
     history: History,
     /// What the files last said, so a launch reads only those that changed.
@@ -189,13 +215,31 @@ impl Tasks {
     ) -> io::Result<Self> {
         let root = root.into();
         fs::create_dir_all(&root)?;
-        let history = History::new(root.join(".history"), device);
-        Ok(Self {
+        Ok(Self::open_in(
+            Arc::new(DiskFiles),
             root,
-            history,
-            cache: Mutex::new(Cache::new(cache.into())),
+            device,
+            Some(cache.into()),
+        ))
+    }
+
+    /// The Tasks in `root` on any `files`, which must hold the folder `root`
+    /// (an empty one is none). Without a `cache` file, nothing is remembered
+    /// between launches.
+    pub fn open_in(
+        files: Arc<dyn Files>,
+        root: impl Into<PathBuf>,
+        device: ItemId,
+        cache: Option<PathBuf>,
+    ) -> Self {
+        let root = root.into();
+        Self {
+            history: History::new(files.clone(), root.join(".history"), device),
+            cache: Mutex::new(Cache::new(files.clone(), cache)),
+            files,
+            root,
             pending: Mutex::new(None),
-        })
+        }
     }
 
     /// Creates a Task at the end of its list, with priority 4. The Title is
@@ -516,10 +560,9 @@ impl Tasks {
     /// Task, each once, sorted.
     pub fn tags_with_prefix(&self, prefix: &str) -> io::Result<Vec<String>> {
         let mut found = Vec::new();
-        for item in fs::read_dir(&self.root)? {
-            let path = item?.path();
-            if path.extension().is_some_and(|e| e == "md")
-                && let Ok(text) = fs::read_to_string(&path)
+        for listed in self.files.list(&self.root)? {
+            if listed.name.ends_with(".md")
+                && let Ok(text) = self.files.read(&self.root.join(&listed.name))
                 && let Some(file) = Document::parse(&text)
             {
                 found.extend(tags_of(&file).into_iter().filter(|t| t.starts_with(prefix)));
@@ -532,7 +575,7 @@ impl Tasks {
 
     /// The file of the Open Task `id` and the Task it describes.
     fn read_open(&self, id: &ItemId) -> Result<(Document, Task), Error> {
-        let file = Document::parse(&fs::read_to_string(self.path(id))?)
+        let file = Document::parse(&self.files.read(&self.path(id))?)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "unreadable Task"))?;
         let task = task_of(&file).ok_or(io::ErrorKind::NotFound)?;
         Ok((file, task))
@@ -561,7 +604,7 @@ impl Tasks {
         let blockers = blockers_of(file);
         let kept: Vec<String> = blockers
             .iter()
-            .filter(|b| ItemId::parse(b).is_some_and(|b| self.path(&b).exists()))
+            .filter(|b| ItemId::parse(b).is_some_and(|b| self.files.exists(&self.path(&b))))
             .cloned()
             .collect();
         if kept.len() != blockers.len() {
@@ -604,6 +647,15 @@ impl Tasks {
             .collect())
     }
 
+    /// `tasks` as a pre-order walk: each Task is followed by its Subtasks.
+    pub fn rows(&self, planning: Planning) -> io::Result<Vec<Row>> {
+        let mut rows = Vec::new();
+        for task in self.tasks(planning)? {
+            Row::flatten(task, 0, &mut rows);
+        }
+        Ok(rows)
+    }
+
     /// Every Task in the folder, repaired. Only `<id>.md` is the Task `id`: a
     /// copy under another name (`<id> 1.md`) would shadow it. Reads only the
     /// files that changed since the cache last saw them.
@@ -612,7 +664,7 @@ impl Tasks {
             .cache
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .nodes(&self.root, read_node)?;
+            .nodes(&self.root, |path| read_node(self.files.as_ref(), path))?;
         repair(&mut nodes);
         Ok(nodes)
     }
@@ -621,23 +673,18 @@ impl Tasks {
         self.root.join(format!("{id}.md"))
     }
 
-    /// Writes `<id>.md` through a hidden scratch file, so a crash leaves no
-    /// torn Task and Sync never sees half of one. Unless told to overwrite,
-    /// fails with `AlreadyExists` rather than replacing a Task.
+    /// Writes `<id>.md` whole. Unless told to overwrite, fails with
+    /// `AlreadyExists` rather than replacing a Task.
     fn write(&self, id: &ItemId, text: &str, overwrite: Overwrite) -> io::Result<()> {
         let path = self.path(id);
-        let scratch = self.root.join(format!(".{id}.tmp"));
-        if overwrite == Overwrite::No && path.exists() {
+        if overwrite == Overwrite::No && self.files.exists(&path) {
             return Err(io::ErrorKind::AlreadyExists.into());
         }
         self.cache
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .forget(&format!("{id}.md"));
-        let written = fs::File::create(&scratch).and_then(|mut f| f.write_all(text.as_bytes()));
-        written
-            .and_then(|()| fs::rename(&scratch, &path))
-            .inspect_err(|_| drop(fs::remove_file(&scratch)))
+        self.files.write(&path, text)
     }
 }
 
@@ -684,8 +731,8 @@ impl Node {
 type Nodes = HashMap<String, Node>;
 
 /// The Task in the file at `path`, if it is one and is named by its id.
-fn read_node(path: &Path) -> Option<Node> {
-    let text = fs::read_to_string(path).ok()?;
+fn read_node(files: &dyn Files, path: &Path) -> Option<Node> {
+    let text = files.read(path).ok()?;
     let node = node_of(&Document::parse(&text)?)?;
     (path.file_stem()? == node.task.id.as_str()).then_some(node)
 }
@@ -2140,5 +2187,47 @@ mod tests {
         tasks.commit().unwrap();
         tasks.tasks(Planning::Active).unwrap();
         assert!(dir.cache().exists());
+    }
+
+    #[test]
+    fn rows_list_each_task_before_its_subtasks() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let parent = tasks.create("parent", Planning::Active).unwrap();
+        tasks.create_subtask(&parent.id, "child").unwrap();
+        tasks.create("other", Planning::Active).unwrap();
+        let rows: Vec<_> = tasks
+            .rows(Planning::Active)
+            .unwrap()
+            .into_iter()
+            .map(|r| (r.task.title, r.depth, r.has_subtasks))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("parent".to_owned(), 0, true),
+                ("child".to_owned(), 1, false),
+                ("other".to_owned(), 0, false)
+            ]
+        );
+    }
+
+    #[test]
+    fn tasks_live_on_any_files() {
+        let files = Arc::new(crate::files::MemoryFiles::default());
+        let device = ItemId::parse("dddddddddddd").unwrap();
+        let tasks = Tasks::open_in(files.clone(), "Tasks", device, None);
+        let task = tasks.create("Buy milk", Planning::Backlog).unwrap();
+        tasks.add_tag(&task.id, "home").unwrap();
+        tasks.plan(&task.id, Planning::Active).unwrap();
+        assert_eq!(tasks.tags_with_prefix("h").unwrap(), ["home"]);
+        let listed = tasks.tasks(Planning::Active).unwrap();
+        assert_eq!(
+            (listed[0].title.as_str(), listed[0].tags.clone()),
+            ("Buy milk", vec!["home".to_owned()])
+        );
+        let changed = files.take_changes();
+        assert_eq!(changed.len(), 2, "{changed:?}"); // the Task and the History
+        assert!(changed.contains(&PathBuf::from(format!("Tasks/{}.md", task.id))));
     }
 }

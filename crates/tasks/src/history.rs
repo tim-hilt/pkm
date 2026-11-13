@@ -1,11 +1,12 @@
 //! The History (ADR-0022): when Tasks were created, made Active, moved to the
 //! Backlog, Done and Rejected, by Item ID and time only.
 
+use crate::files::Files;
 use pkm_base::clock::iso8601;
 use pkm_base::item_id::ItemId;
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::io;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// What happened to a Task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,13 +34,18 @@ impl Event {
 /// Device writes them, so Sync never merges them.
 #[derive(Debug)]
 pub(crate) struct History {
+    files: Arc<dyn Files>,
     folder: PathBuf,
     device: ItemId,
 }
 
 impl History {
-    pub(crate) fn new(folder: PathBuf, device: ItemId) -> Self {
-        Self { folder, device }
+    pub(crate) fn new(files: Arc<dyn Files>, folder: PathBuf, device: ItemId) -> Self {
+        Self {
+            files,
+            folder,
+            device,
+        }
     }
 
     /// Appends `<time> <event> <id>` to the file of the month `at_ms` is in.
@@ -49,15 +55,16 @@ impl History {
         let file = self
             .folder
             .join(format!("{}-{}.log", self.device, &time[..7]));
-        fs::create_dir_all(&self.folder)?;
-        let mut log = OpenOptions::new().create(true).append(true).open(file)?;
-        writeln!(log, "{time} {} {id}", event.name())
+        self.files
+            .append(&file, &format!("{time} {} {id}\n", event.name()))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::files::DiskFiles;
+    use std::fs;
 
     #[test]
     fn lines_go_to_the_file_of_their_month() {
@@ -67,7 +74,7 @@ mod tests {
         ));
         let device = ItemId::parse("aaaaaaaaaaaa").unwrap();
         let id = ItemId::parse("bbbbbbbbbbbb").unwrap();
-        let history = History::new(folder.clone(), device);
+        let history = History::new(Arc::new(DiskFiles), folder.clone(), device);
         history
             .record(Event::Created, &id, 1_700_000_000_000.0)
             .unwrap(); // 2023-11-14

@@ -6,15 +6,12 @@
 //! which is all that is written to the cache file between launches. An Open
 //! Task is kept in memory only and read again on launch: there are few.
 
+use crate::files::{Files, Stamp};
 use crate::store::Node;
 use std::collections::HashMap;
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
-
-/// Changes whenever a file does: modification time in nanoseconds, and size.
-type Stamp = (u128, u64);
+use std::sync::Arc;
 
 #[derive(Debug)]
 struct Entry {
@@ -31,8 +28,9 @@ impl Entry {
 
 #[derive(Debug)]
 pub(crate) struct Cache {
-    /// Never in the Synced folder.
-    file: PathBuf,
+    files: Arc<dyn Files>,
+    /// Never in the Synced folder. Without one, nothing outlives the process.
+    file: Option<PathBuf>,
     /// Keyed by file name. Empty until the first `nodes`, which restores the
     /// Closed Tasks from `file`.
     entries: HashMap<String, Entry>,
@@ -40,8 +38,9 @@ pub(crate) struct Cache {
 }
 
 impl Cache {
-    pub(crate) fn new(file: PathBuf) -> Self {
+    pub(crate) fn new(files: Arc<dyn Files>, file: Option<PathBuf>) -> Self {
         Self {
+            files,
             file,
             entries: HashMap::new(),
             restored: false,
@@ -57,38 +56,37 @@ impl Cache {
         read: impl Fn(&Path) -> Option<Node>,
     ) -> io::Result<HashMap<String, Node>> {
         if !self.restored {
-            self.entries = restore(&self.file);
+            self.entries = self
+                .file
+                .as_deref()
+                .map_or_else(HashMap::new, |file| restore(self.files.as_ref(), file));
             self.restored = true;
         }
         let mut previous = std::mem::take(&mut self.entries);
         // Only Closed Tasks are persisted: an Open one changing leaves the file.
         let mut stale = false;
-        for item in fs::read_dir(folder)? {
-            let path = item?.path();
-            let (Some(name), true) = (
-                path.file_name().and_then(|n| n.to_str()),
-                path.extension().is_some_and(|e| e == "md"),
-            ) else {
+        for listed in self.files.list(folder)? {
+            let (name, stamp) = (listed.name, listed.stamp);
+            if !name.ends_with(".md") {
                 continue;
-            };
-            let Some(stamp) = stamp_of(&path) else {
-                continue;
-            };
-            let entry = match previous.remove(name) {
+            }
+            let entry = match previous.remove(&name) {
                 Some(entry) if entry.stamp == stamp => entry,
                 old => {
                     let entry = Entry {
                         stamp,
-                        node: read(&path),
+                        node: read(&folder.join(&name)),
                     };
                     stale |= entry.is_closed() || old.is_some_and(|o| o.is_closed());
                     entry
                 }
             };
-            self.entries.insert(name.to_owned(), entry);
+            self.entries.insert(name, entry);
         }
-        if stale || previous.values().any(Entry::is_closed) {
-            drop(persist(&self.file, &self.entries)); // only a speed-up
+        if let Some(file) = &self.file
+            && (stale || previous.values().any(Entry::is_closed))
+        {
+            drop(persist(self.files.as_ref(), file, &self.entries)); // only a speed-up
         }
         Ok(self
             .entries
@@ -104,15 +102,9 @@ impl Cache {
     }
 }
 
-fn stamp_of(path: &Path) -> Option<Stamp> {
-    let meta = fs::metadata(path).ok()?;
-    let nanos = meta.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
-    Some((nanos.as_nanos(), meta.len()))
-}
-
 /// One Closed Task per line, tab-separated, the Title last:
 /// `name mtime size id parent order title`.
-fn persist(file: &Path, entries: &HashMap<String, Entry>) -> io::Result<()> {
+fn persist(files: &dyn Files, file: &Path, entries: &HashMap<String, Entry>) -> io::Result<()> {
     let mut text = String::new();
     for (name, entry) in entries {
         if let Some(node) = entry.node.as_ref().filter(|n| n.task.closed) {
@@ -126,13 +118,12 @@ fn persist(file: &Path, entries: &HashMap<String, Entry>) -> io::Result<()> {
             ));
         }
     }
-    let scratch = file.with_extension("tmp");
-    fs::write(&scratch, text).and_then(|()| fs::rename(&scratch, file))
+    files.write(file, &text)
 }
 
 /// The Closed Tasks `persist` wrote; lines that don't parse are dropped.
-fn restore(file: &Path) -> HashMap<String, Entry> {
-    let text = fs::read_to_string(file).unwrap_or_default();
+fn restore(files: &dyn Files, file: &Path) -> HashMap<String, Entry> {
+    let text = files.read(file).unwrap_or_default();
     text.lines().filter_map(restore_line).collect()
 }
 

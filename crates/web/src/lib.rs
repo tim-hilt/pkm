@@ -130,6 +130,8 @@ mirror_enum!(
     Distribution { Horizontally, Vertically }
 );
 
+mod tasks;
+
 /// Modifier keys as a bit set: shift 1, ctrl 2, alt 4, meta 8.
 fn modifiers(bits: u8) -> pkm_drawing::input::Modifiers {
     pkm_drawing::input::Modifiers {

@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use pkm_tasks::{Blocker, Closing, Error, Planning, Task, Tasks};
+use pkm_tasks::{Blocker, Closing, Error, Planning, Row, Task, Tasks};
 
 /// Why a Task wasn't saved or the Tasks couldn't be read.
 #[derive(Debug, uniffi::Error)]
@@ -109,20 +109,6 @@ pub struct ListedTask {
     pub blocked_by: Vec<Blocker>,
 }
 
-impl ListedTask {
-    /// `task` and its Subtasks, each directly after its Parent.
-    fn flatten(mut task: Task, depth: u32, rows: &mut Vec<Self>) {
-        let subtasks = std::mem::take(&mut task.subtasks);
-        let mut row = Self::from(task);
-        row.depth = depth;
-        row.has_subtasks = !subtasks.is_empty();
-        rows.push(row);
-        for subtask in subtasks {
-            Self::flatten(subtask, depth + 1, rows);
-        }
-    }
-}
-
 impl From<Task> for ListedTask {
     fn from(t: Task) -> Self {
         Self {
@@ -139,6 +125,16 @@ impl From<Task> for ListedTask {
             has_subtasks: false,
             blocked: t.blocked,
             blocked_by: t.blocked_by,
+        }
+    }
+}
+
+impl From<Row> for ListedTask {
+    fn from(row: Row) -> Self {
+        Self {
+            depth: row.depth,
+            has_subtasks: row.has_subtasks,
+            ..row.task.into()
         }
     }
 }
@@ -247,11 +243,7 @@ impl TaskStore {
     /// The Tasks planned as `planning`, in their order, as a pre-order walk of
     /// the tree: each Task is followed by its Subtasks, marked by `depth`.
     pub fn tasks(&self, planning: Planning) -> Result<Vec<ListedTask>, TasksError> {
-        let mut rows = Vec::new();
-        for task in self.0.tasks(planning)? {
-            ListedTask::flatten(task, 0, &mut rows);
-        }
-        Ok(rows)
+        Ok(self.0.rows(planning)?.into_iter().map(Into::into).collect())
     }
 }
 

@@ -6,8 +6,10 @@
 //! `pkm-bindings`.
 
 mod cache;
+mod files;
 mod history;
 mod store;
 pub mod sync;
 
-pub use store::{Blocker, Closing, Error, Planning, Task, Tasks};
+pub use files::{DiskFiles, Files, Listed, MemoryFiles, Stamp};
+pub use store::{Blocker, Closing, Error, Planning, Row, Task, Tasks};

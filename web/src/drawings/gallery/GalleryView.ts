@@ -3,28 +3,9 @@ import type { Gallery } from "./Gallery";
 import { type CloudBacking, statusText } from "../../cloud/CloudBacking";
 import { HoldDetector } from "../input/HoldDetector";
 import { menuCorner } from "./CardMenu";
+import { button, make } from "../../Dom";
 
 let nextDialog = 0;
-
-type Tag = keyof HTMLElementTagNameMap;
-
-function make<K extends Tag>(
-  tag: K,
-  className: string,
-  children: (Node | string)[] = [],
-): HTMLElementTagNameMap[K] {
-  const element = document.createElement(tag);
-  element.className = className;
-  element.append(...children);
-  return element;
-}
-
-function button(className: string, label: string, onClick: () => void): HTMLButtonElement {
-  const element = make("button", className, [label]);
-  element.type = "button";
-  element.addEventListener("click", onClick);
-  return element;
-}
 
 const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
 
