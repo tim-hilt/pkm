@@ -1,6 +1,28 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@ done": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ done"
+          }
+        }
+      }
+    },
+    "%@ rejected": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ rejected"
+          }
+        }
+      }
+    },
     "%@, %lld %% read": {
       "extractionState": "manual",
       "localizations": {
@@ -85,6 +107,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Add Custom Color"
+          }
+        }
+      }
+    },
+    "Add Subtask": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add Subtask"
+          }
+        }
+      }
+    },
+    "Add Tag": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add Tag"
           }
         }
       }
@@ -441,6 +485,17 @@
         }
       }
     },
+    "Collapse": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collapse"
+          }
+        }
+      }
+    },
     "Colors": {
       "extractionState": "manual",
       "localizations": {
@@ -650,6 +705,17 @@
         }
       }
     },
+    "Description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Description"
+          }
+        }
+      }
+    },
     "Diamond": {
       "extractionState": "manual",
       "localizations": {
@@ -778,6 +844,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Eraser"
+          }
+        }
+      }
+    },
+    "Expand": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expand"
           }
         }
       }
@@ -1343,6 +1420,17 @@
         }
       }
     },
+    "New Subtask": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Subtask"
+          }
+        }
+      }
+    },
     "New Task": {
       "extractionState": "manual",
       "localizations": {
@@ -1497,6 +1585,17 @@
         }
       }
     },
+    "Priority": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Priority"
+          }
+        }
+      }
+    },
     "Properties": {
       "extractionState": "manual",
       "localizations": {
@@ -1552,6 +1651,17 @@
         }
       }
     },
+    "Reject": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reject"
+          }
+        }
+      }
+    },
     "Remove": {
       "extractionState": "manual",
       "localizations": {
@@ -1559,6 +1669,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Remove"
+          }
+        }
+      }
+    },
+    "Remove %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove %@"
           }
         }
       }
@@ -1662,6 +1783,28 @@
         }
       }
     },
+    "Revert": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revert"
+          }
+        }
+      }
+    },
+    "Revert Done": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revert Done"
+          }
+        }
+      }
+    },
     "Right": {
       "extractionState": "manual",
       "localizations": {
@@ -1691,6 +1834,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "S"
+          }
+        }
+      }
+    },
+    "Save": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save"
           }
         }
       }
@@ -1904,6 +2058,28 @@
         }
       }
     },
+    "Tags": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tags"
+          }
+        }
+      }
+    },
+    "Tags use a–z, 0–9, - and / only.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tags use a–z, 0–9, - and / only."
+          }
+        }
+      }
+    },
     "Tap + to start sketching.": {
       "extractionState": "manual",
       "localizations": {
@@ -1911,6 +2087,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tap + to start sketching."
+          }
+        }
+      }
+    },
+    "Task": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Task"
           }
         }
       }

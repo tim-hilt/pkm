@@ -60,6 +60,10 @@ struct ContentView: View {
         }
         #if os(macOS)
             .task { if AppNavigation.opensSettingsAtLaunch { openSettings() } }
+            // A Mac app quits without going to the background first.
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                tasks.commit()
+            }
         #endif
     }
 }

@@ -60,6 +60,8 @@ struct Pending {
     /// The Task and its Open Subtasks, which are Closed with it.
     ids: Vec<ItemId>,
     closing: Closing,
+    /// When the user Closed it, which the History records.
+    at_ms: f64,
 }
 
 /// A Task as the lists show it: Open, or a Closed Subtask of an Open one.
@@ -273,8 +275,8 @@ impl Tasks {
 
     /// Closes the Open Task `id` and its Open Subtasks as one pending change:
     /// nothing is saved until `commit`, and `revert` leaves no trace. A Close
-    /// still pending is committed first. There is no way to Delete a Task. Fails with
-    /// `NotFound` if there is no such Open Task.
+    /// still pending is committed first. There is no way to Delete a Task.
+    /// Fails with `NotFound` if there is no such Open Task.
     pub fn close(&self, id: &str, closing: Closing) -> Result<(), Error> {
         let id = ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?;
         self.commit()?;
@@ -286,6 +288,7 @@ impl Tasks {
         *self.pending() = Some(Pending {
             ids: open_subtree(&nodes, id.as_str()),
             closing,
+            at_ms: now_ms(),
         });
         Ok(())
     }
@@ -296,14 +299,23 @@ impl Tasks {
     }
 
     /// Saves the pending Close, if any: sets the `state` of the Task and its
-    /// Subtasks and appends `done` or `rejected` to the History for each.
+    /// Subtasks and appends `done` or `rejected` to the History for each. One
+    /// Closed or removed meanwhile, e.g. by Sync, is left as it is.
     pub fn commit(&self) -> Result<(), Error> {
-        let Some(Pending { ids, closing }) = self.pending().take() else {
+        let Some(Pending {
+            ids,
+            closing,
+            at_ms,
+        }) = self.pending().take()
+        else {
             return Ok(());
         };
         for id in ids {
-            self.rewrite(&id, |file| file.set_scalar("state", closing.state()))?;
-            self.history.record(closing.event(), &id, now_ms())?;
+            match self.rewrite(&id, |file| file.set_scalar("state", closing.state())) {
+                Ok(_) => self.history.record(closing.event(), &id, at_ms)?,
+                Err(Error::Io(e)) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e),
+            }
         }
         Ok(())
     }
@@ -387,7 +399,7 @@ impl Tasks {
     /// Structure Sync left broken is repaired here, not in the files.
     pub fn tasks(&self, planning: Planning) -> io::Result<Vec<Task>> {
         let mut nodes = self.load()?;
-        if let Some(Pending { ids, closing }) = self.pending().clone() {
+        if let Some(Pending { ids, closing, .. }) = self.pending().clone() {
             for id in ids {
                 match closing {
                     Closing::Rejected => drop(nodes.remove(id.as_str())),
@@ -415,7 +427,8 @@ impl Tasks {
             .collect())
     }
 
-    /// Every Task in the folder, repaired.
+    /// Every Task in the folder, repaired. Only `<id>.md` is the Task `id`: a
+    /// copy under another name (`<id> 1.md`) would shadow it.
     fn load(&self) -> io::Result<Nodes> {
         let mut nodes = Nodes::new();
         for item in fs::read_dir(&self.root)? {
@@ -423,6 +436,7 @@ impl Tasks {
             if path.extension().is_some_and(|e| e == "md")
                 && let Ok(text) = fs::read_to_string(&path)
                 && let Some(node) = Document::parse(&text).as_ref().and_then(node_of)
+                && path.file_stem().is_some_and(|stem| *stem == *node.task.id)
             {
                 nodes.insert(node.task.id.clone(), node);
             }
@@ -1328,6 +1342,34 @@ mod tests {
             listed[0].subtasks[0].subtasks[0].planning,
             Planning::Backlog
         );
+    }
+
+    #[test]
+    fn a_copy_of_a_task_file_under_another_name_is_ignored() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let task = tasks.create("original", Planning::Active).unwrap();
+        let copy = file_of(&dir, &task).replace("original", "copy");
+        for name in [format!("{} 1.md", task.id), format!("~{}.md", task.id)] {
+            fs::write(dir.0.join(name), &copy).unwrap();
+        }
+        tasks.edit(&task.id, "edited", "", 4).unwrap();
+        assert_eq!(titles(&tasks, Planning::Active), ["edited"]);
+    }
+
+    #[test]
+    fn committing_skips_a_subtask_closed_or_removed_meanwhile() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let parent = tasks.create("p", Planning::Active).unwrap();
+        let gone = subtask(&tasks, &parent, "gone");
+        let kept = subtask(&tasks, &parent, "kept");
+        tasks.close(&parent.id, Closing::Done).unwrap();
+        fs::remove_file(dir.0.join(format!("{}.md", gone.id))).unwrap();
+        tasks.commit().unwrap();
+        assert!(file_of(&dir, &parent).contains("state: done"));
+        assert!(file_of(&dir, &kept).contains("state: done"));
+        assert!(titles(&tasks, Planning::Active).is_empty());
     }
 
     #[test]

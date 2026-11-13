@@ -55,10 +55,10 @@ pub enum Closing {
     Rejected,
 }
 
-/// A Task as the lists show it, see `pkm_tasks::Task` (named apart from
-/// Swift's `Task`).
+/// A Task as the lists show it, one row of the flattened tree, see
+/// `pkm_tasks::Task` (named apart from Swift's `Task`).
 #[derive(uniffi::Record)]
-pub struct OpenTask {
+pub struct ListedTask {
     pub id: String,
     pub title: String,
     /// 1 (highest) to 4.
@@ -78,7 +78,7 @@ pub struct OpenTask {
     pub has_subtasks: bool,
 }
 
-impl OpenTask {
+impl ListedTask {
     /// `task` and its Subtasks, each directly after its Parent.
     fn flatten(mut task: Task, depth: u32, rows: &mut Vec<Self>) {
         let subtasks = std::mem::take(&mut task.subtasks);
@@ -92,7 +92,7 @@ impl OpenTask {
     }
 }
 
-impl From<Task> for OpenTask {
+impl From<Task> for ListedTask {
     fn from(t: Task) -> Self {
         Self {
             id: t.id,
@@ -125,7 +125,7 @@ impl TaskStore {
     }
 
     /// Makes a Task Active or moves it to the Backlog, at the end of that list.
-    pub fn plan(&self, id: String, planning: Planning) -> Result<OpenTask, TasksError> {
+    pub fn plan(&self, id: String, planning: Planning) -> Result<ListedTask, TasksError> {
         Ok(self.0.plan(&id, planning)?.into())
     }
 
@@ -146,13 +146,13 @@ impl TaskStore {
     }
 
     /// Creates a Task, refusing an empty Title.
-    pub fn create(&self, title: String, planning: Planning) -> Result<OpenTask, TasksError> {
+    pub fn create(&self, title: String, planning: Planning) -> Result<ListedTask, TasksError> {
         Ok(self.0.create(&title, planning)?.into())
     }
 
     /// Creates a Subtask under a Task, refusing an empty Title; it follows its
     /// top-level Task's Active or Backlog.
-    pub fn create_subtask(&self, parent: String, title: String) -> Result<OpenTask, TasksError> {
+    pub fn create_subtask(&self, parent: String, title: String) -> Result<ListedTask, TasksError> {
         Ok(self.0.create_subtask(&parent, &title)?.into())
     }
 
@@ -163,17 +163,17 @@ impl TaskStore {
         title: String,
         description: String,
         priority: u8,
-    ) -> Result<OpenTask, TasksError> {
+    ) -> Result<ListedTask, TasksError> {
         Ok(self.0.edit(&id, &title, &description, priority)?.into())
     }
 
     /// Adds a Tag to a Task, refusing an invalid one.
-    pub fn add_tag(&self, id: String, tag: String) -> Result<OpenTask, TasksError> {
+    pub fn add_tag(&self, id: String, tag: String) -> Result<ListedTask, TasksError> {
         Ok(self.0.add_tag(&id, &tag)?.into())
     }
 
     /// Removes a Tag from a Task.
-    pub fn remove_tag(&self, id: String, tag: String) -> Result<OpenTask, TasksError> {
+    pub fn remove_tag(&self, id: String, tag: String) -> Result<ListedTask, TasksError> {
         Ok(self.0.remove_tag(&id, &tag)?.into())
     }
 
@@ -184,10 +184,10 @@ impl TaskStore {
 
     /// The Tasks planned as `planning`, in their order, as a pre-order walk of
     /// the tree: each Task is followed by its Subtasks, marked by `depth`.
-    pub fn tasks(&self, planning: Planning) -> Result<Vec<OpenTask>, TasksError> {
+    pub fn tasks(&self, planning: Planning) -> Result<Vec<ListedTask>, TasksError> {
         let mut rows = Vec::new();
         for task in self.0.tasks(planning)? {
-            OpenTask::flatten(task, 0, &mut rows);
+            ListedTask::flatten(task, 0, &mut rows);
         }
         Ok(rows)
     }

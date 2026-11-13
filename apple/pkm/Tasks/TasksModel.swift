@@ -13,12 +13,12 @@ final class TasksModel {
         didSet { reload() }
     }
     /// The Tasks planned as `planning`, in their order, each followed by its Subtasks.
-    private(set) var tasks: [OpenTask] = []
+    private(set) var tasks: [ListedTask] = []
     /// Parents whose Subtasks are hidden.
     private var collapsed: Set<String> = []
 
     /// `tasks` without the Subtasks of a collapsed Parent.
-    var rows: [OpenTask] {
+    var rows: [ListedTask] {
         var hiddenBelow: UInt32?
         return tasks.filter { task in
             if let depth = hiddenBelow {
@@ -30,19 +30,19 @@ final class TasksModel {
         }
     }
 
-    func isCollapsed(_ task: OpenTask) -> Bool { collapsed.contains(task.id) }
+    func isCollapsed(_ task: ListedTask) -> Bool { collapsed.contains(task.id) }
 
     /// Hides or shows a Parent's Subtasks.
-    func toggleCollapsed(_ task: OpenTask) {
+    func toggleCollapsed(_ task: ListedTask) {
         if !collapsed.insert(task.id).inserted { collapsed.remove(task.id) }
     }
 
     /// The Close that can still be Reverted, for the toast.
-    struct Closed: Equatable {
+    struct PendingClose: Equatable {
         let title: String
         let closing: Closing
     }
-    private(set) var closed: Closed?
+    private(set) var pendingClose: PendingClose?
 
     /// A Close is saved once its toast has been shown for `revertWindow`.
     init(store: TaskStore, revertWindow: Duration = .seconds(5)) {
@@ -62,7 +62,7 @@ final class TasksModel {
 
     /// Adds a Subtask under `parent` and shows it. False, adding nothing, if the Title is empty.
     @discardableResult
-    func addSubtask(title: String, under parent: OpenTask) -> Bool {
+    func addSubtask(title: String, under parent: ListedTask) -> Bool {
         guard (try? store.createSubtask(parent: parent.id, title: title)) != nil else { return false }
         collapsed.remove(parent.id)
         reload()
@@ -72,7 +72,7 @@ final class TasksModel {
     /// Saves a Task's Title, Description, Priority and Tags (adding and removing
     /// what differs). False, saving nothing, if the Title is empty or a Tag is invalid.
     @discardableResult
-    func edit(_ task: OpenTask, title: String, description: String, priority: UInt8, tags: [String]) -> Bool {
+    func edit(_ task: ListedTask, title: String, description: String, priority: UInt8, tags: [String]) -> Bool {
         guard tags.allSatisfy(isValidTag) else { return false }
         guard (try? store.edit(id: task.id, title: title, description: description, priority: priority)) != nil
         else { return false }
@@ -83,7 +83,7 @@ final class TasksModel {
     }
 
     /// Makes a Task Active or moves it to the Backlog; it leaves the list shown.
-    func plan(_ task: OpenTask, as planning: Planning) {
+    func plan(_ task: ListedTask, as planning: Planning) {
         guard (try? store.plan(id: task.id, planning: planning)) != nil else { return }
         reload()
     }
@@ -91,14 +91,14 @@ final class TasksModel {
     /// Closes a Task, committing the previous Close first. Done leaves it in
     /// place, marked, Rejected removes it; either way nothing is saved until
     /// `commit`, which follows `revertWindow` later.
-    func close(_ task: OpenTask, as closing: Closing) {
+    func close(_ task: ListedTask, as closing: Closing) {
         commitTimer?.cancel()
         guard (try? store.close(id: task.id, closing: closing)) != nil else {
-            closed = nil
+            pendingClose = nil
             reload()
             return
         }
-        closed = Closed(title: task.title, closing: closing)
+        pendingClose = PendingClose(title: task.title, closing: closing)
         reload()
         commitTimer = Task { [revertWindow] in
             try? await Task.sleep(for: revertWindow)
@@ -107,7 +107,7 @@ final class TasksModel {
     }
 
     /// The circle of a Task: Done if it is Open, Reverts the Close if it is Done.
-    func toggleDone(_ task: OpenTask) {
+    func toggleDone(_ task: ListedTask) {
         if task.done { revert() } else { close(task, as: .done) }
     }
 
@@ -115,7 +115,7 @@ final class TasksModel {
     func revert() {
         commitTimer?.cancel()
         store.revert()
-        closed = nil
+        pendingClose = nil
         reload()
     }
 
@@ -123,7 +123,7 @@ final class TasksModel {
     func commit() {
         commitTimer?.cancel()
         try? store.commit()
-        closed = nil
+        pendingClose = nil
         reload()
     }
 
@@ -140,4 +140,4 @@ final class TasksModel {
     }
 }
 
-extension OpenTask: Identifiable {}
+extension ListedTask: Identifiable {}

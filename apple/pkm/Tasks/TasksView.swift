@@ -4,8 +4,8 @@ import SwiftUI
 struct TasksView: View {
     @Environment(TasksModel.self) private var model
     @State private var isAdding = false
-    @State private var editing: OpenTask?
-    @State private var subtaskParent: OpenTask?
+    @State private var editing: ListedTask?
+    @State private var subtaskParent: ListedTask?
 
     var body: some View {
         @Bindable var model = model
@@ -26,7 +26,7 @@ struct TasksView: View {
                         .contentShape(Rectangle())
                         .onTapGesture { if !task.closed { editing = task } }
                         .contextMenu {
-                            if !task.closed {
+                            if !task.closed && !task.done {  // a pending Done is Reverted at its circle
                                 Button("Add Subtask", systemImage: "plus.circle") { subtaskParent = task }
                                 if task.depth == 0 {  // a Subtask follows its top-level Task
                                     if task.planning == .backlog {
@@ -64,9 +64,9 @@ struct TasksView: View {
                 #endif
             }
             .safeAreaInset(edge: .bottom) {
-                if let closed = model.closed { ClosedToast(closed: closed) }
+                if let pendingClose = model.pendingClose { ClosedToast(pendingClose: pendingClose) }
             }
-            .animation(.default, value: model.closed)
+            .animation(.default, value: model.pendingClose)
             .addButton("New Task", identifier: "add-task") { isAdding = true }
             .sheet(isPresented: $isAdding) { NewTaskSheet(planning: model.planning) }
             .sheet(item: $subtaskParent) { NewTaskSheet(planning: $0.planning, parent: $0) }
@@ -78,12 +78,17 @@ struct TasksView: View {
 /// Names the Task just Closed and offers to Revert it.
 private struct ClosedToast: View {
     @Environment(TasksModel.self) private var model
-    let closed: TasksModel.Closed
+    let pendingClose: TasksModel.PendingClose
 
     var body: some View {
         HStack {
-            Text("\(closed.title) \(closed.closing == .done ? "done" : "rejected")")
-                .lineLimit(1)
+            Group {
+                switch pendingClose.closing {
+                case .done: Text("\(pendingClose.title) done")
+                case .rejected: Text("\(pendingClose.title) rejected")
+                }
+            }
+            .lineLimit(1)
             Spacer()
             Button("Revert") { model.revert() }
                 .accessibilityIdentifier("revert-close")
@@ -100,7 +105,7 @@ private struct ClosedToast: View {
 /// A Subtask is indented, a Parent has a chevron to collapse it, a Closed Subtask
 /// is struck through. `onCircle` is a tap on the circle.
 private struct TaskRow: View {
-    let task: OpenTask
+    let task: ListedTask
     let isCollapsed: Bool
     let onCircle: () -> Void
     let onDisclose: () -> Void
@@ -149,7 +154,7 @@ private struct TaskRow: View {
     }
 }
 
-extension OpenTask {
+extension ListedTask {
     fileprivate var priorityColor: Color {
         switch priority {
         case 1: .red
@@ -168,9 +173,9 @@ private struct NewTaskSheet: View {
     @State private var title = ""
     @State private var planning: Planning
     @FocusState private var isTitleFocused: Bool
-    private let parent: OpenTask?
+    private let parent: ListedTask?
 
-    init(planning: Planning, parent: OpenTask? = nil) {
+    init(planning: Planning, parent: ListedTask? = nil) {
         _planning = State(initialValue: planning)
         self.parent = parent
     }
@@ -224,7 +229,7 @@ private struct NewTaskSheet: View {
 private struct EditTaskSheet: View {
     @Environment(TasksModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    let task: OpenTask
+    let task: ListedTask
     @State private var title: String
     @State private var description: String
     @State private var priority: UInt8
@@ -232,7 +237,7 @@ private struct EditTaskSheet: View {
     @State private var newTag = ""
     @State private var refusedTagText = false
 
-    init(task: OpenTask) {
+    init(task: ListedTask) {
         self.task = task
         _title = State(initialValue: task.title)
         _description = State(initialValue: task.description)
@@ -265,7 +270,7 @@ private struct EditTaskSheet: View {
                     .lineLimit(3...8)
                     .accessibilityIdentifier("task-description")
                 Picker("Priority", selection: $priority) {
-                    ForEach(UInt8(1)...4, id: \.self) { Text("P\($0)").tag($0) }
+                    ForEach(UInt8(1)...4, id: \.self) { Text(verbatim: "P\($0)").tag($0) }
                 }
                 .pickerStyle(.segmented)
                 Section("Tags") {
