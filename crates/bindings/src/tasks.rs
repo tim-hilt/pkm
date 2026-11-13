@@ -3,7 +3,7 @@
 
 use pkm_tasks::{Error, Planning, Task, Tasks};
 
-/// Why a Task wasn't created or the Tasks couldn't be read.
+/// Why a Task wasn't saved or the Tasks couldn't be read.
 #[derive(Debug, uniffi::Error)]
 #[uniffi(flat_error)]
 pub enum TasksError {
@@ -51,6 +51,8 @@ pub struct OpenTask {
     /// 1 (highest) to 4.
     pub priority: u8,
     pub planning: Planning,
+    /// Plain text; empty if none.
+    pub description: String,
 }
 
 impl From<Task> for OpenTask {
@@ -60,6 +62,7 @@ impl From<Task> for OpenTask {
             title: t.title,
             priority: t.priority,
             planning: t.planning,
+            description: t.description,
         }
     }
 }
@@ -79,6 +82,17 @@ impl TaskStore {
     /// Creates a Task, refusing an empty Title.
     pub fn create(&self, title: String, planning: Planning) -> Result<OpenTask, TasksError> {
         Ok(self.0.create(&title, planning)?.into())
+    }
+
+    /// Sets a Task's Title, Description and Priority, refusing an empty Title.
+    pub fn edit(
+        &self,
+        id: String,
+        title: String,
+        description: String,
+        priority: u8,
+    ) -> Result<OpenTask, TasksError> {
+        Ok(self.0.edit(&id, &title, &description, priority)?.into())
     }
 
     /// The Tasks planned as `planning`, in their order.

@@ -27,6 +27,16 @@ final class TasksModel {
         return true
     }
 
+    /// Saves a Task's Title, Description and Priority. False, saving nothing, if
+    /// the Title is empty.
+    @discardableResult
+    func edit(_ task: OpenTask, title: String, description: String, priority: UInt8) -> Bool {
+        guard (try? store.edit(id: task.id, title: title, description: description, priority: priority)) != nil
+        else { return false }
+        reload()
+        return true
+    }
+
     private func reload() {
         tasks = (try? store.tasks(planning: planning)) ?? []
     }

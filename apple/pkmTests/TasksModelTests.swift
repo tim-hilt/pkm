@@ -36,4 +36,21 @@ import Testing
         try openModel().add(title: "Kept", planning: .active)
         #expect(try openModel().tasks.map(\.title) == ["Kept"])
     }
+
+    @Test func editingChangesTheRowAndStaysAcrossLaunches() throws {
+        let model = try openModel()
+        model.add(title: "Buy milk", planning: .active)
+        #expect(model.edit(model.tasks[0], title: "Buy oat milk", description: "Two litres", priority: 1))
+        #expect(model.tasks.map(\.title) == ["Buy oat milk"])
+        #expect(model.tasks.map(\.description) == ["Two litres"])
+        #expect(model.tasks.map(\.priority) == [1])
+        #expect(try openModel().tasks.map(\.priority) == [1])
+    }
+
+    @Test func editingToAnEmptyTitleChangesNothing() throws {
+        let model = try openModel()
+        model.add(title: "Keep", planning: .active)
+        #expect(!model.edit(model.tasks[0], title: " ", description: "x", priority: 1))
+        #expect(model.tasks.map(\.title) == ["Keep"])
+    }
 }

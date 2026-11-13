@@ -35,6 +35,8 @@ pub struct Task {
     /// 1 (highest) to 4, the default.
     pub priority: u8,
     pub planning: Planning,
+    /// Plain text, the file's body; empty if there is none.
+    pub description: String,
 }
 
 #[derive(Debug)]
@@ -47,6 +49,12 @@ pub enum Error {
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Self {
         Self::Io(e)
+    }
+}
+
+impl From<io::ErrorKind> for Error {
+    fn from(kind: io::ErrorKind) -> Self {
+        Self::Io(kind.into())
     }
 }
 
@@ -99,19 +107,53 @@ impl Tasks {
             file.set_scalar("state", planning.state());
             file.set_scalar("order", order.to_string());
             file.set_scalar("updated", iso8601(now_ms()));
-            match self.write_new(&id, &file.render()) {
+            match self.write(&id, &file.render(), Overwrite::No) {
                 Ok(()) => {
                     return Ok(Task {
                         id: id.to_string(),
                         title,
                         priority: DEFAULT_PRIORITY,
                         planning,
+                        description: String::new(),
                     });
                 }
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
                 Err(e) => return Err(e.into()),
             }
         }
+    }
+
+    /// Sets the Title (as in `create`), Description and Priority of the Open
+    /// Task `id` and bumps `updated`. A Priority outside 1 to 4 is clamped.
+    /// Every other property, known or not, stays as it was. Fails with
+    /// `NotFound` if there is no such Task.
+    pub fn edit(
+        &self,
+        id: &str,
+        title: &str,
+        description: &str,
+        priority: u8,
+    ) -> Result<Task, Error> {
+        let title = one_line(title);
+        if title.is_empty() {
+            return Err(Error::EmptyTitle);
+        }
+        let id = ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?;
+        let path = self.path(&id);
+        let mut file = Document::parse(&fs::read_to_string(&path)?)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "unreadable Task"))?;
+        let priority = priority.clamp(1, 4);
+        let description = description.trim();
+        file.set_scalar("title", &title);
+        file.set_scalar("priority", priority.to_string());
+        file.set_scalar("updated", iso8601(now_ms()));
+        file.body = if description.is_empty() {
+            String::new()
+        } else {
+            format!("{description}\n")
+        };
+        self.write(&id, &file.render(), Overwrite::Yes)?;
+        Ok(task_of(&file).ok_or(io::ErrorKind::InvalidData)?)
     }
 
     /// The Tasks planned as `planning`, in their order.
@@ -138,13 +180,17 @@ impl Tasks {
         Ok(entries)
     }
 
+    fn path(&self, id: &ItemId) -> PathBuf {
+        self.root.join(format!("{id}.md"))
+    }
+
     /// Writes `<id>.md` through a hidden scratch file, so a crash leaves no
-    /// torn Task and Sync never sees half of one. Fails with `AlreadyExists`
-    /// rather than replacing a Task.
-    fn write_new(&self, id: &ItemId, text: &str) -> io::Result<()> {
-        let path = self.root.join(format!("{id}.md"));
+    /// torn Task and Sync never sees half of one. Unless told to overwrite,
+    /// fails with `AlreadyExists` rather than replacing a Task.
+    fn write(&self, id: &ItemId, text: &str, overwrite: Overwrite) -> io::Result<()> {
+        let path = self.path(id);
         let scratch = self.root.join(format!(".{id}.tmp"));
-        if path.exists() {
+        if overwrite == Overwrite::No && path.exists() {
             return Err(io::ErrorKind::AlreadyExists.into());
         }
         let written = fs::File::create(&scratch).and_then(|mut f| f.write_all(text.as_bytes()));
@@ -152,6 +198,12 @@ impl Tasks {
             .and_then(|()| fs::rename(&scratch, &path))
             .inspect_err(|_| drop(fs::remove_file(&scratch)))
     }
+}
+
+#[derive(PartialEq, Eq)]
+enum Overwrite {
+    Yes,
+    No,
 }
 
 struct Entry {
@@ -162,24 +214,31 @@ struct Entry {
 /// The Task in `path`, if it is one planned as `planning`.
 fn read(path: &Path, planning: Planning) -> Option<Entry> {
     let file = Document::parse(&fs::read_to_string(path).ok()?)?;
-    if file.scalar("state")? != planning.state() {
-        return None;
-    }
-    Some(Entry {
-        task: Task {
-            id: file.scalar("id")?.to_owned(),
-            title: file.scalar("title")?.to_owned(),
-            priority: file
-                .scalar("priority")
-                .and_then(|p| p.parse().ok())
-                .filter(|p| (1..=4).contains(p))
-                .unwrap_or(DEFAULT_PRIORITY),
-            planning,
-        },
-        order: file
-            .scalar("order")
-            .and_then(|o| o.parse().ok())
-            .unwrap_or(0.0),
+    let task = task_of(&file).filter(|t| t.planning == planning)?;
+    let order = file
+        .scalar("order")
+        .and_then(|o| o.parse().ok())
+        .unwrap_or(0.0);
+    Some(Entry { task, order })
+}
+
+/// The Open Task a file describes; `None` for a closed or malformed one.
+fn task_of(file: &Document) -> Option<Task> {
+    let planning = match file.scalar("state")? {
+        "active" => Planning::Active,
+        "backlog" => Planning::Backlog,
+        _ => return None,
+    };
+    Some(Task {
+        id: file.scalar("id")?.to_owned(),
+        title: file.scalar("title")?.to_owned(),
+        priority: file
+            .scalar("priority")
+            .and_then(|p| p.parse().ok())
+            .filter(|p| (1..=4).contains(p))
+            .unwrap_or(DEFAULT_PRIORITY),
+        planning,
+        description: file.body.trim().to_owned(),
     })
 }
 
@@ -296,6 +355,94 @@ mod tests {
         let dir = Scratch::new();
         dir.store().create("kept", Planning::Active).unwrap();
         assert_eq!(titles(&dir.store(), Planning::Active), ["kept"]);
+    }
+
+    fn edit_fixture(dir: &Scratch) -> (Tasks, Task) {
+        let tasks = dir.store();
+        let task = tasks.create("Buy milk", Planning::Active).unwrap();
+        (tasks, task)
+    }
+
+    #[test]
+    fn editing_sets_title_description_and_priority() {
+        let dir = Scratch::new();
+        let (tasks, task) = edit_fixture(&dir);
+        let edited = tasks
+            .edit(&task.id, " Buy oat milk ", "Two\nlitres", 1)
+            .unwrap();
+        assert_eq!(edited.title, "Buy oat milk");
+        assert_eq!(edited.description, "Two\nlitres");
+        assert_eq!(edited.priority, 1);
+        assert_eq!(tasks.tasks(Planning::Active).unwrap(), [edited]);
+    }
+
+    #[test]
+    fn editing_refuses_an_empty_title_and_changes_nothing() {
+        let dir = Scratch::new();
+        let (tasks, task) = edit_fixture(&dir);
+        assert!(matches!(
+            tasks.edit(&task.id, "  ", "x", 1),
+            Err(Error::EmptyTitle)
+        ));
+        assert_eq!(tasks.tasks(Planning::Active).unwrap(), [task]);
+    }
+
+    #[test]
+    fn editing_an_unknown_task_fails() {
+        let dir = Scratch::new();
+        let (tasks, _) = edit_fixture(&dir);
+        for id in ["abcdefgh", "../x"] {
+            assert!(matches!(
+                tasks.edit(id, "t", "", 4),
+                Err(Error::Io(e)) if e.kind() == io::ErrorKind::NotFound
+            ));
+        }
+    }
+
+    #[test]
+    fn editing_clamps_the_priority() {
+        let dir = Scratch::new();
+        let (tasks, task) = edit_fixture(&dir);
+        assert_eq!(tasks.edit(&task.id, "t", "", 0).unwrap().priority, 1);
+        assert_eq!(tasks.edit(&task.id, "t", "", 9).unwrap().priority, 4);
+    }
+
+    #[test]
+    fn the_description_is_the_files_body() {
+        let dir = Scratch::new();
+        let (tasks, task) = edit_fixture(&dir);
+        tasks.edit(&task.id, "t", "  details  ", 4).unwrap();
+        let text = fs::read_to_string(dir.0.join(format!("{}.md", task.id))).unwrap();
+        assert!(text.ends_with("---\ndetails\n"), "{text}");
+        tasks.edit(&task.id, "t", "", 4).unwrap();
+        let text = fs::read_to_string(dir.0.join(format!("{}.md", task.id))).unwrap();
+        assert!(text.ends_with("---\n"), "{text}");
+    }
+
+    #[test]
+    fn editing_keeps_unknown_properties_and_bumps_updated() {
+        let dir = Scratch::new();
+        let (tasks, task) = edit_fixture(&dir);
+        let path = dir.0.join(format!("{}.md", task.id));
+        let mut file = Document::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+        file.set_scalar("updated", "2000-01-01T00:00:00Z");
+        file.set_scalar("due", "2030-05-01");
+        file.set(
+            "aliases",
+            pkm_base::front_matter::Value::List(vec!["a".into(), "b".into()]),
+        );
+        fs::write(&path, file.render()).unwrap();
+
+        tasks.edit(&task.id, "New", "body", 2).unwrap();
+
+        let file = Document::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(file.scalar("due"), Some("2030-05-01"));
+        assert_eq!(
+            file.list("aliases"),
+            Some(&["a".to_owned(), "b".to_owned()][..])
+        );
+        assert_eq!(file.scalar("state"), Some("active"));
+        assert_ne!(file.scalar("updated"), Some("2000-01-01T00:00:00Z"));
     }
 
     #[test]
