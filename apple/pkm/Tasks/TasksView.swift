@@ -70,7 +70,6 @@ struct TasksView: View {
                     .accessibilityIdentifier("tasks-planning")
                 }
                 #if os(iOS)
-                    ToolbarItem(placement: .topBarLeading) { EditButton() }  // reordering
                     ToolbarItem(placement: .topBarTrailing) { SettingsButton() }
                 #endif
             }
