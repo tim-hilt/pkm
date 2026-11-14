@@ -105,6 +105,7 @@ impl QuickAdd {
     /// hand: the pick, not the text, decides it. One typed afterwards counts.
     pub fn ignore_priority(&mut self) {
         let found: Vec<_> = words(&self.text)
+            .filter(|word| !self.ignored.contains(word))
             .filter(|&(start, end)| priority_of(&self.text[start..end]).is_some())
             .collect();
         self.ignored.extend(found);

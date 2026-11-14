@@ -370,8 +370,10 @@ export class TasksModel {
    * has: known Tags starting with it, then containing it, and whether to offer Create.
    */
   suggestTags(query: string, leaveOut: string[]): { matches: string[]; create: boolean } {
-    const { matches, create } = this.files.store.suggestTags(query, leaveOut);
-    return { matches, create };
+    const found = this.files.store.suggestTags(query, leaveOut);
+    const plain = { matches: found.matches, create: found.create };
+    found.free();
+    return plain;
   }
 
   /** Every known Tag with its Tag Color, alphabetically. */

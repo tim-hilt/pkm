@@ -11,6 +11,8 @@ struct QuickAddField: View {
     /// Changes when the field must redraw because Quick Add was changed from outside (replaced, or
     /// its Priority Ignored).
     var revision = 0
+    /// Tags the Task already has, which the list doesn't suggest.
+    var taskTags: [String] = []
     /// Takes the keyboard focus when it appears.
     var autofocus = true
     /// Return was pressed.
@@ -33,7 +35,7 @@ struct QuickAddField: View {
     /// What the list offers: matching Tags, then Create for a new valid one; empty while closed.
     private var suggestions: [Suggestion] {
         guard let query, !isClosed else { return [] }
-        let found = model.suggestTags(query.query, leaveOut: query.leaveOut)
+        let found = model.suggestTags(query.query, leaveOut: query.leaveOut + taskTags)
         return found.matches.map { Suggestion(tag: $0, isNew: false) }
             + (found.create ? [Suggestion(tag: query.query, isNew: true)] : [])
     }
@@ -167,6 +169,8 @@ struct QuickAddField: View {
     /// A jump of the cursor into a highlight (a tap or click, unlike typing or the arrow keys, which
     /// move by one unit) Ignores that Shortcut.
     private func cursorMoved() {
+        // Typing or pasting moved it; `typed` hands that over, while the highlights still match the old text.
+        guard String(text.characters) == shown else { return }
         let at = Self.cursor(of: selection, in: text)
         if at.distance(to: quickAdd.cursor()).magnitude > 1,
             let hit = highlighted.first(where: { $0.start < at && at < $0.end })

@@ -639,6 +639,17 @@
         }
       }
     },
+    "Create Tag '%@'": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create Tag '%@'"
+          }
+        }
+      }
+    },
     "Cross-hatch": {
       "extractionState": "manual",
       "localizations": {

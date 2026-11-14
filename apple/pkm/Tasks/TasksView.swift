@@ -361,7 +361,7 @@ private struct EditTaskForm: View {
     var body: some View {
         Form {
             QuickAddField(
-                quickAdd: quickAdd, title: $title, revision: quickAddRevision, autofocus: false,
+                quickAdd: quickAdd, title: $title, revision: quickAddRevision, taskTags: tags, autofocus: false,
                 onSubmit: commitQuickAdd, onBlur: commitQuickAdd
             )
             .accessibilityIdentifier("task-title")

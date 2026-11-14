@@ -348,6 +348,8 @@ impl Tasks {
                     tags.push(tag.clone());
                 }
             }
+            // Rewritten only when one was added: `tags_of` drops invalid Tags
+            // other tools wrote, which an edit of the Title must not remove.
             if tags.len() != before {
                 set_list(file, TAGS, tags);
             }
