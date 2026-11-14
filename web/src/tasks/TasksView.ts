@@ -1,6 +1,7 @@
 import { Closing, Planning } from "../core/Core";
 import { button, make } from "../Dom";
 import { RowDrag } from "./RowDrag";
+import { tagLabel } from "./TagLabel";
 import { RowMenu, type RowMenuItem } from "./RowMenu";
 import { type TaskPlaces, editTaskDialog, newTaskDialog } from "./TaskDialogs";
 import { type ListedTask, type TasksModel, lists } from "./TasksModel";
@@ -138,7 +139,11 @@ export class TasksView {
     const title = make("span", "task-title", [task.title]);
     const text = make("span", "task-text", [title]);
     if (task.description) text.append(make("span", "task-description", [task.description]));
-    if (task.tags.length > 0) text.append(make("span", "task-tags", [task.tags.join(" ")]));
+    if (task.tags.length > 0) {
+      const labels = task.tags.map((tag) => tagLabel(tag, task.tagColors[tag]));
+      // Separate nodes of one line, by name, without chips.
+      text.append(make("span", "task-tags", labels.flatMap((label) => [label, " "]).slice(0, -1)));
+    }
     const open = make("button", "task-open", [text]);
     open.type = "button";
     open.setAttribute("aria-haspopup", "menu");

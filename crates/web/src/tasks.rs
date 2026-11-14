@@ -27,6 +27,24 @@ pub struct Blocker {
     pub closed: bool,
 }
 
+/// A Tag that exists, with its Tag Color.
+#[wasm_bindgen(getter_with_clone)]
+#[derive(Clone)]
+pub struct TagEntry {
+    pub name: String,
+    /// `#rrggbb`; none is Default.
+    pub color: Option<String>,
+}
+
+impl From<pkm_base::tags::Entry> for TagEntry {
+    fn from(e: pkm_base::tags::Entry) -> Self {
+        Self {
+            name: e.name,
+            color: e.color,
+        }
+    }
+}
+
 /// A Task as the lists show it, one row of the flattened tree.
 #[wasm_bindgen(getter_with_clone)]
 pub struct ListedTask {
@@ -37,8 +55,6 @@ pub struct ListedTask {
     pub planning: Planning,
     /// Plain text; empty if none.
     pub description: String,
-    /// In the order they were added.
-    pub tags: Vec<String>,
     /// The Parent's ID, if it is a Subtask.
     pub parent: Option<String>,
     /// How deep it sits in the tree, 0 for a top-level Task.
@@ -52,10 +68,16 @@ pub struct ListedTask {
     /// Whether any Task it's Blocked by is Open.
     pub blocked: bool,
     blocked_by: Vec<pkm_tasks::Blocker>,
+    tags: Vec<TagEntry>,
 }
 
 #[wasm_bindgen]
 impl ListedTask {
+    /// The Tags, in the order they were added, each in its Tag Color.
+    pub fn tags(&self) -> Vec<TagEntry> {
+        self.tags.clone()
+    }
+
     /// The Tasks it's Blocked by, Open or Closed.
     #[wasm_bindgen(js_name = blockedBy)]
     pub fn blocked_by(&self) -> Vec<Blocker> {
@@ -70,16 +92,24 @@ impl ListedTask {
     }
 }
 
-impl From<Row> for ListedTask {
-    fn from(row: Row) -> Self {
+impl ListedTask {
+    /// `row` with each of its Tags in the Tag Color `known` gives it.
+    fn new(row: Row, known: &[pkm_base::tags::Entry]) -> Self {
         let t = row.task;
+        let tags = t.tags.into_iter().map(|name| {
+            let color = known.iter().find(|k| k.name == name);
+            TagEntry {
+                color: color.and_then(|k| k.color.clone()),
+                name,
+            }
+        });
         Self {
+            tags: tags.collect(),
             id: t.id,
             title: t.title,
             priority: t.priority,
             planning: t.planning.into(),
             description: t.description,
-            tags: t.tags,
             parent: t.parent,
             depth: row.depth,
             has_subtasks: row.has_subtasks,
@@ -96,6 +126,16 @@ impl From<Row> for ListedTask {
 pub struct TaskStore {
     files: Arc<MemoryFiles>,
     tasks: Tasks,
+}
+
+impl TaskStore {
+    /// `rows` as the lists show them.
+    fn listed(&self, rows: Vec<Row>) -> Vec<ListedTask> {
+        let known = self.tasks.tags();
+        rows.into_iter()
+            .map(|r| ListedTask::new(r, &known))
+            .collect()
+    }
 }
 
 fn error(e: impl std::fmt::Display) -> JsError {
@@ -207,8 +247,7 @@ impl TaskStore {
     /// `addBlocker` accepts, minus its current Blockers.
     #[wasm_bindgen(js_name = blockerCandidates)]
     pub fn blocker_candidates(&self, id: &str) -> Result<Vec<ListedTask>, JsError> {
-        let rows = self.tasks.blocker_candidates(id).map_err(error)?;
-        Ok(rows.into_iter().map(Into::into).collect())
+        Ok(self.listed(self.tasks.blocker_candidates(id).map_err(error)?))
     }
 
     /// Removes a Blocked by from a Task.
@@ -252,10 +291,23 @@ impl TaskStore {
         self.tasks.tags_with_prefix(prefix).map_err(error)
     }
 
+    /// Every known Tag with its Tag Color, alphabetically.
+    #[wasm_bindgen(js_name = allTags)]
+    pub fn all_tags(&self) -> Vec<TagEntry> {
+        self.tasks.tags().into_iter().map(Into::into).collect()
+    }
+
+    /// Gives a Tag its Tag Color (`#rrggbb`), or Default for none.
+    #[wasm_bindgen(js_name = setTagColor)]
+    pub fn set_tag_color(&self, tag: &str, color: Option<String>) -> Result<(), JsError> {
+        self.tasks
+            .set_tag_color(tag, color.as_deref())
+            .map_err(error)
+    }
+
     /// The Tasks planned as `planning`, in their order, each followed by its Subtasks.
     pub fn tasks(&self, planning: Planning) -> Result<Vec<ListedTask>, JsError> {
-        let rows = self.tasks.rows(planning.into()).map_err(error)?;
-        Ok(rows.into_iter().map(Into::into).collect())
+        Ok(self.listed(self.tasks.rows(planning.into()).map_err(error)?))
     }
 }
 

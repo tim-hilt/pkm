@@ -572,3 +572,54 @@ describe("Sync", () => {
     expect(saved).toBe(1);
   });
 });
+
+describe("Tags", () => {
+  const tag = (name: string) => model.allTags.find((t) => t.name === name);
+
+  beforeEach(() => {
+    model.add("Buy milk");
+    model.edit(first(), {
+      title: "Buy milk",
+      description: "",
+      priority: 4,
+      tags: ["work", "home"],
+    });
+  });
+
+  it("lists every Tag alphabetically, in Default", () => {
+    expect(model.allTags).toEqual([
+      { name: "home", color: undefined },
+      { name: "work", color: undefined },
+    ]);
+  });
+
+  it("lists a Tag no Task carries any more", () => {
+    model.edit(first(), { title: "Buy milk", description: "", priority: 4, tags: [] });
+    expect(model.allTags.map((t) => t.name)).toEqual(["home", "work"]);
+    expect(model.knownTags("ho")).toEqual(["home"]);
+  });
+
+  it("sets a Tag Color, which the list's Tasks show at once", () => {
+    const changed = vi.fn();
+    model.onChange = changed;
+    model.setTagColor("work", "#d0021b");
+    expect(tag("work")?.color).toBe("#d0021b");
+    expect(first().tags).toEqual(["work", "home"]);
+    expect(first().tagColors).toEqual({ work: "#d0021b" });
+    expect(changed).toHaveBeenCalled();
+  });
+
+  it("resets a Tag to Default", () => {
+    model.setTagColor("work", "#d0021b");
+    model.setTagColor("work", undefined);
+    expect(tag("work")?.color).toBeUndefined();
+    expect(first().tagColors).toEqual({});
+  });
+
+  it("keeps a Tag Color after a reload from the saved files", async () => {
+    model.setTagColor("work", "#d0021b");
+    await model.saved();
+    const reopened = new TasksModel(await TaskFiles.open(core, storage));
+    expect(reopened.allTags.find((t) => t.name === "work")?.color).toBe("#d0021b");
+  });
+});

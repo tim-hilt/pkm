@@ -1,5 +1,6 @@
 import { isValidTag } from "../core/Core";
 import { button, make } from "../Dom";
+import { tagLabel } from "./TagLabel";
 import { type Blocker, type ListedTask, TasksModel } from "./TasksModel";
 
 /** How the edit view moves between Tasks, each of which has an address of its own. */
@@ -274,13 +275,15 @@ class TagField {
   }
 
   private showChips(): void {
+    const colors = new Map(this.model.allTags.map((t) => [t.name, t.color]));
     this.chips.replaceChildren(
       ...this.tags.map((tag) => {
-        const remove = button("tasks-chip", `${tag} ×`, () => {
+        const remove = button("tasks-chip", "", () => {
           this.tags.splice(this.tags.indexOf(tag), 1);
           this.showChips();
           this.changed();
         });
+        remove.append(tagLabel(tag, colors.get(tag)), " ×");
         remove.setAttribute("aria-label", `Remove ${tag}`);
         return make("li", "", [remove]);
       }),

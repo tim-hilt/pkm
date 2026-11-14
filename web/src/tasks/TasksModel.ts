@@ -12,6 +12,8 @@ export interface ListedTask {
   description: string;
   /** In the order they were added. */
   tags: string[];
+  /** The Tag Color (`#rrggbb`) of each of `tags` that has one; the others are Default. */
+  tagColors: Record<string, string>;
   /** The Parent's ID, if it is a Subtask. */
   parent: string | undefined;
   /** How deep it sits in the tree, 0 for a top-level Task. */
@@ -26,6 +28,13 @@ export interface ListedTask {
   blocked: boolean;
   /** The Tasks it's Blocked by, Open or Closed. */
   blockedBy: Blocker[];
+}
+
+/** A Tag that exists, with its Tag Color. */
+export interface Tag {
+  name: string;
+  /** `#rrggbb`; `undefined` is Default. */
+  color: string | undefined;
 }
 
 /** A Task another Task is Blocked by; a `closed` one no longer blocks. */
@@ -352,6 +361,20 @@ export class TasksModel {
     return this.files.store.tagsWithPrefix(prefix);
   }
 
+  /** Every known Tag with its Tag Color, alphabetically. */
+  get allTags(): Tag[] {
+    return this.files.store.allTags().map((tag) => {
+      const plain = { name: tag.name, color: tag.color ?? undefined };
+      tag.free();
+      return plain;
+    });
+  }
+
+  /** Gives a Tag its Tag Color (`#rrggbb`), or Default for `undefined`; open lists show it at once. */
+  setTagColor(tag: string, color: string | undefined): void {
+    this.apply(() => this.files.store.setTagColor(tag, color));
+  }
+
   /** `text` without the characters a Tag can never contain. */
   static allowedTagText(text: string): string {
     return stripForbiddenTagCharacters(text);
@@ -412,25 +435,33 @@ export class TasksModel {
 
   /** The wasm `rows` as plain Tasks, freeing them. */
   private listed(rows: ReturnType<TaskFiles["store"]["tasks"]>): ListedTask[] {
-    const tasks = rows.map((row) => ({
-      id: row.id,
-      title: row.title,
-      priority: row.priority,
-      planning: row.planning,
-      description: row.description,
-      tags: row.tags,
-      parent: row.parent ?? undefined,
-      depth: row.depth,
-      hasSubtasks: row.hasSubtasks,
-      done: row.done,
-      closed: row.closed,
-      blocked: row.blocked,
-      blockedBy: row.blockedBy().map((b) => {
-        const blocker = { id: b.id, title: b.title, closed: b.closed };
-        b.free();
-        return blocker;
-      }),
-    }));
+    const tasks = rows.map((row) => {
+      const tags = row.tags();
+      const task = {
+        id: row.id,
+        title: row.title,
+        priority: row.priority,
+        planning: row.planning,
+        description: row.description,
+        tags: tags.map((tag) => tag.name),
+        tagColors: Object.fromEntries(
+          tags.filter((tag) => tag.color).map((tag) => [tag.name, tag.color!]),
+        ),
+        parent: row.parent ?? undefined,
+        depth: row.depth,
+        hasSubtasks: row.hasSubtasks,
+        done: row.done,
+        closed: row.closed,
+        blocked: row.blocked,
+        blockedBy: row.blockedBy().map((b) => {
+          const blocker = { id: b.id, title: b.title, closed: b.closed };
+          b.free();
+          return blocker;
+        }),
+      };
+      tags.forEach((tag) => tag.free());
+      return task;
+    });
     rows.forEach((row) => row.free());
     return tasks;
   }
