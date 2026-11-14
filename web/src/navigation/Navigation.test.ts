@@ -22,13 +22,15 @@ class FakeHistory implements BrowserHistory {
   onTraverse(listener: () => void) {
     this.listener = listener;
   }
-  back() {
-    this.at--;
+  go(delta: number) {
+    this.at += delta;
     this.listener();
   }
+  back() {
+    this.go(-1);
+  }
   forward() {
-    this.at++;
-    this.listener();
+    this.go(1);
   }
 }
 
@@ -125,7 +127,8 @@ describe("Navigation", () => {
     let changes = 0;
     navigation.onChange = () => changes++;
     const goingBack: (() => void)[] = [];
-    history.back = () => void goingBack.push(() => FakeHistory.prototype.back.call(history));
+    history.go = (delta) =>
+      void goingBack.push(() => FakeHistory.prototype.go.call(history, delta));
     navigation.closeItem();
     navigation.closeItem();
     expect(navigation.item).toBeUndefined();
@@ -134,6 +137,34 @@ describe("Navigation", () => {
     goingBack[0]();
     expect(history.path).toBe("/drawings");
     expect(navigation.item).toBeUndefined();
+  });
+
+  it("opens Items on top of each other, and closes them all by going back to the list", () => {
+    const { navigation, history } = open("/tasks");
+    navigation.openItem("aaaaaaaaaaaa");
+    navigation.openItem("bbbbbbbbbbbb");
+    expect(history.entries).toEqual(["/tasks", "/tasks/aaaaaaaaaaaa", "/tasks/bbbbbbbbbbbb"]);
+    navigation.closeItem();
+    expect(history.path).toBe("/tasks");
+    expect(navigation.item).toBeUndefined();
+  });
+
+  it("goes back one Item, and then closes to the list", () => {
+    const { navigation, history } = open("/tasks");
+    navigation.openItem("aaaaaaaaaaaa");
+    navigation.openItem("bbbbbbbbbbbb");
+    navigation.back();
+    expect(navigation.item).toBe("aaaaaaaaaaaa");
+    navigation.closeItem();
+    expect(history.path).toBe("/tasks");
+  });
+
+  it("closes Items on top of one opened by a link by replacing the current entry", () => {
+    const { navigation, history } = open("/tasks/aaaaaaaaaaaa");
+    navigation.openItem("bbbbbbbbbbbb");
+    navigation.closeItem();
+    expect(history.path).toBe("/tasks");
+    expect(history.at).toBe(1);
   });
 
   it("closes an Item opened by a link by replacing its entry", () => {

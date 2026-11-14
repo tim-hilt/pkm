@@ -2,18 +2,12 @@ import { Closing, Planning } from "../core/Core";
 import { button, make } from "../Dom";
 import { RowDrag } from "./RowDrag";
 import { RowMenu, type RowMenuItem } from "./RowMenu";
-import { editTaskDialog, newTaskDialog } from "./TaskDialogs";
+import { type TaskPlaces, editTaskDialog, newTaskDialog } from "./TaskDialogs";
 import { type ListedTask, type TasksModel, lists } from "./TasksModel";
 
 const chevronGlyph = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>`;
 const lockGlyph = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M7 10V8a5 5 0 0 1 10 0v2h1a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1zm2 0h6V8a3 3 0 0 0-6 0z"/></svg>`;
 const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
-
-/** How the view opens and leaves a Task's edit view, which has an address of its own. */
-export interface TaskPlaces {
-  open(id: string): void;
-  close(): void;
-}
 
 /**
  * The Tasks Context: the Active list and the Backlog as Todoist-style rows: a
@@ -34,8 +28,8 @@ export class TasksView {
   private readonly toast = make("div", "tasks-toast");
   private readonly menu: RowMenu;
   private readonly drag: RowDrag;
-  /** The edit view, while shown. */
-  private editor: HTMLDialogElement | undefined;
+  /** The edit view, while shown, and the Task it is of. */
+  private editor: { dialog: HTMLDialogElement; task: string } | undefined;
 
   constructor(
     private readonly model: TasksModel,
@@ -92,23 +86,25 @@ export class TasksView {
     this.showEditor();
   }
 
-  /** The edit view is shown while the model has a Task to edit; leaving it, however, leaves the Task's address. */
+  /**
+   * The edit view is shown while the model has a Task to edit, and is made
+   * anew when that is another one; leaving it, however, leaves the Task's address.
+   */
   private showEditor(): void {
     const { editing } = this.model;
-    if (!editing) {
-      const shown = this.editor;
-      this.editor = undefined;
-      return shown?.close();
-    }
-    if (this.editor) return;
-    const editor = editTaskDialog(this.model, editing, this.element);
-    editor.addEventListener("close", () => {
+    if (this.editor?.task === editing?.id) return;
+    const shown = this.editor;
+    this.editor = undefined;
+    shown?.dialog.close();
+    if (!editing) return;
+    const dialog = editTaskDialog(this.model, editing, this.element, this.places);
+    dialog.addEventListener("close", () => {
       // Closed by the model's say-so (the address left the Task): nothing to tell.
-      if (this.editor !== editor) return;
+      if (this.editor?.dialog !== dialog) return;
       this.editor = undefined;
       this.places.close();
     });
-    this.editor = editor;
+    this.editor = { dialog, task: editing.id };
   }
 
   /** Names the Task just Closed and offers to Revert it. */

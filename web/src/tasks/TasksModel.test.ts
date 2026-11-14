@@ -441,6 +441,93 @@ describe("opening a Task by its id", () => {
   });
 });
 
+describe("opening Blockers", () => {
+  /** "Top" (opened) Blocked by "Mid", itself Blocked by "Low", the last of which is in the Backlog. */
+  function chain() {
+    model.add("Low", Planning.Backlog);
+    model.add("Mid");
+    model.add("Top");
+    model.planning = Planning.Backlog;
+    const low = model.tasks.find((t) => t.title === "Low")!;
+    model.planning = Planning.Active;
+    const mid = model.tasks.find((t) => t.title === "Mid")!;
+    const top = model.tasks.find((t) => t.title === "Top")!;
+    model.setBlockedBy(top, [mid.id]);
+    model.setBlockedBy(mid, [low.id]);
+    return { low, mid, top };
+  }
+
+  it("pushes a Blocker on the stack, to any depth, and pops it with back", () => {
+    const { low, mid, top } = chain();
+    model.open(top.id);
+    expect(model.openBlocker(mid.id)).toBe(true);
+    expect(model.openBlocker(low.id)).toBe(true);
+    expect(model.depth).toBe(3);
+    expect(model.editing?.id).toBe(low.id);
+    model.back();
+    expect(model.editing?.id).toBe(mid.id);
+    model.back();
+    model.back();
+    expect(model.editing?.id).toBe(top.id);
+  });
+
+  it("leaves the list shown when the Blocker is on the other list", () => {
+    const { low, mid, top } = chain();
+    model.open(mid.id);
+    expect(model.openBlocker(low.id)).toBe(true);
+    expect(model.planning).toBe(Planning.Active);
+    expect(top.planning).toBe(Planning.Active);
+  });
+
+  it("refuses a Closed Blocker", () => {
+    const { mid, top } = chain();
+    model.open(top.id);
+    model.close(mid, Closing.Done);
+    model.commit();
+    expect(model.openBlocker(mid.id)).toBe(false);
+    expect(model.depth).toBe(1);
+  });
+
+  it("refuses opening while the Title on top is empty, and popping", () => {
+    const { low, mid, top } = chain();
+    model.open(top.id);
+    model.openBlocker(mid.id);
+    model.edit(model.editing!, { title: " ", description: "", priority: 4, tags: [] });
+    expect(model.isLeavingBlocked).toBe(true);
+    expect(model.openBlocker(low.id)).toBe(false);
+    model.back();
+    expect(model.editing?.id).toBe(mid.id);
+    model.edit(model.editing!, { title: "Mid", description: "", priority: 4, tags: [] });
+    expect(model.isLeavingBlocked).toBe(false);
+    expect(model.openBlocker(low.id)).toBe(true);
+  });
+
+  it("shows the latest saved state after back", () => {
+    const { mid, top } = chain();
+    model.open(top.id);
+    model.openBlocker(mid.id);
+    model.edit(model.editing!, { title: "Renamed", description: "", priority: 1, tags: [] });
+    model.back();
+    expect(model.editing?.blockedBy.map((b) => b.title)).toEqual(["Renamed"]);
+  });
+
+  it("pops to the Task below, or starts over for another one, when opened by id", () => {
+    const { low, mid, top } = chain();
+    model.open(top.id);
+    model.openBlocker(mid.id);
+    model.open(top.id);
+    expect(model.depth).toBe(1);
+    model.openBlocker(mid.id);
+    model.open(mid.id);
+    expect(model.depth).toBe(2);
+    model.open(low.id);
+    expect(model.depth).toBe(1);
+    expect(model.planning).toBe(Planning.Backlog);
+    model.open(undefined);
+    expect(model.depth).toBe(0);
+  });
+});
+
 describe("Sync", () => {
   it("shows the Tasks Sync wrote, and none it deleted", async () => {
     model.add("Mine");

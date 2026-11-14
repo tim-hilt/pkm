@@ -73,10 +73,12 @@ export class TasksModel {
   failure: string | undefined;
   /** Called after a change was written to storage, so that Sync follows. */
   onSaved: () => void = () => {};
-  /** The Open Task whose edit view is shown, if any. */
-  editing: ListedTask | undefined;
   /** The Close the toast offers to Revert. */
   pendingClose: PendingClose | undefined;
+  /** The IDs of the Tasks of the edit view, the first opened first: each Blocker opened is pushed. */
+  private stack: string[] = [];
+  /** Whether the Task on top was last saved with an empty Title, which keeps the stack as it is. */
+  private titleMissing = false;
   /** The Tasks planned as `planning`, in their order, each followed by its Subtasks. */
   private shown: ListedTask[] = [];
   private list = Planning.Active;
@@ -103,6 +105,22 @@ export class TasksModel {
     this.onChange();
   }
 
+  /** The Task on top of the edit view's stack as last saved, from either list; `undefined` if none is shown. */
+  get editing(): ListedTask | undefined {
+    const id = this.stack.at(-1);
+    return id === undefined ? undefined : this.find(id);
+  }
+
+  /** How many Tasks the edit view's stack has. */
+  get depth(): number {
+    return this.stack.length;
+  }
+
+  /** Whether the edit view can't be left or popped: the Title on top is empty. */
+  get isLeavingBlocked(): boolean {
+    return this.titleMissing;
+  }
+
   get tasks(): readonly ListedTask[] {
     return this.shown;
   }
@@ -123,9 +141,13 @@ export class TasksModel {
   /**
    * Shows the edit view of the Open Task `id`, over the list it is in;
    * `undefined` shows none. An unknown or Closed `id` shows the Active list.
+   * The `id` on top of the stack stays as it is, and the one below it is popped
+   * to; any other starts a stack of its own.
    */
   open(id: string | undefined): void {
-    this.editing = undefined;
+    if (id !== undefined && id === this.stack.at(-1)) return;
+    if (id !== undefined && id === this.stack.at(-2)) return this.back();
+    this.clearStack();
     if (id !== undefined) {
       const isTask = (task: ListedTask) => task.id === id && !task.closed;
       const found = lists
@@ -135,10 +157,46 @@ export class TasksModel {
         }))
         .find(({ task }) => task);
       this.list = found?.planning ?? Planning.Active;
-      this.editing = found?.task;
+      if (found?.task) this.stack = [id];
     }
     this.reload();
     this.onChange();
+  }
+
+  /**
+   * Pushes the Open Task `id`, a Blocker of the one on top, onto the stack; the
+   * list shown stays. False, pushing nothing, if it is Closed or gone, or
+   * while the Title on top is empty.
+   */
+  openBlocker(id: string): boolean {
+    const blocker = this.find(id);
+    if (this.stack.length === 0 || this.titleMissing || !blocker || blocker.closed) return false;
+    this.stack.push(id);
+    this.onChange();
+    return true;
+  }
+
+  /** Pops the Task on top, to show the one below as last saved; refused while its Title is empty or it is the last. */
+  back(): void {
+    if (this.stack.length < 2 || this.titleMissing) return;
+    this.stack.pop();
+    this.onChange();
+  }
+
+  private clearStack(): void {
+    this.stack = [];
+    this.titleMissing = false;
+  }
+
+  /** `id` as last saved, from either list. */
+  private find(id: string): ListedTask | undefined {
+    return (
+      this.shown.find((t) => t.id === id) ?? this.read(this.otherList).find((t) => t.id === id)
+    );
+  }
+
+  private get otherList(): Planning {
+    return this.list === Planning.Active ? Planning.Backlog : Planning.Active;
   }
 
   /**
@@ -181,6 +239,7 @@ export class TasksModel {
    */
   edit(task: ListedTask, { title, description, priority, tags }: TaskEdit): boolean {
     if (!tags.every(isValidTag)) return false;
+    if (task.id === this.stack.at(-1)) this.titleMissing = title.trim() === "";
     const { store } = this.files;
     const saved = this.current(task);
     const newTitle = title.trim() === "" ? saved.title : title.trim();
@@ -305,7 +364,7 @@ export class TasksModel {
 
   /** `task` as last saved: the list is read after every change, a `task` held meanwhile is stale. */
   private current(task: ListedTask): ListedTask {
-    return this.shown.find((t) => t.id === task.id) ?? task;
+    return this.find(task.id) ?? task;
   }
 
   /** `change`, then the list and the views as it left them. False if the store refused it. */

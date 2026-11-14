@@ -8,7 +8,7 @@ export function browserHistory(window: Window): BrowserHistory {
     },
     push: (path) => window.history.pushState(null, "", path),
     replace: (path) => window.history.replaceState(null, "", path),
-    back: () => window.history.back(),
+    go: (delta) => window.history.go(delta),
     onTraverse: (listener) => window.addEventListener("popstate", listener),
   };
 }

@@ -13,8 +13,8 @@ export interface BrowserHistory {
   push(path: string): void;
   /** Rewrites the current entry. */
   replace(path: string): void;
-  /** Moves to the previous entry; `onTraverse` follows. */
-  back(): void;
+  /** Moves `delta` entries (negative: back); `onTraverse` follows. */
+  go(delta: number): void;
   /** Calls `listener` after the user moved to another entry (back, forward). */
   onTraverse(listener: () => void): void;
 }
@@ -56,8 +56,10 @@ export class Navigation {
   item: string | undefined;
   /** Called after `selected` or `item` changed. */
   onChange: () => void = () => {};
-  /** Whether the current entry was pushed by `openItem`, so that going back leaves the Item. */
-  private pushedItem = false;
+  /** The Items of the entries `openItem` pushed since the list, so that going back leaves them all. */
+  private pushed: string[] = [];
+  /** Whether the first Item was opened by a link: no entry of its own to go back to the list. */
+  private fromLink = false;
 
   constructor(
     private readonly history: BrowserHistory,
@@ -65,8 +67,11 @@ export class Navigation {
   ) {
     this.follow();
     history.onTraverse(() => {
-      this.pushedItem = false;
       this.follow();
+      // Moved within the entries pushed (or out of them, which forgets them).
+      const at = this.item === undefined ? -1 : this.pushed.lastIndexOf(this.item);
+      this.pushed = this.pushed.slice(0, at + 1);
+      if (at < 0) this.fromLink = false;
       this.onChange();
     });
   }
@@ -75,30 +80,37 @@ export class Navigation {
   select(context: Context): void {
     if (context === this.selected && this.item === undefined) return;
     this.history.push(`/${context}`);
-    this.pushedItem = false;
+    this.forgetPushed();
     this.show({ context });
     this.onChange();
   }
 
-  /** Opens the Item `item` of the selected Context, as a new History entry. */
+  /** Opens the Item `item` of the selected Context, as a new History entry, on top of the one open. */
   openItem(item: string): void {
     if (item === this.item) return;
+    if (this.item !== undefined && this.pushed.length === 0) this.fromLink = true;
     this.history.push(pathOf({ context: this.selected, item }));
-    this.pushedItem = true;
+    this.pushed.push(item);
     this.item = item;
     this.onChange();
   }
 
+  /** Moves to the entry before the current one, which `onTraverse` then follows. */
+  back(): void {
+    this.history.go(-1);
+  }
+
   /**
-   * Leaves the open Item at once: back to the entry it was opened from, or,
-   * for one opened by a link, the Context's own path in its place.
+   * Leaves the open Item, and the Items opened on top of it, at once: back to
+   * the entry the first was opened from, leaving none ahead, or, for one
+   * opened by a link, the Context's own path in its place.
    */
   closeItem(): void {
     if (this.item === undefined) return;
     // The browser goes back later; `onTraverse` then finds the state as it is now.
-    if (this.pushedItem) this.history.back();
+    if (this.pushed.length > 0 && !this.fromLink) this.history.go(-this.pushed.length);
     else this.history.replace(`/${this.selected}`);
-    this.pushedItem = false;
+    this.forgetPushed();
     this.item = undefined;
     this.onChange();
   }
@@ -108,6 +120,11 @@ export class Navigation {
     const place = placeAt(this.history.path) ?? { context: this.lastContext() };
     if (this.history.path !== pathOf(place)) this.history.replace(pathOf(place));
     this.show(place);
+  }
+
+  private forgetPushed(): void {
+    this.pushed = [];
+    this.fromLink = false;
   }
 
   private show({ context, item }: Place): void {

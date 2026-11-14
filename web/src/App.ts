@@ -68,6 +68,7 @@ export async function startApp(
   shell.pane("tasks").append(
     new TasksView(tasks, {
       open: (id) => navigation.openItem(id),
+      back: () => navigation.back(),
       close: () => navigation.closeItem(),
     }).element,
   );
@@ -125,6 +126,9 @@ export async function startApp(
     const { selected, item } = navigation;
     const task = selected === "tasks" ? item : undefined;
     const drawing = selected === "drawings" ? item : undefined;
+    // The Title on top is empty: the address is put back, whatever the browser went to.
+    const held = selected === "tasks" && tasks.isLeavingBlocked ? tasks.editing?.id : undefined;
+    if (held !== undefined && held !== task) return navigation.openItem(held);
     tasks.open(task);
     if (task !== undefined && !tasks.editing) return navigation.closeItem();
     if (drawing === undefined) void gallery.close();

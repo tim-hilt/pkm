@@ -1264,8 +1264,45 @@
       .tasks-tags > * {
         width: 100%;
       }
-      .tasks-chip.closed {
+      .tasks-chip-pair {
+        display: flex;
+        border-radius: 16px;
+        background: var(--control-fill);
+      }
+      .tasks-chip-pair.closed .tasks-chip-title {
         text-decoration: line-through;
+      }
+      .tasks-chip-title {
+        display: inline-flex;
+        align-items: center;
+        min-height: 32px;
+        padding: 0 4px 0 10px;
+        border: 0;
+        background: none;
+        color: inherit;
+        font: inherit;
+      }
+      button.tasks-chip-title {
+        cursor: pointer;
+      }
+      .tasks-chip-pair .tasks-chip {
+        padding: 0 10px 0 6px;
+        background: none;
+      }
+      .tasks-back {
+        align-self: flex-start;
+        min-height: 32px;
+        padding: 0 10px;
+        border: 0;
+        border-radius: 8px;
+        background: var(--control-fill);
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+      }
+      .tasks-back:disabled {
+        opacity: 0.4;
+        cursor: default;
       }
       .tasks-chips,
       .tasks-suggestions {

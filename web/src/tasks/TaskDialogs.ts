@@ -2,6 +2,16 @@ import { isValidTag } from "../core/Core";
 import { button, make } from "../Dom";
 import { type Blocker, type ListedTask, TasksModel } from "./TasksModel";
 
+/** How the edit view moves between Tasks, each of which has an address of its own. */
+export interface TaskPlaces {
+  /** Shows the Task `id`, a Blocker just pushed on the model's stack, at its address. */
+  open(id: string): void;
+  /** Returns to the Task before, at its address. */
+  back(): void;
+  /** Leaves the whole stack, back to the list's address. */
+  close(): void;
+}
+
 let nextId = 0;
 
 /** A modal `<dialog>` with a form of `fields` and `actions`, gone once closed. */
@@ -109,11 +119,14 @@ const typingPause = 500;
  * at once. Done closes it. While the Title is empty the last saved one is kept,
  * a hint says why, and the dialog can't be left (Done is off, Esc ignored).
  * Closing saves what is pending, with a Tag typed but not added if it is valid.
+ * An Open Blocker's title opens it over this Task; Back (with a Task below) returns,
+ * and is off while the Title is empty.
  */
 export function editTaskDialog(
   model: TasksModel,
   task: ListedTask,
   parent: HTMLElement,
+  places: Pick<TaskPlaces, "open" | "back">,
 ): HTMLDialogElement {
   const title = textInput(task.title);
   const titleHint = make("p", "tasks-hint", ["A Task needs a Title."]);
@@ -133,7 +146,18 @@ export function editTaskDialog(
     });
   };
   const tags = new TagField(model, [...task.tags], save);
-  const blockers = new BlockedByField(model.blockerCandidates(task), [...task.blockedBy], save);
+  const openBlocker = (id: string) => {
+    save();
+    if (model.openBlocker(id)) places.open(id);
+  };
+  const blockers = new BlockedByField(
+    model.blockerCandidates(task),
+    [...task.blockedBy],
+    save,
+    openBlocker,
+  );
+  const back = button("tasks-back", "Back", () => places.back());
+  back.hidden = model.depth < 2;
   const priorities = [1, 2, 3, 4].map((value) => ({ value, text: `P${value}` }));
   const done = confirmButton("Done");
   const titleEmpty = () => title.value.trim() === "";
@@ -141,6 +165,7 @@ export function editTaskDialog(
     parent,
     "Task",
     [
+      back,
       field("Title", title),
       titleHint,
       field("Description", description),
@@ -156,6 +181,7 @@ export function editTaskDialog(
   const showTitleState = () => {
     titleHint.hidden = !titleEmpty();
     done.disabled = titleEmpty();
+    back.disabled = titleEmpty();
   };
   showTitleState();
   form.addEventListener("input", (event) => {
@@ -163,6 +189,8 @@ export function editTaskDialog(
       clearTimeout(pause);
       pause = setTimeout(save, typingPause);
     }
+    // The model holds the stack still as soon as the Title is empty, not after the pause.
+    if (titleEmpty() !== model.isLeavingBlocked) save();
     showTitleState();
   });
   form.addEventListener("focusout", (event) => {
@@ -271,8 +299,9 @@ class TagField {
 }
 
 /**
- * The Tasks a Task is Blocked by: chips to remove, and a menu of the Open
- * Tasks it could be Blocked by to add. Closed blockers stay listed, struck through.
+ * The Tasks a Task is Blocked by: chips with a title button to open an Open
+ * Blocker and a × to remove it, and a menu of the Open Tasks it could be
+ * Blocked by to add. Closed blockers stay listed, struck through, with only the ×.
  */
 class BlockedByField {
   readonly element = make("fieldset", "tasks-blocked");
@@ -283,6 +312,7 @@ class BlockedByField {
     private readonly candidates: ListedTask[],
     private readonly chosen: Blocker[],
     private readonly changed: () => void,
+    private readonly open: (id: string) => void,
   ) {
     this.choose.setAttribute("aria-label", "Add Blocked by");
     this.choose.addEventListener("change", () => {
@@ -302,14 +332,21 @@ class BlockedByField {
   private show(): void {
     this.chips.replaceChildren(
       ...this.chosen.map((blocker) => {
-        const remove = button("tasks-chip", `${blocker.title} ×`, () => {
+        const remove = button("tasks-chip", "×", () => {
           this.chosen.splice(this.chosen.indexOf(blocker), 1);
           this.show();
           this.changed();
         });
         remove.setAttribute("aria-label", `Remove ${blocker.title}`);
-        remove.classList.toggle("closed", blocker.closed);
-        return make("li", "", [remove]);
+        const title = make(blocker.closed ? "span" : "button", "tasks-chip-title", [blocker.title]);
+        if (title instanceof HTMLButtonElement) {
+          title.type = "button";
+          title.setAttribute("aria-label", `Open ${blocker.title}`);
+          title.addEventListener("click", () => this.open(blocker.id));
+        }
+        const chip = make("li", "tasks-chip-pair", [title, remove]);
+        chip.classList.toggle("closed", blocker.closed);
+        return chip;
       }),
     );
     const open = this.candidates.filter((t) => !this.chosen.some((b) => b.id === t.id));
