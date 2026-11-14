@@ -413,6 +413,20 @@ mod tests {
     }
 
     #[test]
+    fn a_context_added_after_connecting_gets_its_folder_on_the_first_put() {
+        let Some(server) = Rclone::webdav() else {
+            return;
+        };
+        server.connect().unwrap();
+        // An update brings Tasks; the connection is resumed, not made again.
+        let tls = trusting(&server.cert);
+        let tasks = WebDavStorage::new(&server.url, USER, PASSWORD, "Tasks", tls).unwrap();
+        tasks.put("task.md", &mut &b"kept"[..]).unwrap();
+        let folder = server.dir.0.join(FOLDER).join("Tasks");
+        assert_eq!(fs::read(folder.join("task.md")).unwrap(), b"kept");
+    }
+
+    #[test]
     fn a_url_with_a_path_keeps_everything_inside_it() {
         let Some(server) = Rclone::webdav() else {
             return;

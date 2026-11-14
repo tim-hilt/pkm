@@ -171,7 +171,9 @@ impl WebDav {
     /// Stores `data` as the blob `name`: uploads it to `temp`, a name no other
     /// upload uses, in the `.incoming` folder, then moves it over `name`.
     /// `incoming_exists` says the folder is known to be there; if not it is
-    /// created first. A failed upload deletes what it left at `temp`.
+    /// created first, with the Context's folder and `pkm` if they are missing
+    /// too: a Context added to the app after connecting has no folder yet. A
+    /// failed upload deletes what it left at `temp`.
     pub fn put(
         &self,
         name: &str,
@@ -189,7 +191,10 @@ impl WebDav {
             phase: if incoming_exists {
                 PutPhase::Upload
             } else {
-                PutPhase::MakeIncoming
+                PutPhase::MakeFolder {
+                    folder: INCOMING_FOLDER,
+                    made: false,
+                }
             },
         }
     }
@@ -341,8 +346,17 @@ impl Exchange for Connect {
     }
 }
 
+/// The folders a put may make, each in the one before: `pkm`, the
+/// Context's folder and its `.incoming` folder.
+const INCOMING_FOLDER: usize = 2;
+
 enum PutPhase {
-    MakeIncoming,
+    /// Making the folder of that index; `made` says a folder was made, after
+    /// which a missing parent (409) means it isn't coming back.
+    MakeFolder {
+        folder: usize,
+        made: bool,
+    },
     Upload,
     Move,
     /// Deleting the temporary blob after the error.
@@ -359,6 +373,12 @@ struct Put {
 }
 
 impl Put {
+    fn make_folder(&mut self, folder: usize, made: bool) -> HttpRequest {
+        self.phase = PutPhase::MakeFolder { folder, made };
+        let url = [&self.dav.parent, &self.dav.root, &self.incoming][folder];
+        self.dav.mkcol(url)
+    }
+
     fn upload(&mut self) -> HttpRequest {
         self.phase = PutPhase::Upload;
         let data = std::mem::take(&mut self.data);
@@ -379,7 +399,7 @@ impl Exchange for Put {
 
     fn start(&mut self) -> HttpRequest {
         match self.phase {
-            PutPhase::MakeIncoming => self.dav.mkcol(&self.incoming),
+            PutPhase::MakeFolder { folder, made } => self.make_folder(folder, made),
             _ => self.upload(),
         }
     }
@@ -388,9 +408,13 @@ impl Exchange for Put {
         let status = answer.status;
         let refused = refuse(status);
         match std::mem::replace(&mut self.phase, PutPhase::Upload) {
-            PutPhase::MakeIncoming => match (refused, status) {
+            PutPhase::MakeFolder { folder, made } => match (refused, status) {
                 (Err(error), _) => Turn::Done(Err(error)),
-                (_, 200..=299 | 405) => Turn::Send(self.upload()),
+                // 405: it exists already.
+                (_, 200..=299 | 405) if folder == INCOMING_FOLDER => Turn::Send(self.upload()),
+                (_, 200..=299 | 405) => Turn::Send(self.make_folder(folder + 1, true)),
+                // 409: the folder above is missing.
+                (_, 409) if folder > 0 && !made => Turn::Send(self.make_folder(folder - 1, false)),
                 _ => Turn::Done(Err(unexpected("MKCOL", status))),
             },
             PutPhase::Upload => match (refused, status) {
@@ -756,6 +780,43 @@ mod tests {
                 .1
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn putting_creates_missing_parent_folders_of_a_context_added_after_connecting() {
+        // 409: the parent is missing. `pkm/Drawings` is; then `pkm` too.
+        let mkcols = [
+            "MKCOL https://host/dav/pkm/Drawings/.incoming",
+            "MKCOL https://host/dav/pkm/Drawings",
+            "MKCOL https://host/dav/pkm",
+        ];
+        for missing in 1..=2 {
+            // 409s down to the missing folder; then it, each folder above
+            // and the PUT and MOVE succeed.
+            let mut answers = vec![answer(409, ""); missing];
+            answers.extend(vec![answer(201, ""); missing + 3]);
+            let (sent, result) = run(dav().put("a", "t", Vec::new(), false), &answers);
+            let mut expected = mkcols[..=missing].to_vec();
+            expected.extend(mkcols[..missing].iter().rev());
+            assert_eq!(sent[..expected.len()], expected, "{missing}");
+            assert!(sent[expected.len()].starts_with("PUT "), "{missing}");
+            assert!(sent[expected.len() + 1].starts_with("MOVE "), "{missing}");
+            assert!(result.is_ok(), "{missing}");
+        }
+    }
+
+    #[test]
+    fn putting_gives_up_when_a_folder_stays_missing() {
+        // Even the Server URL is missing.
+        let answers = [answer(409, ""), answer(409, ""), answer(409, "")];
+        let (sent, result) = run(dav().put("a", "t", Vec::new(), false), &answers);
+        assert_eq!(sent.len(), 3);
+        assert!(result.is_err());
+        // A made parent doesn't help.
+        let answers = [answer(409, ""), answer(201, ""), answer(409, "")];
+        let (sent, result) = run(dav().put("a", "t", Vec::new(), false), &answers);
+        assert_eq!(sent.len(), 3);
+        assert!(result.is_err());
     }
 
     #[test]
