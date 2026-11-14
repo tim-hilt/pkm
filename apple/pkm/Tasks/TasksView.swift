@@ -248,6 +248,8 @@ private struct NewTaskSheet: View {
 /// While the Title on top is empty the sheet can't be left.
 private struct EditTaskSheet: View {
     @Environment(TasksModel.self) private var model
+    /// Dismisses the sheet, not a pushed form; its binding then empties the model's stack.
+    @Environment(\.dismiss) private var dismiss
 
     /// The pushed Tasks; popping (Back, edge swipe) goes through the model.
     private var pushed: Binding<[String]> {
@@ -257,14 +259,15 @@ private struct EditTaskSheet: View {
                 if path.count > model.editing.count - 1, let id = path.last {
                     model.openBlocker(id: id)
                 } else {
-                    while model.editing.count > path.count + 1 { model.back() }
+                    while model.editing.count > path.count + 1, model.back() {}
                 }
             }
         )
     }
 
     @ViewBuilder private func form(_ id: String?) -> some View {
-        if let task = id.flatMap(model.task(id:)) { EditTaskForm(task: task) }
+        // Its own identity per Task: a link may swap the bottom Task while the sheet stays.
+        if let task = id.flatMap(model.task(id:)) { EditTaskForm(task: task, done: { dismiss() }).id(task.id) }
     }
 
     var body: some View {
@@ -284,11 +287,12 @@ private struct EditTaskSheet: View {
 /// and when their field loses focus, everything else at once, and a Tag typed but
 /// not submitted when the view is left. While the Title is empty the rest still
 /// saves (the last saved Title stays), a hint shows, and the view can't be left.
-/// On macOS Done closes the whole sheet. An Open Blocker is a row that opens its
+/// On macOS `done` closes the whole sheet. An Open Blocker is a row that opens its
 /// own form on top; Back then shows this one as last saved.
 private struct EditTaskForm: View {
     @Environment(TasksModel.self) private var model
     let task: ListedTask
+    let done: () -> Void
     @State private var title: String
     @State private var description: String
     @State private var priority: UInt8
@@ -303,8 +307,9 @@ private struct EditTaskForm: View {
     /// How long typing pauses before text is saved.
     private static let pause = Duration.milliseconds(500)
 
-    init(task: ListedTask) {
+    init(task: ListedTask, done: @escaping () -> Void) {
         self.task = task
+        self.done = done
         _title = State(initialValue: task.title)
         _description = State(initialValue: task.description)
         _priority = State(initialValue: task.priority)
@@ -338,102 +343,100 @@ private struct EditTaskForm: View {
     private var text: [String] { [title, description] }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                TextField("Title", text: $title, axis: .vertical)
-                    .focused($focus, equals: .title)
-                    .submitLabel(.done)
-                    .accessibilityIdentifier("task-title")
-                if !hasTitle {
-                    Text("A Task needs a Title.")
+        Form {
+            TextField("Title", text: $title, axis: .vertical)
+                .focused($focus, equals: .title)
+                .submitLabel(.done)
+                .accessibilityIdentifier("task-title")
+            if !hasTitle {
+                Text("A Task needs a Title.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            TextField("Description", text: $description, axis: .vertical)
+                .lineLimit(3...8)
+                .focused($focus, equals: .description)
+                .accessibilityIdentifier("task-description")
+            Picker("Priority", selection: $priority) {
+                ForEach(UInt8(1)...4, id: \.self) { Text(verbatim: "P\($0)").tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: priority) { save() }
+            Section("Tags") {
+                ForEach(tags, id: \.self) { tag in
+                    HStack {
+                        Text(tag)
+                        Spacer()
+                        Button("Remove \(tag)", systemImage: "minus.circle") {
+                            tags.removeAll { $0 == tag }
+                            save()
+                        }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
+                    }
+                }
+                TextField("Add Tag", text: $newTag)
+                    .onSubmit { addTag(newTag) }
+                    .onChange(of: newTag) { _, text in
+                        let allowed = TasksModel.allowedTagText(text)
+                        refusedTagText = allowed != text
+                        if refusedTagText { newTag = allowed }
+                    }
+                    #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                    #endif
+                    .autocorrectionDisabled()
+                    .accessibilityIdentifier("task-tag")
+                if refusedTagText {
+                    Text("Tags use a–z, 0–9, - and / only.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
-                TextField("Description", text: $description, axis: .vertical)
-                    .lineLimit(3...8)
-                    .focused($focus, equals: .description)
-                    .accessibilityIdentifier("task-description")
-                Picker("Priority", selection: $priority) {
-                    ForEach(UInt8(1)...4, id: \.self) { Text(verbatim: "P\($0)").tag($0) }
+                ForEach(suggestions, id: \.self) { tag in
+                    Button(tag) { addTag(tag) }
                 }
-                .pickerStyle(.segmented)
-                .onChange(of: priority) { save() }
-                Section("Tags") {
-                    ForEach(tags, id: \.self) { tag in
-                        HStack {
-                            Text(tag)
-                            Spacer()
-                            Button("Remove \(tag)", systemImage: "minus.circle") {
-                                tags.removeAll { $0 == tag }
-                                save()
-                            }
-                            .labelStyle(.iconOnly)
-                            .buttonStyle(.borderless)
+            }
+            Section("Blocked by") {
+                ForEach(blockedBy, id: \.id) { blocker in
+                    HStack {
+                        if blocker.closed {
+                            Text(blocker.title).strikethrough().foregroundStyle(.secondary)
+                        } else {
+                            NavigationLink(blocker.title, value: blocker.id).disabled(!hasTitle)
                         }
-                    }
-                    TextField("Add Tag", text: $newTag)
-                        .onSubmit { addTag(newTag) }
-                        .onChange(of: newTag) { _, text in
-                            let allowed = TasksModel.allowedTagText(text)
-                            refusedTagText = allowed != text
-                            if refusedTagText { newTag = allowed }
+                        Spacer()
+                        Button("Remove \(blocker.title)", systemImage: "minus.circle") {
+                            blockedBy.removeAll { $0.id == blocker.id }
+                            saveBlockedBy()
                         }
-                        #if os(iOS)
-                            .textInputAutocapitalization(.never)
-                        #endif
-                        .autocorrectionDisabled()
-                        .accessibilityIdentifier("task-tag")
-                    if refusedTagText {
-                        Text("Tags use a–z, 0–9, - and / only.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                    ForEach(suggestions, id: \.self) { tag in
-                        Button(tag) { addTag(tag) }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
                     }
                 }
-                Section("Blocked by") {
-                    ForEach(blockedBy, id: \.id) { blocker in
-                        HStack {
-                            if blocker.closed {
-                                Text(blocker.title).strikethrough().foregroundStyle(.secondary)
-                            } else {
-                                NavigationLink(blocker.title, value: blocker.id).disabled(!hasTitle)
-                            }
-                            Spacer()
-                            Button("Remove \(blocker.title)", systemImage: "minus.circle") {
-                                blockedBy.removeAll { $0.id == blocker.id }
+                if !blockerCandidates.isEmpty {
+                    Menu("Add Blocked by") {
+                        ForEach(blockerCandidates) { candidate in
+                            Button(candidate.title) {
+                                blockedBy.append(Blocker(id: candidate.id, title: candidate.title, closed: false))
                                 saveBlockedBy()
                             }
-                            .labelStyle(.iconOnly)
-                            .buttonStyle(.borderless)
                         }
                     }
-                    if !blockerCandidates.isEmpty {
-                        Menu("Add Blocked by") {
-                            ForEach(blockerCandidates) { candidate in
-                                Button(candidate.title) {
-                                    blockedBy.append(Blocker(id: candidate.id, title: candidate.title, closed: false))
-                                    saveBlockedBy()
-                                }
-                            }
-                        }
-                        .accessibilityIdentifier("task-add-blocker")
-                    }
+                    .accessibilityIdentifier("task-add-blocker")
                 }
             }
-            .formStyle(.grouped)
-            .navigationTitle("Task")
-            #if os(iOS)
-                .navigationBarTitleDisplayMode(.inline)
+        }
+        .formStyle(.grouped)
+        .navigationTitle(task.title)  // as last saved; also the back button's label on the Blocker's form
+        #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .toolbar {
+            #if os(macOS)
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done", action: done).disabled(!hasTitle)
+                }
             #endif
-            .toolbar {
-                #if os(macOS)
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") { model.closeEditing() }.disabled(!hasTitle)
-                    }
-                #endif
-            }
         }
         .onChange(of: focus) { save() }
         .onChange(of: hasTitle) { save() }  // keeps the model's Back and Blocker rules current

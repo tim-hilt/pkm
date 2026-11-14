@@ -52,6 +52,10 @@ _Avoid_: Child, nested task, checklist item
 A Task is Blocked by another while that one is Open; it can still be Closed.
 _Avoid_: Depends on, prerequisite, Link (that is a reference between Items)
 
+**Blocker**:
+A Task another is Blocked by.
+_Avoid_: Dependency, prerequisite
+
 **History**:
 When Tasks were created, made Active, moved to the Backlog, Done and Rejected, by Item ID only, for later analysis.
 _Avoid_: Log, audit trail, events

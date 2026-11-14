@@ -593,8 +593,10 @@ impl Tasks {
         Ok((file, task))
     }
 
-    /// Applies `change` to the Open Task `id`, bumps `updated` and saves.
-    /// Every property `change` leaves alone, known or not, stays as it was.
+    /// Applies `change` to the Open Task `id`, bumps `updated` and saves; a
+    /// change that leaves the file as it was writes nothing, so that saving as
+    /// the user goes keeps Sync quiet. Every property `change` leaves alone,
+    /// known or not, stays as it was.
     fn modify(&self, id: &str, change: impl FnOnce(&mut Document)) -> Result<Task, Error> {
         let id = ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?;
         let file = self.rewrite(&id, change)?;
@@ -604,10 +606,13 @@ impl Tasks {
     /// `modify` for a change that may leave the Task no longer Open.
     fn rewrite(&self, id: &ItemId, change: impl FnOnce(&mut Document)) -> Result<Document, Error> {
         let (mut file, _) = self.read_open(id)?;
+        let before = file.render();
         change(&mut file);
         self.drop_missing_blockers(&mut file);
-        file.set_scalar("updated", iso8601(now_ms()));
-        self.write(id, &file.render(), Overwrite::Yes)?;
+        if file.render() != before {
+            file.set_scalar("updated", iso8601(now_ms()));
+            self.write(id, &file.render(), Overwrite::Yes)?;
+        }
         Ok(file)
     }
 
@@ -1221,6 +1226,25 @@ mod tests {
         );
         assert_eq!(file.scalar("state"), Some("active"));
         assert_ne!(file.scalar("updated"), Some("2000-01-01T00:00:00Z"));
+    }
+
+    #[test]
+    fn a_change_that_changes_nothing_writes_nothing() {
+        let dir = Scratch::new();
+        let (tasks, task) = edit_fixture(&dir);
+        tasks.edit(&task.id, "t", "body", 2).unwrap();
+        tasks.add_tag(&task.id, "home").unwrap();
+        let path = dir.0.join(format!("{}.md", task.id));
+        let mut file = Document::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+        file.set_scalar("updated", "2000-01-01T00:00:00Z");
+        fs::write(&path, file.render()).unwrap();
+        let before = fs::read_to_string(&path).unwrap();
+
+        tasks.edit(&task.id, " t ", "body ", 2).unwrap();
+        tasks.add_tag(&task.id, "home").unwrap();
+        tasks.remove_tag(&task.id, "away").unwrap();
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), before);
     }
 
     #[test]
