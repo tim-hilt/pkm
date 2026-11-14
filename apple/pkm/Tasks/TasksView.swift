@@ -161,10 +161,12 @@ private struct TaskRow: View {
                         .truncationMode(.tail)
                 }
                 if !task.tags.isEmpty {
-                    Text(task.tags.joined(separator: " "))
-                        .font(.subheadline)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        ForEach(task.tags, id: \.name) { tag in
+                            Text(tag.name).foregroundStyle(tag.style()).lineLimit(1)
+                        }
+                    }
+                    .font(.subheadline)
                 }
             }
             if task.blocked {
@@ -314,7 +316,7 @@ private struct EditTaskForm: View {
         _title = State(initialValue: task.title)
         _description = State(initialValue: task.description)
         _priority = State(initialValue: task.priority)
-        _tags = State(initialValue: task.tags)
+        _tags = State(initialValue: task.tags.map(\.name))
         _blockedBy = State(initialValue: task.blockedBy)
     }
 
@@ -366,7 +368,7 @@ private struct EditTaskForm: View {
             Section("Tags") {
                 ForEach(tags, id: \.self) { tag in
                     HStack {
-                        Text(tag)
+                        Text(tag).foregroundStyle(model.tagEntry(tag).style(default: .primary))
                         Spacer()
                         Button("Remove \(tag)", systemImage: "minus.circle") {
                             tags.removeAll { $0 == tag }
@@ -454,7 +456,7 @@ private struct EditTaskForm: View {
     private func refresh() {
         guard let saved = model.task(id: task.id) else { return }
         (title, description, priority, tags, blockedBy) =
-            (saved.title, saved.description, saved.priority, saved.tags, saved.blockedBy)
+            (saved.title, saved.description, saved.priority, saved.tags.map(\.name), saved.blockedBy)
     }
 
     /// Saves what is edited, if the Tags are valid; `includingTypedTag` adds a valid

@@ -96,6 +96,24 @@ impl Tags {
         true
     }
 
+    /// Gives the known `tag` the Tag Color `color` (`#rrggbb`, kept lowercase),
+    /// or Default for `None`, and bumps its `updated`. False, changing
+    /// nothing, for an unknown Tag or a malformed color.
+    pub fn set_color(&mut self, tag: &str, color: Option<&str>, updated: &str) -> bool {
+        let is_hex = |c: &str| {
+            c.len() == 7 && c.starts_with('#') && c[1..].bytes().all(|b| b.is_ascii_hexdigit())
+        };
+        if color.is_some_and(|c| !is_hex(c)) {
+            return false;
+        }
+        let Some(meta) = self.0.get_mut(tag) else {
+            return false;
+        };
+        meta.color = color.map(str::to_ascii_lowercase);
+        meta.updated = updated.to_owned();
+        true
+    }
+
     /// Forgets `tag`, with its Tag Color. Whether it was known.
     pub fn forget(&mut self, tag: &str) -> bool {
         self.0.remove(tag).is_some()
@@ -145,6 +163,29 @@ mod tests {
         assert!(tags.add("home", T));
         assert_eq!(tags.list()[1].color.as_deref(), Some("#d0021b"));
         assert!(tags.render().contains("2020-01-01T00:00:00Z"));
+    }
+
+    #[test]
+    fn a_tag_color_is_set_and_reset_bumping_updated() {
+        let mut tags = tags(&["work"]);
+        assert!(tags.set_color("work", Some("#D0021B"), "2027-02-02T00:00:00Z"));
+        assert_eq!(tags.list()[0].color.as_deref(), Some("#d0021b"));
+        assert!(tags.render().contains("2027-02-02T00:00:00Z"));
+        assert!(tags.set_color("work", None, "2027-03-03T00:00:00Z"));
+        assert_eq!(tags.list()[0].color, None);
+        assert!(tags.render().contains("2027-03-03T00:00:00Z"));
+        assert!(!tags.render().contains("color"));
+    }
+
+    #[test]
+    fn a_malformed_color_or_unknown_tag_changes_nothing() {
+        let mut tags = tags(&["work"]);
+        let before = tags.clone();
+        for color in ["red", "#fff", "d0021b", "#d0021g", "#d0021b0"] {
+            assert!(!tags.set_color("work", Some(color), "2027-02-02T00:00:00Z"));
+        }
+        assert!(!tags.set_color("nope", Some("#d0021b"), "2027-02-02T00:00:00Z"));
+        assert_eq!(tags, before);
     }
 
     #[test]

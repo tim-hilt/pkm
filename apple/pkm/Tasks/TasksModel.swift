@@ -21,6 +21,8 @@ final class TasksModel {
     private(set) var isLeavingBlocked = false
     /// The Tasks planned as `planning`, in their order, each followed by its Subtasks.
     private(set) var tasks: [ListedTask] = []
+    /// Every known Tag with its Tag Color, alphabetically, whether or not a Task carries it.
+    private(set) var allTags: [TagEntry] = []
     /// Parents whose Subtasks are hidden.
     private var collapsed: Set<String> = []
 
@@ -134,8 +136,10 @@ final class TasksModel {
         let title = isEmpty ? saved.title : title
         guard (try? store.edit(id: task.id, title: title, description: description, priority: priority)) != nil
         else { return false }
-        for tag in saved.tags where !tags.contains(tag) { _ = try? store.removeTag(id: task.id, tag: tag) }
-        for tag in tags where !saved.tags.contains(tag) { _ = try? store.addTag(id: task.id, tag: tag) }
+        for tag in saved.tags.map(\.name) where !tags.contains(tag) { _ = try? store.removeTag(id: task.id, tag: tag) }
+        for tag in tags where !saved.tags.contains(where: { $0.name == tag }) {
+            _ = try? store.addTag(id: task.id, tag: tag)
+        }
         reload()
         return true
     }
@@ -223,8 +227,16 @@ final class TasksModel {
         reload()
     }
 
-    /// Every known Tag, alphabetically, whether or not a Task carries it.
-    var allTags: [String] { store.tags().map(\.name) }
+    /// Gives a Tag the Tag Color `color` (`#rrggbb`), or Default for nil; the lists show it at once.
+    func setTagColor(_ tag: String, to color: String?) {
+        try? store.setTagColor(tag: tag, color: color)
+        reload()
+    }
+
+    /// The Tag Color of a Tag by name; Default if it isn't known.
+    func tagEntry(_ name: String) -> TagEntry {
+        allTags.first { $0.name == name } ?? TagEntry(name: name, color: nil)
+    }
 
     /// The known Tags starting with `prefix`, to pick from.
     func knownTags(prefix: String) -> [String] {
@@ -244,6 +256,7 @@ final class TasksModel {
 
     private func reload() {
         tasks = (try? store.tasks(planning: planning)) ?? []
+        allTags = store.tags()
     }
 }
 

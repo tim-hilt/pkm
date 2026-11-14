@@ -584,6 +584,24 @@ impl Tasks {
         self.read_tags().list()
     }
 
+    /// Gives the Tag its Tag Color (`#rrggbb`), or Default for `None`. A Tag
+    /// that isn't known is left alone; a malformed color is `InvalidData`.
+    pub fn set_tag_color(&self, tag: &str, color: Option<&str>) -> io::Result<()> {
+        let _held = self
+            .tags_lock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let mut tags = self.read_tags();
+        let known = tags.list().iter().any(|e| e.name == tag);
+        if known && !tags.set_color(tag, color, &iso8601(now_ms())) {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "not #rrggbb"));
+        }
+        if known {
+            self.files.write(&self.tags_path(), &tags.render())?;
+        }
+        Ok(())
+    }
+
     /// The file of the Open Task `id` and the Task it describes.
     fn read_open(&self, id: &ItemId) -> Result<(Document, Task), Error> {
         let file = Document::parse(&self.files.read(&self.path(id))?)
@@ -1381,6 +1399,20 @@ mod tests {
         );
         assert_eq!(tasks.tags_with_prefix("").unwrap().len(), 4);
         assert!(tasks.tags_with_prefix("x").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_tag_color_is_set_and_reset() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        tagged(&tasks, &["home"]);
+        tasks.set_tag_color("home", Some("#d0021b")).unwrap();
+        assert_eq!(tasks.tags()[0].color.as_deref(), Some("#d0021b"));
+        tasks.set_tag_color("home", None).unwrap();
+        assert_eq!(tasks.tags()[0].color, None);
+        tasks.set_tag_color("unknown", Some("#d0021b")).unwrap();
+        assert_eq!(tasks.tags().len(), 1);
+        assert!(tasks.set_tag_color("home", Some("red")).is_err());
     }
 
     #[test]

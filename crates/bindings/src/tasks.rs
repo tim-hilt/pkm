@@ -100,8 +100,8 @@ pub struct ListedTask {
     pub planning: Planning,
     /// Plain text; empty if none.
     pub description: String,
-    /// In the order they were added.
-    pub tags: Vec<String>,
+    /// In the order they were added, each with its Tag Color.
+    pub tags: Vec<TagEntry>,
     /// Closed as Done, the Close still pending: shown in place, marked.
     pub done: bool,
     /// A Closed Subtask of an Open Task: shown struck through.
@@ -126,7 +126,11 @@ impl From<Task> for ListedTask {
             priority: t.priority,
             planning: t.planning,
             description: t.description,
-            tags: t.tags,
+            tags: t
+                .tags
+                .into_iter()
+                .map(|name| TagEntry { name, color: None })
+                .collect(),
             done: t.done,
             closed: t.closed,
             parent: t.parent,
@@ -152,6 +156,24 @@ impl From<Row> for ListedTask {
 #[derive(uniffi::Object)]
 pub struct TaskStore(Tasks);
 
+impl TaskStore {
+    /// `task` with its Tags in their Tag Colors.
+    fn painted(&self, task: ListedTask) -> ListedTask {
+        paint(task, &self.0.tags())
+    }
+}
+
+/// `task` with each Tag's Tag Color taken from `known`.
+fn paint(mut task: ListedTask, known: &[TagEntry]) -> ListedTask {
+    for tag in &mut task.tags {
+        tag.color = known
+            .iter()
+            .find(|k| k.name == tag.name)
+            .and_then(|k| k.color.clone());
+    }
+    task
+}
+
 #[uniffi::export]
 impl TaskStore {
     /// Opens the Tasks in the folder `root`, creating it if needed.
@@ -167,7 +189,7 @@ impl TaskStore {
 
     /// Makes a Task Active or moves it to the Backlog, at the end of that list.
     pub fn plan(&self, id: String, planning: Planning) -> Result<ListedTask, TasksError> {
-        Ok(self.0.plan(&id, planning)?.into())
+        Ok(self.painted(self.0.plan(&id, planning)?.into()))
     }
 
     /// Moves a Task under `parent`, or to the top level of the `planning` list,
@@ -179,10 +201,10 @@ impl TaskStore {
         planning: Planning,
         before: Option<String>,
     ) -> Result<ListedTask, TasksError> {
-        Ok(self
+        let moved = self
             .0
-            .move_to(&id, parent.as_deref(), planning, before.as_deref())?
-            .into())
+            .move_to(&id, parent.as_deref(), planning, before.as_deref())?;
+        Ok(self.painted(moved.into()))
     }
 
     /// Closes a Task as a pending change, committing the previous one first.
@@ -203,13 +225,13 @@ impl TaskStore {
 
     /// Creates a Task, refusing an empty Title.
     pub fn create(&self, title: String, planning: Planning) -> Result<ListedTask, TasksError> {
-        Ok(self.0.create(&title, planning)?.into())
+        Ok(self.painted(self.0.create(&title, planning)?.into()))
     }
 
     /// Creates a Subtask under a Task, refusing an empty Title; it follows its
     /// top-level Task's Active or Backlog.
     pub fn create_subtask(&self, parent: String, title: String) -> Result<ListedTask, TasksError> {
-        Ok(self.0.create_subtask(&parent, &title)?.into())
+        Ok(self.painted(self.0.create_subtask(&parent, &title)?.into()))
     }
 
     /// Sets a Task's Title, Description and Priority, refusing an empty Title.
@@ -220,44 +242,49 @@ impl TaskStore {
         description: String,
         priority: u8,
     ) -> Result<ListedTask, TasksError> {
-        Ok(self.0.edit(&id, &title, &description, priority)?.into())
+        Ok(self.painted(self.0.edit(&id, &title, &description, priority)?.into()))
     }
 
     /// Adds a Tag to a Task, refusing an invalid one.
     pub fn add_tag(&self, id: String, tag: String) -> Result<ListedTask, TasksError> {
-        Ok(self.0.add_tag(&id, &tag)?.into())
+        Ok(self.painted(self.0.add_tag(&id, &tag)?.into()))
     }
 
     /// Removes a Tag from a Task.
     pub fn remove_tag(&self, id: String, tag: String) -> Result<ListedTask, TasksError> {
-        Ok(self.0.remove_tag(&id, &tag)?.into())
+        Ok(self.painted(self.0.remove_tag(&id, &tag)?.into()))
     }
 
     /// Marks a Task as Blocked by another Open Task; refused for itself, its
     /// Parent, its Subtask and a loop.
     pub fn add_blocker(&self, id: String, blocker: String) -> Result<ListedTask, TasksError> {
-        Ok(self.0.add_blocker(&id, &blocker)?.into())
+        Ok(self.painted(self.0.add_blocker(&id, &blocker)?.into()))
     }
 
     /// The Open Tasks of both lists a Task could be Blocked by: the ones
     /// `add_blocker` accepts, minus its current Blockers.
     pub fn blocker_candidates(&self, id: String) -> Result<Vec<ListedTask>, TasksError> {
-        Ok(self
-            .0
-            .blocker_candidates(&id)?
+        let known = self.0.tags();
+        let candidates = self.0.blocker_candidates(&id)?;
+        Ok(candidates
             .into_iter()
-            .map(Into::into)
+            .map(|task| paint(task.into(), &known))
             .collect())
     }
 
     /// Removes a Blocked by from a Task.
     pub fn remove_blocker(&self, id: String, blocker: String) -> Result<ListedTask, TasksError> {
-        Ok(self.0.remove_blocker(&id, &blocker)?.into())
+        Ok(self.painted(self.0.remove_blocker(&id, &blocker)?.into()))
     }
 
     /// The known Tags starting with `prefix`, sorted.
     pub fn tags_with_prefix(&self, prefix: String) -> Result<Vec<String>, TasksError> {
         Ok(self.0.tags_with_prefix(&prefix)?)
+    }
+
+    /// Gives a Tag its Tag Color (`#rrggbb`), or Default for none.
+    pub fn set_tag_color(&self, tag: String, color: Option<String>) -> Result<(), TasksError> {
+        Ok(self.0.set_tag_color(&tag, color.as_deref())?)
     }
 
     /// Every known Tag with its Tag Color, alphabetically.
@@ -268,7 +295,12 @@ impl TaskStore {
     /// The Tasks planned as `planning`, in their order, as a pre-order walk of
     /// the tree: each Task is followed by its Subtasks, marked by `depth`.
     pub fn tasks(&self, planning: Planning) -> Result<Vec<ListedTask>, TasksError> {
-        Ok(self.0.rows(planning)?.into_iter().map(Into::into).collect())
+        let known = self.0.tags();
+        let rows = self.0.rows(planning)?;
+        Ok(rows
+            .into_iter()
+            .map(|row| paint(row.into(), &known))
+            .collect())
     }
 }
 
@@ -283,4 +315,42 @@ pub fn strip_forbidden_tag_characters(text: String) -> String {
 #[uniffi::export]
 pub fn is_valid_tag(tag: String) -> bool {
     pkm_base::tag::is_valid(&tag)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn colors(task: &ListedTask) -> Vec<(&str, Option<&str>)> {
+        let tags = task.tags.iter();
+        tags.map(|t| (t.name.as_str(), t.color.as_deref()))
+            .collect()
+    }
+
+    #[test]
+    fn listed_tasks_carry_their_tags_in_their_tag_colors() {
+        let dir = std::env::temp_dir().join(format!("pkm-bindings-{}", std::process::id()));
+        let path = |name: &str| dir.join(name).to_string_lossy().into_owned();
+        let store = TaskStore::open(path("Tasks"), path("Device")).unwrap();
+        let task = store.create("t".into(), Planning::Active).unwrap();
+        store.add_tag(task.id.clone(), "home".into()).unwrap();
+        let task = store.add_tag(task.id, "work".into()).unwrap();
+        assert_eq!(colors(&task), [("home", None), ("work", None)]);
+
+        store
+            .set_tag_color("work".into(), Some("#d0021b".into()))
+            .unwrap();
+        let listed = store.tasks(Planning::Active).unwrap();
+        assert_eq!(
+            colors(&listed[0]),
+            [("home", None), ("work", Some("#d0021b"))]
+        );
+
+        store.set_tag_color("work".into(), None).unwrap();
+        assert_eq!(
+            colors(&store.tasks(Planning::Active).unwrap()[0])[1],
+            ("work", None)
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

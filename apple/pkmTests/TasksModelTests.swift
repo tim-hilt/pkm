@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 
 @testable import pkm
@@ -20,7 +21,25 @@ import Testing
         let task = model.tasks[0]
         model.edit(task, title: "Buy milk", description: "", priority: 4, tags: ["work/x", "home"])
         model.edit(task, title: "Buy milk", description: "", priority: 4, tags: ["work/x"])
-        #expect(model.allTags == ["home", "work/x"])
+        #expect(model.allTags.map(\.name) == ["home", "work/x"])
+    }
+
+    @Test func aTagColorShowsInTheOpenListAtOnceAndDefaultResetsIt() throws {
+        let model = try openModel()
+        #expect(model.add(title: "Buy milk", planning: .active))
+        model.edit(model.tasks[0], title: "Buy milk", description: "", priority: 4, tags: ["home", "work"])
+        #expect(model.tasks[0].tags.map(\.color) == [nil, nil])
+        model.setTagColor("work", to: "#d0021b")
+        #expect(model.tasks[0].tags.map(\.color) == [nil, "#d0021b"])
+        #expect(model.allTags.map(\.color) == [nil, "#d0021b"])
+        #expect(try openModel().allTags.map(\.color) == [nil, "#d0021b"])
+        model.setTagColor("work", to: nil)
+        #expect(model.tasks[0].tags.map(\.color) == [nil, nil])
+    }
+
+    @Test func aTagColorRoundTripsThroughAColor() {
+        #expect(Color(tagColor: "#d0021b")?.tagColor == "#d0021b")
+        #expect(Color(tagColor: "red") == nil)
     }
 
     @Test func aNewTaskAppearsInTheListItWasAddedTo() throws {
@@ -218,16 +237,16 @@ import Testing
         model.edit(stale, title: "New", description: "", priority: 4, tags: ["a"])
         #expect(model.edit(stale, title: "", description: "", priority: 4, tags: []))
         #expect(model.tasks.map(\.title) == ["New"])
-        #expect(model.tasks[0].tags == [])
+        #expect(model.tasks[0].tags.isEmpty)
     }
 
     @Test func tagsAreAddedAndRemovedOnSave() throws {
         let model = try openModel()
         model.add(title: "t", planning: .active)
         #expect(model.edit(model.tasks[0], title: "t", description: "", priority: 4, tags: ["home", "work/x"]))
-        #expect(model.tasks[0].tags == ["home", "work/x"])
+        #expect(model.tasks[0].tags.map(\.name) == ["home", "work/x"])
         #expect(model.edit(model.tasks[0], title: "t", description: "", priority: 4, tags: ["work/x"]))
-        #expect(try openModel().tasks[0].tags == ["work/x"])
+        #expect(try openModel().tasks[0].tags.map(\.name) == ["work/x"])
     }
 
     @Test func anInvalidTagSavesNothing() throws {
