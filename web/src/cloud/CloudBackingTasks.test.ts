@@ -59,7 +59,7 @@ async function device(tabs?: MemoryTabGroup): Promise<Device> {
 /** Creates a Task on the Device, as the app does, and saves it. */
 async function createTask(device: Device, title: string): Promise<void> {
   const files = await TaskFiles.open(core, device.storage);
-  files.store.create(title, Planning.Active);
+  files.store.create(title, Planning.Active, 4, []);
   await files.save();
   device.cloud.localChange();
 }
@@ -104,7 +104,7 @@ describe("the Tasks folders", () => {
     const browser = await device();
     const tablet = await device();
     const files = await TaskFiles.open(core, browser.storage);
-    files.store.create("Buy milk", Planning.Active);
+    files.store.create("Buy milk", Planning.Active, 4, []);
     const [row] = files.store.tasks(Planning.Active);
     files.store.addTag(row.id, "errand");
     row.free();

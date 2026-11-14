@@ -4,7 +4,7 @@
 //! memory: the client hands in the files it has saved when opening, and after
 //! each change saves the files `take_changes` names.
 
-use pkm_tasks::{Files, MemoryFiles, Row, Tasks};
+use pkm_tasks::{Files, MemoryFiles, QuickAdd, Row, ShortcutMeaning, Tasks};
 use std::path::Path;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
@@ -52,6 +52,137 @@ pub struct TagSuggestions {
     pub matches: Vec<String>,
     /// Whether to offer "Create Tag" for the typed text.
     pub create: bool,
+}
+
+/// A Shortcut in a Quick Add text, at `start..end` in UTF-16 code units. It
+/// sets a Priority or adds a Tag, never both.
+#[wasm_bindgen(getter_with_clone)]
+pub struct QuickShortcut {
+    pub start: u32,
+    pub end: u32,
+    /// The Priority it sets, 1 to 4.
+    pub priority: Option<u8>,
+    /// The Tag it adds, without the `@`.
+    pub tag: Option<String>,
+}
+
+/// What to suggest while the cursor is in an `@` word.
+#[wasm_bindgen(getter_with_clone)]
+pub struct TagQuery {
+    /// The word after its `@`; empty for a lone `@`.
+    pub query: String,
+    /// Tags typed as Shortcuts in other words, which need no suggesting again.
+    #[wasm_bindgen(js_name = leaveOut)]
+    pub leave_out: Vec<String>,
+}
+
+/// The text of a Title field with Shortcuts in it, see `pkm_tasks::QuickAdd`.
+/// One per field.
+#[wasm_bindgen]
+pub struct TaskQuickAdd(QuickAdd);
+
+#[wasm_bindgen]
+impl TaskQuickAdd {
+    /// An empty text, for a new Task.
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self(QuickAdd::new())
+    }
+
+    /// The text of a saved Title, for editing, with every Shortcut-like part
+    /// Ignored.
+    #[wasm_bindgen(js_name = fromTitle)]
+    pub fn from_title(title: &str) -> Self {
+        Self(QuickAdd::from_title(title))
+    }
+
+    /// Replaces the UTF-16 range `start..end` with `with` and moves the cursor
+    /// behind it.
+    pub fn replace(&mut self, start: u32, end: u32, with: &str) {
+        self.0.replace(start, end, with);
+    }
+
+    /// Ignores the Shortcut at a UTF-16 position, keeping it as plain text.
+    pub fn ignore(&mut self, at: u32) {
+        self.0.ignore(at);
+    }
+
+    /// Ignores every Priority Shortcut, as when the Priority is picked by hand.
+    #[wasm_bindgen(js_name = ignorePriority)]
+    pub fn ignore_priority(&mut self) {
+        self.0.ignore_priority();
+    }
+
+    /// Puts the cursor at a UTF-16 position.
+    #[wasm_bindgen(js_name = moveCursor)]
+    pub fn move_cursor(&mut self, at: u32) {
+        self.0.move_cursor(at);
+    }
+
+    /// Where the cursor is, in UTF-16 code units.
+    pub fn cursor(&self) -> u32 {
+        self.0.cursor()
+    }
+
+    /// The text as typed.
+    pub fn text(&self) -> String {
+        self.0.text()
+    }
+
+    /// The Shortcuts to draw highlighted.
+    pub fn highlights(&self) -> Vec<QuickShortcut> {
+        let found = self.0.highlights().into_iter();
+        found
+            .map(|s| {
+                let (priority, tag) = match s.meaning {
+                    ShortcutMeaning::Priority(p) => (Some(p), None),
+                    ShortcutMeaning::Tag(t) => (None, Some(t)),
+                };
+                QuickShortcut {
+                    start: s.start,
+                    end: s.end,
+                    priority,
+                    tag,
+                }
+            })
+            .collect()
+    }
+
+    /// The Title to save; empty if only Shortcuts were typed.
+    pub fn title(&self) -> String {
+        self.0.title()
+    }
+
+    /// The Priority to apply, if a Shortcut sets one.
+    pub fn priority(&self) -> Option<u8> {
+        self.0.priority()
+    }
+
+    /// The Tags to add.
+    pub fn tags(&self) -> Vec<String> {
+        self.0.tags()
+    }
+
+    /// What to suggest, if the cursor is in an `@` word.
+    #[wasm_bindgen(js_name = tagQuery)]
+    pub fn tag_query(&self) -> Option<TagQuery> {
+        self.0.tag_query().map(|q| TagQuery {
+            query: q.query,
+            leave_out: q.leave_out,
+        })
+    }
+
+    /// Completes the `@` word under the cursor to `@tag `, cursor behind it.
+    #[wasm_bindgen(js_name = pickTag)]
+    pub fn pick_tag(&mut self, tag: &str) {
+        self.0.pick_tag(tag);
+    }
+}
+
+impl Default for TaskQuickAdd {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// A Task as the lists show it, one row of the flattened tree.
@@ -192,20 +323,33 @@ impl TaskStore {
             .map_err(error)
     }
 
-    /// Creates a Task, refusing an empty Title; its Item ID.
-    pub fn create(&self, title: &str, planning: Planning) -> Result<String, JsError> {
+    /// Creates a Task with a Priority and Tags, refusing an empty Title or an
+    /// invalid Tag; its Item ID.
+    pub fn create(
+        &self,
+        title: &str,
+        planning: Planning,
+        priority: u8,
+        tags: Vec<String>,
+    ) -> Result<String, JsError> {
         self.tasks
-            .create(title, planning.into(), 4, &[])
+            .create(title, planning.into(), priority, &tags)
             .map(|task| task.id)
             .map_err(error)
     }
 
-    /// Creates a Subtask under a Task, refusing an empty Title; it follows its
-    /// top-level Task's Active or Backlog; its Item ID.
+    /// `create` for a Subtask under a Task; it follows its top-level Task's
+    /// Active or Backlog.
     #[wasm_bindgen(js_name = createSubtask)]
-    pub fn create_subtask(&self, parent: &str, title: &str) -> Result<String, JsError> {
+    pub fn create_subtask(
+        &self,
+        parent: &str,
+        title: &str,
+        priority: u8,
+        tags: Vec<String>,
+    ) -> Result<String, JsError> {
         self.tasks
-            .create_subtask(parent, title, 4, &[])
+            .create_subtask(parent, title, priority, &tags)
             .map(|task| task.id)
             .map_err(error)
     }

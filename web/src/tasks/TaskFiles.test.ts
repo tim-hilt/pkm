@@ -21,7 +21,7 @@ describe("the Tasks in storage", () => {
   it("keeps a created Task in the Tasks folder, and finds it again", async () => {
     const storage = new MemoryStorage();
     const first = await TaskFiles.open(core, storage);
-    first.store.create("Buy milk", Planning.Active);
+    first.store.create("Buy milk", Planning.Active, 4, []);
     await first.save();
     expect((await storage.files("Tasks")).map((file) => file.name)).toEqual([
       expect.stringMatching(/^[a-z0-9]{12}\.md$/),
@@ -34,10 +34,10 @@ describe("the Tasks in storage", () => {
   it("appends to the History of this Device across launches", async () => {
     const storage = new MemoryStorage();
     const first = await TaskFiles.open(core, storage);
-    first.store.create("One", Planning.Active);
+    first.store.create("One", Planning.Active, 4, []);
     await first.save();
     const second = await TaskFiles.open(core, storage);
-    second.store.create("Two", Planning.Active);
+    second.store.create("Two", Planning.Active, 4, []);
     await second.save();
 
     const logs = await storage.files("Tasks/.history");
@@ -56,7 +56,7 @@ describe("the Tasks in storage", () => {
     await TaskFiles.open(core, storage);
     const id = new TextDecoder().decode(await storage.read("Device/device-id"));
     const again = await TaskFiles.open(core, storage);
-    again.store.create("x", Planning.Active);
+    again.store.create("x", Planning.Active, 4, []);
     await again.save();
     const [log] = await storage.files("Tasks/.history");
     expect(log.name.startsWith(`${id}-`)).toBe(true);
@@ -66,7 +66,7 @@ describe("the Tasks in storage", () => {
     const storage = new MemoryStorage();
     await storage.write("Device/device-id", new TextEncoder().encode("damaged"));
     const files = await TaskFiles.open(core, storage);
-    files.store.create("x", Planning.Active);
+    files.store.create("x", Planning.Active, 4, []);
     await files.save();
     const id = new TextDecoder().decode(await storage.read("Device/device-id"));
     expect(id).toMatch(/^[a-z0-9]{12}$/);
@@ -77,12 +77,12 @@ describe("the Tasks in storage", () => {
   it("reloads with what was changed and Closed while it read the files", async () => {
     const storage = new MemoryStorage();
     const files = await TaskFiles.open(core, storage);
-    files.store.create("Closed meanwhile", Planning.Active);
+    files.store.create("Closed meanwhile", Planning.Active, 4, []);
     await files.save();
     const [closed] = files.store.tasks(Planning.Active);
 
     const reloading = files.reload();
-    files.store.create("Made meanwhile", Planning.Active);
+    files.store.create("Made meanwhile", Planning.Active, 4, []);
     void files.save();
     files.store.close(closed.id, Closing.Done);
     await reloading;
@@ -93,7 +93,7 @@ describe("the Tasks in storage", () => {
   it("saves each change once, in the order it was made", async () => {
     const storage = new MemoryStorage();
     const files = await TaskFiles.open(core, storage);
-    files.store.create("A", Planning.Backlog);
+    files.store.create("A", Planning.Backlog, 4, []);
     const saving = files.save();
     files.store.plan(files.store.tasks(Planning.Backlog)[0].id, Planning.Active);
     await Promise.all([saving, files.save()]);

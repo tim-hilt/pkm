@@ -1285,6 +1285,53 @@
         font: inherit;
         font-size: 1rem;
       }
+      .tasks-quick-add {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      /* One line; spaces are kept so that a Shortcut's trailing space shows. */
+      .tasks-quick-input {
+        overflow-x: auto;
+        white-space: pre;
+        scrollbar-width: none;
+      }
+      .tasks-quick-input:empty::before {
+        content: attr(data-placeholder);
+        opacity: 0.5;
+      }
+      .tasks-shortcut {
+        border-radius: 3px;
+        background: color-mix(in srgb, var(--accent) 25%, transparent);
+        color: inherit;
+      }
+      .tasks-quick-add .tasks-suggestions {
+        flex-direction: column;
+        gap: 2px;
+      }
+      .tasks-quick-add .tasks-suggestion {
+        display: flex;
+        align-items: center;
+        min-height: 32px;
+        padding: 0 8px;
+        border-radius: 6px;
+        background: none;
+        color: inherit;
+      }
+      .tasks-quick-add .tasks-suggestion.selected {
+        background: color-mix(in srgb, var(--accent) 20%, transparent);
+      }
+      /* For screen readers only: the Ignore buttons of the Shortcuts. */
+      .tasks-ignores {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        clip-path: inset(50%);
+        list-style: none;
+      }
       .tasks-choice,
       .tasks-blocked,
       .tasks-tags {

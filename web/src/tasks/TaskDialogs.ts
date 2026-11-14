@@ -1,5 +1,6 @@
-import { Planning, isValidTag } from "../core/Core";
+import { Planning, TaskQuickAdd, isValidTag } from "../core/Core";
 import { button, make } from "../Dom";
+import { QuickAddField } from "./QuickAddField";
 import { tagLabel } from "./TagLabel";
 import { type Blocker, type ListedTask, TasksModel } from "./TasksModel";
 
@@ -49,6 +50,7 @@ function openDialog(
   fields: HTMLElement[],
   save: () => boolean,
   canSave: () => boolean,
+  closed: () => void = () => {},
 ): void {
   const confirm = confirmButton(confirmLabel);
   const { dialog, form } = modal(parent, title, fields, [
@@ -59,6 +61,7 @@ function openDialog(
     event.preventDefault();
     if (save()) dialog.close();
   });
+  dialog.addEventListener("close", closed);
   form.addEventListener("input", () => (confirm.disabled = !canSave()));
   confirm.disabled = !canSave();
 }
@@ -117,11 +120,14 @@ export function deleteTagDialog(
   });
 }
 
-/** Asks for a Title and a Description and adds the Task, Active; a Subtask of `under` follows its top-level Task's list. */
+/**
+ * Asks for a Title, typed with Quick Add Shortcuts, and a Description and adds
+ * the Task, Active, with the Priority and Tags the Shortcuts give; a Subtask of
+ * `under` follows its top-level Task's list.
+ */
 export function newTaskDialog(model: TasksModel, host: HTMLElement, under?: ListedTask): void {
-  const title = textInput("");
-  title.setAttribute("aria-label", "Title");
-  title.placeholder = "Title";
+  const quickAdd = new TaskQuickAdd();
+  const title = new QuickAddField(model, quickAdd);
   const description = make("textarea", "tasks-input");
   description.rows = 4;
   description.setAttribute("aria-label", "Description");
@@ -130,12 +136,19 @@ export function newTaskDialog(model: TasksModel, host: HTMLElement, under?: List
     host,
     under ? "New Subtask" : "New Task",
     "Add",
-    [title, description],
-    () =>
-      under
-        ? model.addSubtask(title.value, under, description.value)
-        : model.add(title.value, Planning.Active, description.value),
-    () => title.value.trim() !== "",
+    [title.element, description],
+    () => {
+      const extras = {
+        description: description.value,
+        priority: quickAdd.priority(),
+        tags: quickAdd.tags(),
+      };
+      return under
+        ? model.addSubtask(title.title, under, extras)
+        : model.add(title.title, Planning.Active, extras);
+    },
+    () => title.title !== "",
+    () => quickAdd.free(),
   );
   title.focus();
 }

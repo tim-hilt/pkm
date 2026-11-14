@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { type Core, Closing, Planning, loadCore } from "../core/Core";
+import { type Core, Closing, Planning, TaskQuickAdd, loadCore } from "../core/Core";
 import { MemoryStorage } from "../storage/MemoryStorage";
 import { TaskFiles } from "./TaskFiles";
 import { TasksModel } from "./TasksModel";
@@ -39,14 +39,47 @@ describe("the Tasks list", () => {
   });
 
   it("adds a Task with a Description", () => {
-    expect(model.add("Buy milk", Planning.Active, "Two litres")).toBe(true);
+    expect(model.add("Buy milk", Planning.Active, { description: "Two litres" })).toBe(true);
     expect(first()).toMatchObject({ title: "Buy milk", description: "Two litres" });
   });
 
   it("adds a Subtask with a Description", () => {
     model.add("Shop");
-    expect(model.addSubtask("Milk", first(), "Oat")).toBe(true);
+    expect(model.addSubtask("Milk", first(), { description: "Oat" })).toBe(true);
     expect(model.tasks[1]).toMatchObject({ title: "Milk", description: "Oat" });
+  });
+
+  it("adds a Task with the Title, Priority and Tags of Quick Add", () => {
+    const quickAdd = new TaskQuickAdd();
+    quickAdd.replace(0, 0, "Fix login p1 @bug @work/x ");
+    const { title, tags } = { title: quickAdd.title(), tags: quickAdd.tags() };
+    expect(model.add(title, Planning.Active, { priority: quickAdd.priority(), tags })).toBe(true);
+    quickAdd.free();
+    expect(first()).toMatchObject({ title: "Fix login", priority: 1, tags: ["bug", "work/x"] });
+    expect(model.allTags.map((t) => t.name)).toEqual(["bug", "work/x"]);
+  });
+
+  it("adds a Subtask with the Priority and Tags of Quick Add, and a Description", () => {
+    model.add("Shop");
+    const quickAdd = new TaskQuickAdd();
+    quickAdd.replace(0, 0, "p2 Milk @food ");
+    const extras = { description: "Oat", priority: quickAdd.priority(), tags: quickAdd.tags() };
+    expect(model.addSubtask(quickAdd.title(), first(), extras)).toBe(true);
+    quickAdd.free();
+    expect(model.tasks[1]).toMatchObject({
+      title: "Milk",
+      description: "Oat",
+      priority: 2,
+      tags: ["food"],
+    });
+  });
+
+  it("refuses a Title of only Shortcuts like an empty one", () => {
+    const quickAdd = new TaskQuickAdd();
+    quickAdd.replace(0, 0, "p1 @bug");
+    expect(model.add(quickAdd.title(), Planning.Active, { tags: quickAdd.tags() })).toBe(false);
+    quickAdd.free();
+    expect(model.tasks).toEqual([]);
   });
 
   it("refuses an empty Title and adds nothing", () => {
@@ -547,7 +580,7 @@ describe("Sync", () => {
     model.add("Mine");
     await model.saved();
     const other = await TaskFiles.open(core, new MemoryStorage());
-    other.store.create("Theirs", Planning.Active);
+    other.store.create("Theirs", Planning.Active, 4, []);
     const [path] = other.store.takeChanges().filter((p) => p.endsWith(".md"));
     await storage.write(path, new TextEncoder().encode(other.store.file(path)));
     await model.syncDidChange();

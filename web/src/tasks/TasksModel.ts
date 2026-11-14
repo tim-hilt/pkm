@@ -30,6 +30,16 @@ export interface ListedTask {
   blockedBy: Blocker[];
 }
 
+/** What a new Task has besides its Title. */
+export interface NewTask {
+  /** Plain text; none if omitted. */
+  description?: string;
+  /** 1 (highest) to 4; 4 if omitted. */
+  priority?: number;
+  /** Tags to add; ones that don't exist yet are created. */
+  tags?: string[];
+}
+
 /** A Tag that exists, with its Tag Color. */
 export interface Tag {
   name: string;
@@ -232,10 +242,15 @@ export class TasksModel {
     this.onChange();
   }
 
-  /** Adds a Task, with a Description if given, and shows the list it landed in. False, adding nothing, if the Title is empty. */
-  add(title: string, planning = Planning.Active, description = ""): boolean {
+  /** Adds a Task and shows the list it landed in. False, adding nothing, if the Title is empty or a Tag invalid. */
+  add(title: string, planning = Planning.Active, extras: NewTask = {}): boolean {
     const { store } = this.files;
-    if (!this.change(() => this.describe(store.create(title, planning), title, description)))
+    const { priority = 4, tags = [] } = extras;
+    if (
+      !this.change(() =>
+        this.describe(store.create(title, planning, priority, tags), title, extras),
+      )
+    )
       return false;
     this.list = planning;
     this.reload();
@@ -270,17 +285,22 @@ export class TasksModel {
     });
   }
 
-  /** Adds a Subtask under `parent`, with a Description if given, and shows it. False, adding nothing, if the Title is empty. */
-  addSubtask(title: string, parent: ListedTask, description = ""): boolean {
+  /** Adds a Subtask under `parent` and shows it. False, adding nothing, if the Title is empty or a Tag invalid. */
+  addSubtask(title: string, parent: ListedTask, extras: NewTask = {}): boolean {
     this.collapsed.delete(parent.id);
+    const { priority = 4, tags = [] } = extras;
     return this.apply(() =>
-      this.describe(this.files.store.createSubtask(parent.id, title), title, description),
+      this.describe(
+        this.files.store.createSubtask(parent.id, title, priority, tags),
+        title,
+        extras,
+      ),
     );
   }
 
-  /** Gives the Task `id`, just created, its `description`. */
-  private describe(id: string, title: string, description: string): void {
-    if (description.trim() !== "") this.files.store.edit(id, title, description, 4);
+  /** Gives the Task `id`, just created from `title`, its Description. */
+  private describe(id: string, title: string, { description = "", priority = 4 }: NewTask): void {
+    if (description.trim() !== "") this.files.store.edit(id, title, description, priority);
   }
 
   /** Makes a Task Active or moves it to the Backlog; it leaves the list shown. */
