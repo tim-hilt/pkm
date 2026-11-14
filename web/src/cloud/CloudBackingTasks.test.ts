@@ -100,6 +100,26 @@ describe("the Tasks folders", () => {
     expect(tablet.tasksChanged).toBe(1);
   });
 
+  it("Syncs the Tags to the server and another Device, and tells it", async () => {
+    const browser = await device();
+    const tablet = await device();
+    const files = await TaskFiles.open(core, browser.storage);
+    files.store.create("Buy milk", Planning.Active);
+    const [row] = files.store.tasks(Planning.Active);
+    files.store.addTag(row.id, "errand");
+    row.free();
+    await files.save();
+    browser.cloud.localChange();
+    await settle();
+
+    expect([...server.contents("pkm/Tags").keys()]).toEqual(["tags.json"]);
+
+    await sync(tablet);
+    const store = (await TaskFiles.open(core, tablet.storage)).store;
+    expect(store.tagsWithPrefix("")).toEqual(["errand"]);
+    expect(tablet.tasksChanged).toBeGreaterThan(0);
+  });
+
   it("doesn't tell of History files alone, which the Tasks don't read", async () => {
     const tablet = await device();
     server.put("pkm/Tasks", "bbbbbbbbbbbb-2025-01.log", new TextEncoder().encode("x\n"));

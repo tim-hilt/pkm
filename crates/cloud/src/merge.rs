@@ -2,6 +2,7 @@
 //! Items, and how two versions of one Item become one. The engine decides
 //! when to merge; the Context decides how.
 
+use pkm_base::tags::Tags;
 use pkm_books::sync as books;
 use pkm_drawing::{are_same_drawing, is_drawing, merge_drawings};
 use pkm_tasks::sync as tasks;
@@ -226,5 +227,37 @@ impl Merge for TaskHistory {
 
     fn same_item(&self, a: &[u8], b: &[u8]) -> Option<bool> {
         Some(a == b)
+    }
+}
+
+/// The Tags file: `Tags/tags.json` beside the Context folders, merged per Tag
+/// (ADR-0023). One file, so any two Tags files are one Item; a file that
+/// isn't one is left where it is.
+pub struct TagsFile;
+
+impl TagsFile {
+    /// The folder on the Device and in the cloud (`pkm/Tags`).
+    pub const FOLDER: &str = "Tags";
+}
+
+impl Merge for TagsFile {
+    fn extension(&self) -> &str {
+        ".json"
+    }
+
+    fn merge(&self, base: Option<&[u8]>, local: &[u8], remote: &[u8]) -> Option<Vec<u8>> {
+        Tags::merge(base, local, remote)
+    }
+
+    fn is_item(&self, bytes: &[u8]) -> bool {
+        Tags::is_file(bytes)
+    }
+
+    fn same_item(&self, a: &[u8], b: &[u8]) -> Option<bool> {
+        (Tags::is_file(a) && Tags::is_file(b)).then_some(true)
+    }
+
+    fn transfers_unparseable(&self) -> bool {
+        false
     }
 }

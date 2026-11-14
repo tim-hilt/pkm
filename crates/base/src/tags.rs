@@ -14,11 +14,13 @@ pub struct Entry {
     pub color: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Ordered by `updated` first, so that `max` picks the newer; a tie falls to
+/// the color, whichever side is local.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct Meta {
-    color: Option<String>,
     /// When the Tag or its color last changed, as a Task's `updated`.
     updated: String,
+    color: Option<String>,
 }
 
 /// Every known Tag, by name.
@@ -32,17 +34,57 @@ impl Tags {
     /// The Tags in `text`; none if it isn't the Tags file. Invalid Tag names
     /// are left out.
     pub fn parse(text: &str) -> Self {
-        let value = json::parse(text).unwrap_or(Value::Null);
-        let tags = value.get("tags").and_then(Value::as_object);
+        Self::try_parse(text).unwrap_or_default()
+    }
+
+    /// Like `parse`, but none if `text` isn't the Tags file.
+    fn try_parse(text: &str) -> Option<Self> {
+        let value = json::parse(text).ok()?;
+        let tags = value.get("tags")?.as_object()?;
         let mut found = BTreeMap::new();
-        for (name, meta) in tags.into_iter().flat_map(Object::iter) {
+        for (name, meta) in tags.iter() {
             if crate::tag::is_valid(name) {
                 let text = |key| meta.get(key).and_then(Value::as_str).map(str::to_owned);
                 let (color, updated) = (text("color"), text("updated").unwrap_or_default());
-                found.insert(name.to_owned(), Meta { color, updated });
+                found.insert(name.to_owned(), Meta { updated, color });
             }
         }
-        Self(found)
+        Some(Self(found))
+    }
+
+    /// What the Tags files `local` and `remote` merge to, given the file at the
+    /// last Sync (none if there was none). Per Tag: one gone from a side that
+    /// had it at the last Sync is gone, even if its Tag Color changed on the
+    /// other; otherwise a Tag on either side is kept, and the newer `updated`
+    /// decides its Tag Color. None if either isn't a Tags file.
+    pub fn merge(base: Option<&[u8]>, local: &[u8], remote: &[u8]) -> Option<Vec<u8>> {
+        let (local, remote) = (Self::of_bytes(local)?, Self::of_bytes(remote)?);
+        // An unreadable base is as good as none.
+        let base = base.and_then(Self::of_bytes);
+        let deleted = |name: &String, side: &Self| {
+            base.as_ref()
+                .is_some_and(|b| b.0.contains_key(name) && !side.0.contains_key(name))
+        };
+        let mut merged = BTreeMap::new();
+        for (name, meta) in local.0.iter().chain(&remote.0) {
+            if deleted(name, &local) || deleted(name, &remote) {
+                continue;
+            }
+            merged
+                .entry(name.clone())
+                .and_modify(|kept: &mut Meta| *kept = meta.max(kept).clone())
+                .or_insert_with(|| meta.clone());
+        }
+        Some(Self(merged).render().into_bytes())
+    }
+
+    /// Whether `bytes` are a Tags file.
+    pub fn is_file(bytes: &[u8]) -> bool {
+        Self::of_bytes(bytes).is_some()
+    }
+
+    fn of_bytes(bytes: &[u8]) -> Option<Self> {
+        Self::try_parse(std::str::from_utf8(bytes).ok()?)
     }
 
     /// The file's text, with the Tags sorted.
@@ -89,8 +131,8 @@ impl Tags {
             return false;
         }
         let meta = Meta {
-            color: None,
             updated: updated.to_owned(),
+            color: None,
         };
         self.0.insert(tag.to_owned(), meta);
         true
@@ -234,5 +276,97 @@ mod tests {
         }
         let tags = Tags::parse(r#"{"tags": {"Bad Tag": {}, "ok": {}}}"#);
         assert_eq!(names(&tags), ["ok"]);
+    }
+
+    const NEWER: &str = "2027-01-01T00:00:00Z";
+    const NEWEST: &str = "2028-01-01T00:00:00Z";
+
+    /// A Tags file of `(name, color, updated)`.
+    fn file(entries: &[(&str, Option<&str>, &str)]) -> Vec<u8> {
+        let mut tags = Tags::default();
+        for (name, color, updated) in entries {
+            tags.add(name, updated);
+            tags.set_color(name, *color, updated);
+        }
+        tags.render().into_bytes()
+    }
+
+    /// The merge, the same from both sides.
+    fn merged(base: Option<&[u8]>, a: &[u8], b: &[u8]) -> Tags {
+        let ab = Tags::merge(base, a, b).unwrap();
+        assert_eq!(ab, Tags::merge(base, b, a).unwrap(), "symmetric");
+        Tags::parse(std::str::from_utf8(&ab).unwrap())
+    }
+
+    fn colors(tags: &Tags) -> Vec<(String, Option<String>)> {
+        tags.list().into_iter().map(|e| (e.name, e.color)).collect()
+    }
+
+    #[test]
+    fn a_tag_added_on_one_side_is_kept() {
+        let base = file(&[("a", None, T)]);
+        let local = file(&[("a", None, T), ("b", Some("#d0021b"), NEWER)]);
+        let tags = merged(Some(&base), &local, &base);
+        assert_eq!(
+            colors(&tags),
+            [("a".into(), None), ("b".into(), Some("#d0021b".into()))]
+        );
+    }
+
+    #[test]
+    fn a_tag_deleted_on_one_side_is_gone_even_if_its_color_changed_on_the_other() {
+        let base = file(&[("a", None, T), ("b", None, T)]);
+        let deleted = file(&[("b", None, T)]);
+        let recolored = file(&[("a", Some("#d0021b"), NEWER), ("b", None, T)]);
+        assert_eq!(names(&merged(Some(&base), &deleted, &recolored)), ["b"]);
+    }
+
+    #[test]
+    fn a_color_changed_on_both_sides_takes_the_newer() {
+        let base = file(&[("a", None, T)]);
+        let one = file(&[("a", Some("#111111"), NEWER)]);
+        let two = file(&[("a", Some("#222222"), NEWEST)]);
+        let tags = merged(Some(&base), &one, &two);
+        assert_eq!(colors(&tags), [("a".into(), Some("#222222".into()))]);
+    }
+
+    #[test]
+    fn without_a_base_both_sides_tags_are_kept_and_the_newer_color_wins() {
+        let one = file(&[("a", Some("#111111"), NEWER), ("b", None, T)]);
+        let two = file(&[("a", Some("#222222"), NEWEST), ("c", None, T)]);
+        let tags = merged(None, &one, &two);
+        assert_eq!(
+            colors(&tags),
+            [
+                ("a".into(), Some("#222222".into())),
+                ("b".into(), None),
+                ("c".into(), None)
+            ]
+        );
+    }
+
+    #[test]
+    fn equal_updated_settles_alike_on_both_sides() {
+        let one = file(&[("a", Some("#111111"), NEWER)]);
+        let two = file(&[("a", Some("#222222"), NEWER)]);
+        merged(None, &one, &two); // `merged` checks the symmetry
+    }
+
+    #[test]
+    fn only_a_tags_file_merges() {
+        let good = file(&[("a", None, T)]);
+        assert!(Tags::is_file(&good));
+        for bad in [&b"nope"[..], b"[]", br#"{"tags": []}"#, b"\xff"] {
+            assert!(!Tags::is_file(bad));
+            assert_eq!(Tags::merge(None, &good, bad), None);
+            assert_eq!(Tags::merge(None, bad, &good), None);
+        }
+    }
+
+    #[test]
+    fn an_unreadable_base_is_as_good_as_none() {
+        let one = file(&[("a", None, T)]);
+        let two = file(&[("b", None, T)]);
+        assert_eq!(names(&merged(Some(b"junk"), &one, &two)), ["a", "b"]);
     }
 }

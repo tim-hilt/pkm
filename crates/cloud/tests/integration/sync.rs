@@ -7,11 +7,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
 
+use pkm_base::item_id::ItemId;
 use pkm_base::json;
 use pkm_books::library::Library;
 use pkm_cloud::{
     Blob, BookStates, Books as BookFiles, DirStorage, Drawings, Folder, Merge, Progress, Storage,
-    SyncState, TaskHistory, Tasks, sync_folders, sync_step,
+    SyncState, TagsFile, TaskHistory, Tasks, sync_folders, sync_step,
 };
 
 struct Scratch(PathBuf);
@@ -2287,4 +2288,144 @@ fn tasks_sync_alongside_drawings_and_books() {
     assert!(tablet.read_task("aaaaaaaaaaaa.md").is_some());
     assert_eq!(tablet.read_book("Book.pdf").unwrap(), b"%PDF-one");
     assert_eq!(tablet.files(), ["Sketch.excalidraw"]);
+}
+
+/// A Device with a Tasks store, its Tags beside it as on a real Device.
+struct TaggingDevice {
+    root: Scratch,
+    id: &'static str,
+}
+
+impl TaggingDevice {
+    fn new(id: &'static str) -> Self {
+        Self {
+            root: Scratch::new("tagging"),
+            id,
+        }
+    }
+
+    /// The store, opened fresh as at a launch.
+    fn store(&self) -> pkm_tasks::Tasks {
+        let device = ItemId::parse(self.id).unwrap();
+        pkm_tasks::Tasks::open(self.root.0.join("Tasks"), device, self.root.0.join("cache"))
+            .unwrap()
+    }
+
+    /// One Sync step of the Tags and of the Task files, each with its cloud.
+    fn sync(&self, tags: &Cloud, tasks: &Cloud) {
+        fs::create_dir_all(self.root.0.join("state")).unwrap();
+        let state = |name| SyncState::open(self.root.0.join("state").join(name)).unwrap();
+        let (tags_state, tasks_state) = (state("Tags"), state("Tasks"));
+        let (tags_dir, tasks_dir) = (self.root.0.join("Tags"), self.root.0.join("Tasks"));
+        fs::create_dir_all(&tags_dir).unwrap();
+        fs::create_dir_all(&tasks_dir).unwrap();
+        let folders = [
+            Folder {
+                dir: &tags_dir,
+                state: &tags_state,
+                storage: &tags.storage,
+                merge: Arc::new(TagsFile),
+            },
+            Folder {
+                dir: &tasks_dir,
+                state: &tasks_state,
+                storage: &tasks.storage,
+                merge: Arc::new(Tasks),
+            },
+        ];
+        for outcome in sync_folders(&folders, &AtomicBool::new(false), &|_| {}) {
+            assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        }
+    }
+
+    /// The Tags with their Tag Colors, as the store lists them.
+    fn tags(&self) -> Vec<(String, Option<String>)> {
+        let store = self.store();
+        let _ = store.tasks(pkm_tasks::Planning::Active); // reads what Sync brought
+        store
+            .tags()
+            .into_iter()
+            .map(|e| (e.name, e.color))
+            .collect()
+    }
+}
+
+fn tag(name: &str, color: Option<&str>) -> (String, Option<String>) {
+    (name.to_owned(), color.map(str::to_owned))
+}
+
+#[test]
+fn tags_and_their_colors_sync_and_merge_between_devices() {
+    let (tags, tasks) = (Cloud::new(), Cloud::new());
+    let (phone, tablet) = (
+        TaggingDevice::new("aaaaaaaaaaaa"),
+        TaggingDevice::new("bbbbbbbbbbbb"),
+    );
+    let store = phone.store();
+    let milk = store.create("Milk", pkm_tasks::Planning::Active).unwrap();
+    store.add_tag(&milk.id, "home").unwrap();
+    store.add_tag(&milk.id, "work").unwrap();
+    phone.sync(&tags, &tasks);
+    tablet.sync(&tags, &tasks);
+    assert_eq!(tablet.tags(), [tag("home", None), tag("work", None)]);
+
+    // Both change the Tag Color of `work`, the tablet later; the phone adds a Tag.
+    store.set_tag_color("work", Some("#111111")).unwrap();
+    store.add_tag(&milk.id, "errand").unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    tablet
+        .store()
+        .set_tag_color("work", Some("#222222"))
+        .unwrap();
+    phone.sync(&tags, &tasks);
+    tablet.sync(&tags, &tasks);
+    phone.sync(&tags, &tasks);
+
+    let expected = [
+        tag("errand", None),
+        tag("home", None),
+        tag("work", Some("#222222")),
+    ];
+    assert_eq!(tablet.tags(), expected);
+    assert_eq!(phone.tags(), expected);
+}
+
+#[test]
+fn a_tag_put_on_a_task_while_another_device_deleted_it_comes_back_grey_on_that_task_only() {
+    let (tags, tasks) = (Cloud::new(), Cloud::new());
+    let (phone, tablet) = (
+        TaggingDevice::new("aaaaaaaaaaaa"),
+        TaggingDevice::new("bbbbbbbbbbbb"),
+    );
+    let store = phone.store();
+    let planning = pkm_tasks::Planning::Active;
+    let (milk, eggs) = (
+        store.create("Milk", planning).unwrap(),
+        store.create("Eggs", planning).unwrap(),
+    );
+    store.add_tag(&milk.id, "work").unwrap();
+    store.set_tag_color("work", Some("#d0021b")).unwrap();
+    phone.sync(&tags, &tasks);
+    tablet.sync(&tags, &tasks);
+
+    // The phone Deletes `work`; the tablet puts it on Eggs.
+    store.remove_tag_everywhere("work").unwrap();
+    store.forget_tag("work").unwrap();
+    tablet.store().add_tag(&eggs.id, "work").unwrap();
+    phone.sync(&tags, &tasks);
+    tablet.sync(&tags, &tasks);
+    phone.sync(&tags, &tasks);
+
+    for device in [&phone, &tablet] {
+        assert_eq!(device.tags(), [tag("work", None)]);
+        let tagged: Vec<_> = device
+            .store()
+            .tasks(planning)
+            .unwrap()
+            .into_iter()
+            .filter(|t| t.tags.contains(&"work".to_owned()))
+            .map(|t| t.title)
+            .collect();
+        assert_eq!(tagged, ["Eggs"]);
+    }
 }
