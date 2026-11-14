@@ -290,11 +290,16 @@ import Testing
         #expect(model.tasks[0].title == "t")
     }
 
-    @Test func knownTagsAreSuggestedByPrefix() throws {
+    @Test func knownTagsAreSuggestedByPrefixThenAnywhere() throws {
         let model = try openModel()
         model.add(title: "t", planning: .active)
-        model.edit(model.tasks[0], title: "t", description: "", priority: 4, tags: ["home", "work"])
-        #expect(model.knownTags(prefix: "w") == ["work"])
+        model.edit(model.tasks[0], title: "t", description: "", priority: 4, tags: ["home", "work", "network"])
+        #expect(model.suggestTags("w", leaveOut: []).matches == ["work", "network"])
+        #expect(model.suggestTags("w", leaveOut: ["work"]).matches == ["network"])
+        #expect(
+            model.suggestTags("", leaveOut: []) == TagSuggestions(matches: ["home", "network", "work"], create: false))
+        #expect(model.suggestTags("x", leaveOut: []) == TagSuggestions(matches: [], create: true))
+        #expect(!model.suggestTags("work", leaveOut: []).create)
     }
 
     @Test func forbiddenTagCharactersAreStripped() {

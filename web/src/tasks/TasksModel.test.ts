@@ -138,7 +138,7 @@ describe("the Tasks list", () => {
     expect(titles()).toEqual([]);
   });
 
-  it("suggests the known Tags that start with what is typed", () => {
+  it("suggests the known Tags that start with what is typed, then those containing it", () => {
     model.add("Buy milk");
     model.edit(first(), {
       title: "Buy milk",
@@ -146,9 +146,12 @@ describe("the Tasks list", () => {
       priority: 4,
       tags: ["home", "work"],
     });
-    expect(model.knownTags("h")).toEqual(["home"]);
-    expect(model.knownTags("")).toEqual(["home", "work"]);
-    expect(model.knownTags("x")).toEqual([]);
+    expect(model.suggestTags("h", [])).toEqual({ matches: ["home"], create: true });
+    expect(model.suggestTags("", [])).toEqual({ matches: ["home", "work"], create: false });
+    expect(model.suggestTags("o", [])).toEqual({ matches: ["home", "work"], create: true });
+    expect(model.suggestTags("o", ["home"]).matches).toEqual(["work"]);
+    expect(model.suggestTags("x", [])).toEqual({ matches: [], create: true });
+    expect(model.suggestTags("X", []).create).toBe(false);
   });
 
   it("refuses the characters a Tag can't hold as they are typed", () => {
@@ -607,7 +610,7 @@ describe("Tags", () => {
   it("lists a Tag no Task carries any more", () => {
     model.edit(first(), { title: "Buy milk", description: "", priority: 4, tags: [] });
     expect(model.allTags.map((t) => t.name)).toEqual(["home", "work"]);
-    expect(model.knownTags("ho")).toEqual(["home"]);
+    expect(model.suggestTags("ho", []).matches).toEqual(["home"]);
   });
 
   it("sets a Tag Color, which the list's Tasks show at once", () => {

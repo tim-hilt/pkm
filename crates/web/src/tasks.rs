@@ -45,6 +45,15 @@ impl From<pkm_base::tags::Entry> for TagEntry {
     }
 }
 
+/// What a Tag field offers for the typed text.
+#[wasm_bindgen(getter_with_clone)]
+pub struct TagSuggestions {
+    /// Known Tags: prefix matches, then matches anywhere, each sorted.
+    pub matches: Vec<String>,
+    /// Whether to offer "Create Tag" for the typed text.
+    pub create: bool,
+}
+
 /// A Task as the lists show it, one row of the flattened tree.
 #[wasm_bindgen(getter_with_clone)]
 pub struct ListedTask {
@@ -282,10 +291,19 @@ impl TaskStore {
         self.tasks.remove_tag(id, tag).map(drop).map_err(error)
     }
 
-    /// The known Tags starting with `prefix`, sorted.
-    #[wasm_bindgen(js_name = tagsWithPrefix)]
-    pub fn tags_with_prefix(&self, prefix: &str) -> Result<Vec<String>, JsError> {
-        self.tasks.tags_with_prefix(prefix).map_err(error)
+    /// What a Tag field offers for the typed `query`, leaving out the Tags the
+    /// Task already has.
+    #[wasm_bindgen(js_name = suggestTags)]
+    pub fn suggest_tags(
+        &self,
+        query: &str,
+        leave_out: Vec<String>,
+    ) -> Result<TagSuggestions, JsError> {
+        let found = self.tasks.suggest_tags(query, &leave_out).map_err(error)?;
+        Ok(TagSuggestions {
+            matches: found.matches,
+            create: found.create,
+        })
     }
 
     /// Every known Tag with its Tag Color, alphabetically.

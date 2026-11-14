@@ -23,6 +23,16 @@ struct Meta {
     color: Option<String>,
 }
 
+/// What a Tag field offers for the typed text, see `Tags::suggest`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Suggestions {
+    /// Known Tags: those starting with the text, then those containing it
+    /// elsewhere, each group alphabetical.
+    pub matches: Vec<String>,
+    /// Whether to offer "Create Tag" for the text itself.
+    pub create: bool,
+}
+
 /// Every known Tag, by name.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Tags(BTreeMap<String, Meta>);
@@ -124,14 +134,22 @@ impl Tags {
         self.0.get(tag)?.color.as_deref()
     }
 
-    /// The names of the Tags starting with `prefix`, alphabetically.
-    pub fn with_prefix(&self, prefix: &str) -> Vec<String> {
-        self.0
-            .range(prefix.to_owned()..)
-            .map(|(name, _)| name)
-            .take_while(|name| name.starts_with(prefix))
+    /// What to offer while `query` is typed into a Tag field, leaving out the
+    /// Tags in `leave_out` (those the Item already has). An empty `query`
+    /// matches every Tag and offers no Create.
+    pub fn suggest(&self, query: &str, leave_out: &[String]) -> Suggestions {
+        let left_out = |name: &&String| !leave_out.contains(name);
+        let names = || self.0.keys().filter(left_out);
+        let (mut matches, anywhere): (Vec<String>, Vec<String>) = names()
+            .filter(|name| name.contains(query))
             .cloned()
-            .collect()
+            .partition(|name| name.starts_with(query));
+        matches.extend(anywhere);
+        let create = !query.is_empty()
+            && crate::tag::is_valid(query)
+            && !self.contains(query)
+            && !leave_out.iter().any(|t| t == query);
+        Suggestions { matches, create }
     }
 
     /// Adds `tag` (valid, as `updated`) in Default; a known Tag stays as it
@@ -198,12 +216,39 @@ mod tests {
         );
     }
 
+    fn left_out(names: &[&str]) -> Vec<String> {
+        names.iter().map(|n| n.to_string()).collect()
+    }
+
     #[test]
-    fn tags_are_found_by_prefix() {
-        let tags = tags(&["work/b", "home", "work/a", "w", "x"]);
-        assert_eq!(tags.with_prefix("w"), ["w", "work/a", "work/b"]);
-        assert_eq!(tags.with_prefix("").len(), 5);
-        assert!(tags.with_prefix("y").is_empty());
+    fn suggestions_list_prefix_matches_then_matches_anywhere() {
+        let tags = tags(&["network", "work/b", "home", "work/a", "w", "x", "bw"]);
+        let found = tags.suggest("w", &[]);
+        assert_eq!(found.matches, ["w", "work/a", "work/b", "bw", "network"]);
+        assert!(tags.suggest("y", &[]).matches.is_empty());
+    }
+
+    #[test]
+    fn suggestions_leave_out_the_given_tags() {
+        let tags = tags(&["work", "network"]);
+        let found = tags.suggest("wor", &left_out(&["work"]));
+        assert_eq!(found.matches, ["network"]);
+    }
+
+    #[test]
+    fn create_is_offered_for_a_valid_unknown_tag_not_left_out() {
+        let tags = tags(&["work"]);
+        assert!(tags.suggest("wo", &[]).create);
+        assert!(!tags.suggest("work", &[]).create); // known
+        assert!(!tags.suggest("Bad", &[]).create); // invalid
+        assert!(!tags.suggest("wo", &left_out(&["wo"])).create); // already on the Item
+    }
+
+    #[test]
+    fn an_empty_query_lists_every_tag_and_offers_no_create() {
+        let found = tags(&["b", "a"]).suggest("", &[]);
+        assert_eq!(found.matches, ["a", "b"]);
+        assert!(!found.create);
     }
 
     #[test]

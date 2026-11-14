@@ -8,7 +8,7 @@ use pkm_base::front_matter::{Document, Value};
 use pkm_base::item_id::ItemId;
 use pkm_base::random::Entropy;
 use pkm_base::tag;
-use pkm_base::tags::Tags;
+use pkm_base::tags::{Suggestions, Tags};
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -573,10 +573,10 @@ impl Tasks {
         })
     }
 
-    /// The known Tags that start with `prefix`, sorted. Reads the Tags file
-    /// only, so a Tag no Task carries any more is found too.
-    pub fn tags_with_prefix(&self, prefix: &str) -> io::Result<Vec<String>> {
-        Ok(self.read_tags().with_prefix(prefix))
+    /// What a Tag field offers for the typed `query`, see `Tags::suggest`.
+    /// Reads the Tags file only, so a Tag no Task carries any more is found too.
+    pub fn suggest_tags(&self, query: &str, leave_out: &[String]) -> io::Result<Suggestions> {
+        Ok(self.read_tags().suggest(query, leave_out))
     }
 
     /// Every known Tag with its Tag Color.
@@ -1355,6 +1355,11 @@ mod tests {
         assert!(titles(&tasks, Planning::Active).is_empty());
     }
 
+    /// The Tags suggested for `query`, leaving none out.
+    fn known(tasks: &Tasks, query: &str) -> Vec<String> {
+        tasks.suggest_tags(query, &[]).unwrap().matches
+    }
+
     fn tagged(tasks: &Tasks, tags: &[&str]) -> Task {
         let task = tasks.create("t", Planning::Active).unwrap();
         for tag in tags {
@@ -1426,17 +1431,14 @@ mod tests {
     }
 
     #[test]
-    fn known_tags_are_listed_by_prefix_sorted_and_once() {
+    fn known_tags_are_suggested_sorted_and_once() {
         let dir = Scratch::new();
         let tasks = dir.store();
         tagged(&tasks, &["work/b", "home"]);
         tagged(&tasks, &["work/a", "home", "w"]);
-        assert_eq!(
-            tasks.tags_with_prefix("w").unwrap(),
-            ["w", "work/a", "work/b"]
-        );
-        assert_eq!(tasks.tags_with_prefix("").unwrap().len(), 4);
-        assert!(tasks.tags_with_prefix("x").unwrap().is_empty());
+        assert_eq!(known(&tasks, "w"), ["w", "work/a", "work/b"]);
+        assert_eq!(known(&tasks, "").len(), 4);
+        assert!(known(&tasks, "x").is_empty());
     }
 
     #[test]
@@ -1459,7 +1461,7 @@ mod tests {
         let tasks = dir.store();
         let task = tagged(&tasks, &["gone", "kept"]);
         tasks.remove_tag(&task.id, "gone").unwrap();
-        assert_eq!(tasks.tags_with_prefix("").unwrap(), ["gone", "kept"]);
+        assert_eq!(known(&tasks, ""), ["gone", "kept"]);
     }
 
     #[test]
@@ -1467,7 +1469,7 @@ mod tests {
         let dir = Scratch::new();
         tagged(&dir.store(), &["home"]);
         let text = fs::read_to_string(dir.tags_file()).unwrap();
-        assert_eq!(Tags::parse(&text).with_prefix(""), ["home"]);
+        assert_eq!(Tags::parse(&text).suggest("", &[]).matches, ["home"]);
     }
 
     #[test]
@@ -1477,9 +1479,9 @@ mod tests {
         let path = dir.0.join(format!("{}.md", task.id));
         let text = fs::read_to_string(&path).unwrap();
         fs::write(&path, text.replace("state:", "tags:\n  - hand\nstate:")).unwrap();
-        assert!(tasks.tags_with_prefix("").unwrap().is_empty()); // not read yet
+        assert!(known(&tasks, "").is_empty()); // not read yet
         tasks.edit(&task.id, "new", "", 4).unwrap();
-        assert_eq!(tasks.tags_with_prefix("").unwrap(), ["hand"]);
+        assert_eq!(known(&tasks, ""), ["hand"]);
     }
 
     #[test]
@@ -1492,7 +1494,7 @@ mod tests {
         let text = text.replace("state:", "tags:\n  - synced\n  - Bad Tag\nstate:");
         fs::write(&path, text).unwrap();
         tasks.tasks(Planning::Active).unwrap();
-        assert_eq!(tasks.tags_with_prefix("").unwrap(), ["synced"]);
+        assert_eq!(known(&tasks, ""), ["synced"]);
     }
 
     #[test]
@@ -2491,7 +2493,7 @@ mod tests {
         let task = tasks.create("Buy milk", Planning::Backlog).unwrap();
         tasks.add_tag(&task.id, "home").unwrap();
         tasks.plan(&task.id, Planning::Active).unwrap();
-        assert_eq!(tasks.tags_with_prefix("h").unwrap(), ["home"]);
+        assert_eq!(known(&tasks, "h"), ["home"]);
         let listed = tasks.tasks(Planning::Active).unwrap();
         assert_eq!(
             (listed[0].title.as_str(), listed[0].tags.clone()),

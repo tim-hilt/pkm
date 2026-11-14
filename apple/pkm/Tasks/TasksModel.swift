@@ -253,9 +253,10 @@ final class TasksModel {
         allTags.first { $0.name == name } ?? TagEntry(name: name, color: nil)
     }
 
-    /// The known Tags starting with `prefix`, to pick from.
-    func knownTags(prefix: String) -> [String] {
-        (try? store.tagsWithPrefix(prefix: prefix)) ?? []
+    /// What a Tag field offers for the typed `query`, leaving out the Tags the
+    /// Task has: known Tags starting with it, then containing it, and whether to offer Create.
+    func suggestTags(_ query: String, leaveOut: [String]) -> TagSuggestions {
+        (try? store.suggestTags(query: query, leaveOut: leaveOut)) ?? TagSuggestions(matches: [], create: false)
     }
 
     /// `text` without the characters a Tag can never contain.

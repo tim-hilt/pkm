@@ -332,11 +332,8 @@ private struct EditTaskForm: View {
         _blockedBy = State(initialValue: task.blockedBy)
     }
 
-    /// Existing Tags matching what is typed, not yet on the Task.
-    private var suggestions: [String] {
-        guard !newTag.isEmpty else { return [] }
-        return model.knownTags(prefix: newTag).filter { !tags.contains($0) }
-    }
+    /// Known Tags matching what is typed, not yet on the Task, and whether to offer Create.
+    private var suggestions: TagSuggestions { model.suggestTags(newTag, leaveOut: tags) }
 
     private func addTag(_ tag: String) {
         guard isValidTag(tag: tag) else { return }
@@ -404,8 +401,12 @@ private struct EditTaskForm: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
-                ForEach(suggestions, id: \.self) { tag in
+                let suggested = suggestions
+                ForEach(suggested.matches, id: \.self) { tag in
                     Button(tag) { addTag(tag) }
+                }
+                if suggested.create {
+                    Button("Create Tag '\(newTag)'") { addTag(newTag) }
                 }
             }
             Section("Blocked by") {

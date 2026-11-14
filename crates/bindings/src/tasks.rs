@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use pkm_base::tags::{Entry as TagEntry, Tags};
+use pkm_base::tags::{Entry as TagEntry, Suggestions as TagSuggestions, Tags};
 use pkm_tasks::{Blocker, Closing, Error, Planning, Row, Task, Tasks};
 
 /// Why a Task wasn't saved or the Tasks couldn't be read.
@@ -87,6 +87,15 @@ pub struct TagEntry {
     pub name: String,
     /// `#rrggbb`; none is Default.
     pub color: Option<String>,
+}
+
+/// What a Tag field offers for the typed text.
+#[uniffi::remote(Record)]
+pub struct TagSuggestions {
+    /// Known Tags: prefix matches, then matches anywhere, each sorted.
+    pub matches: Vec<String>,
+    /// Whether to offer "Create Tag" for the typed text.
+    pub create: bool,
 }
 
 /// A Task as the lists show it, one row of the flattened tree, see
@@ -268,9 +277,15 @@ impl TaskStore {
         Ok(self.listed(self.0.remove_blocker(&id, &blocker)?))
     }
 
-    /// The known Tags starting with `prefix`, sorted.
-    pub fn tags_with_prefix(&self, prefix: String) -> Result<Vec<String>, TasksError> {
-        Ok(self.0.tags_with_prefix(&prefix)?)
+    /// What a Tag field offers for the typed `query`, leaving out the Tags the
+    /// Task already has: known Tags starting with it, then containing it, and
+    /// whether to offer Create.
+    pub fn suggest_tags(
+        &self,
+        query: String,
+        leave_out: Vec<String>,
+    ) -> Result<TagSuggestions, TasksError> {
+        Ok(self.0.suggest_tags(&query, &leave_out)?)
     }
 
     /// Gives a Tag its Tag Color (`#rrggbb`), or Default for none.

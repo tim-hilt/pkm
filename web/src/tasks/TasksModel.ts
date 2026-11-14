@@ -365,9 +365,13 @@ export class TasksModel {
     });
   }
 
-  /** The known Tags starting with `prefix`, to pick from. */
-  knownTags(prefix: string): string[] {
-    return this.files.store.tagsWithPrefix(prefix);
+  /**
+   * What a Tag field offers for the typed `query`, leaving out the Tags the Task
+   * has: known Tags starting with it, then containing it, and whether to offer Create.
+   */
+  suggestTags(query: string, leaveOut: string[]): { matches: string[]; create: boolean } {
+    const { matches, create } = this.files.store.suggestTags(query, leaveOut);
+    return { matches, create };
   }
 
   /** Every known Tag with its Tag Color, alphabetically. */

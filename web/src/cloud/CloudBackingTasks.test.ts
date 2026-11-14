@@ -116,7 +116,7 @@ describe("the Tasks folders", () => {
 
     await sync(tablet);
     const store = (await TaskFiles.open(core, tablet.storage)).store;
-    expect(store.tagsWithPrefix("")).toEqual(["errand"]);
+    expect(store.suggestTags("", []).matches).toEqual(["errand"]);
     expect(tablet.tasksChanged).toBeGreaterThan(0);
   });
 

@@ -321,12 +321,12 @@ class TagField {
 
   private showSuggestions(): void {
     const typed = this.input.value;
-    const known = typed === "" ? [] : this.model.knownTags(typed);
-    this.suggestions.replaceChildren(
-      ...known
-        .filter((tag) => !this.tags.includes(tag))
-        .map((tag) => make("li", "", [button("tasks-suggestion", tag, () => this.add(tag))])),
-    );
+    const { matches, create } = this.model.suggestTags(typed, this.tags);
+    const rows = matches.map((tag) => button("tasks-suggestion", tag, () => this.add(tag)));
+    if (create) {
+      rows.push(button("tasks-suggestion", `Create Tag '${typed}'`, () => this.add(typed)));
+    }
+    this.suggestions.replaceChildren(...rows.map((row) => make("li", "", [row])));
   }
 }
 
