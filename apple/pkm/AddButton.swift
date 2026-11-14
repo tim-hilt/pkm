@@ -1,5 +1,11 @@
 import SwiftUI
 
+/// The floating "+" button's geometry on iOS, for views that sit beside it.
+enum AddButtonMetrics {
+    static let size: CGFloat = 56
+    static let margin: CGFloat = 20
+}
+
 extension View {
     /// A Gallery's "+" action: a toolbar button on the Mac; on iOS a floating
     /// button in the lower right, within thumb's reach, like other native iOS apps.
@@ -10,11 +16,11 @@ extension View {
                     Image(systemName: "plus")
                         .font(.title2.weight(.semibold))
                         .foregroundStyle(.white)
-                        .frame(width: 56, height: 56)
+                        .frame(width: AddButtonMetrics.size, height: AddButtonMetrics.size)
                         .background(Color.accentColor, in: Circle())
                         .shadow(radius: 4, y: 2)
                 }
-                .padding(20)
+                .padding(AddButtonMetrics.margin)
                 .accessibilityLabel(title)
                 .accessibilityIdentifier(identifier)
             }

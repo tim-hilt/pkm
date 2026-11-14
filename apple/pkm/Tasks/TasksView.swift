@@ -73,11 +73,11 @@ struct TasksView: View {
                     ToolbarItem(placement: .topBarTrailing) { SettingsButton() }
                 #endif
             }
-            .addButton("New Task", identifier: "add-task") { isAdding = true }
-            .safeAreaInset(edge: .bottom) {  // below the "+", so the toast stays clear of it
+            .safeAreaInset(edge: .bottom) {
                 if let pendingClose = model.pendingClose { ClosedToast(pendingClose: pendingClose) }
             }
             .animation(.default, value: model.pendingClose)
+            .addButton("New Task", identifier: "add-task") { isAdding = true }
             .sheet(isPresented: $isAdding) { NewTaskSheet() }
             .sheet(item: $subtaskParent) { NewTaskSheet(parent: $0) }
             .sheet(item: $model.editing) { EditTaskSheet(task: $0) }
@@ -103,9 +103,16 @@ private struct ClosedToast: View {
             Button("Revert") { model.revert() }
                 .accessibilityIdentifier("revert-close")
         }
-        .padding()
-        .background(.regularMaterial, in: .rect(cornerRadius: 12))
         .padding(.horizontal)
+        .frame(minHeight: AddButtonMetrics.size)
+        .background(.regularMaterial, in: .rect(cornerRadius: 12))
+        #if os(iOS)  // left of the "+", level with it
+            .padding(.leading, AddButtonMetrics.margin)
+            .padding(.trailing, AddButtonMetrics.size + 2 * AddButtonMetrics.margin)
+            .padding(.bottom, AddButtonMetrics.margin)
+        #else
+            .padding(.horizontal)
+        #endif
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 }
