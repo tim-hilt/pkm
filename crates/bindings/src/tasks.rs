@@ -230,6 +230,17 @@ impl TaskStore {
         Ok(self.0.add_blocker(&id, &blocker)?.into())
     }
 
+    /// The Open Tasks of both lists a Task could be Blocked by: the ones
+    /// `add_blocker` accepts, minus its current Blockers.
+    pub fn blocker_candidates(&self, id: String) -> Result<Vec<ListedTask>, TasksError> {
+        Ok(self
+            .0
+            .blocker_candidates(&id)?
+            .into_iter()
+            .map(Into::into)
+            .collect())
+    }
+
     /// Removes a Blocked by from a Task.
     pub fn remove_blocker(&self, id: String, blocker: String) -> Result<ListedTask, TasksError> {
         Ok(self.0.remove_blocker(&id, &blocker)?.into())

@@ -219,7 +219,7 @@ export class TasksModel {
 
   /**
    * Makes a Task Blocked by exactly the Tasks `ids` (adding and removing what
-   * differs). False if one is refused: itself, its Parent, its Subtask, or a loop.
+   * differs). False if one is refused, which `blockerCandidates` never offers.
    */
   setBlockedBy(task: ListedTask, ids: string[]): boolean {
     const current = task.blockedBy.map((b) => b.id);
@@ -230,23 +230,9 @@ export class TasksModel {
     });
   }
 
-  /**
-   * The Open Tasks of both lists `task` could be Blocked by: not itself, its
-   * Parent or its Subtasks, and not one it is Blocked by already.
-   */
+  /** The Open Tasks of both lists `task` could be Blocked by (see the store). */
   blockerCandidates(task: ListedTask): ListedTask[] {
-    const blocking = new Set(task.blockedBy.map((b) => b.id));
-    return [Planning.Active, Planning.Backlog]
-      .flatMap((planning) => this.read(planning))
-      .filter(
-        (t) =>
-          !t.closed &&
-          !t.done &&
-          t.id !== task.id &&
-          t.id !== task.parent &&
-          t.parent !== task.id &&
-          !blocking.has(t.id),
-      );
+    return this.listed(this.files.store.blockerCandidates(task.id));
   }
 
   /**
@@ -344,7 +330,11 @@ export class TasksModel {
   }
 
   private read(planning: Planning): ListedTask[] {
-    const rows = this.files.store.tasks(planning);
+    return this.listed(this.files.store.tasks(planning));
+  }
+
+  /** The wasm `rows` as plain Tasks, freeing them. */
+  private listed(rows: ReturnType<TaskFiles["store"]["tasks"]>): ListedTask[] {
     const tasks = rows.map((row) => ({
       id: row.id,
       title: row.title,

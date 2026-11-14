@@ -114,7 +114,7 @@ export function editTaskDialog(
       blockers.element,
     ],
     () => {
-      if (!model.setBlockedBy(task, blockers.ids())) return blockers.refuse();
+      if (!model.setBlockedBy(task, blockers.ids())) return false;
       return model.edit(task, {
         title: title.value,
         description: description.value,
@@ -217,32 +217,23 @@ class BlockedByField {
   readonly element = make("fieldset", "tasks-blocked");
   private readonly chips = make("ul", "tasks-chips");
   private readonly choose = make("select", "tasks-input");
-  private readonly hint = make("p", "tasks-hint", ["That would make Tasks wait on each other."]);
 
   constructor(
     private readonly candidates: ListedTask[],
     private readonly chosen: Blocker[],
   ) {
     this.choose.setAttribute("aria-label", "Add Blocked by");
-    this.hint.hidden = true;
     this.choose.addEventListener("change", () => {
       const task = this.candidates.find((t) => t.id === this.choose.value);
       if (task) this.chosen.push({ id: task.id, title: task.title, closed: false });
-      this.hint.hidden = true;
       this.show();
     });
-    this.element.append(make("legend", "", ["Blocked by"]), this.chips, this.choose, this.hint);
+    this.element.append(make("legend", "", ["Blocked by"]), this.chips, this.choose);
     this.show();
   }
 
   ids(): string[] {
     return this.chosen.map((b) => b.id);
-  }
-
-  /** Shows why the choice was refused; false, for the save to return. */
-  refuse(): false {
-    this.hint.hidden = false;
-    return false;
   }
 
   private show(): void {

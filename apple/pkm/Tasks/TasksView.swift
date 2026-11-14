@@ -253,7 +253,6 @@ private struct EditTaskSheet: View {
     @State private var newTag = ""
     @State private var refusedTagText = false
     @State private var blockedBy: [Blocker]
-    @State private var refusedBlockedBy = false
     @State private var didSave = false
 
     init(task: ListedTask) {
@@ -350,16 +349,10 @@ private struct EditTaskSheet: View {
                             ForEach(blockerCandidates) { candidate in
                                 Button(candidate.title) {
                                     blockedBy.append(Blocker(id: candidate.id, title: candidate.title, closed: false))
-                                    refusedBlockedBy = false
                                 }
                             }
                         }
                         .accessibilityIdentifier("task-add-blocker")
-                    }
-                    if refusedBlockedBy {
-                        Text("That would make Tasks wait on each other.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -390,10 +383,7 @@ private struct EditTaskSheet: View {
         guard !didSave else { return }
         var saved = tags
         if isValidTag(tag: newTag), !saved.contains(newTag) { saved.append(newTag) }
-        guard model.setBlockedBy(task, to: blockedBy.map(\.id)) else {
-            refusedBlockedBy = true
-            return
-        }
+        guard model.setBlockedBy(task, to: blockedBy.map(\.id)) else { return }
         if model.edit(task, title: title, description: description, priority: priority, tags: saved) {
             didSave = true
             dismiss()

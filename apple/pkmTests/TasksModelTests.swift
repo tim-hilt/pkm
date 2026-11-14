@@ -248,7 +248,14 @@ import Testing
         #expect(model.tasks.map(\.blocked) == [false, false])
     }
 
-    @Test func candidatesLeaveOutTheTaskItsParentItsSubtasksAndExistingBlockers() throws {
+    @Test func candidatesLeaveOutATaskThatWouldCloseALoop() throws {
+        let model = try openModel()
+        for title in ["a", "b"] { model.add(title: title, planning: .active) }
+        model.setBlockedBy(model.tasks[1], to: [model.tasks[0].id])
+        #expect(model.blockerCandidates(for: model.tasks[0]).isEmpty)
+    }
+
+    @Test func candidatesLeaveOutTheTaskItsParentItsSubtasksExistingBlockersAndLoops() throws {
         let model = try openModel()
         for title in ["a", "b"] { model.add(title: title, planning: .active) }
         model.add(title: "later", planning: .backlog)
@@ -256,6 +263,6 @@ import Testing
         model.addSubtask(title: "sub", under: model.tasks[0])
         model.setBlockedBy(model.tasks[0], to: [model.tasks[2].id])
         #expect(model.blockerCandidates(for: model.tasks[0]).map(\.title) == ["later"])
-        #expect(model.blockerCandidates(for: model.tasks[2]).map(\.title) == ["a", "sub", "later"])
+        #expect(model.blockerCandidates(for: model.tasks[2]).map(\.title) == ["sub", "later"])
     }
 }

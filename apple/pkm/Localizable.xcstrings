@@ -2190,17 +2190,6 @@
         }
       }
     },
-    "That would make Tasks wait on each other.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "That would make Tasks wait on each other."
-          }
-        }
-      }
-    },
     "The Backlog is empty.": {
       "extractionState": "manual",
       "localizations": {

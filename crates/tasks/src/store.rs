@@ -522,19 +522,10 @@ impl Tasks {
     pub fn add_blocker(&self, id: &str, blocker: &str) -> Result<Task, Error> {
         let nodes = self.load()?;
         let open = |id: &str| nodes.get(id).filter(|n| !n.task.closed);
-        let task = open(id).ok_or(io::ErrorKind::NotFound)?;
-        let blocking = open(blocker).ok_or(io::ErrorKind::NotFound)?;
-        if id == blocker {
-            return Err(Error::BlockedByItself);
-        }
-        if task.task.parent.as_deref() == Some(blocker) {
-            return Err(Error::BlockedByParent);
-        }
-        if blocking.task.parent.as_deref() == Some(id) {
-            return Err(Error::BlockedBySubtask);
-        }
-        if waits_for(&nodes, blocker, id) {
-            return Err(Error::BlockedByLoop);
+        open(id).ok_or(io::ErrorKind::NotFound)?;
+        open(blocker).ok_or(io::ErrorKind::NotFound)?;
+        if let Some(refusal) = blocker_refusal(&nodes, id, blocker) {
+            return Err(refusal);
         }
         self.modify(id, |file| {
             let mut blockers = blockers_of(file);
@@ -543,6 +534,27 @@ impl Tasks {
                 set_list(file, BLOCKED_BY, blockers);
             }
         })
+    }
+
+    /// The Open Tasks of both lists, as rows, that the Open Task `id` could be
+    /// Blocked by: those `add_blocker` accepts, minus the ones it is Blocked by
+    /// already. Fails with `NotFound` if there is no such Task.
+    pub fn blocker_candidates(&self, id: &str) -> Result<Vec<Row>, Error> {
+        let nodes = self.load()?;
+        let task = nodes
+            .get(id)
+            .filter(|n| !n.task.closed)
+            .ok_or(io::ErrorKind::NotFound)?;
+        let mut rows = self.rows(Planning::Active)?;
+        rows.extend(self.rows(Planning::Backlog)?);
+        rows.retain(|row| {
+            let candidate = &row.task;
+            !candidate.closed
+                && !candidate.done
+                && !task.blocked_by.contains(&candidate.id)
+                && blocker_refusal(&nodes, id, &candidate.id).is_none()
+        });
+        Ok(rows)
     }
 
     /// Removes `blocker` from what the Open Task `id` is Blocked by; one it
@@ -860,6 +872,22 @@ fn resolve_blockers(nodes: &mut Nodes) {
             .filter_map(|id| known.get(id).cloned())
             .collect();
         node.task.blocked = node.task.blocked_by.iter().any(|b| !b.closed);
+    }
+}
+
+/// Why the Open Task `id` can't be Blocked by the Open Task `blocker`, if so.
+fn blocker_refusal(nodes: &Nodes, id: &str, blocker: &str) -> Option<Error> {
+    let parent_of = |id: &str| nodes.get(id).and_then(|n| n.task.parent.as_deref());
+    if id == blocker {
+        Some(Error::BlockedByItself)
+    } else if parent_of(id) == Some(blocker) {
+        Some(Error::BlockedByParent)
+    } else if parent_of(blocker) == Some(id) {
+        Some(Error::BlockedBySubtask)
+    } else if waits_for(nodes, blocker, id) {
+        Some(Error::BlockedByLoop)
+    } else {
+        None
     }
 }
 
@@ -2012,6 +2040,35 @@ mod tests {
                 Err(Error::Io(e)) if e.kind() == io::ErrorKind::NotFound
             ));
         }
+    }
+
+    #[test]
+    fn blocker_candidates_leave_out_what_add_blocker_refuses() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let a = tasks.create("a", Planning::Active).unwrap();
+        let sub = tasks.create_subtask(&a.id, "sub").unwrap();
+        let b = tasks.create("b", Planning::Backlog).unwrap();
+        let c = tasks.create("c", Planning::Active).unwrap();
+        let d = tasks.create("d", Planning::Backlog).unwrap();
+        let e = tasks.create("e", Planning::Active).unwrap();
+        let gone = tasks.create("gone", Planning::Active).unwrap();
+        tasks.close(&gone.id, Closing::Done).unwrap();
+        tasks.commit().unwrap();
+        tasks.add_blocker(&b.id, &a.id).unwrap(); // direct loop for a
+        tasks.add_blocker(&c.id, &b.id).unwrap(); // longer loop for a
+        tasks.add_blocker(&a.id, &e.id).unwrap(); // current Blocker
+        let titles = |id: &str| -> Vec<String> {
+            let rows = tasks.blocker_candidates(id).unwrap();
+            rows.into_iter().map(|r| r.task.title).collect()
+        };
+        assert_eq!(titles(&a.id), ["d"]);
+        assert_eq!(titles(&sub.id), ["c", "e", "b", "d"]); // not a, its Parent
+        assert_eq!(titles(&d.id), ["a", "sub", "c", "e", "b"]);
+        assert!(matches!(
+            tasks.blocker_candidates(&gone.id),
+            Err(Error::Io(e)) if e.kind() == io::ErrorKind::NotFound
+        ));
     }
 
     /// `raw` with a `blocked-by` list.

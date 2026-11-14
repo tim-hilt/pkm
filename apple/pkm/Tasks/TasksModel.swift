@@ -94,7 +94,7 @@ final class TasksModel {
     }
 
     /// Makes a Task Blocked by exactly the Tasks `ids` (adding and removing what
-    /// differs). False if one is refused: itself, its Parent, its Subtask, or a loop.
+    /// differs). False if one is refused, which `blockerCandidates` never offers.
     @discardableResult
     func setBlockedBy(_ task: ListedTask, to ids: [String]) -> Bool {
         let current = task.blockedBy.map(\.id)
@@ -106,16 +106,9 @@ final class TasksModel {
         return true
     }
 
-    /// The Open Tasks of both lists `task` could be Blocked by: not itself, its
-    /// Parent or its Subtasks, and not one it is Blocked by already.
+    /// The Open Tasks of both lists `task` could be Blocked by (see the store).
     func blockerCandidates(for task: ListedTask) -> [ListedTask] {
-        let blocking = Set(task.blockedBy.map(\.id))
-        return [Planning.active, .backlog]
-            .flatMap { (try? store.tasks(planning: $0)) ?? [] }
-            .filter {
-                !$0.closed && !$0.done && $0.id != task.id && $0.id != task.parent && $0.parent != task.id
-                    && !blocking.contains($0.id)
-            }
+        (try? store.blockerCandidates(id: task.id)) ?? []
     }
 
     /// Makes a Task Active or moves it to the Backlog; it leaves the list shown.

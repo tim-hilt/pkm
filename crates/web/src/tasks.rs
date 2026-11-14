@@ -203,6 +203,14 @@ impl TaskStore {
         self.tasks.add_blocker(id, blocker).map(drop).map_err(error)
     }
 
+    /// The Open Tasks of both lists a Task could be Blocked by: the ones
+    /// `addBlocker` accepts, minus its current Blockers.
+    #[wasm_bindgen(js_name = blockerCandidates)]
+    pub fn blocker_candidates(&self, id: &str) -> Result<Vec<ListedTask>, JsError> {
+        let rows = self.tasks.blocker_candidates(id).map_err(error)?;
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
     /// Removes a Blocked by from a Task.
     #[wasm_bindgen(js_name = removeBlocker)]
     pub fn remove_blocker(&self, id: &str, blocker: &str) -> Result<(), JsError> {

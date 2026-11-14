@@ -378,6 +378,11 @@ describe("Blocked by", () => {
     expect(model.blockerCandidates(task("a")).map((t) => t.title)).toEqual(["c"]);
   });
 
+  it("doesn't offer a Task that would make Tasks wait on each other", () => {
+    model.setBlockedBy(task("b"), [task("a").id]);
+    expect(model.blockerCandidates(task("a")).map((t) => t.title)).toEqual([]);
+  });
+
   it("unblocks a Task once its blocker is Done", () => {
     model.setBlockedBy(task("a"), [task("b").id]);
     model.close(task("b"), Closing.Done);
