@@ -205,6 +205,11 @@ impl TaskQuickAdd {
         self.lock().replace(start, end, &with);
     }
 
+    /// Ignores the Shortcut at a UTF-16 position, keeping it as plain text.
+    pub fn ignore(&self, at: u32) {
+        self.lock().ignore(at);
+    }
+
     /// Puts the cursor at a UTF-16 position.
     pub fn move_cursor(&self, at: u32) {
         self.lock().move_cursor(at);

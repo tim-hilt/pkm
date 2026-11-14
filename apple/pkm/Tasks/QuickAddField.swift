@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The Title field of a new Task: Quick Add's text, with its Shortcuts highlighted, and the Tags
 /// to suggest below it while the cursor is in an `@` word. It only draws and forwards what is typed,
-/// the cursor, Return and picks; every rule lives in the core's `TaskQuickAdd`.
+/// the cursor, Return, picks and Ignores; every rule lives in the core's `TaskQuickAdd`.
 struct QuickAddField: View {
     @Environment(TasksModel.self) private var model
     let quickAdd: TaskQuickAdd
@@ -74,6 +74,7 @@ struct QuickAddField: View {
                     Text("Title").foregroundStyle(.tertiary).allowsHitTesting(false)
                 }
             }
+            .accessibilityRepresentation { shortcutElements }
             .onChange(of: text) { typed() }
             .onChange(of: selection) { cursorMoved() }
             .onKeyPress(.downArrow) { move(by: 1) }
@@ -84,6 +85,32 @@ struct QuickAddField: View {
                 isClosed = true
                 return .handled
             }
+    }
+
+    /// The field for VoiceOver: the editor, then each Shortcut with its meaning and an Ignore action.
+    private var shortcutElements: some View {
+        VStack {
+            SwiftUI.TextEditor(text: $text, selection: $selection)
+            ForEach(highlighted, id: \.start) { shortcut in
+                Text(Self.label(of: shortcut, in: shown))
+                    .accessibilityAction(named: "Ignore") { ignore(at: shortcut.start) }
+            }
+        }
+    }
+
+    /// "p1, Priority 1" or "@bug, Tag bug".
+    static func label(of shortcut: QuickShortcut, in text: String) -> LocalizedStringResource {
+        let word = (text as NSString).substring(
+            with: NSRange(location: Int(shortcut.start), length: Int(shortcut.end - shortcut.start)))
+        switch shortcut.meaning {
+        case .priority(let p): return "\(word), Priority \(Int(p))"
+        case .tag(let tag): return "\(word), Tag \(tag)"
+        }
+    }
+
+    private func ignore(at position: UInt32) {
+        quickAdd.ignore(at: position)
+        draw()
     }
 
     private func move(by step: Int) -> KeyPress.Result {
@@ -124,8 +151,18 @@ struct QuickAddField: View {
         draw()
     }
 
+    /// A jump of the cursor into a highlight (a tap or click, unlike typing or the arrow keys, which
+    /// move by one unit) Ignores that Shortcut.
     private func cursorMoved() {
-        quickAdd.moveCursor(at: Self.cursor(of: selection, in: text))
+        let at = Self.cursor(of: selection, in: text)
+        if at.distance(to: quickAdd.cursor()).magnitude > 1,
+            let hit = highlighted.first(where: { $0.start < at && at < $0.end })
+        {
+            quickAdd.moveCursor(at: at)
+            ignore(at: hit.start)
+            return
+        }
+        quickAdd.moveCursor(at: at)
         if quickAdd.highlights() != highlighted || quickAdd.tagQuery() != query { draw() }
     }
 

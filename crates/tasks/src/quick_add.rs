@@ -35,6 +35,8 @@ pub struct TagQuery {
 pub struct QuickAdd {
     text: Vec<u16>,
     cursor: usize,
+    /// Ranges of Shortcuts the user Ignored; each is still a whole word.
+    ignored: Vec<(usize, usize)>,
 }
 
 impl QuickAdd {
@@ -51,7 +53,36 @@ impl QuickAdd {
         let start = (start as usize).min(end);
         let with: Vec<u16> = single_line(with).encode_utf16().collect();
         self.cursor = start + with.len();
+        let grown = with.len() as isize - (end - start) as isize;
         self.text.splice(start..end, with);
+        // An edit before an Ignore shifts it, one touching it clears it.
+        let mut ignored = std::mem::take(&mut self.ignored);
+        ignored.retain_mut(|(s, e)| {
+            if end <= *s {
+                *s = s.wrapping_add_signed(grown);
+                *e = e.wrapping_add_signed(grown);
+                true
+            } else {
+                start >= *e
+            }
+        });
+        // An edit right behind one grows its word, which is then new text.
+        let text = &self.text;
+        ignored.retain(|range| words(text).any(|word| word == *range));
+        self.ignored = ignored;
+    }
+
+    /// Ignores the Shortcut containing `at` (UTF-16 position), turning it back
+    /// into plain text of the Title. Does nothing if `at` is in no Shortcut.
+    pub fn ignore(&mut self, at: u32) {
+        let at = at as usize;
+        if let Some(s) = self
+            .shortcuts()
+            .into_iter()
+            .find(|s| (s.start as usize..s.end as usize).contains(&at))
+        {
+            self.ignored.push((s.start as usize, s.end as usize));
+        }
     }
 
     /// Puts the cursor at `at`, clamped to the text.
@@ -148,10 +179,12 @@ impl QuickAdd {
         })
     }
 
-    /// Every Shortcut in the text, in order, under the cursor or not. Of
-    /// several Priority Shortcuts only the last counts; earlier ones are plain.
+    /// Every Shortcut in the text, in order, under the cursor or not. Ignored
+    /// ones are plain text. Of several Priority Shortcuts only the last counts;
+    /// earlier ones are plain.
     fn shortcuts(&self) -> Vec<QuickShortcut> {
         let mut found: Vec<QuickShortcut> = words(&self.text)
+            .filter(|word| !self.ignored.contains(word))
             .filter_map(|(start, end)| {
                 meaning_of(&self.text[start..end]).map(|meaning| QuickShortcut {
                     start: start as u32,
@@ -538,6 +571,72 @@ mod tests {
         let mut quick = typed("Fix");
         quick.pick_tag("bug");
         assert_eq!(quick.text(), "Fix");
+    }
+
+    #[test]
+    fn an_ignored_shortcut_stays_in_the_title_and_sets_nothing() {
+        let mut quick = typed_cursor_at_start("Fix p1 @bug");
+        quick.ignore(5);
+        quick.ignore(8);
+        assert_eq!(quick.priority(), None);
+        assert!(quick.tags().is_empty());
+        assert!(quick.highlights().is_empty());
+        assert_eq!(quick.title(), "Fix p1 @bug");
+    }
+
+    #[test]
+    fn ignoring_outside_a_shortcut_changes_nothing() {
+        let mut quick = typed_cursor_at_start("Fix p1");
+        quick.ignore(1);
+        quick.ignore(6); // just behind `p1`
+        assert_eq!(quick.priority(), Some(1));
+    }
+
+    #[test]
+    fn an_ignored_last_priority_lets_the_one_before_win() {
+        let mut quick = typed_cursor_at_start("p1 x p2");
+        quick.ignore(6);
+        assert_eq!(quick.priority(), Some(1));
+        assert_eq!(quick.title(), "x p2");
+    }
+
+    #[test]
+    fn an_ignore_holds_while_typing_elsewhere() {
+        let mut quick = typed("Fix p1 now");
+        quick.ignore(5);
+        quick.replace(0, 0, "Please "); // before: shifts
+        quick.replace(quick.text().len() as u32, quick.text().len() as u32, "!"); // after
+        quick.replace(7, 7, "a "); // right before the word, now at 7..
+        assert_eq!(quick.text(), "Please a Fix p1 now!");
+        assert_eq!(quick.priority(), None);
+        quick.replace(0, 0, "x");
+        assert_eq!(quick.priority(), None);
+    }
+
+    #[test]
+    fn editing_inside_an_ignored_shortcut_clears_the_ignore() {
+        let mut quick = typed("Fix p1 now");
+        quick.ignore(5);
+        quick.replace(5, 6, "2"); // `p2`, typed inside the Ignore
+        assert_eq!(quick.priority(), Some(2));
+    }
+
+    #[test]
+    fn deleting_and_retyping_an_ignored_shortcut_makes_it_a_shortcut_again() {
+        let mut quick = typed("Fix p1 now");
+        quick.ignore(5);
+        quick.replace(4, 6, "");
+        quick.replace(4, 4, "p1");
+        assert_eq!(quick.priority(), Some(1));
+    }
+
+    #[test]
+    fn an_edit_that_breaks_the_word_clears_the_ignore_even_if_undone_by_hand() {
+        let mut quick = typed("Fix p1 now");
+        quick.ignore(5);
+        quick.replace(6, 6, "x"); // `p1x`
+        quick.replace(6, 7, ""); // `p1` again
+        assert_eq!(quick.priority(), Some(1));
     }
 
     #[test]

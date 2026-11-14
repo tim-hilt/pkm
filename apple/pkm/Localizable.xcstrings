@@ -12,6 +12,28 @@
         }
       }
     },
+    "%@, Priority %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@, Priority %lld"
+          }
+        }
+      }
+    },
+    "%@, Tag %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@, Tag %@"
+          }
+        }
+      }
+    },
     "%@, shade %lld": {
       "extractionState": "manual",
       "localizations": {
@@ -1163,6 +1185,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Hex code"
+          }
+        }
+      }
+    },
+    "Ignore": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ignore"
           }
         }
       }
