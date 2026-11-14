@@ -602,6 +602,45 @@ impl Tasks {
         Ok(())
     }
 
+    /// Removes `tag` from every Task, Open or Closed, saving each changed file
+    /// with a new `updated`. The History and the Tags are left alone; repeating
+    /// it after an interruption finishes the job.
+    pub fn remove_tag_everywhere(&self, tag: &str) -> io::Result<()> {
+        for listed in self.files.list(&self.root)? {
+            let Some(id) = listed.name.strip_suffix(".md").and_then(ItemId::parse) else {
+                continue;
+            };
+            let Some(mut file) = (self.files.read(&self.path(&id)).ok())
+                .and_then(|text| Document::parse(&text))
+                .filter(is_task)
+            else {
+                continue;
+            };
+            let mut tags = file.list(TAGS).unwrap_or_default().to_vec();
+            if tags.iter().any(|t| t == tag) {
+                tags.retain(|t| t != tag);
+                set_list(&mut file, TAGS, tags);
+                file.set_scalar("updated", iso8601(now_ms()));
+                self.write(&id, &file, Overwrite::Yes)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Forgets `tag` and its Tag Color. Call `remove_tag_everywhere` first, or
+    /// a Task still carrying it brings it back, grey.
+    pub fn forget_tag(&self, tag: &str) -> io::Result<()> {
+        let _held = self
+            .tags_lock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let mut tags = self.read_tags();
+        if tags.forget(tag) {
+            self.files.write(&self.tags_path(), &tags.render())?;
+        }
+        Ok(())
+    }
+
     /// The file of the Open Task `id` and the Task it describes.
     fn read_open(&self, id: &ItemId) -> Result<(Document, Task), Error> {
         let file = Document::parse(&self.files.read(&self.path(id))?)
@@ -1455,6 +1494,55 @@ mod tests {
         fs::write(&path, text).unwrap();
         tasks.tasks(Planning::Active).unwrap();
         assert_eq!(tasks.tags_with_prefix("").unwrap(), ["synced"]);
+    }
+
+    #[test]
+    fn removing_a_tag_everywhere_reaches_closed_tasks_and_leaves_the_history() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let open = tagged(&tasks, &["home", "work"]);
+        let closed = tagged(&tasks, &["work"]);
+        let other = tagged(&tasks, &["home"]);
+        tasks.close(&closed.id, Closing::Done).unwrap();
+        tasks.commit().unwrap();
+        let path = |t: &Task| dir.0.join(format!("{}.md", t.id));
+        let stamp = |t: &Task| {
+            let mut file = Document::parse(&fs::read_to_string(path(t)).unwrap()).unwrap();
+            file.set_scalar("updated", "2000-01-01T00:00:00Z");
+            fs::write(path(t), file.render()).unwrap();
+        };
+        for task in [&open, &closed, &other] {
+            stamp(task);
+        }
+        let other_text = fs::read_to_string(path(&other)).unwrap();
+        let history_before = history(&dir);
+
+        tasks.remove_tag_everywhere("work").unwrap();
+
+        for task in [&open, &closed] {
+            let file = Document::parse(&fs::read_to_string(path(task)).unwrap()).unwrap();
+            assert!(!tags_of(&file).contains(&"work".to_owned()));
+            assert_ne!(file.scalar("updated"), Some("2000-01-01T00:00:00Z"));
+        }
+        assert_eq!(
+            tags_of(&Document::parse(&fs::read_to_string(path(&open)).unwrap()).unwrap()),
+            ["home"]
+        );
+        assert_eq!(fs::read_to_string(path(&other)).unwrap(), other_text);
+        assert_eq!(history(&dir), history_before);
+    }
+
+    #[test]
+    fn a_forgotten_tag_is_gone_and_starts_grey_when_added_again() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let task = tagged(&tasks, &["work"]);
+        tasks.set_tag_color("work", Some("#d0021b")).unwrap();
+        tasks.remove_tag_everywhere("work").unwrap();
+        tasks.forget_tag("work").unwrap();
+        assert!(tasks.tags().is_empty());
+        tasks.add_tag(&task.id, "work").unwrap();
+        assert_eq!(tasks.tags()[0].color, None);
     }
 
     fn history(dir: &Scratch) -> Vec<String> {

@@ -15,6 +15,7 @@ struct TagsSettingsSection: View {
 /// the row's color picker changes and "Default" resets; "No Tags" if there are none.
 struct ManageTagsView: View {
     @Environment(TasksModel.self) private var tasks
+    @State private var deletion = TagDeletion()
 
     var body: some View {
         List(tasks.allTags, id: \.name) { tag in
@@ -26,9 +27,30 @@ struct ManageTagsView: View {
                     .buttonStyle(.borderless)
                     .disabled(tag.color == nil)
             }
+            .swipeActions(edge: .trailing) {
+                Button("Delete", role: .destructive) { deletion.ask(for: tag.name) }
+            }
+            .contextMenu {
+                Button("Delete", role: .destructive) { deletion.ask(for: tag.name) }
+            }
+        }
+        .confirmationDialog(
+            "Delete '\(deletion.pending ?? "")'? It is Removed from every Item.",
+            isPresented: asking, titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let tag = deletion.pending { tasks.deleteTag(tag) }
+                deletion.cancel()
+            }
+            Button("Cancel", role: .cancel) { deletion.cancel() }
         }
         .overlay { if tasks.allTags.isEmpty { Text("No Tags").foregroundStyle(.secondary) } }
         .navigationTitle("Manage Tags")
+    }
+
+    /// The dialog shows while a Tag is pending; dismissing it cancels.
+    private var asking: Binding<Bool> {
+        Binding(get: { deletion.pending != nil }, set: { if !$0 { deletion.cancel() } })
     }
 
     /// The picker's color: the Tag Color, or the grey of Default.
@@ -37,4 +59,12 @@ struct ManageTagsView: View {
             get: { tag.color.flatMap(Color.init(tagColor:)) ?? .gray },
             set: { tasks.setTagColor(tag.name, to: $0.tagColor) })
     }
+}
+
+/// The Tag awaiting the user's answer to "Delete 'work'?"; none when nobody is asked.
+struct TagDeletion {
+    private(set) var pending: String?
+
+    mutating func ask(for tag: String) { pending = tag }
+    mutating func cancel() { pending = nil }
 }

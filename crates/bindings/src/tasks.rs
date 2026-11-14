@@ -287,6 +287,14 @@ impl TaskStore {
         Ok(self.0.set_tag_color(&tag, color.as_deref())?)
     }
 
+    /// Deletes a Tag: Removes it from every Item, Open or Closed, then forgets
+    /// it and its Tag Color. Removing first means an interrupted Delete can
+    /// just be repeated. The History is untouched.
+    pub fn delete_tag(&self, tag: String) -> Result<(), TasksError> {
+        self.0.remove_tag_everywhere(&tag)?;
+        Ok(self.0.forget_tag(&tag)?)
+    }
+
     /// Every known Tag with its Tag Color, alphabetically.
     pub fn tags(&self) -> Vec<TagEntry> {
         self.0.tags()
@@ -351,6 +359,27 @@ mod tests {
             colors(&store.tasks(Planning::Active).unwrap()[0])[1],
             ("work", None)
         );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn deleting_a_tag_removes_it_from_every_task_and_forgets_it() {
+        let dir = std::env::temp_dir().join(format!("pkm-bindings-del-{}", std::process::id()));
+        let path = |name: &str| dir.join(name).to_string_lossy().into_owned();
+        let store = TaskStore::open(path("Tasks"), path("Device")).unwrap();
+        let task = store.create("t".into(), Planning::Active).unwrap();
+        store.add_tag(task.id.clone(), "home".into()).unwrap();
+        store.add_tag(task.id, "work".into()).unwrap();
+        store
+            .set_tag_color("work".into(), Some("#d0021b".into()))
+            .unwrap();
+
+        store.delete_tag("work".into()).unwrap();
+
+        let listed = store.tasks(Planning::Active).unwrap();
+        assert_eq!(colors(&listed[0]), [("home", None)]);
+        let names: Vec<_> = store.tags().into_iter().map(|t| t.name).collect();
+        assert_eq!(names, ["home"]);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

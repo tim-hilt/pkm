@@ -233,6 +233,12 @@ final class TasksModel {
         reload()
     }
 
+    /// Deletes a Tag: it is Removed from every Task, Open or Closed, and its Tag Color is forgotten.
+    func deleteTag(_ tag: String) {
+        try? store.deleteTag(tag: tag)
+        reload()
+    }
+
     /// The Tag Color of a Tag by name; Default if it isn't known.
     func tagEntry(_ name: String) -> TagEntry {
         allTags.first { $0.name == name } ?? TagEntry(name: name, color: nil)

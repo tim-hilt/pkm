@@ -37,6 +37,32 @@ import Testing
         #expect(model.tasks[0].tags.map(\.color) == [nil, nil])
     }
 
+    @Test func deletingATagRemovesItFromEveryTaskAndForgetsItsColor() throws {
+        let model = try openModel()
+        #expect(model.add(title: "Buy milk", planning: .active))
+        model.edit(model.tasks[0], title: "Buy milk", description: "", priority: 4, tags: ["home", "work"])
+        model.setTagColor("work", to: "#d0021b")
+        model.deleteTag("work")
+        #expect(model.tasks[0].tags.map(\.name) == ["home"])
+        #expect(model.allTags.map(\.name) == ["home"])
+        model.edit(model.tasks[0], title: "Buy milk", description: "", priority: 4, tags: ["home", "work"])
+        #expect(model.allTags.map(\.color) == [nil, nil])
+        #expect(try openModel().allTags.map(\.name) == ["home", "work"])
+    }
+
+    @Test func cancellingTheDeleteConfirmationChangesNothing() throws {
+        let model = try openModel()
+        #expect(model.add(title: "Buy milk", planning: .active))
+        model.edit(model.tasks[0], title: "Buy milk", description: "", priority: 4, tags: ["work"])
+        var delete = TagDeletion()
+        delete.ask(for: "work")
+        #expect(delete.pending == "work")
+        delete.cancel()
+        #expect(delete.pending == nil)
+        #expect(model.allTags.map(\.name) == ["work"])
+        #expect(model.tasks[0].tags.map(\.name) == ["work"])
+    }
+
     @Test func aTagColorRoundTripsThroughAColor() {
         #expect(Color(tagColor: "#d0021b")?.tagColor == "#d0021b")
         #expect(Color(tagColor: "red") == nil)
