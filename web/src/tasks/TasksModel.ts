@@ -1,4 +1,10 @@
-import { Closing, Planning, isValidTag, stripForbiddenTagCharacters } from "../core/Core";
+import {
+  Closing,
+  Planning,
+  type TaskQuickAdd,
+  isValidTag,
+  stripForbiddenTagCharacters,
+} from "../core/Core";
 import type { TaskFiles } from "./TaskFiles";
 
 /** A Task as a row of the list shows it: a plain copy, as the core's objects must be freed. */
@@ -279,10 +285,29 @@ export class TasksModel {
     )
       return true;
     return this.apply(() => {
-      store.edit(task.id, newTitle, description, priority);
+      const added = tags.filter((t) => !saved.tags.includes(t));
+      store.edit(task.id, newTitle, description, priority, added);
       for (const tag of saved.tags) if (!tags.includes(tag)) store.removeTag(task.id, tag);
-      for (const tag of tags) if (!saved.tags.includes(tag)) store.addTag(task.id, tag);
     });
+  }
+
+  /**
+   * Commits the Shortcuts of Quick Add, the Title field of the edit view, to a
+   * Task: its Title without them, a Priority Shortcut replacing `priority`, its
+   * Tags added to `tags` (never removed), saved like `edit`. Returns the Task as
+   * saved, or `undefined`, saving nothing, if only Shortcuts were typed or the
+   * save failed.
+   */
+  commitQuickAdd(
+    quickAdd: TaskQuickAdd,
+    task: ListedTask,
+    { description, priority, tags }: Omit<TaskEdit, "title">,
+  ): ListedTask | undefined {
+    const title = quickAdd.title();
+    if (title.trim() === "") return undefined;
+    const merged = [...tags, ...quickAdd.tags().filter((t) => !tags.includes(t))];
+    const edit = { title, description, priority: quickAdd.priority() ?? priority, tags: merged };
+    return this.edit(task, edit) ? this.find(task.id) : undefined;
   }
 
   /** Adds a Subtask under `parent` and shows it. False, adding nothing, if the Title is empty or a Tag invalid. */
@@ -300,7 +325,7 @@ export class TasksModel {
 
   /** Gives the Task `id`, just created from `title`, its Description. */
   private describe(id: string, title: string, { description = "", priority = 4 }: NewTask): void {
-    if (description.trim() !== "") this.files.store.edit(id, title, description, priority);
+    if (description.trim() !== "") this.files.store.edit(id, title, description, priority, []);
   }
 
   /** Makes a Task Active or moves it to the Backlog; it leaves the list shown. */

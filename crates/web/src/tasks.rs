@@ -409,16 +409,18 @@ impl TaskStore {
             .map_err(error)
     }
 
-    /// Sets a Task's Title, Description and Priority, refusing an empty Title.
+    /// Sets a Task's Title, Description and Priority and adds Tags in one
+    /// write, refusing an empty Title or an invalid Tag.
     pub fn edit(
         &self,
         id: &str,
         title: &str,
         description: &str,
         priority: u8,
+        add_tags: Vec<String>,
     ) -> Result<(), JsError> {
         self.tasks
-            .edit(id, title, description, priority, &[])
+            .edit(id, title, description, priority, &add_tags)
             .map(drop)
             .map_err(error)
     }

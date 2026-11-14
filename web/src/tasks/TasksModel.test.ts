@@ -113,6 +113,75 @@ describe("the Tasks list", () => {
     });
   });
 
+  it("starts Quick Add from a saved Title with the Shortcut-like parts Ignored", () => {
+    model.add("Call p1 @home");
+    const quickAdd = TaskQuickAdd.fromTitle(first().title);
+    expect(quickAdd.priority()).toBeUndefined();
+    expect(quickAdd.tags()).toEqual([]);
+    expect(quickAdd.title()).toBe(first().title);
+    quickAdd.free();
+  });
+
+  it("commits Quick Add: Title without Shortcuts, Priority replaced, Tags added", () => {
+    model.add("Buy milk");
+    const quickAdd = TaskQuickAdd.fromTitle("Buy milk");
+    quickAdd.replace(9, 9, " p1 @bug ");
+    const saved = model.commitQuickAdd(quickAdd, first(), {
+      description: "d",
+      priority: 3,
+      tags: ["home"],
+    });
+    quickAdd.free();
+    expect(saved).toMatchObject({
+      title: "Buy milk",
+      description: "d",
+      priority: 1,
+      tags: ["home", "bug"],
+    });
+    expect(first()).toMatchObject(saved!);
+  });
+
+  it("commits with the Priority as it is when no Priority Shortcut is pending", () => {
+    model.add("Buy milk");
+    const quickAdd = TaskQuickAdd.fromTitle("Buy milk");
+    quickAdd.replace(9, 9, " @bug ");
+    const saved = model.commitQuickAdd(quickAdd, first(), {
+      description: "",
+      priority: 3,
+      tags: [],
+    });
+    quickAdd.free();
+    expect(saved).toMatchObject({ priority: 3, tags: ["bug"] });
+  });
+
+  it("lets the Priority control override a pending Priority Shortcut", () => {
+    model.add("Buy milk");
+    const quickAdd = TaskQuickAdd.fromTitle("Buy milk");
+    quickAdd.replace(9, 9, " p1 ");
+    quickAdd.ignorePriority();
+    const saved = model.commitQuickAdd(quickAdd, first(), {
+      description: "",
+      priority: 2,
+      tags: [],
+    });
+    quickAdd.free();
+    expect(saved).toMatchObject({ title: "Buy milk p1", priority: 2 });
+  });
+
+  it("commits nothing if only Shortcuts are typed", () => {
+    model.add("Buy milk");
+    const quickAdd = TaskQuickAdd.fromTitle("");
+    quickAdd.replace(0, 0, "p1 @bug");
+    const saved = model.commitQuickAdd(quickAdd, first(), {
+      description: "",
+      priority: 3,
+      tags: [],
+    });
+    quickAdd.free();
+    expect(saved).toBeUndefined();
+    expect(first()).toMatchObject({ title: "Buy milk", priority: 4, tags: [] });
+  });
+
   it("removes the Tags an edit leaves out", () => {
     model.add("Buy milk");
     model.edit(first(), {

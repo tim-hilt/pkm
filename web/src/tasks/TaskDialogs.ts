@@ -91,6 +91,7 @@ function choice<T extends string | number>(
     const input = make("input", "");
     input.type = "radio";
     input.name = name;
+    input.value = String(value);
     input.checked = value === chosen;
     input.addEventListener("change", () => change(value));
     group.append(make("label", "", [input, make("span", "", [text])]));
@@ -159,7 +160,10 @@ const typingPause = 500;
 /**
  * Edits a Task's Title, Description, Priority, Tags and Blocked by, saving as
  * the user goes: text after a pause and when its field loses focus, the rest
- * at once. Done closes it. While the Title is empty the last saved one is kept,
+ * at once. The Title is Quick Add, starting with everything Ignored: the pause
+ * saves it without pending Shortcuts, and Enter, losing focus and closing
+ * apply them (Tags are added, a Priority Shortcut replaces the Priority); the
+ * Priority control Ignores a pending Priority Shortcut. Done closes it. While the Title is empty the last saved one is kept,
  * a hint says why, and the dialog can't be left (Done is off, Esc ignored).
  * Closing saves what is pending, with a Tag typed but not added if it is valid.
  * An Open Blocker's title opens it over this Task; Back (with a Task below) returns,
@@ -171,7 +175,8 @@ export function editTaskDialog(
   parent: HTMLElement,
   places: Pick<TaskPlaces, "open" | "back">,
 ): HTMLDialogElement {
-  const title = textInput(task.title);
+  let quickAdd = TaskQuickAdd.fromTitle(task.title);
+  const title = new QuickAddField(model, quickAdd);
   const titleHint = make("p", "tasks-hint", ["A Task needs a Title."]);
   const description = make("textarea", "tasks-input");
   description.rows = 4;
@@ -182,13 +187,31 @@ export function editTaskDialog(
     clearTimeout(pause);
     model.setBlockedBy(task, blockers.ids());
     model.edit(task, {
-      title: title.value,
+      title: title.title,
       description: description.value,
       priority,
       tags: withTypedTag ? tags.all() : tags.chosen(),
     });
   };
   const tags = new TagField(model, [...task.tags], save);
+  /** Applies the Shortcuts of the Title: they leave the field, the Priority control and the Tags show the result. With none pending it just saves. */
+  const commit = () => {
+    if (quickAdd.priority() === undefined && quickAdd.tags().length === 0) return save();
+    clearTimeout(pause);
+    model.setBlockedBy(task, blockers.ids());
+    const saved = model.commitQuickAdd(quickAdd, task, {
+      description: description.value,
+      priority,
+      tags: tags.chosen(),
+    });
+    if (!saved) return save();
+    priority = saved.priority;
+    showPriority();
+    tags.set(saved.tags);
+    quickAdd.free();
+    quickAdd = TaskQuickAdd.fromTitle(saved.title);
+    title.use(quickAdd);
+  };
   const openBlocker = (id: string) => {
     save();
     if (model.openBlocker(id)) places.open(id);
@@ -203,24 +226,32 @@ export function editTaskDialog(
   back.hidden = model.depth < 2;
   const priorities = [1, 2, 3, 4].map((value) => ({ value, text: `P${value}` }));
   const done = confirmButton("Done");
-  const titleEmpty = () => title.value.trim() === "";
+  const titleEmpty = () => title.title.trim() === "";
+  const priorityChoice = choice("Priority", priorities, priority, (value) => {
+    priority = value;
+    quickAdd.ignorePriority(); // the last action wins
+    title.redraw();
+    save();
+  });
+  const showPriority = () => {
+    priorityChoice.querySelector<HTMLInputElement>(`input[value="${priority}"]`)!.checked = true;
+  };
   const { dialog, form } = modal(
     parent,
     "Task",
     [
       back,
-      field("Title", title),
+      title.element,
       titleHint,
       field("Description", description),
-      choice("Priority", priorities, priority, (value) => {
-        priority = value;
-        save();
-      }),
+      priorityChoice,
       tags.element,
       blockers.element,
     ],
     [done],
   );
+  const isText = (target: EventTarget | null) =>
+    target === description || title.element.contains(target as Node);
   const showTitleState = () => {
     titleHint.hidden = !titleEmpty();
     done.disabled = titleEmpty();
@@ -228,7 +259,7 @@ export function editTaskDialog(
   };
   showTitleState();
   form.addEventListener("input", (event) => {
-    if (event.target === title || event.target === description) {
+    if (isText(event.target)) {
       clearTimeout(pause);
       pause = setTimeout(save, typingPause);
     }
@@ -237,7 +268,9 @@ export function editTaskDialog(
     showTitleState();
   });
   form.addEventListener("focusout", (event) => {
-    if (event.target === title || event.target === description) save();
+    if (!dialog.open) return; // closing has saved, and freed Quick Add
+    if (title.element.contains(event.target as Node)) commit();
+    else if (event.target === description) save();
   });
   form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -246,7 +279,11 @@ export function editTaskDialog(
   dialog.addEventListener("cancel", (event) => {
     if (titleEmpty()) event.preventDefault();
   });
-  dialog.addEventListener("close", () => save(true));
+  dialog.addEventListener("close", () => {
+    commit();
+    save(true);
+    quickAdd.free();
+  });
   return dialog;
 }
 
@@ -299,6 +336,12 @@ class TagField {
   /** The Tags added so far. */
   chosen(): string[] {
     return this.tags;
+  }
+
+  /** Shows exactly `tags`, e.g. after Quick Add added some. */
+  set(tags: string[]): void {
+    this.tags.splice(0, this.tags.length, ...tags);
+    this.showChips();
   }
 
   /** The Tags chosen, with the one typed but not yet added, if it is one. */

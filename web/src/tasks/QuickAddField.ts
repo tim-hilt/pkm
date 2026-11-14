@@ -67,7 +67,8 @@ function placeCaret(root: HTMLElement, offset: number): void {
  * highlighted, and the Tags to suggest below it while the cursor is in an `@`
  * word. It only draws and forwards what is typed, the cursor, Return, picks and
  * Ignores; every rule lives in the core's `TaskQuickAdd`, which the caller
- * owns and frees.
+ * owns and frees. It can start from a saved
+ * Title (`TaskQuickAdd.fromTitle`) to edit one.
  *
  * The browser edits the text; each change is handed to Quick Add as the range
  * it replaced, and the field is drawn again from Quick Add's text, with the
@@ -95,7 +96,7 @@ export class QuickAddField {
   /** `taskTags` are Tags the Task already has, which the list doesn't suggest. */
   constructor(
     private readonly model: TasksModel,
-    private readonly quickAdd: TaskQuickAdd,
+    private quickAdd: TaskQuickAdd,
     private readonly taskTags: string[] = [],
   ) {
     const editor = this.editor;
@@ -139,6 +140,17 @@ export class QuickAddField {
   /** Quick Add's Title (the text without Shortcuts). */
   get title(): string {
     return this.quickAdd.title();
+  }
+
+  /** Shows another Quick Add (which the caller owns, as the first) instead, e.g. after a commit. */
+  use(quickAdd: TaskQuickAdd): void {
+    this.quickAdd = quickAdd;
+    this.redraw();
+  }
+
+  /** Draws again after Quick Add was changed from outside, e.g. its Priority Ignored. */
+  redraw(): void {
+    this.draw();
   }
 
   /** Takes the keyboard focus. */
