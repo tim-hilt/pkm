@@ -241,7 +241,11 @@ private struct NewTaskSheet: View {
     }
 }
 
-/// Edits a Task's Title, Description, Priority and Tags; on iOS closing the sheet saves it (not with an empty Title); on macOS Save is off while the Title is empty.
+/// Edits a Task, saving as it goes: Title and Description after a pause in typing
+/// and when their field loses focus, everything else at once, and a Tag typed but
+/// not submitted when the view is left. While the Title is empty the rest still
+/// saves (the last saved Title stays), a hint shows, and the view can't be left.
+/// On macOS Done closes it.
 private struct EditTaskSheet: View {
     @Environment(TasksModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -253,7 +257,12 @@ private struct EditTaskSheet: View {
     @State private var newTag = ""
     @State private var refusedTagText = false
     @State private var blockedBy: [Blocker]
-    @State private var didSave = false
+    @FocusState private var focus: Field?
+
+    private enum Field { case title, description }
+
+    /// How long typing pauses before text is saved.
+    private static let pause = Duration.milliseconds(500)
 
     init(task: ListedTask) {
         self.task = task
@@ -275,6 +284,7 @@ private struct EditTaskSheet: View {
         if !tags.contains(tag) { tags.append(tag) }
         newTag = ""
         refusedTagText = false
+        save()
     }
 
     /// Open Tasks it could be Blocked by, not yet chosen here.
@@ -283,30 +293,43 @@ private struct EditTaskSheet: View {
         return model.blockerCandidates(for: task).filter { !chosen.contains($0.id) }
     }
 
-    private var canSave: Bool { !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var hasTitle: Bool { !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    /// What the typing pause waits on.
+    private var text: [String] { [title, description] }
 
     var body: some View {
         NavigationStack {
             Form {
                 TextField("Title", text: $title, axis: .vertical)
-                    .onSubmit(save)
+                    .focused($focus, equals: .title)
                     .submitLabel(.done)
                     .accessibilityIdentifier("task-title")
+                if !hasTitle {
+                    Text("A Task needs a Title.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
                 TextField("Description", text: $description, axis: .vertical)
                     .lineLimit(3...8)
+                    .focused($focus, equals: .description)
                     .accessibilityIdentifier("task-description")
                 Picker("Priority", selection: $priority) {
                     ForEach(UInt8(1)...4, id: \.self) { Text(verbatim: "P\($0)").tag($0) }
                 }
                 .pickerStyle(.segmented)
+                .onChange(of: priority) { save() }
                 Section("Tags") {
                     ForEach(tags, id: \.self) { tag in
                         HStack {
                             Text(tag)
                             Spacer()
-                            Button("Remove \(tag)", systemImage: "minus.circle") { tags.removeAll { $0 == tag } }
-                                .labelStyle(.iconOnly)
-                                .buttonStyle(.borderless)
+                            Button("Remove \(tag)", systemImage: "minus.circle") {
+                                tags.removeAll { $0 == tag }
+                                save()
+                            }
+                            .labelStyle(.iconOnly)
+                            .buttonStyle(.borderless)
                         }
                     }
                     TextField("Add Tag", text: $newTag)
@@ -339,6 +362,7 @@ private struct EditTaskSheet: View {
                             Spacer()
                             Button("Remove \(blocker.title)", systemImage: "minus.circle") {
                                 blockedBy.removeAll { $0.id == blocker.id }
+                                saveBlockedBy()
                             }
                             .labelStyle(.iconOnly)
                             .buttonStyle(.borderless)
@@ -349,6 +373,7 @@ private struct EditTaskSheet: View {
                             ForEach(blockerCandidates) { candidate in
                                 Button(candidate.title) {
                                     blockedBy.append(Blocker(id: candidate.id, title: candidate.title, closed: false))
+                                    saveBlockedBy()
                                 }
                             }
                         }
@@ -363,30 +388,34 @@ private struct EditTaskSheet: View {
             #endif
             .toolbar {
                 #if os(macOS)
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Save", action: save).disabled(!canSave)
+                        Button("Done") { dismiss() }.disabled(!hasTitle)
                     }
                 #endif
             }
         }
-        #if os(iOS)
-            .onDisappear(perform: save)
-        #endif
+        .onChange(of: focus) { save() }
+        .task(id: text) {
+            guard (try? await Task.sleep(for: Self.pause)) != nil else { return }
+            save()
+        }
+        .onDisappear { save(includingTypedTag: true) }
+        .interactiveDismissDisabled(!hasTitle)
         #if os(macOS)
             .frame(minWidth: 360)
         #endif
         .presentationDetents([.medium])
     }
 
-    private func save() {
-        guard !didSave else { return }
+    /// Saves what is edited, if the Tags are valid; `includingTypedTag` adds a valid
+    /// Tag typed but not submitted, as when the view is left.
+    private func save(includingTypedTag: Bool = false) {
         var saved = tags
-        if isValidTag(tag: newTag), !saved.contains(newTag) { saved.append(newTag) }
-        guard model.setBlockedBy(task, to: blockedBy.map(\.id)) else { return }
-        if model.edit(task, title: title, description: description, priority: priority, tags: saved) {
-            didSave = true
-            dismiss()
-        }
+        if includingTypedTag, isValidTag(tag: newTag), !saved.contains(newTag) { saved.append(newTag) }
+        model.edit(task, title: title, description: description, priority: priority, tags: saved)
+    }
+
+    private func saveBlockedBy() {
+        model.setBlockedBy(task, to: blockedBy.map(\.id))
     }
 }

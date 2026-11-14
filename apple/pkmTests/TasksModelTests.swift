@@ -117,11 +117,23 @@ import Testing
         #expect(try openModel().tasks.map(\.priority) == [1])
     }
 
-    @Test func editingToAnEmptyTitleChangesNothing() throws {
+    @Test func editingToAnEmptyTitleKeepsTheOldTitleAndSavesTheRest() throws {
         let model = try openModel()
         model.add(title: "Keep", planning: .active)
-        #expect(!model.edit(model.tasks[0], title: " ", description: "x", priority: 1, tags: []))
+        #expect(model.edit(model.tasks[0], title: " ", description: "x", priority: 1, tags: []))
         #expect(model.tasks.map(\.title) == ["Keep"])
+        #expect(model.tasks.map(\.description) == ["x"])
+        #expect(try openModel().tasks.map(\.title) == ["Keep"])
+    }
+
+    @Test func anEditKeepsTheLastSavedTitleEvenFromAStaleTask() throws {
+        let model = try openModel()
+        model.add(title: "Old", planning: .active)
+        let stale = model.tasks[0]
+        model.edit(stale, title: "New", description: "", priority: 4, tags: ["a"])
+        #expect(model.edit(stale, title: "", description: "", priority: 4, tags: []))
+        #expect(model.tasks.map(\.title) == ["New"])
+        #expect(model.tasks[0].tags == [])
     }
 
     @Test func tagsAreAddedAndRemovedOnSave() throws {

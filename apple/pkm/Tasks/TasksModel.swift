@@ -81,23 +81,29 @@ final class TasksModel {
     }
 
     /// Saves a Task's Title, Description, Priority and Tags (adding and removing
-    /// what differs). False, saving nothing, if the Title is empty or a Tag is invalid.
+    /// what differs from what is saved now, not from `task`, which may be stale).
+    /// An empty Title keeps the last saved one and saves the rest. False, saving
+    /// nothing, if a Tag is invalid. Writes only what differs, so saving twice is quiet.
     @discardableResult
     func edit(_ task: ListedTask, title: String, description: String, priority: UInt8, tags: [String]) -> Bool {
         guard tags.allSatisfy(isValidTag) else { return false }
-        guard (try? store.edit(id: task.id, title: title, description: description, priority: priority)) != nil
-        else { return false }
-        for tag in task.tags where !tags.contains(tag) { _ = try? store.removeTag(id: task.id, tag: tag) }
-        for tag in tags where !task.tags.contains(tag) { _ = try? store.addTag(id: task.id, tag: tag) }
+        let saved = current(task)
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? saved.title : title
+        if title != saved.title || description != saved.description || priority != saved.priority {
+            guard (try? store.edit(id: task.id, title: title, description: description, priority: priority)) != nil
+            else { return false }
+        }
+        for tag in saved.tags where !tags.contains(tag) { _ = try? store.removeTag(id: task.id, tag: tag) }
+        for tag in tags where !saved.tags.contains(tag) { _ = try? store.addTag(id: task.id, tag: tag) }
         reload()
         return true
     }
 
     /// Makes a Task Blocked by exactly the Tasks `ids` (adding and removing what
-    /// differs). False if one is refused, which `blockerCandidates` never offers.
+    /// differs from what is saved now). False if one is refused, which `blockerCandidates` never offers.
     @discardableResult
     func setBlockedBy(_ task: ListedTask, to ids: [String]) -> Bool {
-        let current = task.blockedBy.map(\.id)
+        let current = self.current(task).blockedBy.map(\.id)
         for id in current where !ids.contains(id) { _ = try? store.removeBlocker(id: task.id, blocker: id) }
         defer { reload() }
         for id in ids where !current.contains(id) {
@@ -186,6 +192,11 @@ final class TasksModel {
 
     /// Sync wrote or deleted Task files: the list shows what is there now.
     func syncDidChange() { reload() }
+
+    /// `task` as last saved, if it is in the list shown; else as given.
+    private func current(_ task: ListedTask) -> ListedTask {
+        tasks.first { $0.id == task.id } ?? task
+    }
 
     private func reload() {
         tasks = (try? store.tasks(planning: planning)) ?? []
