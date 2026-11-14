@@ -232,9 +232,11 @@ export class TasksModel {
     this.onChange();
   }
 
-  /** Adds a Task and shows the list it landed in. False, adding nothing, if the Title is empty. */
-  add(title: string, planning = Planning.Active): boolean {
-    if (!this.change(() => this.files.store.create(title, planning))) return false;
+  /** Adds a Task, with a Description if given, and shows the list it landed in. False, adding nothing, if the Title is empty. */
+  add(title: string, planning = Planning.Active, description = ""): boolean {
+    const { store } = this.files;
+    if (!this.change(() => this.describe(store.create(title, planning), title, description)))
+      return false;
     this.list = planning;
     this.reload();
     this.onChange();
@@ -268,10 +270,17 @@ export class TasksModel {
     });
   }
 
-  /** Adds a Subtask under `parent` and shows it. False, adding nothing, if the Title is empty. */
-  addSubtask(title: string, parent: ListedTask): boolean {
+  /** Adds a Subtask under `parent`, with a Description if given, and shows it. False, adding nothing, if the Title is empty. */
+  addSubtask(title: string, parent: ListedTask, description = ""): boolean {
     this.collapsed.delete(parent.id);
-    return this.apply(() => this.files.store.createSubtask(parent.id, title));
+    return this.apply(() =>
+      this.describe(this.files.store.createSubtask(parent.id, title), title, description),
+    );
+  }
+
+  /** Gives the Task `id`, just created, its `description`. */
+  private describe(id: string, title: string, description: string): void {
+    if (description.trim() !== "") this.files.store.edit(id, title, description, 4);
   }
 
   /** Makes a Task Active or moves it to the Backlog; it leaves the list shown. */

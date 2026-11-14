@@ -151,6 +151,14 @@ import Testing
         #expect(model.tasks.isEmpty)
     }
 
+    @Test func addsATaskWithADescription() throws {
+        let model = try openModel()
+        #expect(model.add(title: "Buy milk", description: "Two litres"))
+        #expect(model.tasks.map(\.description) == ["Two litres"])
+        #expect(model.addSubtask(title: "Oat", description: "Barista", under: model.tasks[0]))
+        #expect(model.tasks.map(\.description) == ["Two litres", "Barista"])
+    }
+
     @Test func anEmptyTitleAddsNothing() throws {
         let model = try openModel()
         #expect(!model.add(title: "  \n", planning: .active))

@@ -1,4 +1,4 @@
-import { isValidTag } from "../core/Core";
+import { Planning, isValidTag } from "../core/Core";
 import { button, make } from "../Dom";
 import { tagLabel } from "./TagLabel";
 import { type Blocker, type ListedTask, TasksModel } from "./TasksModel";
@@ -117,17 +117,24 @@ export function deleteTagDialog(
   });
 }
 
-/** Asks for a Title and adds the Task, Active; a Subtask of `under` follows its top-level Task's list. */
+/** Asks for a Title and a Description and adds the Task, Active; a Subtask of `under` follows its top-level Task's list. */
 export function newTaskDialog(model: TasksModel, host: HTMLElement, under?: ListedTask): void {
   const title = textInput("");
   title.setAttribute("aria-label", "Title");
   title.placeholder = "Title";
+  const description = make("textarea", "tasks-input");
+  description.rows = 4;
+  description.setAttribute("aria-label", "Description");
+  description.placeholder = "Description";
   openDialog(
     host,
     under ? "New Subtask" : "New Task",
     "Add",
-    [title],
-    () => (under ? model.addSubtask(title.value, under) : model.add(title.value)),
+    [title, description],
+    () =>
+      under
+        ? model.addSubtask(title.value, under, description.value)
+        : model.add(title.value, Planning.Active, description.value),
     () => title.value.trim() !== "",
   );
   title.focus();

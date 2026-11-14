@@ -183,21 +183,21 @@ impl TaskStore {
             .map_err(error)
     }
 
-    /// Creates a Task, refusing an empty Title.
-    pub fn create(&self, title: &str, planning: Planning) -> Result<(), JsError> {
+    /// Creates a Task, refusing an empty Title; its Item ID.
+    pub fn create(&self, title: &str, planning: Planning) -> Result<String, JsError> {
         self.tasks
             .create(title, planning.into())
-            .map(drop)
+            .map(|task| task.id)
             .map_err(error)
     }
 
     /// Creates a Subtask under a Task, refusing an empty Title; it follows its
-    /// top-level Task's Active or Backlog.
+    /// top-level Task's Active or Backlog; its Item ID.
     #[wasm_bindgen(js_name = createSubtask)]
-    pub fn create_subtask(&self, parent: &str, title: &str) -> Result<(), JsError> {
+    pub fn create_subtask(&self, parent: &str, title: &str) -> Result<String, JsError> {
         self.tasks
             .create_subtask(parent, title)
-            .map(drop)
+            .map(|task| task.id)
             .map_err(error)
     }
 

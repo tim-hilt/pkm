@@ -38,6 +38,17 @@ describe("the Tasks list", () => {
     });
   });
 
+  it("adds a Task with a Description", () => {
+    expect(model.add("Buy milk", Planning.Active, "Two litres")).toBe(true);
+    expect(first()).toMatchObject({ title: "Buy milk", description: "Two litres" });
+  });
+
+  it("adds a Subtask with a Description", () => {
+    model.add("Shop");
+    expect(model.addSubtask("Milk", first(), "Oat")).toBe(true);
+    expect(model.tasks[1]).toMatchObject({ title: "Milk", description: "Oat" });
+  });
+
   it("refuses an empty Title and adds nothing", () => {
     expect(model.add("   ")).toBe(false);
     expect(model.tasks).toEqual([]);

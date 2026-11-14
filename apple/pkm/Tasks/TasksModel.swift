@@ -105,22 +105,31 @@ final class TasksModel {
         reload()
     }
 
-    /// Adds a Task and shows the list it landed in. False, adding nothing, if
-    /// the Title is empty.
+    /// Adds a Task, with a Description if given, and shows the list it landed in.
+    /// False, adding nothing, if the Title is empty.
     @discardableResult
-    func add(title: String, planning: Planning = .active) -> Bool {
-        guard (try? store.create(title: title, planning: planning)) != nil else { return false }
+    func add(title: String, description: String = "", planning: Planning = .active) -> Bool {
+        guard let task = try? store.create(title: title, planning: planning) else { return false }
+        describe(task, description)
         if self.planning == planning { reload() } else { self.planning = planning }
         return true
     }
 
-    /// Adds a Subtask under `parent` and shows it. False, adding nothing, if the Title is empty.
+    /// Adds a Subtask under `parent`, with a Description if given, and shows it.
+    /// False, adding nothing, if the Title is empty.
     @discardableResult
-    func addSubtask(title: String, under parent: ListedTask) -> Bool {
-        guard (try? store.createSubtask(parent: parent.id, title: title)) != nil else { return false }
+    func addSubtask(title: String, description: String = "", under parent: ListedTask) -> Bool {
+        guard let task = try? store.createSubtask(parent: parent.id, title: title) else { return false }
+        describe(task, description)
         collapsed.remove(parent.id)
         reload()
         return true
+    }
+
+    /// Gives a Task just created its Description, if any.
+    private func describe(_ task: ListedTask, _ description: String) {
+        guard !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        _ = try? store.edit(id: task.id, title: task.title, description: description, priority: task.priority)
     }
 
     /// Saves a Task's Title, Description, Priority and Tags (adding and removing

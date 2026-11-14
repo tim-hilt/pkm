@@ -201,11 +201,12 @@ extension ListedTask {
     }
 }
 
-/// Asks for a Title; the Task is added Active. Also used for a Subtask of `parent`.
+/// Asks for a Title and a Description; the Task is added Active. Also used for a Subtask of `parent`.
 private struct NewTaskSheet: View {
     @Environment(TasksModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var title = ""
+    @State private var description = ""
     @FocusState private var isTitleFocused: Bool
     private let parent: ListedTask?
 
@@ -223,6 +224,9 @@ private struct NewTaskSheet: View {
                     .onSubmit(add)
                     .submitLabel(.done)
                     .accessibilityIdentifier("task-title")
+                TextField("Description", text: $description, axis: .vertical)
+                    .lineLimit(3...8)
+                    .accessibilityIdentifier("task-description")
             }
             .formStyle(.grouped)
             .navigationTitle(parent == nil ? "New Task" : "New Subtask")
@@ -247,8 +251,8 @@ private struct NewTaskSheet: View {
 
     private func add() {
         let added =
-            if let parent { model.addSubtask(title: title, under: parent) } else {
-                model.add(title: title)
+            if let parent { model.addSubtask(title: title, description: description, under: parent) } else {
+                model.add(title: title, description: description)
             }
         if added { dismiss() }
     }
