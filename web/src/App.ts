@@ -24,9 +24,10 @@ import { TasksModel } from "./tasks/TasksModel";
 import { TasksView } from "./tasks/TasksView";
 
 /**
- * The app: the shell with its five Contexts; Tasks are listed in their pane, and in Drawings the Gallery, from
- * which a Drawing is opened into the Canvas, and back. Drawings are kept
- * saved as they change (autosave), and when the page goes to the background.
+ * The app: the shell with its five Contexts; the Tasks in their pane, and in
+ * Drawings the Gallery, from which a Drawing is opened into the Canvas, and
+ * back. Drawings are kept saved as they change (autosave), and when the page
+ * goes to the background.
  */
 export async function startApp(
   root: HTMLElement,
@@ -62,8 +63,8 @@ export async function startApp(
   const shell = new Shell(navigation, new SettingsView(appearance, cloud));
   root.replaceChildren(shell.element);
   const tasks = new TasksModel(await TaskFiles.open(core, storage));
-  tasks.onSaved = () => cloud.localChange();
-  cloud.onTasksSynced(() => void tasks.syncDidChange());
+  tasks.onSaved = () => cloud.tasksSaved();
+  cloud.onTasksChanged(() => void tasks.syncDidChange());
   shell.pane("tasks").append(
     new TasksView(tasks, {
       open: (id) => navigation.openItem(id),

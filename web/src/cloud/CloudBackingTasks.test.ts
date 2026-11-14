@@ -5,6 +5,7 @@ import { DrawingStore } from "../drawings/gallery/DrawingStore";
 import { MemoryStorage } from "../storage/MemoryStorage";
 import { TaskFiles } from "../tasks/TaskFiles";
 import { CloudBacking } from "./CloudBacking";
+import { MemoryTabGroup } from "./MemoryTabs";
 import { MemoryWebDav } from "./MemoryWebDav";
 
 const generated = new URL("../../generated/", import.meta.url);
@@ -34,19 +35,22 @@ const text = (data: Uint8Array | undefined) => new TextDecoder().decode(data);
 interface Device {
   storage: MemoryStorage;
   cloud: CloudBacking;
-  tasksSynced: number;
+  tasksChanged: number;
 }
 
-async function device(): Promise<Device> {
+/** A Device, Connected; or a tab of the browser of `tabs`, not Connected yet. */
+async function device(tabs?: MemoryTabGroup): Promise<Device> {
   const storage = new MemoryStorage();
   const cloud = await CloudBacking.open(
     core,
     storage,
     server.fetch,
     new DrawingStore(storage, core),
+    tabs?.tab(),
   );
-  const device = { storage, cloud, tasksSynced: 0 };
-  cloud.onTasksSynced(() => device.tasksSynced++);
+  const device = { storage, cloud, tasksChanged: 0 };
+  cloud.onTasksChanged(() => device.tasksChanged++);
+  if (tabs) return device;
   await cloud.connect(url, "user", "secret");
   await advance(0);
   return device;
@@ -93,7 +97,23 @@ describe("the Tasks folders", () => {
 
     await sync(tablet);
     expect(await titles(tablet)).toEqual(["Buy milk"]);
-    expect(tablet.tasksSynced).toBe(1);
+    expect(tablet.tasksChanged).toBe(1);
+  });
+
+  it("doesn't tell of History files alone, which the Tasks don't read", async () => {
+    const tablet = await device();
+    server.put("pkm/Tasks", "bbbbbbbbbbbb-2025-01.log", new TextEncoder().encode("x\n"));
+    await sync(tablet);
+    expect(await tablet.storage.files("Tasks/.history")).toHaveLength(1);
+    expect(tablet.tasksChanged).toBe(0);
+  });
+
+  it("tells the other tabs when one saved Task files", async () => {
+    const tabs = new MemoryTabGroup();
+    const one = await device(tabs);
+    const two = await device(tabs);
+    one.cloud.tasksSaved();
+    expect([one.tasksChanged, two.tasksChanged]).toEqual([0, 1]);
   });
 
   it("transfers the History of a Device as it is", async () => {

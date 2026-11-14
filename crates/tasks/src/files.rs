@@ -30,9 +30,6 @@ pub trait Files: Send + Sync + Debug {
     /// Adds `text` to the end of the file, creating it and its folders.
     fn append(&self, path: &Path, text: &str) -> io::Result<()>;
 
-    /// Removes the file; `NotFound` if there is none.
-    fn remove(&self, path: &Path) -> io::Result<()>;
-
     fn exists(&self, path: &Path) -> bool;
 
     /// The files directly in `folder`; none if there is no such folder.
@@ -69,10 +66,6 @@ impl Files for DiskFiles {
         file.write_all(text.as_bytes())
     }
 
-    fn remove(&self, path: &Path) -> io::Result<()> {
-        fs::remove_file(path)
-    }
-
     fn exists(&self, path: &Path) -> bool {
         path.exists()
     }
@@ -102,11 +95,11 @@ impl Files for DiskFiles {
 
 #[derive(Debug, Default)]
 struct Memory {
-    files: BTreeMap<PathBuf, String>,
-    /// When each file was last written: counts writes, so it never repeats.
-    written: BTreeMap<PathBuf, u128>,
+    /// Each file's text, and when it was last written: a count of writes, so
+    /// that it never repeats.
+    files: BTreeMap<PathBuf, (String, u128)>,
     writes: u128,
-    /// Files written or removed since `take_changes`.
+    /// Files written since `take_changes`.
     changed: BTreeSet<PathBuf>,
 }
 
@@ -124,13 +117,11 @@ impl MemoryFiles {
     pub fn load(&self, path: &Path, text: String) {
         let mut memory = self.memory();
         memory.writes += 1;
-        let stamp = memory.writes;
-        memory.written.insert(path.to_owned(), stamp);
-        memory.files.insert(path.to_owned(), text);
+        let written = memory.writes;
+        memory.files.insert(path.to_owned(), (text, written));
     }
 
-    /// The files written or removed since the last call, each once, sorted.
-    /// `read` tells which was which: a removed file is not found.
+    /// The files written since the last call, each once, sorted.
     pub fn take_changes(&self) -> Vec<PathBuf> {
         std::mem::take(&mut self.memory().changed)
             .into_iter()
@@ -143,7 +134,7 @@ impl Files for MemoryFiles {
         self.memory()
             .files
             .get(path)
-            .cloned()
+            .map(|(text, _)| text.clone())
             .ok_or_else(|| io::ErrorKind::NotFound.into())
     }
 
@@ -159,28 +150,20 @@ impl Files for MemoryFiles {
         self.write(path, &whole)
     }
 
-    fn remove(&self, path: &Path) -> io::Result<()> {
-        let mut memory = self.memory();
-        memory.written.remove(path);
-        memory.files.remove(path).ok_or(io::ErrorKind::NotFound)?;
-        memory.changed.insert(path.to_owned());
-        Ok(())
-    }
-
     fn exists(&self, path: &Path) -> bool {
         self.memory().files.contains_key(path)
     }
 
     fn list(&self, folder: &Path) -> io::Result<Vec<Listed>> {
-        let memory = self.memory();
-        Ok(memory
+        Ok(self
+            .memory()
             .files
             .iter()
             .filter(|(path, _)| path.parent() == Some(folder))
-            .filter_map(|(path, text)| {
+            .filter_map(|(path, (text, written))| {
                 Some(Listed {
                     name: path.file_name()?.to_str()?.to_owned(),
-                    stamp: (memory.written[path], text.len() as u64),
+                    stamp: (*written, text.len() as u64),
                 })
             })
             .collect())
@@ -222,13 +205,13 @@ mod tests {
         files.load(Path::new("Tasks/old.md"), "old".into());
         files.write(Path::new("Tasks/a.md"), "a").unwrap();
         files.append(Path::new("Tasks/a.md"), "!").unwrap();
-        files.remove(Path::new("Tasks/old.md")).unwrap();
+        files.write(Path::new("Tasks/b.md"), "b").unwrap();
         assert_eq!(
             files.take_changes(),
-            [Path::new("Tasks/a.md"), Path::new("Tasks/old.md")]
+            [Path::new("Tasks/a.md"), Path::new("Tasks/b.md")]
         );
         assert!(files.take_changes().is_empty());
         assert_eq!(files.read(Path::new("Tasks/a.md")).unwrap(), "a!");
-        assert!(files.read(Path::new("Tasks/old.md")).is_err());
+        assert_eq!(files.read(Path::new("Tasks/old.md")).unwrap(), "old");
     }
 }

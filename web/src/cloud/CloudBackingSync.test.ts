@@ -349,9 +349,7 @@ describe("Disconnect", () => {
 /** A Drawing with full control of the Elements, `files` and `appState`. */
 const full = (elements: string[], files = "{}", appState = "{}") =>
   bytes(
-    `{"type":"excalidraw","version":2,"elements":[${elements.join(
-      ",",
-    )}],"appState":${appState},"files":${files}}`,
+    `{"type":"excalidraw","version":2,"elements":[${elements.join(",")}],"appState":${appState},"files":${files}}`,
   );
 const erased = (id: string, version: number, index: string) =>
   element(id, version, index, 0).replace('"isDeleted":false', '"isDeleted":true');

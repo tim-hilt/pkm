@@ -450,6 +450,16 @@ describe("Sync", () => {
     expect(titles()).toEqual([]);
   });
 
+  it("commits a Close made while it read the files", async () => {
+    model.add("Now");
+    await model.saved();
+    const syncing = model.syncDidChange();
+    model.close(first(), Closing.Rejected);
+    await syncing;
+    expect(model.pendingClose).toBeUndefined();
+    expect(model.tasks).toEqual([]);
+  });
+
   it("tells when a change was saved", async () => {
     let saved = 0;
     model.onSaved = () => saved++;

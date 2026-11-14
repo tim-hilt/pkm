@@ -1,3 +1,4 @@
+import { isValidTag } from "../core/Core";
 import { button, make } from "../Dom";
 import { type Blocker, type ListedTask, TasksModel, lists } from "./TasksModel";
 
@@ -146,7 +147,7 @@ export function editTaskDialog(
 /**
  * The Tags of a Task: chips to remove, and an input that refuses forbidden
  * characters as they are typed (with a hint) and suggests the known Tags that
- * start with what is typed.
+ * start with what is typed. Text that is no Tag yet (`work/`) is not added.
  */
 class TagField {
   readonly element = make("fieldset", "tasks-tags");
@@ -176,7 +177,7 @@ class TagField {
       if (event.key !== "Enter" || this.input.value === "") return;
       event.preventDefault();
       event.stopPropagation();
-      this.add(this.input.value);
+      if (isValidTag(this.input.value)) this.add(this.input.value);
     });
     this.element.append(
       make("legend", "", ["Tags"]),
@@ -188,10 +189,10 @@ class TagField {
     this.showChips();
   }
 
-  /** The Tags chosen, with the one typed but not yet added. */
+  /** The Tags chosen, with the one typed but not yet added, if it is one. */
   all(): string[] {
     const typed = this.input.value;
-    return typed && !this.tags.includes(typed) ? [...this.tags, typed] : this.tags;
+    return isValidTag(typed) && !this.tags.includes(typed) ? [...this.tags, typed] : this.tags;
   }
 
   private add(tag: string): void {

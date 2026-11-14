@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
-import { type Core, Planning, loadCore } from "../core/Core";
+import { type Core, Closing, Planning, loadCore } from "../core/Core";
 import { MemoryStorage } from "../storage/MemoryStorage";
 import { TaskFiles } from "./TaskFiles";
 
@@ -60,6 +60,34 @@ describe("the Tasks in storage", () => {
     await again.save();
     const [log] = await storage.files("Tasks/.history");
     expect(log.name.startsWith(`${id}-`)).toBe(true);
+  });
+
+  it("replaces a Device ID file that holds no Item ID", async () => {
+    const storage = new MemoryStorage();
+    await storage.write("Device/device-id", new TextEncoder().encode("damaged"));
+    const files = await TaskFiles.open(core, storage);
+    files.store.create("x", Planning.Active);
+    await files.save();
+    const id = new TextDecoder().decode(await storage.read("Device/device-id"));
+    expect(id).toMatch(/^[a-z0-9]{12}$/);
+    const [log] = await storage.files("Tasks/.history");
+    expect(log.name.startsWith(`${id}-`)).toBe(true);
+  });
+
+  it("reloads with what was changed and Closed while it read the files", async () => {
+    const storage = new MemoryStorage();
+    const files = await TaskFiles.open(core, storage);
+    files.store.create("Closed meanwhile", Planning.Active);
+    await files.save();
+    const [closed] = files.store.tasks(Planning.Active);
+
+    const reloading = files.reload();
+    files.store.create("Made meanwhile", Planning.Active);
+    void files.save();
+    files.store.close(closed.id, Closing.Done);
+    await reloading;
+
+    expect(titles(files, Planning.Active)).toEqual(["Made meanwhile"]);
   });
 
   it("saves each change once, in the order it was made", async () => {

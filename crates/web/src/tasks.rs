@@ -2,7 +2,7 @@
 //!
 //! The browser's storage is asynchronous, so the store works on files in
 //! memory: the client hands in the files it has saved when opening, and after
-//! each change saves what `take_changes` names, as `file` tells it.
+//! each change saves the files `take_changes` names.
 
 use pkm_tasks::{Files, MemoryFiles, Row, Tasks};
 use std::path::Path;
@@ -123,7 +123,7 @@ impl TaskStore {
         Ok(Self { files, tasks })
     }
 
-    /// The paths written or removed since the last call; `file` says which.
+    /// The paths written since the last call; `file` holds what to save.
     #[wasm_bindgen(js_name = takeChanges)]
     pub fn take_changes(&self) -> Vec<String> {
         let changes = self.files.take_changes();
@@ -133,7 +133,7 @@ impl TaskStore {
             .collect()
     }
 
-    /// What the file at `path` holds now; none if it was removed.
+    /// What the file at `path` holds now; none if there is no such file.
     pub fn file(&self, path: &str) -> Option<String> {
         self.files.read(Path::new(path)).ok()
     }

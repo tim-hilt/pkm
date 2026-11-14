@@ -23,7 +23,7 @@ export class TaskFiles {
     private readonly storage: FileStorage,
   ) {}
 
-  static async open(core: Pick<Core, "newItemId">, storage: FileStorage): Promise<TaskFiles> {
+  static async open(core: Pick<Core, "claimItemIds">, storage: FileStorage): Promise<TaskFiles> {
     const device = await deviceId(core, storage);
     return new TaskFiles(await load(device, storage), device, storage);
   }
@@ -35,13 +35,22 @@ export class TaskFiles {
 
   /**
    * Starts over from what the files hold now, after Sync wrote or deleted
-   * some. What the store changed is saved first; the old store is freed.
+   * some. What the store changed is saved first, with its pending Close
+   * committed, as that can't outlive the store; the old store is freed.
    */
   async reload(): Promise<void> {
-    await this.save().catch(() => {});
-    const reloaded = await load(this.device, this.storage);
-    this.current.free();
-    this.current = reloaded;
+    for (;;) {
+      const saved = this.saveAll();
+      await saved;
+      const reloaded = await load(this.device, this.storage);
+      // What the store changed while the files were read may be missing from them.
+      if (this.saveAll() === saved) {
+        this.current.free();
+        this.current = reloaded;
+        return;
+      }
+      reloaded.free();
+    }
   }
 
   /**
@@ -51,14 +60,21 @@ export class TaskFiles {
   save(): Promise<void> {
     // What the files hold now, so that a later change can't overtake this save.
     const changes = this.store.takeChanges().map((path) => ({ path, text: this.store.file(path) }));
+    if (changes.length === 0) return this.writing;
     const written = this.writing.then(async () => {
       for (const { path, text } of changes) {
-        if (text === undefined) await this.storage.remove(path);
-        else await this.storage.write(path, new TextEncoder().encode(text));
+        if (text !== undefined) await this.storage.write(path, new TextEncoder().encode(text));
       }
     });
     this.writing = written.catch(() => {});
     return written;
+  }
+
+  /** Commits the pending Close and saves; the writes then in progress, the same as before if there was nothing to save. */
+  private saveAll(): Promise<void> {
+    this.current.commit();
+    void this.save().catch(() => {});
+    return this.writing;
   }
 }
 
@@ -80,10 +96,12 @@ async function load(device: string, storage: FileStorage): Promise<TaskStore> {
   return new TaskStore(device, paths, texts);
 }
 
-async function deviceId(core: Pick<Core, "newItemId">, storage: FileStorage): Promise<string> {
-  const saved = await storage.read(deviceFile);
-  if (saved) return decode(saved);
-  const id = core.newItemId();
-  await storage.write(deviceFile, new TextEncoder().encode(id));
-  return id;
+/** Made on first use, and again if the file holds no Item ID, as on Apple (`pkm_base::device`). */
+async function deviceId(core: Pick<Core, "claimItemIds">, storage: FileStorage): Promise<string> {
+  const bytes = await storage.read(deviceFile);
+  const saved = bytes ? decode(bytes).trim() : "";
+  const [made] = core.claimItemIds([saved]);
+  if (made === "") return saved;
+  await storage.write(deviceFile, new TextEncoder().encode(made));
+  return made;
 }

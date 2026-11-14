@@ -224,11 +224,7 @@ export class CloudBacking {
     await this.check({ url, username, password });
     await this.stopLoop();
     this.setReport({});
-    await this.keep({
-      url: url.trim().replace(/\/+$/, ""),
-      username,
-      password,
-    });
+    await this.keep({ url: url.trim().replace(/\/+$/, ""), username, password });
     this.startLoop();
     this.changed();
     this.tabs.post({ kind: "connected" });
@@ -284,11 +280,7 @@ export class CloudBacking {
     this.online = online;
     this.schedule?.setOnline(online, Date.now());
     if (!online && this.schedule && !this.hasProblem && this.report.status !== undefined)
-      this.setReport({
-        ...this.report,
-        status: "offline",
-        progress: undefined,
-      });
+      this.setReport({ ...this.report, status: "offline", progress: undefined });
     this.arm();
   }
 
@@ -298,10 +290,16 @@ export class CloudBacking {
     return () => this.syncedListeners.delete(listener);
   }
 
-  /** Calls `listener` whenever a step changed Task files or History files here. Returns a function that stops it. */
-  onTasksSynced(listener: () => void): () => void {
+  /** Calls `listener` whenever a step or another tab changed Task files here. Returns a function that stops it. */
+  onTasksChanged(listener: () => void): () => void {
     this.tasksListeners.add(listener);
     return () => this.tasksListeners.delete(listener);
+  }
+
+  /** This tab saved Task files: Sync follows, and the other tabs, whose stores don't hold them yet, read them again. */
+  tasksSaved(): void {
+    this.localChange();
+    this.tabs.post({ kind: "changed", names: [], tasks: true });
   }
 
   /** Follows what another tab did: the storage already holds the new connection (or none). */
@@ -380,7 +378,8 @@ export class CloudBacking {
     const now = Date.now();
     // One step per folder, in order, all against the same server: Drawings,
     // the Book Files, then their state, which the core's Books merge merges,
-    // and the Task files and their History, which is only transferred.
+    // and the Task files and their History, which is only transferred and
+    // which the Tasks don't read.
     const plans = [
       {
         run: this.core.syncRun(now),
@@ -420,7 +419,7 @@ export class CloudBacking {
         files: this.taskHistory,
         state: this.taskHistoryState,
         incoming: this.tasksIncoming,
-        reports: "tasks" as const,
+        reports: undefined,
       },
     ];
     const results: StepResult[] = [];

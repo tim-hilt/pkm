@@ -141,11 +141,16 @@ export class TasksModel {
     this.onChange();
   }
 
-  /** Sync wrote or deleted Task files: reads them again, after committing a pending Close so that it isn't lost. */
+  /**
+   * Sync or another tab wrote or deleted Task files: reads them again. A
+   * pending Close, even one made meanwhile, is committed, as it can't outlive
+   * the store.
+   */
   async syncDidChange(): Promise<void> {
     this.commit();
-    await this.saving;
     await this.files.reload();
+    clearTimeout(this.commitTimer);
+    this.pendingClose = undefined;
     this.reload();
     this.onChange();
   }
