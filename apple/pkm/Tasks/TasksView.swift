@@ -174,6 +174,7 @@ private struct TaskRow: View {
                     .accessibilityLabel("Blocked")
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)  // the whole row opens the Task, not just its text
         .padding(.vertical, 4)
         .padding(.leading, CGFloat(task.depth) * 24)
     }
