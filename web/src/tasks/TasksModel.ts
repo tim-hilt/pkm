@@ -176,15 +176,27 @@ export class TasksModel {
 
   /**
    * Saves a Task's Title, Description, Priority and Tags (adding and removing
-   * what differs). False, saving nothing, if the Title is empty or a Tag is invalid.
+   * what differs from what is saved, however old `task` is). An empty Title
+   * keeps the saved one and the rest is saved; an edit that changes nothing writes nothing. False, saving nothing, if a Tag is invalid.
    */
   edit(task: ListedTask, { title, description, priority, tags }: TaskEdit): boolean {
     if (!tags.every(isValidTag)) return false;
     const { store } = this.files;
+    const saved = this.current(task);
+    const newTitle = title.trim() === "" ? saved.title : title.trim();
+    const tagsSame = saved.tags.length === tags.length && tags.every((t) => saved.tags.includes(t));
+    // Nothing differs: no write, which would bump `updated` and wake Sync.
+    if (
+      tagsSame &&
+      newTitle === saved.title &&
+      description.trim() === saved.description &&
+      priority === saved.priority
+    )
+      return true;
     return this.apply(() => {
-      store.edit(task.id, title, description, priority);
-      for (const tag of task.tags) if (!tags.includes(tag)) store.removeTag(task.id, tag);
-      for (const tag of tags) if (!task.tags.includes(tag)) store.addTag(task.id, tag);
+      store.edit(task.id, newTitle, description, priority);
+      for (const tag of saved.tags) if (!tags.includes(tag)) store.removeTag(task.id, tag);
+      for (const tag of tags) if (!saved.tags.includes(tag)) store.addTag(task.id, tag);
     });
   }
 
@@ -222,7 +234,8 @@ export class TasksModel {
    * differs). False if one is refused, which `blockerCandidates` never offers.
    */
   setBlockedBy(task: ListedTask, ids: string[]): boolean {
-    const current = task.blockedBy.map((b) => b.id);
+    const current = this.current(task).blockedBy.map((b) => b.id);
+    if (current.length === ids.length && ids.every((id) => current.includes(id))) return true;
     const { store } = this.files;
     return this.apply(() => {
       for (const id of current) if (!ids.includes(id)) store.removeBlocker(task.id, id);
@@ -288,6 +301,11 @@ export class TasksModel {
   /** Resolves once everything changed so far is saved (or has failed to be). */
   async saved(): Promise<void> {
     await this.saving;
+  }
+
+  /** `task` as last saved: the list is read after every change, a `task` held meanwhile is stale. */
+  private current(task: ListedTask): ListedTask {
+    return this.shown.find((t) => t.id === task.id) ?? task;
   }
 
   /** `change`, then the list and the views as it left them. False if the store refused it. */

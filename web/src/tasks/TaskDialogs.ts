@@ -4,37 +4,52 @@ import { type Blocker, type ListedTask, TasksModel } from "./TasksModel";
 
 let nextId = 0;
 
-/** A modal `<dialog>` with a form that is saved with its confirm button or Enter, and gone once closed. */
-function openDialog(
+/** A modal `<dialog>` with a form of `fields` and `actions`, gone once closed. */
+function modal(
   parent: HTMLElement,
   title: string,
-  confirm: string,
   fields: HTMLElement[],
-  save: () => boolean,
-  canSave: () => boolean = () => true,
-): HTMLDialogElement {
+  actions: HTMLElement[],
+): { dialog: HTMLDialogElement; form: HTMLFormElement } {
   const dialog = make("dialog", "tasks-dialog");
   const heading = make("h2", "", [title]);
   dialog.setAttribute("aria-labelledby", (heading.id = `tasks-dialog-${nextId++}`));
   const form = make("form", "tasks-form");
-  const confirmButton = make("button", "tasks-confirm", [confirm]);
-  confirmButton.type = "submit";
-  const actions = make("div", "tasks-actions", [
-    button("", "Cancel", () => dialog.close()),
-    confirmButton,
-  ]);
-  form.append(heading, ...fields, actions);
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    if (save()) dialog.close();
-  });
-  form.addEventListener("input", () => (confirmButton.disabled = !canSave()));
-  confirmButton.disabled = !canSave();
+  form.append(heading, ...fields, make("div", "tasks-actions", actions));
   dialog.append(form);
   dialog.addEventListener("close", () => dialog.remove());
   parent.append(dialog);
   dialog.showModal();
-  return dialog;
+  return { dialog, form };
+}
+
+/** A confirm button of a form, off while it can't be saved. */
+function confirmButton(label: string): HTMLButtonElement {
+  const confirm = make("button", "tasks-confirm", [label]);
+  confirm.type = "submit";
+  return confirm;
+}
+
+/** A modal form saved with its confirm button or Enter, closed once `save` succeeds, or with Cancel. */
+function openDialog(
+  parent: HTMLElement,
+  title: string,
+  confirmLabel: string,
+  fields: HTMLElement[],
+  save: () => boolean,
+  canSave: () => boolean,
+): void {
+  const confirm = confirmButton(confirmLabel);
+  const { dialog, form } = modal(parent, title, fields, [
+    button("", "Cancel", () => dialog.close()),
+    confirm,
+  ]);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (save()) dialog.close();
+  });
+  form.addEventListener("input", () => (confirm.disabled = !canSave()));
+  confirm.disabled = !canSave();
 }
 
 function field(label: string, control: HTMLElement): HTMLLabelElement {
@@ -85,45 +100,83 @@ export function newTaskDialog(model: TasksModel, host: HTMLElement, under?: List
   title.focus();
 }
 
-/** Edits a Task's Title, Description, Priority, Tags and Blocked by; Save is off while the Title is empty. */
+/** How long typing must pause before the text is saved. */
+const typingPause = 500;
+
+/**
+ * Edits a Task's Title, Description, Priority, Tags and Blocked by, saving as
+ * the user goes: text after a pause and when its field loses focus, the rest
+ * at once. Done closes it. While the Title is empty the last saved one is kept,
+ * a hint says why, and the dialog can't be left (Done is off, Esc ignored).
+ * Closing saves what is pending, with a Tag typed but not added if it is valid.
+ */
 export function editTaskDialog(
   model: TasksModel,
   task: ListedTask,
   parent: HTMLElement,
 ): HTMLDialogElement {
   const title = textInput(task.title);
+  const titleHint = make("p", "tasks-hint", ["A Task needs a Title."]);
   const description = make("textarea", "tasks-input");
   description.rows = 4;
   description.value = task.description;
   let priority = task.priority;
-  const priorities = [1, 2, 3, 4].map((value) => ({
-    value,
-    text: `P${value}`,
-  }));
-  const tags = new TagField(model, [...task.tags]);
-  const blockers = new BlockedByField(model.blockerCandidates(task), [...task.blockedBy]);
-  return openDialog(
+  let pause: ReturnType<typeof setTimeout> | undefined;
+  const save = (withTypedTag = false) => {
+    clearTimeout(pause);
+    model.setBlockedBy(task, blockers.ids());
+    model.edit(task, {
+      title: title.value,
+      description: description.value,
+      priority,
+      tags: withTypedTag ? tags.all() : tags.chosen(),
+    });
+  };
+  const tags = new TagField(model, [...task.tags], save);
+  const blockers = new BlockedByField(model.blockerCandidates(task), [...task.blockedBy], save);
+  const priorities = [1, 2, 3, 4].map((value) => ({ value, text: `P${value}` }));
+  const done = confirmButton("Done");
+  const titleEmpty = () => title.value.trim() === "";
+  const { dialog, form } = modal(
     parent,
     "Task",
-    "Save",
     [
       field("Title", title),
+      titleHint,
       field("Description", description),
-      choice("Priority", priorities, priority, (value) => (priority = value)),
+      choice("Priority", priorities, priority, (value) => {
+        priority = value;
+        save();
+      }),
       tags.element,
       blockers.element,
     ],
-    () => {
-      if (!model.setBlockedBy(task, blockers.ids())) return false;
-      return model.edit(task, {
-        title: title.value,
-        description: description.value,
-        priority,
-        tags: tags.all(),
-      });
-    },
-    () => title.value.trim() !== "",
+    [done],
   );
+  const showTitleState = () => {
+    titleHint.hidden = !titleEmpty();
+    done.disabled = titleEmpty();
+  };
+  showTitleState();
+  form.addEventListener("input", (event) => {
+    if (event.target === title || event.target === description) {
+      clearTimeout(pause);
+      pause = setTimeout(save, typingPause);
+    }
+    showTitleState();
+  });
+  form.addEventListener("focusout", (event) => {
+    if (event.target === title || event.target === description) save();
+  });
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (!titleEmpty()) dialog.close();
+  });
+  dialog.addEventListener("cancel", (event) => {
+    if (titleEmpty()) event.preventDefault();
+  });
+  dialog.addEventListener("close", () => save(true));
+  return dialog;
 }
 
 /**
@@ -141,6 +194,7 @@ class TagField {
   constructor(
     private readonly model: TasksModel,
     private readonly tags: string[],
+    private readonly changed: () => void,
   ) {
     this.input.setAttribute("aria-label", "Add Tag");
     this.input.placeholder = "Add Tag";
@@ -171,6 +225,11 @@ class TagField {
     this.showChips();
   }
 
+  /** The Tags added so far. */
+  chosen(): string[] {
+    return this.tags;
+  }
+
   /** The Tags chosen, with the one typed but not yet added, if it is one. */
   all(): string[] {
     const typed = this.input.value;
@@ -183,6 +242,7 @@ class TagField {
     this.hint.hidden = true;
     this.showChips();
     this.showSuggestions();
+    this.changed();
   }
 
   private showChips(): void {
@@ -191,6 +251,7 @@ class TagField {
         const remove = button("tasks-chip", `${tag} ×`, () => {
           this.tags.splice(this.tags.indexOf(tag), 1);
           this.showChips();
+          this.changed();
         });
         remove.setAttribute("aria-label", `Remove ${tag}`);
         return make("li", "", [remove]);
@@ -221,12 +282,14 @@ class BlockedByField {
   constructor(
     private readonly candidates: ListedTask[],
     private readonly chosen: Blocker[],
+    private readonly changed: () => void,
   ) {
     this.choose.setAttribute("aria-label", "Add Blocked by");
     this.choose.addEventListener("change", () => {
       const task = this.candidates.find((t) => t.id === this.choose.value);
       if (task) this.chosen.push({ id: task.id, title: task.title, closed: false });
       this.show();
+      this.changed();
     });
     this.element.append(make("legend", "", ["Blocked by"]), this.chips, this.choose);
     this.show();
@@ -242,6 +305,7 @@ class BlockedByField {
         const remove = button("tasks-chip", `${blocker.title} ×`, () => {
           this.chosen.splice(this.chosen.indexOf(blocker), 1);
           this.show();
+          this.changed();
         });
         remove.setAttribute("aria-label", `Remove ${blocker.title}`);
         remove.classList.toggle("closed", blocker.closed);

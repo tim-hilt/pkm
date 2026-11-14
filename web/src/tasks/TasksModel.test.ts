@@ -86,23 +86,35 @@ describe("the Tasks list", () => {
     expect(first().tags).toEqual(["b"]);
   });
 
-  it("saves nothing if the Title is empty or a Tag is invalid", () => {
+  it("keeps the old Title and saves the rest if the Title is empty", () => {
     model.add("Buy milk");
-    const task = first();
-    expect(model.edit(task, { title: " ", description: "x", priority: 1, tags: [] })).toBe(false);
-    expect(
-      model.edit(task, {
-        title: "New",
-        description: "x",
-        priority: 1,
-        tags: ["No!"],
-      }),
-    ).toBe(false);
+    expect(model.edit(first(), { title: " ", description: "x", priority: 1, tags: ["a"] })).toBe(
+      true,
+    );
     expect(first()).toMatchObject({
       title: "Buy milk",
-      description: "",
-      priority: 4,
+      description: "x",
+      priority: 1,
+      tags: ["a"],
     });
+  });
+
+  it("saves nothing if a Tag is invalid", () => {
+    model.add("Buy milk");
+    expect(
+      model.edit(first(), { title: "New", description: "x", priority: 1, tags: ["No!"] }),
+    ).toBe(false);
+    expect(first()).toMatchObject({ title: "Buy milk", description: "", priority: 4 });
+  });
+
+  it("edits again from a stale Task, as an autosaving view does", () => {
+    model.add("Buy milk");
+    const stale = first();
+    const edit = (tags: string[]) =>
+      model.edit(stale, { title: "Buy milk", description: "", priority: 4, tags });
+    edit(["a"]);
+    edit([]);
+    expect(first().tags).toEqual([]);
   });
 
   it("moves a Task between the lists; it leaves the one shown", () => {
