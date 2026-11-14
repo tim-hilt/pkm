@@ -45,6 +45,22 @@ impl QuickAdd {
         Self::default()
     }
 
+    /// The text of a saved Title, for editing: every Shortcut-like part starts
+    /// Ignored, so opening a Task never changes its Title, Priority or Tags.
+    /// Editing inside such a part clears its Ignore like any other. The
+    /// cursor is at the end.
+    pub fn from_title(title: &str) -> Self {
+        let text: Vec<u16> = single_line(title).encode_utf16().collect();
+        let ignored = words(&text)
+            .filter(|&(start, end)| meaning_of(&text[start..end]).is_some())
+            .collect();
+        Self {
+            cursor: text.len(),
+            text,
+            ignored,
+        }
+    }
+
     /// Replaces `start..end` with `with` (typing, deleting, pasting) and moves
     /// the cursor behind it. Line breaks become spaces; a range beyond the
     /// text is clamped.
@@ -83,6 +99,15 @@ impl QuickAdd {
         {
             self.ignored.push((s.start as usize, s.end as usize));
         }
+    }
+
+    /// Ignores every Priority Shortcut, as when the user picks a Priority by
+    /// hand: the pick, not the text, decides it. One typed afterwards counts.
+    pub fn ignore_priority(&mut self) {
+        let found: Vec<_> = words(&self.text)
+            .filter(|&(start, end)| priority_of(&self.text[start..end]).is_some())
+            .collect();
+        self.ignored.extend(found);
     }
 
     /// Puts the cursor at `at`, clamped to the text.
@@ -637,6 +662,58 @@ mod tests {
         quick.replace(6, 6, "x"); // `p1x`
         quick.replace(6, 7, ""); // `p1` again
         assert_eq!(quick.priority(), Some(1));
+    }
+
+    #[test]
+    fn a_saved_title_starts_with_every_shortcut_ignored() {
+        let quick = QuickAdd::from_title("Fix p1 @bug me@mail.com");
+        assert_eq!(quick.text(), "Fix p1 @bug me@mail.com");
+        assert_eq!(quick.title(), "Fix p1 @bug me@mail.com");
+        assert_eq!(quick.priority(), None);
+        assert!(quick.tags().is_empty());
+        assert!(quick.highlights().is_empty());
+        assert_eq!(quick.cursor(), 23);
+    }
+
+    #[test]
+    fn editing_inside_a_saved_shortcut_applies_it() {
+        let mut quick = QuickAdd::from_title("Fix p1 now");
+        quick.replace(5, 6, "2");
+        assert_eq!(quick.priority(), Some(2));
+        assert_eq!(quick.title(), "Fix now");
+    }
+
+    #[test]
+    fn typing_elsewhere_keeps_a_saved_shortcut_ignored() {
+        let mut quick = QuickAdd::from_title("Fix p1");
+        quick.replace(0, 0, "Please ");
+        quick.replace(3, 3, "x");
+        assert_eq!(quick.priority(), None);
+    }
+
+    #[test]
+    fn ignoring_the_priority_keeps_it_in_the_title() {
+        let mut quick = typed("p1 Fix p2 ");
+        quick.ignore_priority();
+        assert_eq!(quick.priority(), None);
+        assert_eq!(quick.title(), "p1 Fix p2");
+        assert!(quick.highlights().is_empty());
+    }
+
+    #[test]
+    fn a_priority_typed_after_ignoring_it_wins() {
+        let mut quick = typed("Fix p1 ");
+        quick.ignore_priority();
+        quick.replace(7, 7, "p3 ");
+        assert_eq!(quick.priority(), Some(3));
+        assert_eq!(quick.title(), "Fix p1");
+    }
+
+    #[test]
+    fn ignoring_the_priority_leaves_tags() {
+        let mut quick = typed("Fix p1 @bug ");
+        quick.ignore_priority();
+        assert_eq!(quick.tags(), ["bug"]);
     }
 
     #[test]

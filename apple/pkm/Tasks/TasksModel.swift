@@ -137,7 +137,8 @@ final class TasksModel {
     /// Gives a Task just created its Description, if any.
     private func describe(_ task: ListedTask, _ description: String) {
         guard !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        _ = try? store.edit(id: task.id, title: task.title, description: description, priority: task.priority)
+        _ = try? store.edit(
+            id: task.id, title: task.title, description: description, priority: task.priority, addTags: [])
     }
 
     /// Saves a Task's Title, Description, Priority and Tags (adding and removing
@@ -151,14 +152,31 @@ final class TasksModel {
         let isEmpty = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if task.id == editing.last { isLeavingBlocked = isEmpty }
         let title = isEmpty ? saved.title : title
-        guard (try? store.edit(id: task.id, title: title, description: description, priority: priority)) != nil
+        let added = tags.filter { tag in !saved.tags.contains { $0.name == tag } }
+        guard
+            (try? store.edit(
+                id: task.id, title: title, description: description, priority: priority, addTags: added)) != nil
         else { return false }
         for tag in saved.tags.map(\.name) where !tags.contains(tag) { _ = try? store.removeTag(id: task.id, tag: tag) }
-        for tag in tags where !saved.tags.contains(where: { $0.name == tag }) {
-            _ = try? store.addTag(id: task.id, tag: tag)
-        }
         reload()
         return true
+    }
+
+    /// Commits Quick Add's Shortcuts to a Task being edited: its Title without them, a Priority
+    /// Shortcut replacing `priority`, its Tags added to `tags` (never removed), saved in one write
+    /// like `edit`. Returns the Task as saved, or nil, changing nothing, if only Shortcuts were typed
+    /// or the save failed.
+    func commit(
+        _ quickAdd: TaskQuickAdd, to task: ListedTask, description: String, priority: UInt8, tags: [String]
+    ) -> ListedTask? {
+        guard !quickAdd.title().isEmpty else { return nil }
+        let merged = tags + quickAdd.tags().filter { !tags.contains($0) }
+        guard
+            edit(
+                task, title: quickAdd.title(), description: description, priority: quickAdd.priority() ?? priority,
+                tags: merged)
+        else { return nil }
+        return self.task(id: task.id)
     }
 
     /// Makes a Task Blocked by exactly the Tasks `ids` (adding and removing what

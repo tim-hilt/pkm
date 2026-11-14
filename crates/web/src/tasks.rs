@@ -274,7 +274,7 @@ impl TaskStore {
         priority: u8,
     ) -> Result<(), JsError> {
         self.tasks
-            .edit(id, title, description, priority)
+            .edit(id, title, description, priority, &[])
             .map(drop)
             .map_err(error)
     }

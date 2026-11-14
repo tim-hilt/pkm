@@ -199,6 +199,13 @@ impl TaskQuickAdd {
         Self(Mutex::new(QuickAdd::new()))
     }
 
+    /// The text of a saved Title, for editing, with every Shortcut-like part
+    /// Ignored.
+    #[uniffi::constructor]
+    pub fn from_title(title: String) -> Self {
+        Self(Mutex::new(QuickAdd::from_title(&title)))
+    }
+
     /// Replaces the UTF-16 range `start..end` with `with` and moves the cursor
     /// behind it.
     pub fn replace(&self, start: u32, end: u32, with: String) {
@@ -208,6 +215,11 @@ impl TaskQuickAdd {
     /// Ignores the Shortcut at a UTF-16 position, keeping it as plain text.
     pub fn ignore(&self, at: u32) {
         self.lock().ignore(at);
+    }
+
+    /// Ignores every Priority Shortcut, as when the Priority is picked by hand.
+    pub fn ignore_priority(&self) {
+        self.lock().ignore_priority();
     }
 
     /// Puts the cursor at a UTF-16 position.
@@ -356,15 +368,20 @@ impl TaskStore {
         Ok(self.listed(self.0.create_subtask(&parent, &title, priority, &tags)?))
     }
 
-    /// Sets a Task's Title, Description and Priority, refusing an empty Title.
+    /// Sets a Task's Title, Description and Priority and adds Tags in one
+    /// write, refusing an empty Title or an invalid Tag.
     pub fn edit(
         &self,
         id: String,
         title: String,
         description: String,
         priority: u8,
+        add_tags: Vec<String>,
     ) -> Result<ListedTask, TasksError> {
-        Ok(self.listed(self.0.edit(&id, &title, &description, priority)?))
+        Ok(self.listed(
+            self.0
+                .edit(&id, &title, &description, priority, &add_tags)?,
+        ))
     }
 
     /// Adds a Tag to a Task, refusing an invalid one.

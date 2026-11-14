@@ -296,6 +296,51 @@ import Testing
         #expect(try openModel().tasks.map(\.priority) == [1])
     }
 
+    @Test func committingQuickAddAppliesTheShortcutsAndLeavesThemOutOfTheTitle() throws {
+        let model = try openModel()
+        model.add(title: "Fix login", priority: 3, tags: ["home"])
+        let quickAdd = TaskQuickAdd.fromTitle(title: "Fix login")
+        quickAdd.replace(start: 9, end: 9, with: " p1 @bug")
+        let saved = model.commit(quickAdd, to: model.tasks[0], description: "", priority: 3, tags: ["home"])
+        #expect(saved?.title == "Fix login")
+        #expect(saved?.priority == 1)
+        #expect(saved?.tags.map(\.name) == ["home", "bug"])
+    }
+
+    @Test func aSavedTitleStaysAsItIsWhenCommitted() throws {
+        let model = try openModel()
+        model.add(title: "Ship p1 @bug", priority: 3)
+        let quickAdd = TaskQuickAdd.fromTitle(title: "Ship p1 @bug")
+        let saved = model.commit(quickAdd, to: model.tasks[0], description: "", priority: 3, tags: [])
+        #expect(saved?.title == "Ship p1 @bug")
+        #expect(saved?.priority == 3)
+        #expect(saved?.tags.isEmpty == true)
+    }
+
+    @Test func thePickerOverridesAPendingPriorityShortcutButALaterOneWins() throws {
+        let model = try openModel()
+        model.add(title: "Fix", priority: 4)
+        let quickAdd = TaskQuickAdd.fromTitle(title: "Fix")
+        quickAdd.replace(start: 3, end: 3, with: " p1")
+        quickAdd.ignorePriority()  // the picker was used
+        var saved = model.commit(quickAdd, to: model.tasks[0], description: "", priority: 3, tags: [])
+        #expect(saved?.title == "Fix p1")
+        #expect(saved?.priority == 3)
+        quickAdd.replace(start: 6, end: 6, with: " p2 ")
+        saved = model.commit(quickAdd, to: model.tasks[0], description: "", priority: 3, tags: [])
+        #expect(saved?.title == "Fix p1")
+        #expect(saved?.priority == 2)
+    }
+
+    @Test func committingOnlyShortcutsChangesNothing() throws {
+        let model = try openModel()
+        model.add(title: "Fix", priority: 4)
+        let quickAdd = TaskQuickAdd.fromTitle(title: "")
+        quickAdd.replace(start: 0, end: 0, with: "p1 @bug ")
+        #expect(model.commit(quickAdd, to: model.tasks[0], description: "", priority: 4, tags: []) == nil)
+        #expect(model.tasks[0].priority == 4)
+    }
+
     @Test func editingToAnEmptyTitleKeepsTheOldTitleAndSavesTheRest() throws {
         let model = try openModel()
         model.add(title: "Keep", planning: .active)

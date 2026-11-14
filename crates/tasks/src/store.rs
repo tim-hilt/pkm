@@ -319,22 +319,38 @@ impl Tasks {
     }
 
     /// Sets the Title (as in `create`), Description and Priority of the Open
-    /// Task `id` and bumps `updated`. A Priority outside 1 to 4 is clamped.
-    /// Every other property, known or not, stays as it was. Fails with
-    /// `NotFound` if there is no such Task.
+    /// Task `id`, adds `add_tags` (never removing any; new ones join the Tags
+    /// file) and bumps `updated`, all in one write. A Priority outside 1 to 4
+    /// is clamped. Every other property, known or not, stays as it was. Fails
+    /// with `NotFound` if there is no such Task, or `InvalidTag` for any
+    /// invalid Tag, before saving anything.
     pub fn edit(
         &self,
         id: &str,
         title: &str,
         description: &str,
         priority: u8,
+        add_tags: &[String],
     ) -> Result<Task, Error> {
         let title = checked_title(title)?;
         let priority = priority.clamp(1, 4);
         let description = description.trim();
+        if !add_tags.iter().all(|t| tag::is_valid(t)) {
+            return Err(Error::InvalidTag);
+        }
         self.modify(id, |file| {
             file.set_scalar("title", &title);
             file.set_scalar("priority", priority.to_string());
+            let mut tags = tags_of(file);
+            let before = tags.len();
+            for tag in add_tags {
+                if !tags.contains(tag) {
+                    tags.push(tag.clone());
+                }
+            }
+            if tags.len() != before {
+                set_list(file, TAGS, tags);
+            }
             file.body = if description.is_empty() {
                 String::new()
             } else {
@@ -1389,7 +1405,7 @@ mod tests {
         let dir = Scratch::new();
         let (tasks, task) = edit_fixture(&dir);
         let edited = tasks
-            .edit(&task.id, " Buy oat milk ", "Two\nlitres", 1)
+            .edit(&task.id, " Buy oat milk ", "Two\nlitres", 1, &[])
             .unwrap();
         assert_eq!(edited.title, "Buy oat milk");
         assert_eq!(edited.description, "Two\nlitres");
@@ -1398,11 +1414,36 @@ mod tests {
     }
 
     #[test]
+    fn editing_adds_tags_in_one_write_and_keeps_the_others() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let task = tagged(&tasks, &["a"]);
+        let add = ["a".to_owned(), "new/b".to_owned()];
+        let edited = tasks.edit(&task.id, "n", "", 2, &add).unwrap();
+        assert_eq!((edited.title.as_str(), edited.priority), ("n", 2));
+        assert_eq!(edited.tags, ["a", "new/b"]);
+        assert!(known(&tasks, "new").contains(&"new/b".to_owned()));
+    }
+
+    #[test]
+    fn editing_with_an_invalid_tag_changes_nothing() {
+        let dir = Scratch::new();
+        let (tasks, task) = edit_fixture(&dir);
+        let add = ["ok".to_owned(), "Bad".to_owned()];
+        assert!(matches!(
+            tasks.edit(&task.id, "n", "", 1, &add),
+            Err(Error::InvalidTag)
+        ));
+        assert_eq!(tasks.tasks(Planning::Active).unwrap(), [task]);
+        assert!(known(&tasks, "ok").is_empty());
+    }
+
+    #[test]
     fn editing_refuses_an_empty_title_and_changes_nothing() {
         let dir = Scratch::new();
         let (tasks, task) = edit_fixture(&dir);
         assert!(matches!(
-            tasks.edit(&task.id, "  ", "x", 1),
+            tasks.edit(&task.id, "  ", "x", 1, &[]),
             Err(Error::EmptyTitle)
         ));
         assert_eq!(tasks.tasks(Planning::Active).unwrap(), [task]);
@@ -1414,7 +1455,7 @@ mod tests {
         let (tasks, _) = edit_fixture(&dir);
         for id in ["abcdefgh", "../x"] {
             assert!(matches!(
-                tasks.edit(id, "t", "", 4),
+                tasks.edit(id, "t", "", 4, &[]),
                 Err(Error::Io(e)) if e.kind() == io::ErrorKind::NotFound
             ));
         }
@@ -1424,18 +1465,18 @@ mod tests {
     fn editing_clamps_the_priority() {
         let dir = Scratch::new();
         let (tasks, task) = edit_fixture(&dir);
-        assert_eq!(tasks.edit(&task.id, "t", "", 0).unwrap().priority, 1);
-        assert_eq!(tasks.edit(&task.id, "t", "", 9).unwrap().priority, 4);
+        assert_eq!(tasks.edit(&task.id, "t", "", 0, &[]).unwrap().priority, 1);
+        assert_eq!(tasks.edit(&task.id, "t", "", 9, &[]).unwrap().priority, 4);
     }
 
     #[test]
     fn the_description_is_the_files_body() {
         let dir = Scratch::new();
         let (tasks, task) = edit_fixture(&dir);
-        tasks.edit(&task.id, "t", "  details  ", 4).unwrap();
+        tasks.edit(&task.id, "t", "  details  ", 4, &[]).unwrap();
         let text = fs::read_to_string(dir.0.join(format!("{}.md", task.id))).unwrap();
         assert!(text.ends_with("---\ndetails\n"), "{text}");
-        tasks.edit(&task.id, "t", "", 4).unwrap();
+        tasks.edit(&task.id, "t", "", 4, &[]).unwrap();
         let text = fs::read_to_string(dir.0.join(format!("{}.md", task.id))).unwrap();
         assert!(text.ends_with("---\n"), "{text}");
     }
@@ -1454,7 +1495,7 @@ mod tests {
         );
         fs::write(&path, file.render()).unwrap();
 
-        tasks.edit(&task.id, "New", "body", 2).unwrap();
+        tasks.edit(&task.id, "New", "body", 2, &[]).unwrap();
 
         let file = Document::parse(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(file.scalar("due"), Some("2030-05-01"));
@@ -1470,7 +1511,7 @@ mod tests {
     fn a_change_that_changes_nothing_writes_nothing() {
         let dir = Scratch::new();
         let (tasks, task) = edit_fixture(&dir);
-        tasks.edit(&task.id, "t", "body", 2).unwrap();
+        tasks.edit(&task.id, "t", "body", 2, &[]).unwrap();
         tasks.add_tag(&task.id, "home").unwrap();
         let path = dir.0.join(format!("{}.md", task.id));
         let mut file = Document::parse(&fs::read_to_string(&path).unwrap()).unwrap();
@@ -1478,7 +1519,7 @@ mod tests {
         fs::write(&path, file.render()).unwrap();
         let before = fs::read_to_string(&path).unwrap();
 
-        tasks.edit(&task.id, " t ", "body ", 2).unwrap();
+        tasks.edit(&task.id, " t ", "body ", 2, &[]).unwrap();
         tasks.add_tag(&task.id, "home").unwrap();
         tasks.remove_tag(&task.id, "away").unwrap();
 
@@ -1565,7 +1606,7 @@ mod tests {
         let dir = Scratch::new();
         let tasks = dir.store();
         let task = tagged(&tasks, &["a"]);
-        assert_eq!(tasks.edit(&task.id, "n", "d", 2).unwrap().tags, ["a"]);
+        assert_eq!(tasks.edit(&task.id, "n", "d", 2, &[]).unwrap().tags, ["a"]);
         let task = tasks.add_tag(&task.id, "b").unwrap();
         assert_eq!((task.title.as_str(), task.priority), ("n", 2));
     }
@@ -1620,7 +1661,7 @@ mod tests {
         let text = fs::read_to_string(&path).unwrap();
         fs::write(&path, text.replace("state:", "tags:\n  - hand\nstate:")).unwrap();
         assert!(known(&tasks, "").is_empty()); // not read yet
-        tasks.edit(&task.id, "new", "", 4).unwrap();
+        tasks.edit(&task.id, "new", "", 4, &[]).unwrap();
         assert_eq!(known(&tasks, ""), ["hand"]);
     }
 
@@ -1874,7 +1915,7 @@ mod tests {
         let dir = Scratch::new();
         let (tasks, task) = closing_fixture(&dir);
         tasks.close(&task.id, Closing::Done).unwrap();
-        tasks.edit(&task.id, "Renamed", "", 1).unwrap();
+        tasks.edit(&task.id, "Renamed", "", 1, &[]).unwrap();
         tasks.commit().unwrap();
         let text = file_of(&dir, &task);
         assert!(
@@ -2092,7 +2133,7 @@ mod tests {
         for name in [format!("{} 1.md", task.id), format!("~{}.md", task.id)] {
             fs::write(dir.0.join(name), &copy).unwrap();
         }
-        tasks.edit(&task.id, "edited", "", 4).unwrap();
+        tasks.edit(&task.id, "edited", "", 4, &[]).unwrap();
         assert_eq!(titles(&tasks, Planning::Active), ["edited"]);
     }
 
@@ -2448,7 +2489,7 @@ mod tests {
         let a = listed(&tasks, "aaaaaaaaaaaa");
         assert!(!a.blocked && a.blocked_by.is_empty());
         assert!(file_of(&dir, &a).contains("zzzzzzzzzzzz"));
-        tasks.edit("aaaaaaaaaaaa", "t", "", 4).unwrap();
+        tasks.edit("aaaaaaaaaaaa", "t", "", 4, &[]).unwrap();
         assert!(!file_of(&dir, &a).contains("blocked-by"));
     }
 
@@ -2594,7 +2635,7 @@ mod tests {
         let (tasks, _) = cache_fixture(&dir);
         let parent = tasks.tasks(Planning::Active).unwrap().remove(0);
         fs::remove_file(dir.cache()).unwrap();
-        tasks.edit(&parent.id, "renamed", "", 1).unwrap();
+        tasks.edit(&parent.id, "renamed", "", 1, &[]).unwrap();
         tasks.create("new", Planning::Active, 4, &[]).unwrap();
         tasks.tasks(Planning::Active).unwrap();
         assert!(!dir.cache().exists());

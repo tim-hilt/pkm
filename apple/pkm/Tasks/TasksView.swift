@@ -299,7 +299,8 @@ private struct EditTaskSheet: View {
 
 /// Edits a Task, saving as it goes: Title and Description after a pause in typing
 /// and when their field loses focus, everything else at once, and a Tag typed but
-/// not submitted when the view is left. While the Title is empty the rest still
+/// not submitted when the view is left. The Title is Quick Add: the pause saves it without
+/// pending Shortcuts, and Return, losing focus and leaving the view apply them. While the Title is empty the rest still
 /// saves (the last saved Title stays), a hint shows, and the view can't be left.
 /// On macOS `done` closes the whole sheet. An Open Blocker is a row that opens its
 /// own form on top; Back then shows this one as last saved.
@@ -308,6 +309,9 @@ private struct EditTaskForm: View {
     let task: ListedTask
     let done: () -> Void
     @State private var title: String
+    /// The Title field's text with its Shortcuts; `title` is what it leaves of it.
+    @State private var quickAdd: TaskQuickAdd
+    @State private var quickAddRevision = 0
     @State private var description: String
     @State private var priority: UInt8
     @State private var tags: [String]
@@ -316,7 +320,7 @@ private struct EditTaskForm: View {
     @State private var blockedBy: [Blocker]
     @FocusState private var focus: Field?
 
-    private enum Field { case title, description }
+    private enum Field { case description }
 
     /// How long typing pauses before text is saved.
     private static let pause = Duration.milliseconds(500)
@@ -325,6 +329,7 @@ private struct EditTaskForm: View {
         self.task = task
         self.done = done
         _title = State(initialValue: task.title)
+        _quickAdd = State(initialValue: .fromTitle(title: task.title))
         _description = State(initialValue: task.description)
         _priority = State(initialValue: task.priority)
         _tags = State(initialValue: task.tags.map(\.name))
@@ -355,10 +360,11 @@ private struct EditTaskForm: View {
 
     var body: some View {
         Form {
-            TextField("Title", text: $title, axis: .vertical)
-                .focused($focus, equals: .title)
-                .submitLabel(.done)
-                .accessibilityIdentifier("task-title")
+            QuickAddField(
+                quickAdd: quickAdd, title: $title, revision: quickAddRevision, autofocus: false,
+                onSubmit: commitQuickAdd, onBlur: commitQuickAdd
+            )
+            .accessibilityIdentifier("task-title")
             if !hasTitle {
                 Text("A Task needs a Title.")
                     .font(.footnote)
@@ -372,7 +378,11 @@ private struct EditTaskForm: View {
                 ForEach(UInt8(1)...4, id: \.self) { Text(verbatim: "P\($0)").tag($0) }
             }
             .pickerStyle(.segmented)
-            .onChange(of: priority) { save() }
+            .onChange(of: priority) {
+                quickAdd.ignorePriority()  // the last action wins
+                quickAddRevision += 1
+                save()
+            }
             Section("Tags") {
                 ForEach(tags, id: \.self) { tag in
                     Text(tag).foregroundStyle(model.tagEntry(tag).style(default: .primary))
@@ -455,7 +465,10 @@ private struct EditTaskForm: View {
             guard (try? await Task.sleep(for: Self.pause)) != nil else { return }
             save()
         }
-        .onDisappear { save(includingTypedTag: true) }
+        .onDisappear {
+            commitQuickAdd()
+            save(includingTypedTag: true)
+        }
         .navigationBarBackButtonHidden(!hasTitle)
         .onAppear(perform: refresh)
     }
@@ -465,6 +478,22 @@ private struct EditTaskForm: View {
         guard let saved = model.task(id: task.id) else { return }
         (title, description, priority, tags, blockedBy) =
             (saved.title, saved.description, saved.priority, saved.tags.map(\.name), saved.blockedBy)
+        startQuickAdd(from: saved.title)
+    }
+
+    private func startQuickAdd(from title: String) {
+        quickAdd = .fromTitle(title: title)
+        quickAddRevision += 1
+    }
+
+    /// Applies the Shortcuts in the Title field: they leave the field, the Priority picker and the
+    /// Tag list show the result. With none pending it just saves.
+    private func commitQuickAdd() {
+        guard quickAdd.priority() != nil || !quickAdd.tags().isEmpty,
+            let saved = model.commit(quickAdd, to: task, description: description, priority: priority, tags: tags)
+        else { return save() }
+        (title, priority, tags) = (saved.title, saved.priority, saved.tags.map(\.name))
+        startQuickAdd(from: saved.title)
     }
 
     /// Saves what is edited, if the Tags are valid; `includingTypedTag` adds a valid

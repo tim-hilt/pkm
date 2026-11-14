@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The Title field of a new Task: Quick Add's text, with its Shortcuts highlighted, and the Tags
+/// The Title field of a Task: Quick Add's text, with its Shortcuts highlighted, and the Tags
 /// to suggest below it while the cursor is in an `@` word. It only draws and forwards what is typed,
 /// the cursor, Return, picks and Ignores; every rule lives in the core's `TaskQuickAdd`.
 struct QuickAddField: View {
@@ -8,8 +8,16 @@ struct QuickAddField: View {
     let quickAdd: TaskQuickAdd
     /// Quick Add's Title (the text without Shortcuts), kept up to date.
     @Binding var title: String
+    /// Changes when the field must redraw because Quick Add was changed from outside (replaced, or
+    /// its Priority Ignored).
+    var revision = 0
+    /// Takes the keyboard focus when it appears.
+    var autofocus = true
     /// Return was pressed.
     let onSubmit: () -> Void
+    /// The field lost focus. Not while the suggestion list is open: picking from it may take focus
+    /// for a moment, and the `@` word is not finished.
+    var onBlur: () -> Void = {}
     @State private var text = AttributedString()
     @State private var selection = AttributedTextSelection()
     /// The plain text the editor shows, to tell typing from our own re-drawing of highlights.
@@ -68,7 +76,12 @@ struct QuickAddField: View {
             .scrollDisabled(true)
             .padding(.horizontal, -5)  // the editor's own inset, to line up with the other fields
             .focused($isFocused)
-            .onAppear { isFocused = true }
+            .onAppear {
+                draw()
+                isFocused = autofocus
+            }
+            .onChange(of: isFocused) { if !isFocused && suggestions.isEmpty { onBlur() } }
+            .onChange(of: revision) { draw(placingCursor: true) }
             .overlay(alignment: .topLeading) {
                 if text.characters.isEmpty {
                     Text("Title").foregroundStyle(.tertiary).allowsHitTesting(false)
@@ -167,7 +180,7 @@ struct QuickAddField: View {
     }
 
     /// Shows Quick Add's text with its highlights, keeping the cursor where Quick Add has it.
-    private func draw() {
+    private func draw(placingCursor: Bool = false) {
         let plain = quickAdd.text()
         title = quickAdd.title()
         highlighted = quickAdd.highlights()
@@ -179,7 +192,7 @@ struct QuickAddField: View {
         let moved = plain != String(text.characters)
         shown = plain
         text = drawn
-        if moved {
+        if moved || placingCursor {
             let cursor = NSRange(location: Int(quickAdd.cursor()), length: 0)
             selection = AttributedTextSelection(insertionPoint: Range(cursor, in: drawn)?.lowerBound ?? drawn.endIndex)
         }
