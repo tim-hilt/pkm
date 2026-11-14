@@ -49,7 +49,7 @@ import Testing
         model.add(title: "Buy milk", planning: .active)
         model.toggleDone(model.tasks[0])
         #expect(model.tasks.map(\.done) == [true])
-        #expect(model.pendingClose == .init(title: "Buy milk", closing: .done))
+        #expect(model.pendingClose == .done)
         #expect(try openModel().tasks.map(\.title) == ["Buy milk"])  // nothing saved yet
         model.commit()
         #expect(model.tasks.isEmpty && model.pendingClose == nil)
@@ -70,7 +70,7 @@ import Testing
         let model = try openModel()
         model.add(title: "Oops", planning: .active)
         model.close(model.tasks[0], as: .rejected)
-        #expect(model.tasks.isEmpty && model.pendingClose?.closing == .rejected)
+        #expect(model.tasks.isEmpty && model.pendingClose == .rejected)
         model.revert()
         #expect(model.tasks.map(\.title) == ["Oops"])
     }

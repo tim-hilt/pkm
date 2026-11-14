@@ -74,7 +74,7 @@ struct TasksView: View {
                 #endif
             }
             .safeAreaInset(edge: .bottom) {
-                if let pendingClose = model.pendingClose { ClosedToast(pendingClose: pendingClose) }
+                if let pendingClose = model.pendingClose { ClosedToast(closing: pendingClose) }
             }
             .animation(.default, value: model.pendingClose)
             .addButton("New Task", identifier: "add-task") { isAdding = true }
@@ -85,20 +85,17 @@ struct TasksView: View {
     }
 }
 
-/// Names the Task just Closed and offers to Revert it.
+/// Tells that a Task was just Closed and offers to Revert it.
 private struct ClosedToast: View {
     @Environment(TasksModel.self) private var model
-    let pendingClose: TasksModel.PendingClose
+    let closing: Closing
 
     var body: some View {
         HStack {
-            Group {
-                switch pendingClose.closing {
-                case .done: Text("\(pendingClose.title) done")
-                case .rejected: Text("\(pendingClose.title) rejected")
-                }
+            switch closing {
+            case .done: Text("Task Done")
+            case .rejected: Text("Task Rejected")
             }
-            .lineLimit(1)
             Spacer()
             Button("Revert") { model.revert() }
                 .accessibilityIdentifier("revert-close")

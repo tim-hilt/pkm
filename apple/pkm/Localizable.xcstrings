@@ -1,28 +1,6 @@
 {
   "sourceLanguage": "en",
   "strings": {
-    "%@ done": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ done"
-          }
-        }
-      }
-    },
-    "%@ rejected": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ rejected"
-          }
-        }
-      }
-    },
     "%@, %lld %% read": {
       "extractionState": "manual",
       "localizations": {
@@ -2131,6 +2109,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Task"
+          }
+        }
+      }
+    },
+    "Task Done": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Task Done"
+          }
+        }
+      }
+    },
+    "Task Rejected": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Task Rejected"
           }
         }
       }

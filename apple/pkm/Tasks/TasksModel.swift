@@ -53,11 +53,7 @@ final class TasksModel {
     }
 
     /// The Close that can still be Reverted, for the toast.
-    struct PendingClose: Equatable {
-        let title: String
-        let closing: Closing
-    }
-    private(set) var pendingClose: PendingClose?
+    private(set) var pendingClose: Closing?
 
     /// A Close is saved once its toast has been shown for `revertWindow`.
     init(store: TaskStore, revertWindow: Duration = .seconds(5)) {
@@ -158,7 +154,7 @@ final class TasksModel {
             reload()
             return
         }
-        pendingClose = PendingClose(title: task.title, closing: closing)
+        pendingClose = closing
         reload()
         commitTimer = Task { [revertWindow] in
             try? await Task.sleep(for: revertWindow)
