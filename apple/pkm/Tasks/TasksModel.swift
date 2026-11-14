@@ -12,8 +12,13 @@ final class TasksModel {
     var planning: Planning = .active {
         didSet { reload() }
     }
-    /// The Task whose sheet is open, over the list shown.
-    var editing: ListedTask?
+    /// The Tasks of the open sheet's stack, by id, first opened first: a Blocker
+    /// opened from a Task is pushed on it. Empty when no sheet is open. Over the
+    /// list shown, which opening a Blocker never changes.
+    private(set) var editing: [String] = []
+    /// Whether the Task on top was last saved with an empty Title, which keeps
+    /// the stack as it is until it has one.
+    private var isTitleMissing = false
     /// The Tasks planned as `planning`, in their order, each followed by its Subtasks.
     private(set) var tasks: [ListedTask] = []
     /// Parents whose Subtasks are hidden.
@@ -35,15 +40,48 @@ final class TasksModel {
     /// Opens the sheet of the Open Task `id`, over the list it is in. `nil` opens
     /// no sheet; an unknown or Closed `id` shows the Active list.
     func open(id: String?) {
-        editing = nil
+        closeEditing()
         guard let id else { return }
         let isTask = { (task: ListedTask) in task.id == id && !task.closed }
         let list = [Planning.active, .backlog].first {
             ((try? store.tasks(planning: $0)) ?? []).contains(where: isTask)
         }
         planning = list ?? .active
-        editing = tasks.first(where: isTask)
+        if let task = tasks.first(where: isTask) { startEditing(task) }
     }
+
+    /// Opens the sheet of an Open `task` of the list shown, as the only one in the stack.
+    func startEditing(_ task: ListedTask) {
+        editing = [task.id]
+        isTitleMissing = false
+    }
+
+    /// Pushes the Open Task `id`, a Blocker of the one on top, onto the stack.
+    /// False, pushing nothing, if it is Closed or gone, or while the Title on top is empty.
+    @discardableResult
+    func openBlocker(id: String) -> Bool {
+        guard !editing.isEmpty, !isTitleMissing, let blocker = find(id), !blocker.closed else { return false }
+        editing.append(id)
+        return true
+    }
+
+    /// Pops the Task on top; refused while its Title is empty or it is the last.
+    func back() {
+        guard editing.count > 1, !isTitleMissing else { return }
+        editing.removeLast()
+    }
+
+    /// Closes the sheet, whatever the stack's depth.
+    func closeEditing() {
+        editing = []
+        isTitleMissing = false
+    }
+
+    /// Whether the sheet can't be left or popped: the Title on top is empty.
+    var isLeavingBlocked: Bool { isTitleMissing }
+
+    /// The Task `id` as last saved, from either list.
+    func task(id: String) -> ListedTask? { find(id) }
 
     func isCollapsed(_ task: ListedTask) -> Bool { collapsed.contains(task.id) }
 
@@ -88,7 +126,9 @@ final class TasksModel {
     func edit(_ task: ListedTask, title: String, description: String, priority: UInt8, tags: [String]) -> Bool {
         guard tags.allSatisfy(isValidTag) else { return false }
         let saved = current(task)
-        let title = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? saved.title : title
+        let isEmpty = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if task.id == editing.last { isTitleMissing = isEmpty }
+        let title = isEmpty ? saved.title : title
         if title != saved.title || description != saved.description || priority != saved.priority {
             guard (try? store.edit(id: task.id, title: title, description: description, priority: priority)) != nil
             else { return false }
@@ -193,9 +233,15 @@ final class TasksModel {
     /// Sync wrote or deleted Task files: the list shows what is there now.
     func syncDidChange() { reload() }
 
-    /// `task` as last saved, if it is in the list shown; else as given.
+    /// `task` as last saved, if it is in either list; else as given.
     private func current(_ task: ListedTask) -> ListedTask {
-        tasks.first { $0.id == task.id } ?? task
+        find(task.id) ?? task
+    }
+
+    private func find(_ id: String) -> ListedTask? {
+        if let task = tasks.first(where: { $0.id == id }) { return task }
+        let other: Planning = planning == .active ? .backlog : .active
+        return ((try? store.tasks(planning: other)) ?? []).first { $0.id == id }
     }
 
     private func reload() {

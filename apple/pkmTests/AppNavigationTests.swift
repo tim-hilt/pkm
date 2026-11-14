@@ -142,11 +142,11 @@ extension AppNavigationTests {
         links.follow(URL(string: "pkm://tasks/\(id)")!)
         #expect(links.navigation.selected == .tasks)
         #expect(tasks.planning == .backlog)
-        #expect(tasks.editing?.id == id)
+        #expect(tasks.editing == [id])
 
         links.follow(URL(string: "pkm://tasks/unknown")!)
         #expect(tasks.planning == .active)
-        #expect(tasks.editing == nil)
+        #expect(tasks.editing.isEmpty)
     }
 
     @Test func aContextLinkToTasksClosesAnOpenTask() throws {
@@ -154,7 +154,7 @@ extension AppNavigationTests {
         tasks.add(title: "Now", planning: .active)
         links.follow(URL(string: "pkm://tasks/\(tasks.tasks[0].id)")!)
         links.follow(URL(string: "pkm://tasks")!)
-        #expect(tasks.editing == nil)
+        #expect(tasks.editing.isEmpty)
     }
 
     @Test func aLinkToAClosedSubtaskOpensNoSheet() throws {
@@ -167,6 +167,6 @@ extension AppNavigationTests {
 
         links.follow(URL(string: "pkm://tasks/\(sub.id)")!)
         #expect(tasks.planning == .active)
-        #expect(tasks.editing == nil)
+        #expect(tasks.editing.isEmpty)
     }
 }

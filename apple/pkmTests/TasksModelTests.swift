@@ -107,6 +107,81 @@ import Testing
         #expect(try openModel().tasks.map(\.title) == ["Kept"])
     }
 
+    @Test func openingBlockersStacksTasksAndBackPopsThem() throws {
+        let model = try openModel()
+        model.add(title: "b", planning: .active)
+        model.add(title: "a", planning: .active)
+        let (a, b) = (model.tasks[1], model.tasks[0])
+        model.setBlockedBy(a, to: [b.id])
+        model.startEditing(model.tasks[1])
+        #expect(model.openBlocker(id: model.tasks[1].blockedBy[0].id))
+        #expect(model.editing == [a.id, b.id])
+        model.back()
+        #expect(model.editing == [a.id])
+        model.closeEditing()
+        #expect(model.editing.isEmpty)
+    }
+
+    @Test func aBlockerOnTheOtherListOpensWithoutChangingTheListShown() throws {
+        let model = try openModel()
+        model.add(title: "far", planning: .backlog)
+        model.add(title: "a", planning: .active)
+        model.planning = .backlog
+        let farTask = model.tasks[0]
+        model.planning = .active
+        model.setBlockedBy(model.tasks[0], to: [farTask.id])
+        model.startEditing(model.tasks[0])
+        #expect(model.openBlocker(id: model.tasks[0].blockedBy[0].id))
+        #expect(model.editing.last == farTask.id)
+        #expect(model.planning == .active)
+    }
+
+    @Test func aClosedBlockerAndAnEmptyTitleRefuseOpening() throws {
+        let model = try openModel()
+        model.add(title: "b", planning: .active)
+        model.add(title: "a", planning: .active)
+        let (a, b) = (model.tasks[1], model.tasks[0])
+        model.setBlockedBy(a, to: [b.id])
+        model.startEditing(a)
+        model.edit(a, title: " ", description: "", priority: 4, tags: [])
+        #expect(!model.openBlocker(id: b.id))
+        model.edit(a, title: "a", description: "", priority: 4, tags: [])
+        #expect(model.openBlocker(id: b.id))
+        model.back()
+        model.close(model.tasks[0], as: .rejected)
+        model.commit()
+        #expect(!model.openBlocker(id: b.id))
+        #expect(model.editing == [a.id])
+    }
+
+    @Test func backIsRefusedWhileTheTitleOnTopIsEmptyAndShowsTheLatestSavedState() throws {
+        let model = try openModel()
+        model.add(title: "b", planning: .active)
+        model.add(title: "a", planning: .active)
+        let (a, b) = (model.tasks[1], model.tasks[0])
+        model.setBlockedBy(a, to: [b.id])
+        model.startEditing(a)
+        model.openBlocker(id: model.tasks[1].blockedBy[0].id)
+        model.edit(b, title: "", description: "", priority: 4, tags: [])
+        model.back()
+        #expect(model.editing == [a.id, b.id])
+        model.edit(b, title: "b2", description: "", priority: 4, tags: [])
+        model.back()
+        #expect(model.task(id: a.id)?.blockedBy.map(\.title) == ["b2"])
+    }
+
+    @Test func aBlockerOnTheOtherListIsSavedToo() throws {
+        let model = try openModel()
+        model.add(title: "far", planning: .backlog)
+        model.add(title: "a", planning: .active)
+        model.planning = .backlog
+        let far = model.tasks[0]
+        model.planning = .active
+        model.setBlockedBy(model.tasks[0], to: [far.id])
+        model.edit(far, title: "far2", description: "", priority: 4, tags: [])
+        #expect(model.task(id: far.id)?.title == "far2")
+    }
+
     @Test func editingChangesTheRowAndStaysAcrossLaunches() throws {
         let model = try openModel()
         model.add(title: "Buy milk", planning: .active)

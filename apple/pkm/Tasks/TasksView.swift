@@ -32,7 +32,7 @@ struct TasksView: View {
                                 model.move(moved, under: task)
                                 return true
                             }
-                            .onTapGesture { if !task.closed { model.editing = task } }
+                            .onTapGesture { if !task.closed { model.startEditing(task) } }
                             .contextMenu {
                                 if !task.closed && !task.done {  // a pending Done is Reverted at its circle
                                     Button("Add Subtask", systemImage: "plus.circle") { subtaskParent = task }
@@ -83,7 +83,9 @@ struct TasksView: View {
             .addButton("New Task", identifier: "add-task") { isAdding = true }
             .sheet(isPresented: $isAdding) { NewTaskSheet() }
             .sheet(item: $subtaskParent) { NewTaskSheet(parent: $0) }
-            .sheet(item: $model.editing) { EditTaskSheet(task: $0) }
+            .sheet(isPresented: Binding(get: { !model.editing.isEmpty }, set: { if !$0 { model.closeEditing() } })) {
+                EditTaskSheet()
+            }
         }
     }
 }
@@ -241,14 +243,51 @@ private struct NewTaskSheet: View {
     }
 }
 
+/// The sheet over the list: a stack of Tasks following the model's, the Task
+/// opened first at the bottom and each Blocker opened from one pushed on it.
+/// While the Title on top is empty the sheet can't be left.
+private struct EditTaskSheet: View {
+    @Environment(TasksModel.self) private var model
+
+    /// The pushed Tasks; popping (Back, edge swipe) goes through the model.
+    private var pushed: Binding<[String]> {
+        Binding(
+            get: { Array(model.editing.dropFirst()) },
+            set: { path in
+                if path.count > model.editing.count - 1, let id = path.last {
+                    model.openBlocker(id: id)
+                } else {
+                    while model.editing.count > path.count + 1 { model.back() }
+                }
+            }
+        )
+    }
+
+    @ViewBuilder private func form(_ id: String?) -> some View {
+        if let task = id.flatMap(model.task(id:)) { EditTaskForm(task: task) }
+    }
+
+    var body: some View {
+        NavigationStack(path: pushed) {
+            form(model.editing.first)
+                .navigationDestination(for: String.self) { form($0) }
+        }
+        .interactiveDismissDisabled(model.isLeavingBlocked)
+        #if os(macOS)
+            .frame(minWidth: 360)
+        #endif
+        .presentationDetents([.medium])
+    }
+}
+
 /// Edits a Task, saving as it goes: Title and Description after a pause in typing
 /// and when their field loses focus, everything else at once, and a Tag typed but
 /// not submitted when the view is left. While the Title is empty the rest still
 /// saves (the last saved Title stays), a hint shows, and the view can't be left.
-/// On macOS Done closes it.
-private struct EditTaskSheet: View {
+/// On macOS Done closes the whole sheet. An Open Blocker is a row that opens its
+/// own form on top; Back then shows this one as last saved.
+private struct EditTaskForm: View {
     @Environment(TasksModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
     let task: ListedTask
     @State private var title: String
     @State private var description: String
@@ -356,9 +395,11 @@ private struct EditTaskSheet: View {
                 Section("Blocked by") {
                     ForEach(blockedBy, id: \.id) { blocker in
                         HStack {
-                            Text(blocker.title)
-                                .strikethrough(blocker.closed)
-                                .foregroundStyle(blocker.closed ? .secondary : .primary)
+                            if blocker.closed {
+                                Text(blocker.title).strikethrough().foregroundStyle(.secondary)
+                            } else {
+                                NavigationLink(blocker.title, value: blocker.id).disabled(!hasTitle)
+                            }
                             Spacer()
                             Button("Remove \(blocker.title)", systemImage: "minus.circle") {
                                 blockedBy.removeAll { $0.id == blocker.id }
@@ -389,22 +430,27 @@ private struct EditTaskSheet: View {
             .toolbar {
                 #if os(macOS)
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") { dismiss() }.disabled(!hasTitle)
+                        Button("Done") { model.closeEditing() }.disabled(!hasTitle)
                     }
                 #endif
             }
         }
         .onChange(of: focus) { save() }
+        .onChange(of: hasTitle) { save() }  // keeps the model's Back and Blocker rules current
         .task(id: text) {
             guard (try? await Task.sleep(for: Self.pause)) != nil else { return }
             save()
         }
         .onDisappear { save(includingTypedTag: true) }
-        .interactiveDismissDisabled(!hasTitle)
-        #if os(macOS)
-            .frame(minWidth: 360)
-        #endif
-        .presentationDetents([.medium])
+        .navigationBarBackButtonHidden(!hasTitle)
+        .onAppear(perform: refresh)
+    }
+
+    /// Shows what is saved now: this Task may have been edited from a Blocker's form on top.
+    private func refresh() {
+        guard let saved = model.task(id: task.id) else { return }
+        (title, description, priority, tags, blockedBy) =
+            (saved.title, saved.description, saved.priority, saved.tags, saved.blockedBy)
     }
 
     /// Saves what is edited, if the Tags are valid; `includingTypedTag` adds a valid
