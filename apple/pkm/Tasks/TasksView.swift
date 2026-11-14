@@ -199,9 +199,10 @@ private struct NewTaskSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Title", text: $title)
+                TextField("Title", text: $title, axis: .vertical)
                     .focused($isTitleFocused)
                     .onSubmit(add)
+                    .submitLabel(.done)
                     .accessibilityIdentifier("task-title")
             }
             .formStyle(.grouped)
@@ -279,8 +280,9 @@ private struct EditTaskSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Title", text: $title)
+                TextField("Title", text: $title, axis: .vertical)
                     .onSubmit(save)
+                    .submitLabel(.done)
                     .accessibilityIdentifier("task-title")
                 TextField("Description", text: $description, axis: .vertical)
                     .lineLimit(3...8)
