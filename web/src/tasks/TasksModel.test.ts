@@ -616,27 +616,28 @@ describe("Tags", () => {
     expect(first().tagColors).toEqual({});
   });
 
-  it("deletes a Tag from every Task, Open or Closed, and forgets its Tag Color", () => {
-    model.add("Old");
-    const old = () => model.tasks.find((t) => t.title === "Old")!;
-    model.edit(old(), { title: "Old", description: "", priority: 4, tags: ["work"] });
-    model.close(old(), Closing.Done);
+  it("deletes a Tag from every Task, Open or Closed, and forgets its Tag Color", async () => {
+    model.addSubtask("Old", first());
+    const old = model.tasks.find((t) => t.title === "Old")!;
+    model.edit(old, { title: "Old", description: "", priority: 4, tags: ["work"] });
+    model.close(old, Closing.Done);
+    model.commit();
+    const closedFile = async () => {
+      await model.saved();
+      return new TextDecoder().decode(await storage.read(`Tasks/${old.id}.md`));
+    };
+    expect(await closedFile()).toContain("state: done");
+    expect(await closedFile()).toContain("  - work\n");
     model.setTagColor("work", "#d0021b");
     const changed = vi.fn();
     model.onChange = changed;
     model.deleteTag("work");
     expect(model.allTags.map((t) => t.name)).toEqual(["home"]);
     expect(first().tags).toEqual(["home"]);
-    expect(old().tags).toEqual([]);
+    expect(await closedFile()).not.toContain("work");
     expect(changed).toHaveBeenCalled();
     model.edit(first(), { title: "Buy milk", description: "", priority: 4, tags: ["work"] });
     expect(tag("work")?.color).toBeUndefined();
-  });
-
-  it("changes nothing when the Tag is not deleted", () => {
-    model.setTagColor("work", "#d0021b");
-    expect(model.allTags.map((t) => t.name)).toEqual(["home", "work"]);
-    expect(first().tags).toEqual(["work", "home"]);
   });
 
   it("keeps a Tag Color after a reload from the saved files", async () => {

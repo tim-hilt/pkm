@@ -8,8 +8,8 @@ const defaultGrey = "#808080";
 
 /**
  * Settings' "Manage Tags" subpage: every Tag, alphabetically, in its Tag
- * Color, each with a color input, a Default and a Delete button; "No Tags" if there are
- * none. `back` returns to Settings. Call `show` to list the Tags as they are.
+ * Color, each with a color input, a Default and a Delete button; "No Tags"
+ * if there are none. `back` returns to Settings. Call `show` to list the Tags as they are.
  */
 export class ManageTagsPage {
   readonly element = make("div", "manage-tags");
@@ -39,13 +39,13 @@ export class ManageTagsPage {
           this.tasks.setTagColor(name, input.value);
           this.show();
         });
-        const reset = button("manage-tags-default", "Default", () => {
+        const reset = button("manage-tags-button", "Default", () => {
           this.tasks.setTagColor(name, undefined);
           this.show();
         });
         reset.disabled = color === undefined;
         reset.setAttribute("aria-label", `Reset ${name} to Default`);
-        const remove = button("manage-tags-default", "Delete", () => {
+        const remove = button("manage-tags-button", "Delete", () => {
           deleteTagDialog(this.tasks, this.element, name, () => this.show());
         });
         remove.setAttribute("aria-label", `Delete ${name}`);

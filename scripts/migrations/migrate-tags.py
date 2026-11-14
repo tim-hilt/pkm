@@ -7,6 +7,7 @@ invalid Tags from the Task files."""  # `--test` runs its tests
 import json
 import os
 import re
+import stat
 import sys
 import tempfile
 import unittest
@@ -30,15 +31,29 @@ def now():
 
 
 def write_atomically(path, text):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    fd, temp = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
+    """Replaces `path` whole through a rename, so a crash leaves the old or
+    the new file. It keeps the old file's permissions, as the WebDAV server
+    must still read it; `mkstemp` alone would make it private."""
+    folder = os.path.dirname(path)
+    os.makedirs(folder, exist_ok=True)
+    fd, temp = tempfile.mkstemp(dir=folder, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
             f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(temp, stat.S_IMODE(os.stat(path).st_mode) if os.path.exists(path) else new_file_mode())
         os.replace(temp, path)
     except BaseException:
         os.unlink(temp)
         raise
+
+
+def new_file_mode():
+    """The permissions a file created with `open` gets."""
+    umask = os.umask(0)
+    os.umask(umask)
+    return 0o666 & ~umask
 
 
 def unquote(item):
@@ -50,42 +65,37 @@ def unquote(item):
 
 def clean_task(text, stamp):
     """(Tags kept, new text or None if nothing changes). Only `tags` and
-    `updated` are touched; no front matter or no `tags` means no change."""
+    `updated` are touched, as the app writes them: an emptied `tags` is
+    left out. No front matter or no `tags` means no change."""
     lines = text.splitlines(keepends=True)
-    if not lines or lines[0].rstrip("\r\n") != "---":
+    bare = [line.rstrip("\r\n") for line in lines]
+    if not bare or bare[0] != "---" or "---" not in bare[1:]:
         return [], None
-    close = next((i for i, l in enumerate(lines[1:], 1) if l.rstrip("\r\n") == "---"), None)
-    if close is None:
-        return [], None
-    eol = "\r\n" if lines[0].endswith("\r\n") else "\n"
-    kept, out, in_tags, removed = [], [], False, False
-    for i, line in enumerate(lines):
-        bare = line.rstrip("\r\n")
-        if 0 < i < close:
-            if bare.startswith("tags:"):
-                in_tags = True
-            elif in_tags and bare.lstrip().startswith("- "):
-                tag = unquote(bare.lstrip()[2:])
-                if is_valid(tag):
-                    kept.append(tag)
-                else:
-                    removed = True
-                    continue
-            elif bare.strip():
-                in_tags = False
-        out.append(line)
-    if not removed:
+    close = bare.index("---", 1)
+    kept, dropped, in_tags, tags_at = [], set(), False, None
+    for i in range(1, close):
+        if bare[i].startswith("tags:"):
+            in_tags, tags_at = True, i
+        elif in_tags and bare[i].lstrip().startswith("- "):
+            tag = unquote(bare[i].lstrip()[2:])
+            if is_valid(tag):
+                kept.append(tag)
+            else:
+                dropped.add(i)
+        elif bare[i].strip():
+            in_tags = False
+    if not dropped:
         return kept, None
-    stamped = False
-    for i, line in enumerate(out):
-        if line.startswith("updated:") and i < close:
-            out[i] = f"updated: {stamp}{eol}"
-            stamped = True
-            break
-    if not stamped:
-        at = next(i for i, l in enumerate(out[1:], 1) if l.rstrip("\r\n") == "---")
-        out.insert(at, f"updated: {stamp}{eol}")
-    return kept, "".join(out)
+    if not kept:
+        dropped.add(tags_at)
+    front = [line for i, line in enumerate(lines[:close]) if i not in dropped]
+    stamped = f"updated: {stamp}{lines[0][3:]}"  # with the file's line ending
+    at = next((i for i, line in enumerate(front) if line.startswith("updated:")), None)
+    if at is None:
+        front.append(stamped)
+    else:
+        front[at] = stamped
+    return kept, "".join(front + lines[close:])
 
 
 def migrate(root, stamp=None):
@@ -172,6 +182,23 @@ class MigrateTests(unittest.TestCase):
             task(["home", "ok-1"], updated="T1"),
         )
         self.assertEqual(sorted(self.tags()), ["home", "ok-1"])
+
+    def test_drops_the_tags_property_once_no_tag_is_left(self):
+        self.put("a.md", task(["Bad"]))
+        migrate(self.root, "T1")
+        self.assertEqual(self.read("Tasks", "a.md"), task([], updated="T1").replace("tags:\n", ""))
+
+    def test_adds_updated_to_the_front_matter_not_the_body(self):
+        self.put("a.md", "---\ntags:\n  - Bad\n  - B2\n---\nupdated: never\n")
+        migrate(self.root, "T1")
+        self.assertEqual(self.read("Tasks", "a.md"), "---\nupdated: T1\n---\nupdated: never\n")
+
+    def test_keeps_the_permissions_of_a_rewritten_file(self):
+        self.put("a.md", task(["Bad", "home"]))
+        path = os.path.join(self.root, "Tasks", "a.md")
+        os.chmod(path, 0o644)
+        migrate(self.root, "T1")
+        self.assertEqual(os.stat(path).st_mode & 0o777, 0o644)
 
     def test_rerun_changes_nothing(self):
         self.put("a.md", task(["home", "Bad"]))
