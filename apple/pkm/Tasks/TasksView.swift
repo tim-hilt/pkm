@@ -211,7 +211,9 @@ private struct NewTaskSheet: View {
                 .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                #if os(macOS)
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                #endif
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add", action: add).disabled(!canAdd)
                 }
@@ -233,7 +235,7 @@ private struct NewTaskSheet: View {
     }
 }
 
-/// Edits a Task's Title, Description, Priority and Tags; Save is off while the Title is empty.
+/// Edits a Task's Title, Description, Priority and Tags; on iOS closing the sheet saves it (not with an empty Title); on macOS Save is off while the Title is empty.
 private struct EditTaskSheet: View {
     @Environment(TasksModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -246,6 +248,7 @@ private struct EditTaskSheet: View {
     @State private var refusedTagText = false
     @State private var blockedBy: [Blocker]
     @State private var refusedBlockedBy = false
+    @State private var didSave = false
 
     init(task: ListedTask) {
         self.task = task
@@ -360,12 +363,17 @@ private struct EditTaskSheet: View {
                 .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save", action: save).disabled(!canSave)
-                }
+                #if os(macOS)
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save", action: save).disabled(!canSave)
+                    }
+                #endif
             }
         }
+        #if os(iOS)
+            .onDisappear(perform: save)
+        #endif
         #if os(macOS)
             .frame(minWidth: 360)
         #endif
@@ -373,12 +381,16 @@ private struct EditTaskSheet: View {
     }
 
     private func save() {
+        guard !didSave else { return }
         var saved = tags
         if isValidTag(tag: newTag), !saved.contains(newTag) { saved.append(newTag) }
         guard model.setBlockedBy(task, to: blockedBy.map(\.id)) else {
             refusedBlockedBy = true
             return
         }
-        if model.edit(task, title: title, description: description, priority: priority, tags: saved) { dismiss() }
+        if model.edit(task, title: title, description: description, priority: priority, tags: saved) {
+            didSave = true
+            dismiss()
+        }
     }
 }
