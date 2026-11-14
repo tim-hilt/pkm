@@ -251,13 +251,9 @@ export class TasksModel {
   /** Adds a Task and shows the list it landed in. False, adding nothing, if the Title is empty or a Tag invalid. */
   add(title: string, planning = Planning.Active, extras: NewTask = {}): boolean {
     const { store } = this.files;
-    const { priority = 4, tags = [] } = extras;
-    if (
-      !this.change(() =>
-        this.describe(store.create(title, planning, priority, tags), title, extras),
-      )
-    )
-      return false;
+    const { description, priority = 4, tags = [] } = extras;
+    const create = () => store.create(title, planning, priority, tags);
+    if (!this.change(() => this.describe(create(), title, priority, description))) return false;
     this.list = planning;
     this.reload();
     this.onChange();
@@ -304,7 +300,7 @@ export class TasksModel {
     { description, priority, tags }: Omit<TaskEdit, "title">,
   ): ListedTask | undefined {
     const title = quickAdd.title();
-    if (title.trim() === "") return undefined;
+    if (title === "") return undefined;
     const merged = [...tags, ...quickAdd.tags().filter((t) => !tags.includes(t))];
     const edit = { title, description, priority: quickAdd.priority() ?? priority, tags: merged };
     return this.edit(task, edit) ? this.find(task.id) : undefined;
@@ -313,18 +309,13 @@ export class TasksModel {
   /** Adds a Subtask under `parent` and shows it. False, adding nothing, if the Title is empty or a Tag invalid. */
   addSubtask(title: string, parent: ListedTask, extras: NewTask = {}): boolean {
     this.collapsed.delete(parent.id);
-    const { priority = 4, tags = [] } = extras;
-    return this.apply(() =>
-      this.describe(
-        this.files.store.createSubtask(parent.id, title, priority, tags),
-        title,
-        extras,
-      ),
-    );
+    const { description, priority = 4, tags = [] } = extras;
+    const create = () => this.files.store.createSubtask(parent.id, title, priority, tags);
+    return this.apply(() => this.describe(create(), title, priority, description));
   }
 
-  /** Gives the Task `id`, just created from `title`, its Description. */
-  private describe(id: string, title: string, { description = "", priority = 4 }: NewTask): void {
+  /** Gives the Task `id`, just created with `title` and `priority`, its Description, if any. */
+  private describe(id: string, title: string, priority: number, description = ""): void {
     if (description.trim() !== "") this.files.store.edit(id, title, description, priority, []);
   }
 

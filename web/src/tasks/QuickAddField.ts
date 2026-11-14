@@ -5,7 +5,10 @@ import type { TasksModel } from "./TasksModel";
 
 let nextId = 0;
 
-/** The UTF-16 range of `old` that `now` replaced, and what replaced it: all but their common start and end. */
+/**
+ * The UTF-16 range of `old` that `now` replaced, and what replaced it: all but
+ * their common start and end, never splitting a surrogate pair.
+ */
 export function textEdit(
   old: string,
   now: string,
@@ -13,9 +16,16 @@ export function textEdit(
   const limit = Math.min(old.length, now.length);
   let head = 0;
   while (head < limit && old[head] === now[head]) head++;
+  if (head > 0 && (isLowSurrogate(old, head) || isLowSurrogate(now, head))) head--;
   let tail = 0;
   while (tail < limit - head && old[old.length - 1 - tail] === now[now.length - 1 - tail]) tail++;
+  if (tail > 0 && isLowSurrogate(old, old.length - tail)) tail--;
   return { start: head, end: old.length - tail, inserted: now.slice(head, now.length - tail) };
+}
+
+function isLowSurrogate(text: string, at: number): boolean {
+  const unit = text.charCodeAt(at);
+  return unit >= 0xdc00 && unit <= 0xdfff;
 }
 
 /** A Shortcut to draw: plain copy of the core's, which must be freed. */
@@ -32,10 +42,11 @@ interface Query {
   leaveOut: string[];
 }
 
-/** The UTF-16 offset of the selection's focus in `root`'s text; none if it is elsewhere. */
+/** The UTF-16 offset of the caret in `root`'s text; none if it is elsewhere or a range is selected. */
 function caretOffset(root: HTMLElement): number | undefined {
   const selection = getSelection();
-  if (!selection?.focusNode || !root.contains(selection.focusNode)) return undefined;
+  if (!selection?.isCollapsed || !selection.focusNode || !root.contains(selection.focusNode))
+    return undefined;
   const range = document.createRange();
   range.selectNodeContents(root);
   range.setEnd(selection.focusNode, selection.focusOffset);
@@ -93,12 +104,21 @@ export class QuickAddField {
   /** The rows as last drawn, to draw only what changed. */
   private listKey = "";
 
-  /** `taskTags` are Tags the Task already has, which the list doesn't suggest. */
+  private readonly taskTags: () => readonly string[];
+  private readonly submit: () => void;
+
+  /**
+   * `taskTags` gives the Tags the Task has now, which the list doesn't suggest;
+   * `submit` is what Return does while the list is closed, submitting the form
+   * if omitted.
+   */
   constructor(
     private readonly model: TasksModel,
     private quickAdd: TaskQuickAdd,
-    private readonly taskTags: string[] = [],
+    options: { taskTags?: () => readonly string[]; submit?: () => void } = {},
   ) {
+    this.taskTags = options.taskTags ?? (() => []);
+    this.submit = options.submit ?? (() => this.element.closest("form")?.requestSubmit());
     const editor = this.editor;
     editor.setAttribute("contenteditable", "plaintext-only");
     editor.setAttribute("role", "combobox");
@@ -170,8 +190,10 @@ export class QuickAddField {
       const { start, end, inserted } = textEdit(old, now);
       this.quickAdd.replace(start, end, inserted);
     }
+    // While a range is selected the cursor, and so the highlights, stay: a
+    // redraw would drop the selection. Line breaks pasted in become spaces,
+    // which keeps the length.
     const caret = caretOffset(this.editor);
-    // Line breaks pasted in become spaces, which keeps the length.
     if (caret !== undefined && caret <= this.quickAdd.text().length)
       this.quickAdd.moveCursor(caret);
     this.draw();
@@ -200,7 +222,7 @@ export class QuickAddField {
         event.preventDefault();
         // While the list is open Return picks instead of adding.
         if (open) this.pick(this.suggestions[this.selected].tag);
-        else this.element.closest("form")?.requestSubmit();
+        else this.submit();
         break;
       case "Tab":
         if (!open || event.shiftKey) return;
@@ -299,7 +321,7 @@ export class QuickAddField {
     this.suggestions = [];
     if (this.query && focused && !this.closed) {
       const { query, leaveOut } = this.query;
-      const { matches, create } = this.model.suggestTags(query, [...leaveOut, ...this.taskTags]);
+      const { matches, create } = this.model.suggestTags(query, [...leaveOut, ...this.taskTags()]);
       this.suggestions = matches.map((tag) => ({ tag, isNew: false }));
       if (create) this.suggestions.push({ tag: query, isNew: true });
     }

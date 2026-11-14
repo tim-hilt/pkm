@@ -161,10 +161,11 @@ const typingPause = 500;
  * Edits a Task's Title, Description, Priority, Tags and Blocked by, saving as
  * the user goes: text after a pause and when its field loses focus, the rest
  * at once. The Title is Quick Add, starting with everything Ignored: the pause
- * saves it without pending Shortcuts, and Enter, losing focus and closing
+ * saves it without pending Shortcuts, and Return, losing focus and closing
  * apply them (Tags are added, a Priority Shortcut replaces the Priority); the
- * Priority control Ignores a pending Priority Shortcut. Done closes it. While the Title is empty the last saved one is kept,
- * a hint says why, and the dialog can't be left (Done is off, Esc ignored).
+ * Priority control Ignores a pending Priority Shortcut. Done closes it. While
+ * the Title is empty the last saved one is kept, a hint says why, and the
+ * dialog can't be left (Done is off, Esc ignored).
  * Closing saves what is pending, with a Tag typed but not added if it is valid.
  * An Open Blocker's title opens it over this Task; Back (with a Task below) returns,
  * and is off while the Title is empty.
@@ -176,7 +177,11 @@ export function editTaskDialog(
   places: Pick<TaskPlaces, "open" | "back">,
 ): HTMLDialogElement {
   let quickAdd = TaskQuickAdd.fromTitle(task.title);
-  const title = new QuickAddField(model, quickAdd);
+  const tags = new TagField(model, [...task.tags], () => save());
+  const title = new QuickAddField(model, quickAdd, {
+    taskTags: () => tags.chosen(),
+    submit: () => commit(),
+  });
   const titleHint = make("p", "tasks-hint", ["A Task needs a Title."]);
   const description = make("textarea", "tasks-input");
   description.rows = 4;
@@ -193,18 +198,13 @@ export function editTaskDialog(
       tags: withTypedTag ? tags.all() : tags.chosen(),
     });
   };
-  const tags = new TagField(model, [...task.tags], save);
   /** Applies the Shortcuts of the Title: they leave the field, the Priority control and the Tags show the result. With none pending it just saves. */
   const commit = () => {
-    if (quickAdd.priority() === undefined && quickAdd.tags().length === 0) return save();
-    clearTimeout(pause);
-    model.setBlockedBy(task, blockers.ids());
-    const saved = model.commitQuickAdd(quickAdd, task, {
-      description: description.value,
-      priority,
-      tags: tags.chosen(),
-    });
+    const pending = quickAdd.priority() !== undefined || quickAdd.tags().length > 0;
+    const edit = { description: description.value, priority, tags: tags.chosen() };
+    const saved = pending ? model.commitQuickAdd(quickAdd, task, edit) : undefined;
     if (!saved) return save();
+    clearTimeout(pause);
     priority = saved.priority;
     showPriority();
     tags.set(saved.tags);
@@ -226,7 +226,7 @@ export function editTaskDialog(
   back.hidden = model.depth < 2;
   const priorities = [1, 2, 3, 4].map((value) => ({ value, text: `P${value}` }));
   const done = confirmButton("Done");
-  const titleEmpty = () => title.title.trim() === "";
+  const titleEmpty = () => title.title === "";
   const priorityChoice = choice("Priority", priorities, priority, (value) => {
     priority = value;
     quickAdd.ignorePriority(); // the last action wins
@@ -269,7 +269,9 @@ export function editTaskDialog(
   });
   form.addEventListener("focusout", (event) => {
     if (!dialog.open) return; // closing has saved, and freed Quick Add
-    if (title.element.contains(event.target as Node)) commit();
+    const leaves = (field: HTMLElement) =>
+      field.contains(event.target as Node) && !field.contains(event.relatedTarget as Node);
+    if (leaves(title.element)) commit();
     else if (event.target === description) save();
   });
   form.addEventListener("submit", (event) => {

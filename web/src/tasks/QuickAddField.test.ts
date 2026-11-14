@@ -14,6 +14,12 @@ describe("textEdit", () => {
     expect(textEdit("😀 a b", "😀 X b")).toEqual({ start: 3, end: 4, inserted: "X" });
   });
 
+  it("never splits a character made of two UTF-16 units", () => {
+    // 😀 and 😃 share their first unit; typing one before the other.
+    expect(textEdit("😀", "😃😀")).toEqual({ start: 0, end: 0, inserted: "😃" });
+    expect(textEdit("a😀", "a😃")).toEqual({ start: 1, end: 3, inserted: "😃" });
+  });
+
   it("finds nothing in equal texts", () => {
     expect(textEdit("same", "same")).toEqual({ start: 4, end: 4, inserted: "" });
   });
