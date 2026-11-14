@@ -223,6 +223,9 @@ final class TasksModel {
         reload()
     }
 
+    /// Every known Tag, alphabetically, whether or not a Task carries it.
+    var allTags: [String] { store.tags().map(\.name) }
+
     /// The known Tags starting with `prefix`, to pick from.
     func knownTags(prefix: String) -> [String] {
         (try? store.tagsWithPrefix(prefix: prefix)) ?? []

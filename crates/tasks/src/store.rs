@@ -8,8 +8,10 @@ use pkm_base::front_matter::{Document, Value};
 use pkm_base::item_id::ItemId;
 use pkm_base::random::Entropy;
 use pkm_base::tag;
+use pkm_base::tags::Tags;
+use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -197,6 +199,8 @@ pub struct Tasks {
     cache: Mutex<Cache>,
     /// The one Close that can still be reverted.
     pending: Mutex<Option<Pending>>,
+    /// Held while the Tags file is read and written back.
+    tags_lock: Mutex<()>,
 }
 
 impl Tasks {
@@ -239,6 +243,7 @@ impl Tasks {
             files,
             root,
             pending: Mutex::new(None),
+            tags_lock: Mutex::new(()),
         }
     }
 
@@ -286,7 +291,7 @@ impl Tasks {
             }
             file.set_scalar("order", order.to_string());
             file.set_scalar("updated", iso8601(now_ms()));
-            match self.write(&id, &file.render(), Overwrite::No) {
+            match self.write(&id, &file, Overwrite::No) {
                 Ok(()) => {
                     self.history.record(Event::Created, &id, now_ms())?;
                     return Ok(task_of(&file).ok_or(io::ErrorKind::InvalidData)?);
@@ -568,21 +573,15 @@ impl Tasks {
         })
     }
 
-    /// The Tags that start with `prefix` and are carried by an Open or Closed
-    /// Task, each once, sorted.
+    /// The known Tags that start with `prefix`, sorted. Reads the Tags file
+    /// only, so a Tag no Task carries any more is found too.
     pub fn tags_with_prefix(&self, prefix: &str) -> io::Result<Vec<String>> {
-        let mut found = Vec::new();
-        for listed in self.files.list(&self.root)? {
-            if listed.name.ends_with(".md")
-                && let Ok(text) = self.files.read(&self.root.join(&listed.name))
-                && let Some(file) = Document::parse(&text)
-            {
-                found.extend(tags_of(&file).into_iter().filter(|t| t.starts_with(prefix)));
-            }
-        }
-        found.sort();
-        found.dedup();
-        Ok(found)
+        Ok(self.read_tags().with_prefix(prefix))
+    }
+
+    /// Every known Tag with its Tag Color, alphabetically.
+    pub fn tags(&self) -> Vec<pkm_base::tags::Entry> {
+        self.read_tags().list()
     }
 
     /// The file of the Open Task `id` and the Task it describes.
@@ -611,7 +610,7 @@ impl Tasks {
         self.drop_missing_blockers(&mut file);
         if file.render() != before {
             file.set_scalar("updated", iso8601(now_ms()));
-            self.write(id, &file.render(), Overwrite::Yes)?;
+            self.write(id, &file, Overwrite::Yes)?;
         }
         Ok(file)
     }
@@ -677,11 +676,17 @@ impl Tasks {
     /// copy under another name (`<id> 1.md`) would shadow it. Reads only the
     /// files that changed since the cache last saw them.
     fn load(&self) -> io::Result<Nodes> {
+        let read_tags = RefCell::new(BTreeSet::new());
         let mut nodes = self
             .cache
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .nodes(&self.root, |path| read_node(self.files.as_ref(), path))?;
+            .nodes(&self.root, |path| {
+                let (node, tags) = read_node(self.files.as_ref(), path)?;
+                read_tags.borrow_mut().extend(tags);
+                Some(node)
+            })?;
+        self.remember_tags(read_tags.into_inner())?;
         repair(&mut nodes);
         Ok(nodes)
     }
@@ -690,9 +695,9 @@ impl Tasks {
         self.root.join(format!("{id}.md"))
     }
 
-    /// Writes `<id>.md` whole. Unless told to overwrite, fails with
-    /// `AlreadyExists` rather than replacing a Task.
-    fn write(&self, id: &ItemId, text: &str, overwrite: Overwrite) -> io::Result<()> {
+    /// Writes `<id>.md` whole and adds its Tags to the Tags. Unless told to
+    /// overwrite, fails with `AlreadyExists` rather than replacing a Task.
+    fn write(&self, id: &ItemId, file: &Document, overwrite: Overwrite) -> io::Result<()> {
         let path = self.path(id);
         if overwrite == Overwrite::No && self.files.exists(&path) {
             return Err(io::ErrorKind::AlreadyExists.into());
@@ -701,7 +706,38 @@ impl Tasks {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .forget(&format!("{id}.md"));
-        self.files.write(&path, text)
+        self.files.write(&path, &file.render())?;
+        self.remember_tags(tags_of(file))
+    }
+
+    /// Where the Tags are: beside the Tasks folder, like every Context's.
+    fn tags_path(&self) -> PathBuf {
+        self.root.parent().unwrap_or(Path::new("")).join(Tags::FILE)
+    }
+
+    /// The Tags; none if there is no file or it isn't one.
+    fn read_tags(&self) -> Tags {
+        let text = self.files.read(&self.tags_path()).unwrap_or_default();
+        Tags::parse(&text)
+    }
+
+    /// Adds the valid `found` Tags to the Tags file, leaving known ones as
+    /// they are; writes nothing if all are known.
+    fn remember_tags(&self, found: impl IntoIterator<Item = String>) -> io::Result<()> {
+        let _held = self
+            .tags_lock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let mut tags = self.read_tags();
+        let updated = iso8601(now_ms());
+        let mut changed = false;
+        for tag in found {
+            changed |= tags.add(&tag, &updated);
+        }
+        if changed {
+            self.files.write(&self.tags_path(), &tags.render())?;
+        }
+        Ok(())
     }
 }
 
@@ -747,11 +783,13 @@ impl Node {
 
 type Nodes = HashMap<String, Node>;
 
-/// The Task in the file at `path`, if it is one and is named by its id.
-fn read_node(files: &dyn Files, path: &Path) -> Option<Node> {
+/// The Task in the file at `path`, if it is one and is named by its id, and
+/// the valid Tags the file carries.
+fn read_node(files: &dyn Files, path: &Path) -> Option<(Node, Vec<String>)> {
     let text = files.read(path).ok()?;
-    let node = node_of(&Document::parse(&text)?)?;
-    (path.file_stem()? == node.task.id.as_str()).then_some(node)
+    let file = Document::parse(&text)?;
+    let node = node_of(&file)?;
+    (path.file_stem()? == node.task.id.as_str()).then(|| (node, tags_of(&file)))
 }
 
 /// The Task a file describes, Open or Closed; `None` for a malformed one.
@@ -1045,6 +1083,10 @@ mod tests {
                 self.cache(),
             )
             .unwrap()
+        }
+
+        fn tags_file(&self) -> PathBuf {
+            self.0.parent().unwrap().join(Tags::FILE)
         }
 
         /// Beside the Tasks folder, as a Device keeps it.
@@ -1342,17 +1384,45 @@ mod tests {
     }
 
     #[test]
-    fn a_tag_only_closed_tasks_carry_is_still_listed_but_an_unused_one_is_not() {
+    fn a_tag_no_task_carries_any_more_is_still_suggested() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let task = tagged(&tasks, &["gone", "closed"]);
+        let task = tagged(&tasks, &["gone", "kept"]);
         tasks.remove_tag(&task.id, "gone").unwrap();
+        assert_eq!(tasks.tags_with_prefix("").unwrap(), ["gone", "kept"]);
+    }
+
+    #[test]
+    fn tags_are_kept_in_the_tags_file_beside_the_context_folders() {
+        let dir = Scratch::new();
+        tagged(&dir.store(), &["home"]);
+        let text = fs::read_to_string(dir.tags_file()).unwrap();
+        assert_eq!(Tags::parse(&text).with_prefix(""), ["home"]);
+    }
+
+    #[test]
+    fn saving_an_edit_adds_the_tags_the_file_carries() {
+        let dir = Scratch::new();
+        let (tasks, task) = edit_fixture(&dir);
         let path = dir.0.join(format!("{}.md", task.id));
-        let text = fs::read_to_string(&path)
-            .unwrap()
-            .replace("state: active", "state: done");
+        let text = fs::read_to_string(&path).unwrap();
+        fs::write(&path, text.replace("state:", "tags:\n  - hand\nstate:")).unwrap();
+        assert!(tasks.tags_with_prefix("").unwrap().is_empty()); // not read yet
+        tasks.edit(&task.id, "new", "", 4).unwrap();
+        assert_eq!(tasks.tags_with_prefix("").unwrap(), ["hand"]);
+    }
+
+    #[test]
+    fn reading_a_task_file_with_an_unknown_tag_adds_it() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let task = tasks.create("t", Planning::Active).unwrap();
+        let path = dir.0.join(format!("{}.md", task.id));
+        let text = fs::read_to_string(&path).unwrap();
+        let text = text.replace("state:", "tags:\n  - synced\n  - Bad Tag\nstate:");
         fs::write(&path, text).unwrap();
-        assert_eq!(tasks.tags_with_prefix("").unwrap(), ["closed"]);
+        tasks.tasks(Planning::Active).unwrap();
+        assert_eq!(tasks.tags_with_prefix("").unwrap(), ["synced"]);
     }
 
     fn history(dir: &Scratch) -> Vec<String> {
@@ -2308,7 +2378,8 @@ mod tests {
             ("Buy milk", vec!["home".to_owned()])
         );
         let changed = files.take_changes();
-        assert_eq!(changed.len(), 2, "{changed:?}"); // the Task and the History
+        assert_eq!(changed.len(), 3, "{changed:?}"); // the Task, the History and the Tags
+        assert!(changed.contains(&PathBuf::from("Tags/tags.json")));
         assert!(changed.contains(&PathBuf::from(format!("Tasks/{}.md", task.id))));
     }
 }

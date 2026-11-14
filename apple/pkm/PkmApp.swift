@@ -31,7 +31,7 @@ struct PkmApp: App {
             }
             // ⌘, opens it.
             Settings {
-                SettingsView().environment(cloud).environment(readerSettings).environment(library)
+                SettingsView().environment(cloud).environment(readerSettings).environment(library).environment(tasks)
             }
         #else
             WindowGroup {

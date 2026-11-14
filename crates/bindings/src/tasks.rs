@@ -3,6 +3,7 @@
 
 use std::path::Path;
 
+use pkm_base::tags::Entry as TagEntry;
 use pkm_tasks::{Blocker, Closing, Error, Planning, Row, Task, Tasks};
 
 /// Why a Task wasn't saved or the Tasks couldn't be read.
@@ -78,6 +79,14 @@ pub struct Blocker {
     pub id: String,
     pub title: String,
     pub closed: bool,
+}
+
+/// A Tag that exists, with its Tag Color.
+#[uniffi::remote(Record)]
+pub struct TagEntry {
+    pub name: String,
+    /// `#rrggbb`; none is Default.
+    pub color: Option<String>,
 }
 
 /// A Task as the lists show it, one row of the flattened tree, see
@@ -249,6 +258,11 @@ impl TaskStore {
     /// The known Tags starting with `prefix`, sorted.
     pub fn tags_with_prefix(&self, prefix: String) -> Result<Vec<String>, TasksError> {
         Ok(self.0.tags_with_prefix(&prefix)?)
+    }
+
+    /// Every known Tag with its Tag Color, alphabetically.
+    pub fn tags(&self) -> Vec<TagEntry> {
+        self.0.tags()
     }
 
     /// The Tasks planned as `planning`, in their order, as a pre-order walk of

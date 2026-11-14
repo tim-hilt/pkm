@@ -13,6 +13,16 @@ import Testing
                 root: root.appending(path: "Tasks").path, deviceFolder: root.appending(path: "Device").path))
     }
 
+    @Test func everyTagIsListedAlphabeticallyEvenOneNoTaskCarriesAnyMore() throws {
+        let model = try openModel()
+        #expect(model.allTags.isEmpty)
+        #expect(model.add(title: "Buy milk", planning: .active))
+        let task = model.tasks[0]
+        model.edit(task, title: "Buy milk", description: "", priority: 4, tags: ["work/x", "home"])
+        model.edit(task, title: "Buy milk", description: "", priority: 4, tags: ["work/x"])
+        #expect(model.allTags == ["home", "work/x"])
+    }
+
     @Test func aNewTaskAppearsInTheListItWasAddedTo() throws {
         let model = try openModel()
         #expect(model.add(title: "Buy milk", planning: .active))

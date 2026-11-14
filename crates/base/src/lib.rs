@@ -10,3 +10,4 @@ pub mod json;
 pub mod random;
 pub mod sha256;
 pub mod tag;
+pub mod tags;
