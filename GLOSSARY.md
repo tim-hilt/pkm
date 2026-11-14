@@ -39,8 +39,16 @@ One PDF or EPUB to read in the Books Context, including papers and other non-boo
 _Avoid_: E-book, document, paper, bookmark (when meaning a saved position in a Book)
 
 **Tag**:
-A name the user puts on Items, of lowercase letters, digits, `-` and `/`; it exists as long as an Item carries it.
+A name the user puts on Items, of lowercase letters, digits, `-` and `/`. It exists from when it is first put on an Item until it is Deleted, whether or not any Item still carries it. Taking it off one Item is **Removing** it.
 _Avoid_: Label, category, hashtag
+
+**Tag Color**:
+The color a Tag is shown in, wherever it appears and on every Device; grey unless the user picks another.
+_Avoid_: Label color, Tag theme
+
+**Delete a Tag**:
+Ending a Tag in Settings: it is Removed from every Item, Open or Closed, and its Tag Color forgotten.
+_Avoid_: Remove (that is one Item), clear
 
 **Link**:
 A reference from one item to another, possibly in another Context.
