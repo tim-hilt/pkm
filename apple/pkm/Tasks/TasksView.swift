@@ -59,6 +59,9 @@ struct TasksView: View {
                     .contentMargins(.bottom, 80, for: .scrollContent)  // scroll the last Task clear of the "+"
                 }
             }
+            #if os(iOS)
+                .navigationBarTitleDisplayMode(.inline)  // no large-title space above the list
+            #endif
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Picker("List", selection: $model.planning) {
