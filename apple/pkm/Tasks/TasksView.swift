@@ -58,7 +58,6 @@ struct TasksView: View {
                     .listStyle(.plain)
                 }
             }
-            .navigationTitle(Text(AppContext.tasks.title))
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Picker("List", selection: $model.planning) {

@@ -65,7 +65,6 @@ struct BooksView: View {
             .environment(scroll)
             .searchable(text: $searchText)
             .searchFocused($isSearchFocused)
-            .navigationTitle("Books")
             .toolbar {
                 ToolbarItem { SortMenu(sort: Bindable(library).sort) }
                 #if os(iOS)
