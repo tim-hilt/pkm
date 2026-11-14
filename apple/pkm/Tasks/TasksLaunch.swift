@@ -27,13 +27,15 @@ extension TasksModel {
                 ("Reply to Anna's email", "About the trip", 3, []),
             ]
             for (title, description, priority, tags) in samples {
-                if let task = try? store.create(title: title, planning: .active) {
+                if let task = try? store.create(title: title, planning: .active, priority: 4, tags: []) {
                     _ = try? store.edit(id: task.id, title: title, description: description, priority: priority)
                     for tag in tags { _ = try? store.addTag(id: task.id, tag: tag) }
-                    if title == "Buy milk" { _ = try? store.createSubtask(parent: task.id, title: "Find the oat milk") }
+                    if title == "Buy milk" {
+                        _ = try? store.createSubtask(parent: task.id, title: "Find the oat milk", priority: 4, tags: [])
+                    }
                 }
             }
-            _ = try? store.create(title: "Learn Rust", planning: .backlog)
+            _ = try? store.create(title: "Learn Rust", planning: .backlog, priority: 4, tags: [])
         }
         return TasksModel(store: store)
     }

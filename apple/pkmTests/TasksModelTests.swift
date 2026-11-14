@@ -14,6 +14,37 @@ import Testing
                 root: root.appending(path: "Tasks").path, deviceFolder: root.appending(path: "Device").path))
     }
 
+    @Test func aTaskIsAddedWithTheTitleAndPriorityOfQuickAdd() throws {
+        let model = try openModel()
+        let quickAdd = TaskQuickAdd()
+        quickAdd.replace(start: 0, end: 0, with: "Fix login p1 ")
+        #expect(model.add(title: quickAdd.title(), priority: quickAdd.priority() ?? 4, tags: quickAdd.tags()))
+        #expect(model.tasks.map(\.title) == ["Fix login"])
+        #expect(model.tasks.map(\.priority) == [1])
+    }
+
+    @Test func aSubtaskIsAddedWithThePriorityOfQuickAdd() throws {
+        let model = try openModel()
+        #expect(model.add(title: "Parent"))
+        let quickAdd = TaskQuickAdd()
+        quickAdd.replace(start: 0, end: 0, with: "p2 Child")
+        #expect(
+            model.addSubtask(
+                title: quickAdd.title(), priority: quickAdd.priority() ?? 4, tags: quickAdd.tags(),
+                under: model.tasks[0]
+            ))
+        #expect(model.tasks.map(\.title) == ["Parent", "Child"])
+        #expect(model.tasks.map(\.priority) == [4, 2])
+    }
+
+    @Test func aTitleOfOnlyShortcutsIsRefusedLikeAnEmptyOne() throws {
+        let model = try openModel()
+        let quickAdd = TaskQuickAdd()
+        quickAdd.replace(start: 0, end: 0, with: "p1")
+        #expect(!model.add(title: quickAdd.title(), priority: quickAdd.priority() ?? 4))
+        #expect(model.tasks.isEmpty)
+    }
+
     @Test func everyTagIsListedAlphabeticallyEvenOneNoTaskCarriesAnyMore() throws {
         let model = try openModel()
         #expect(model.allTags.isEmpty)

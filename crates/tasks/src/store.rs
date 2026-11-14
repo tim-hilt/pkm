@@ -247,19 +247,34 @@ impl Tasks {
         }
     }
 
-    /// Creates a Task at the end of its list, with priority 4. The Title is
-    /// trimmed and kept to one line (line breaks become spaces).
-    pub fn create(&self, title: &str, planning: Planning) -> Result<Task, Error> {
-        let title = checked_title(title)?;
+    /// Creates a Task at the end of its list, with `priority` (clamped to 1 to
+    /// 4) and `tags`, in one write with one `created` History entry; Tags that
+    /// are new join the Tags file. The Title is trimmed and kept to one line
+    /// (line breaks become spaces). Fails with `EmptyTitle`, or `InvalidTag`
+    /// for any invalid Tag, before saving anything.
+    pub fn create(
+        &self,
+        title: &str,
+        planning: Planning,
+        priority: u8,
+        tags: &[String],
+    ) -> Result<Task, Error> {
+        let new = NewTask::checked(title, priority, tags)?;
         let order = next_order(&self.load()?, None, planning);
-        self.insert(&title, planning, None, order)
+        self.insert(&new, planning, None, order)
     }
 
-    /// Creates a Subtask at the end of the Open Task `parent`'s Subtasks. It
-    /// follows its top-level Task's Active or Backlog. Fails with `NotFound`
+    /// `create` for a Subtask at the end of the Open Task `parent`'s Subtasks.
+    /// It follows its top-level Task's Active or Backlog. Fails with `NotFound`
     /// if there is no such Open Task.
-    pub fn create_subtask(&self, parent: &str, title: &str) -> Result<Task, Error> {
-        let title = checked_title(title)?;
+    pub fn create_subtask(
+        &self,
+        parent: &str,
+        title: &str,
+        priority: u8,
+        tags: &[String],
+    ) -> Result<Task, Error> {
+        let new = NewTask::checked(title, priority, tags)?;
         let nodes = self.load()?;
         let parent = nodes
             .get(parent)
@@ -267,13 +282,13 @@ impl Tasks {
             .ok_or(io::ErrorKind::NotFound)?;
         let planning = parent.task.planning;
         let order = next_order(&nodes, Some(&parent.task.id), planning);
-        self.insert(&title, planning, Some(&parent.task.id), order)
+        self.insert(&new, planning, Some(&parent.task.id), order)
     }
 
     /// Saves a new Task under a fresh Item ID and records its creation.
     fn insert(
         &self,
-        title: &str,
+        new: &NewTask,
         planning: Planning,
         parent: Option<&str>,
         order: f64,
@@ -283,12 +298,13 @@ impl Tasks {
             let id = ItemId::new(&mut entropy);
             let mut file = Document::default();
             file.set_scalar("id", id.as_str());
-            file.set_scalar("title", title);
-            file.set_scalar("priority", DEFAULT_PRIORITY.to_string());
+            file.set_scalar("title", &new.title);
+            file.set_scalar("priority", new.priority.to_string());
             file.set_scalar("state", planning.state());
             if let Some(parent) = parent {
                 file.set_scalar("parent", parent);
             }
+            set_list(&mut file, TAGS, new.tags.clone());
             file.set_scalar("order", order.to_string());
             file.set_scalar("updated", iso8601(now_ms()));
             match self.write(&id, &file, Overwrite::No) {
@@ -1100,6 +1116,33 @@ fn set_list(file: &mut Document, key: &str, items: Vec<String>) {
     }
 }
 
+/// The checked properties of a Task about to be created.
+struct NewTask {
+    title: String,
+    priority: u8,
+    /// Without duplicates, in the order given.
+    tags: Vec<String>,
+}
+
+impl NewTask {
+    fn checked(title: &str, priority: u8, tags: &[String]) -> Result<Self, Error> {
+        let mut unique: Vec<String> = Vec::new();
+        for tag in tags {
+            if !tag::is_valid(tag) {
+                return Err(Error::InvalidTag);
+            }
+            if !unique.contains(tag) {
+                unique.push(tag.clone());
+            }
+        }
+        Ok(Self {
+            title: checked_title(title)?,
+            priority: priority.clamp(1, 4),
+            tags: unique,
+        })
+    }
+}
+
 fn checked_title(title: &str) -> Result<String, Error> {
     let title = one_line(title);
     if title.is_empty() {
@@ -1170,8 +1213,10 @@ mod tests {
     fn a_new_task_is_listed_where_it_was_planned() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        tasks.create("Buy milk", Planning::Active).unwrap();
-        tasks.create("Learn Rust", Planning::Backlog).unwrap();
+        tasks.create("Buy milk", Planning::Active, 4, &[]).unwrap();
+        tasks
+            .create("Learn Rust", Planning::Backlog, 4, &[])
+            .unwrap();
         assert_eq!(titles(&tasks, Planning::Active), ["Buy milk"]);
         assert_eq!(titles(&tasks, Planning::Backlog), ["Learn Rust"]);
     }
@@ -1181,7 +1226,7 @@ mod tests {
         let dir = Scratch::new();
         let tasks = dir.store();
         for title in ["one", "two", "three"] {
-            tasks.create(title, Planning::Active).unwrap();
+            tasks.create(title, Planning::Active, 4, &[]).unwrap();
         }
         assert_eq!(titles(&tasks, Planning::Active), ["one", "two", "three"]);
     }
@@ -1189,8 +1234,98 @@ mod tests {
     #[test]
     fn a_new_task_has_priority_4() {
         let dir = Scratch::new();
-        let task = dir.store().create("x", Planning::Active).unwrap();
+        let task = dir.store().create("x", Planning::Active, 4, &[]).unwrap();
         assert_eq!(task.priority, 4);
+    }
+
+    fn tag_names(tags: &[&str]) -> Vec<String> {
+        tags.iter().map(|t| (*t).to_owned()).collect()
+    }
+
+    #[test]
+    fn a_task_is_created_with_its_priority_and_tags_in_one_write() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let tags = tag_names(&["bug", "work", "bug"]);
+        let task = tasks
+            .create("Fix login", Planning::Active, 1, &tags)
+            .unwrap();
+        assert_eq!(
+            (task.priority, task.tags.clone()),
+            (1, tag_names(&["bug", "work"]))
+        );
+        assert_eq!(
+            tasks.tasks(Planning::Active).unwrap(),
+            std::slice::from_ref(&task)
+        );
+        let text = file_of(&dir, &task);
+        assert!(
+            text.contains("priority: 1") && text.contains("tags:"),
+            "{text}"
+        );
+        assert_eq!(history(&dir).len(), 1);
+    }
+
+    #[test]
+    fn the_tags_of_a_new_task_join_the_tags_file() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        tasks
+            .create("a", Planning::Active, 4, &tag_names(&["new", "work"]))
+            .unwrap();
+        let known: Vec<_> = tasks.tags().list().into_iter().map(|e| e.name).collect();
+        assert_eq!(known, ["new", "work"]);
+    }
+
+    #[test]
+    fn an_invalid_tag_or_an_empty_title_creates_nothing() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let bad = tag_names(&["ok", "Bad"]);
+        assert!(matches!(
+            tasks.create("a", Planning::Active, 4, &bad),
+            Err(Error::InvalidTag)
+        ));
+        assert!(matches!(
+            tasks.create(" ", Planning::Active, 1, &[]),
+            Err(Error::EmptyTitle)
+        ));
+        assert!(titles(&tasks, Planning::Active).is_empty());
+        assert!(!dir.0.join(".history").exists());
+        assert!(tasks.tags().list().is_empty());
+    }
+
+    #[test]
+    fn a_priority_outside_1_to_4_is_clamped_on_create() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        assert_eq!(
+            tasks
+                .create("a", Planning::Active, 0, &[])
+                .unwrap()
+                .priority,
+            1
+        );
+        assert_eq!(
+            tasks
+                .create("b", Planning::Active, 9, &[])
+                .unwrap()
+                .priority,
+            4
+        );
+    }
+
+    #[test]
+    fn a_subtask_is_created_with_its_priority_and_tags() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let parent = tasks.create("p", Planning::Backlog, 4, &[]).unwrap();
+        let sub = tasks
+            .create_subtask(&parent.id, "s", 2, &tag_names(&["home"]))
+            .unwrap();
+        assert_eq!((sub.priority, sub.tags), (2, tag_names(&["home"])));
+        assert_eq!(history(&dir).len(), 2);
+        assert!(tasks.tags().contains("home"));
     }
 
     #[test]
@@ -1199,7 +1334,7 @@ mod tests {
         let tasks = dir.store();
         for title in ["", "   ", "\n\t \n"] {
             assert!(matches!(
-                tasks.create(title, Planning::Active),
+                tasks.create(title, Planning::Active, 4, &[]),
                 Err(Error::EmptyTitle)
             ));
         }
@@ -1211,7 +1346,7 @@ mod tests {
         let dir = Scratch::new();
         let task = dir
             .store()
-            .create("  Buy\n  milk \r\n\n and eggs ", Planning::Active)
+            .create("  Buy\n  milk \r\n\n and eggs ", Planning::Active, 4, &[])
             .unwrap();
         assert_eq!(task.title, "Buy milk and eggs");
     }
@@ -1219,7 +1354,10 @@ mod tests {
     #[test]
     fn a_task_is_a_markdown_file_named_by_its_id_with_front_matter() {
         let dir = Scratch::new();
-        let task = dir.store().create("Buy: milk", Planning::Backlog).unwrap();
+        let task = dir
+            .store()
+            .create("Buy: milk", Planning::Backlog, 4, &[])
+            .unwrap();
         let text = fs::read_to_string(dir.0.join(format!("{}.md", task.id))).unwrap();
         let file = Document::parse(&text).unwrap();
         assert_eq!(file.scalar("id"), Some(task.id.as_str()));
@@ -1234,13 +1372,15 @@ mod tests {
     #[test]
     fn tasks_persist_across_opens() {
         let dir = Scratch::new();
-        dir.store().create("kept", Planning::Active).unwrap();
+        dir.store()
+            .create("kept", Planning::Active, 4, &[])
+            .unwrap();
         assert_eq!(titles(&dir.store(), Planning::Active), ["kept"]);
     }
 
     fn edit_fixture(dir: &Scratch) -> (Tasks, Task) {
         let tasks = dir.store();
-        let task = tasks.create("Buy milk", Planning::Active).unwrap();
+        let task = tasks.create("Buy milk", Planning::Active, 4, &[]).unwrap();
         (tasks, task)
     }
 
@@ -1361,7 +1501,7 @@ mod tests {
     }
 
     fn tagged(tasks: &Tasks, tags: &[&str]) -> Task {
-        let task = tasks.create("t", Planning::Active).unwrap();
+        let task = tasks.create("t", Planning::Active, 4, &[]).unwrap();
         for tag in tags {
             tasks.add_tag(&task.id, tag).unwrap();
         }
@@ -1488,7 +1628,7 @@ mod tests {
     fn reading_a_task_file_with_an_unknown_tag_adds_it() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let task = tasks.create("t", Planning::Active).unwrap();
+        let task = tasks.create("t", Planning::Active, 4, &[]).unwrap();
         let path = dir.0.join(format!("{}.md", task.id));
         let text = fs::read_to_string(&path).unwrap();
         let text = text.replace("state:", "tags:\n  - synced\n  - Bad Tag\nstate:");
@@ -1565,8 +1705,8 @@ mod tests {
     fn a_backlog_task_can_be_made_active_and_moved_back() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        tasks.create("first", Planning::Active).unwrap();
-        let later = tasks.create("later", Planning::Backlog).unwrap();
+        tasks.create("first", Planning::Active, 4, &[]).unwrap();
+        let later = tasks.create("later", Planning::Backlog, 4, &[]).unwrap();
         let moved = tasks.plan(&later.id, Planning::Active).unwrap();
         assert_eq!(moved.planning, Planning::Active);
         assert_eq!(titles(&tasks, Planning::Active), ["first", "later"]);
@@ -1585,7 +1725,7 @@ mod tests {
     fn planning_keeps_the_other_properties() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let task = tasks.create("t", Planning::Backlog).unwrap();
+        let task = tasks.create("t", Planning::Backlog, 4, &[]).unwrap();
         tasks.add_tag(&task.id, "home").unwrap();
         let moved = tasks.plan(&task.id, Planning::Active).unwrap();
         assert_eq!(moved.tags, ["home"]);
@@ -1595,7 +1735,9 @@ mod tests {
     fn creating_and_planning_are_recorded_by_id_and_time_only() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let task = tasks.create("Secret title", Planning::Backlog).unwrap();
+        let task = tasks
+            .create("Secret title", Planning::Backlog, 4, &[])
+            .unwrap();
         tasks.add_tag(&task.id, "private").unwrap();
         tasks.plan(&task.id, Planning::Active).unwrap();
         tasks.plan(&task.id, Planning::Active).unwrap(); // no change, no line
@@ -1616,8 +1758,8 @@ mod tests {
 
     fn closing_fixture(dir: &Scratch) -> (Tasks, Task) {
         let tasks = dir.store();
-        tasks.create("other", Planning::Active).unwrap();
-        let task = tasks.create("Buy milk", Planning::Active).unwrap();
+        tasks.create("other", Planning::Active, 4, &[]).unwrap();
+        let task = tasks.create("Buy milk", Planning::Active, 4, &[]).unwrap();
         (tasks, task)
     }
 
@@ -1711,8 +1853,8 @@ mod tests {
     fn a_new_close_commits_the_previous_one_first() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let first = tasks.create("first", Planning::Active).unwrap();
-        let second = tasks.create("second", Planning::Active).unwrap();
+        let first = tasks.create("first", Planning::Active, 4, &[]).unwrap();
+        let second = tasks.create("second", Planning::Active, 4, &[]).unwrap();
         tasks.close(&first.id, Closing::Done).unwrap();
         tasks.close(&second.id, Closing::Rejected).unwrap();
         assert!(file_of(&dir, &first).contains("state: done"));
@@ -1742,7 +1884,7 @@ mod tests {
     }
 
     fn subtask(tasks: &Tasks, parent: &Task, title: &str) -> Task {
-        tasks.create_subtask(&parent.id, title).unwrap()
+        tasks.create_subtask(&parent.id, title, 4, &[]).unwrap()
     }
 
     fn sub_titles(task: &Task) -> Vec<&str> {
@@ -1763,7 +1905,7 @@ mod tests {
     fn a_subtask_is_listed_under_its_parent_in_the_parents_list() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let parent = tasks.create("parent", Planning::Backlog).unwrap();
+        let parent = tasks.create("parent", Planning::Backlog, 4, &[]).unwrap();
         let child = subtask(&tasks, &parent, "child");
         let grandchild = subtask(&tasks, &child, "grandchild");
         subtask(&tasks, &parent, "second");
@@ -1780,24 +1922,24 @@ mod tests {
     fn a_subtask_needs_an_open_parent_and_a_title() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let parent = tasks.create("p", Planning::Active).unwrap();
+        let parent = tasks.create("p", Planning::Active, 4, &[]).unwrap();
         assert!(matches!(
-            tasks.create_subtask(&parent.id, " "),
+            tasks.create_subtask(&parent.id, " ", 4, &[]),
             Err(Error::EmptyTitle)
         ));
         assert!(matches!(
-            tasks.create_subtask("aaaaaaaaaaaa", "x"),
+            tasks.create_subtask("aaaaaaaaaaaa", "x", 4, &[]),
             Err(Error::Io(e)) if e.kind() == io::ErrorKind::NotFound
         ));
         raw(&dir, "bbbbbbbbbbbb", "done", None, 1);
-        assert!(tasks.create_subtask("bbbbbbbbbbbb", "x").is_err());
+        assert!(tasks.create_subtask("bbbbbbbbbbbb", "x", 4, &[]).is_err());
     }
 
     #[test]
     fn planning_a_task_rewrites_its_open_subtasks_and_records_each() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let parent = tasks.create("p", Planning::Backlog).unwrap();
+        let parent = tasks.create("p", Planning::Backlog, 4, &[]).unwrap();
         let child = subtask(&tasks, &parent, "c");
         let grandchild = subtask(&tasks, &child, "g");
         raw(&dir, "cccccccccccc", "done", Some(&parent.id), 9);
@@ -1835,7 +1977,7 @@ mod tests {
     fn a_subtask_cannot_be_made_active_or_moved_by_itself() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let parent = tasks.create("p", Planning::Backlog).unwrap();
+        let parent = tasks.create("p", Planning::Backlog, 4, &[]).unwrap();
         let child = subtask(&tasks, &parent, "c");
         for planning in [Planning::Active, Planning::Backlog] {
             assert!(matches!(
@@ -1850,7 +1992,7 @@ mod tests {
     fn closing_a_parent_closes_its_open_subtasks_in_one_pending_change() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let parent = tasks.create("p", Planning::Active).unwrap();
+        let parent = tasks.create("p", Planning::Active, 4, &[]).unwrap();
         let child = subtask(&tasks, &parent, "c");
         let grandchild = subtask(&tasks, &child, "g");
         let before = (file_of(&dir, &child), history(&dir));
@@ -1878,7 +2020,7 @@ mod tests {
     fn a_closed_subtask_stays_listed_under_its_open_parent_marked_closed() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let parent = tasks.create("p", Planning::Active).unwrap();
+        let parent = tasks.create("p", Planning::Active, 4, &[]).unwrap();
         let open = subtask(&tasks, &parent, "open");
         let gone = subtask(&tasks, &parent, "gone");
         tasks.close(&gone.id, Closing::Rejected).unwrap();
@@ -1945,7 +2087,7 @@ mod tests {
     fn a_copy_of_a_task_file_under_another_name_is_ignored() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let task = tasks.create("original", Planning::Active).unwrap();
+        let task = tasks.create("original", Planning::Active, 4, &[]).unwrap();
         let copy = file_of(&dir, &task).replace("original", "copy");
         for name in [format!("{} 1.md", task.id), format!("~{}.md", task.id)] {
             fs::write(dir.0.join(name), &copy).unwrap();
@@ -1958,7 +2100,7 @@ mod tests {
     fn committing_skips_a_subtask_closed_or_removed_meanwhile() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let parent = tasks.create("p", Planning::Active).unwrap();
+        let parent = tasks.create("p", Planning::Active, 4, &[]).unwrap();
         let gone = subtask(&tasks, &parent, "gone");
         let kept = subtask(&tasks, &parent, "kept");
         tasks.close(&parent.id, Closing::Done).unwrap();
@@ -1980,7 +2122,7 @@ mod tests {
 
     fn move_fixture(dir: &Scratch) -> (Tasks, [Task; 3]) {
         let tasks = dir.store();
-        let [a, b, c] = ["a", "b", "c"].map(|t| tasks.create(t, Planning::Active).unwrap());
+        let [a, b, c] = ["a", "b", "c"].map(|t| tasks.create(t, Planning::Active, 4, &[]).unwrap());
         (tasks, [a, b, c])
     }
 
@@ -2075,8 +2217,8 @@ mod tests {
     fn a_moved_task_takes_its_new_top_level_tasks_list_and_records_it() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let active = tasks.create("active", Planning::Active).unwrap();
-        let backlog = tasks.create("backlog", Planning::Backlog).unwrap();
+        let active = tasks.create("active", Planning::Active, 4, &[]).unwrap();
+        let backlog = tasks.create("backlog", Planning::Backlog, 4, &[]).unwrap();
         let own = subtask(&tasks, &active, "own");
         let before = history(&dir).len();
         tasks
@@ -2130,8 +2272,8 @@ mod tests {
 
     fn two_tasks(tasks: &Tasks) -> (Task, Task) {
         (
-            tasks.create("a", Planning::Active).unwrap(),
-            tasks.create("b", Planning::Backlog).unwrap(),
+            tasks.create("a", Planning::Active, 4, &[]).unwrap(),
+            tasks.create("b", Planning::Backlog, 4, &[]).unwrap(),
         )
     }
 
@@ -2181,7 +2323,7 @@ mod tests {
         let dir = Scratch::new();
         let tasks = dir.store();
         let (a, b) = two_tasks(&tasks);
-        let c = tasks.create("c", Planning::Active).unwrap();
+        let c = tasks.create("c", Planning::Active, 4, &[]).unwrap();
         tasks.add_blocker(&a.id, &b.id).unwrap();
         tasks.add_blocker(&a.id, &c.id).unwrap();
         tasks.close(&b.id, Closing::Done).unwrap();
@@ -2235,7 +2377,7 @@ mod tests {
             tasks.add_blocker(&b.id, &a.id),
             Err(Error::BlockedByLoop)
         ));
-        let c = tasks.create("c", Planning::Active).unwrap();
+        let c = tasks.create("c", Planning::Active, 4, &[]).unwrap();
         tasks.add_blocker(&b.id, &c.id).unwrap();
         assert!(matches!(
             tasks.add_blocker(&c.id, &a.id),
@@ -2262,13 +2404,13 @@ mod tests {
     fn blocker_candidates_leave_out_what_add_blocker_refuses() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let a = tasks.create("a", Planning::Active).unwrap();
-        let sub = tasks.create_subtask(&a.id, "sub").unwrap();
-        let b = tasks.create("b", Planning::Backlog).unwrap();
-        let c = tasks.create("c", Planning::Active).unwrap();
-        let d = tasks.create("d", Planning::Backlog).unwrap();
-        let e = tasks.create("e", Planning::Active).unwrap();
-        let gone = tasks.create("gone", Planning::Active).unwrap();
+        let a = tasks.create("a", Planning::Active, 4, &[]).unwrap();
+        let sub = tasks.create_subtask(&a.id, "sub", 4, &[]).unwrap();
+        let b = tasks.create("b", Planning::Backlog, 4, &[]).unwrap();
+        let c = tasks.create("c", Planning::Active, 4, &[]).unwrap();
+        let d = tasks.create("d", Planning::Backlog, 4, &[]).unwrap();
+        let e = tasks.create("e", Planning::Active, 4, &[]).unwrap();
+        let gone = tasks.create("gone", Planning::Active, 4, &[]).unwrap();
         tasks.close(&gone.id, Closing::Done).unwrap();
         tasks.commit().unwrap();
         tasks.add_blocker(&b.id, &a.id).unwrap(); // direct loop for a
@@ -2320,7 +2462,7 @@ mod tests {
         let listed = tasks.tasks(Planning::Active).unwrap();
         assert_eq!(listed.len(), 3);
         assert!(listed.iter().all(|t| t.blocked));
-        let d = tasks.create("d", Planning::Active).unwrap();
+        let d = tasks.create("d", Planning::Active, 4, &[]).unwrap();
         tasks.add_blocker(&d.id, "aaaaaaaaaaaa").unwrap();
         assert!(matches!(
             tasks.add_blocker("bbbbbbbbbbbb", &d.id),
@@ -2348,7 +2490,7 @@ mod tests {
 
     fn cache_fixture(dir: &Scratch) -> (Tasks, Task) {
         let tasks = dir.store();
-        let parent = tasks.create("parent", Planning::Active).unwrap();
+        let parent = tasks.create("parent", Planning::Active, 4, &[]).unwrap();
         let gone = subtask(&tasks, &parent, "gone");
         subtask(&tasks, &parent, "open");
         tasks.close(&gone.id, Closing::Done).unwrap();
@@ -2386,8 +2528,8 @@ mod tests {
     fn a_file_changed_added_or_removed_outside_the_app_shows_up() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let kept = tasks.create("kept", Planning::Active).unwrap();
-        let other = tasks.create("other", Planning::Active).unwrap();
+        let kept = tasks.create("kept", Planning::Active, 4, &[]).unwrap();
+        let other = tasks.create("other", Planning::Active, 4, &[]).unwrap();
         assert_eq!(titles(&tasks, Planning::Active), ["kept", "other"]);
 
         let path = dir.0.join(format!("{}.md", kept.id));
@@ -2411,7 +2553,7 @@ mod tests {
     fn a_task_closed_by_another_device_is_no_longer_open() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let task = tasks.create("t", Planning::Active).unwrap();
+        let task = tasks.create("t", Planning::Active, 4, &[]).unwrap();
         assert_eq!(titles(&tasks, Planning::Active), ["t"]);
         let path = dir.0.join(format!("{}.md", task.id));
         let text = fs::read_to_string(&path)
@@ -2453,7 +2595,7 @@ mod tests {
         let parent = tasks.tasks(Planning::Active).unwrap().remove(0);
         fs::remove_file(dir.cache()).unwrap();
         tasks.edit(&parent.id, "renamed", "", 1).unwrap();
-        tasks.create("new", Planning::Active).unwrap();
+        tasks.create("new", Planning::Active, 4, &[]).unwrap();
         tasks.tasks(Planning::Active).unwrap();
         assert!(!dir.cache().exists());
         tasks.close(&parent.id, Closing::Rejected).unwrap();
@@ -2466,9 +2608,9 @@ mod tests {
     fn rows_list_each_task_before_its_subtasks() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let parent = tasks.create("parent", Planning::Active).unwrap();
-        tasks.create_subtask(&parent.id, "child").unwrap();
-        tasks.create("other", Planning::Active).unwrap();
+        let parent = tasks.create("parent", Planning::Active, 4, &[]).unwrap();
+        tasks.create_subtask(&parent.id, "child", 4, &[]).unwrap();
+        tasks.create("other", Planning::Active, 4, &[]).unwrap();
         let rows: Vec<_> = tasks
             .rows(Planning::Active)
             .unwrap()
@@ -2490,7 +2632,7 @@ mod tests {
         let files = Arc::new(crate::files::MemoryFiles::default());
         let device = ItemId::parse("dddddddddddd").unwrap();
         let tasks = Tasks::open_in(files.clone(), "Tasks", device, None);
-        let task = tasks.create("Buy milk", Planning::Backlog).unwrap();
+        let task = tasks.create("Buy milk", Planning::Backlog, 4, &[]).unwrap();
         tasks.add_tag(&task.id, "home").unwrap();
         tasks.plan(&task.id, Planning::Active).unwrap();
         assert_eq!(known(&tasks, "h"), ["home"]);

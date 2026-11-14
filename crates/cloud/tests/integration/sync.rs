@@ -2363,7 +2363,9 @@ fn tags_and_their_colors_sync_and_merge_between_devices() {
         TaggingDevice::new("bbbbbbbbbbbb"),
     );
     let store = phone.store();
-    let milk = store.create("Milk", pkm_tasks::Planning::Active).unwrap();
+    let milk = store
+        .create("Milk", pkm_tasks::Planning::Active, 4, &[])
+        .unwrap();
     store.add_tag(&milk.id, "home").unwrap();
     store.add_tag(&milk.id, "work").unwrap();
     phone.sync(&tags, &tasks);
@@ -2401,8 +2403,8 @@ fn a_tag_put_on_a_task_while_another_device_deleted_it_comes_back_grey_on_that_t
     let store = phone.store();
     let planning = pkm_tasks::Planning::Active;
     let (milk, eggs) = (
-        store.create("Milk", planning).unwrap(),
-        store.create("Eggs", planning).unwrap(),
+        store.create("Milk", planning, 4, &[]).unwrap(),
+        store.create("Eggs", planning, 4, &[]).unwrap(),
     );
     store.add_tag(&milk.id, "work").unwrap();
     store.set_tag_color("work", Some("#d0021b")).unwrap();

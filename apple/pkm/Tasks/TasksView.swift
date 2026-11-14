@@ -205,24 +205,20 @@ extension ListedTask {
 private struct NewTaskSheet: View {
     @Environment(TasksModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @State private var quickAdd = TaskQuickAdd()
+    /// Quick Add's Title, kept up to date by the field.
     @State private var title = ""
     @State private var description = ""
-    @FocusState private var isTitleFocused: Bool
     private let parent: ListedTask?
 
     init(parent: ListedTask? = nil) {
         self.parent = parent
     }
 
-    private var canAdd: Bool { !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Title", text: $title, axis: .vertical)
-                    .focused($isTitleFocused)
-                    .onSubmit(add)
-                    .submitLabel(.done)
+                QuickAddField(quickAdd: quickAdd, title: $title, onSubmit: add)
                     .accessibilityIdentifier("task-title")
                 TextField("Description", text: $description, axis: .vertical)
                     .lineLimit(3...8)
@@ -238,11 +234,10 @@ private struct NewTaskSheet: View {
                     ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 #endif
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add", action: add).disabled(!canAdd)
+                    Button("Add", action: add).disabled(title.isEmpty)
                 }
             }
         }
-        .onAppear { isTitleFocused = true }
         #if os(macOS)
             .frame(minWidth: 360)
         #endif
@@ -250,9 +245,13 @@ private struct NewTaskSheet: View {
     }
 
     private func add() {
+        let priority = quickAdd.priority() ?? 4
+        let tags = quickAdd.tags()
         let added =
-            if let parent { model.addSubtask(title: title, description: description, under: parent) } else {
-                model.add(title: title, description: description)
+            if let parent {
+                model.addSubtask(title: title, description: description, priority: priority, tags: tags, under: parent)
+            } else {
+                model.add(title: title, description: description, priority: priority, tags: tags)
             }
         if added { dismiss() }
     }

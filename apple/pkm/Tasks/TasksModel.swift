@@ -105,21 +105,29 @@ final class TasksModel {
         reload()
     }
 
-    /// Adds a Task, with a Description if given, and shows the list it landed in.
-    /// False, adding nothing, if the Title is empty.
+    /// Adds a Task, with a Description, Priority and Tags if given, and shows the list it landed in.
+    /// False, adding nothing, if the Title is empty or a Tag invalid.
     @discardableResult
-    func add(title: String, description: String = "", planning: Planning = .active) -> Bool {
-        guard let task = try? store.create(title: title, planning: planning) else { return false }
+    func add(
+        title: String, description: String = "", planning: Planning = .active, priority: UInt8 = 4, tags: [String] = []
+    ) -> Bool {
+        guard let task = try? store.create(title: title, planning: planning, priority: priority, tags: tags) else {
+            return false
+        }
         describe(task, description)
         if self.planning == planning { reload() } else { self.planning = planning }
         return true
     }
 
-    /// Adds a Subtask under `parent`, with a Description if given, and shows it.
-    /// False, adding nothing, if the Title is empty.
+    /// Adds a Subtask under `parent`, with a Description, Priority and Tags if given, and shows it.
+    /// False, adding nothing, if the Title is empty or a Tag invalid.
     @discardableResult
-    func addSubtask(title: String, description: String = "", under parent: ListedTask) -> Bool {
-        guard let task = try? store.createSubtask(parent: parent.id, title: title) else { return false }
+    func addSubtask(
+        title: String, description: String = "", priority: UInt8 = 4, tags: [String] = [], under parent: ListedTask
+    ) -> Bool {
+        guard
+            let task = try? store.createSubtask(parent: parent.id, title: title, priority: priority, tags: tags)
+        else { return false }
         describe(task, description)
         collapsed.remove(parent.id)
         reload()

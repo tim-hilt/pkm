@@ -2,9 +2,12 @@
 //! logic lives in `pkm-tasks`.
 
 use std::path::Path;
+use std::sync::Mutex;
 
 use pkm_base::tags::{Entry as TagEntry, Suggestions as TagSuggestions, Tags};
-use pkm_tasks::{Blocker, Closing, Error, Planning, Row, Task, Tasks};
+use pkm_tasks::{
+    Blocker, Closing, Error, Planning, QuickAdd, QuickShortcut, Row, ShortcutMeaning, Task, Tasks,
+};
 
 /// Why a Task wasn't saved or the Tasks couldn't be read.
 #[derive(Debug, uniffi::Error)]
@@ -160,6 +163,78 @@ impl ListedTask {
     }
 }
 
+/// What a Shortcut sets.
+#[uniffi::remote(Enum)]
+pub enum ShortcutMeaning {
+    Priority(u8),
+}
+
+/// A Shortcut in a Quick Add text, at `start..end` in UTF-16 code units.
+#[uniffi::remote(Record)]
+pub struct QuickShortcut {
+    pub start: u32,
+    pub end: u32,
+    pub meaning: ShortcutMeaning,
+}
+
+/// The text of a Title field with Shortcuts in it, see `pkm_tasks::QuickAdd`.
+/// One per field; the object is shared, so it locks.
+#[derive(uniffi::Object)]
+pub struct TaskQuickAdd(Mutex<QuickAdd>);
+
+#[uniffi::export]
+impl TaskQuickAdd {
+    /// An empty text, for a new Task.
+    #[uniffi::constructor]
+    pub fn new() -> Self {
+        Self(Mutex::new(QuickAdd::new()))
+    }
+
+    /// Replaces the UTF-16 range `start..end` with `with` and moves the cursor
+    /// behind it.
+    pub fn replace(&self, start: u32, end: u32, with: String) {
+        self.lock().replace(start, end, &with);
+    }
+
+    /// Puts the cursor at a UTF-16 position.
+    pub fn move_cursor(&self, at: u32) {
+        self.lock().move_cursor(at);
+    }
+
+    /// The text as typed.
+    pub fn text(&self) -> String {
+        self.lock().text()
+    }
+
+    /// The Shortcuts to draw highlighted.
+    pub fn highlights(&self) -> Vec<QuickShortcut> {
+        self.lock().highlights()
+    }
+
+    /// The Title to save; empty if only Shortcuts were typed.
+    pub fn title(&self) -> String {
+        self.lock().title()
+    }
+
+    /// The Priority to apply, if a Shortcut sets one.
+    pub fn priority(&self) -> Option<u8> {
+        self.lock().priority()
+    }
+
+    /// The Tags to add.
+    pub fn tags(&self) -> Vec<String> {
+        self.lock().tags()
+    }
+}
+
+impl TaskQuickAdd {
+    fn lock(&self) -> std::sync::MutexGuard<'_, QuickAdd> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
 /// The Tasks in a folder, see `pkm_tasks::Tasks`.
 #[derive(uniffi::Object)]
 pub struct TaskStore(Tasks);
@@ -228,15 +303,28 @@ impl TaskStore {
         Ok(self.0.commit()?)
     }
 
-    /// Creates a Task, refusing an empty Title.
-    pub fn create(&self, title: String, planning: Planning) -> Result<ListedTask, TasksError> {
-        Ok(self.listed(self.0.create(&title, planning)?))
+    /// Creates a Task with a Priority and Tags, refusing an empty Title or an
+    /// invalid Tag.
+    pub fn create(
+        &self,
+        title: String,
+        planning: Planning,
+        priority: u8,
+        tags: Vec<String>,
+    ) -> Result<ListedTask, TasksError> {
+        Ok(self.listed(self.0.create(&title, planning, priority, &tags)?))
     }
 
-    /// Creates a Subtask under a Task, refusing an empty Title; it follows its
-    /// top-level Task's Active or Backlog.
-    pub fn create_subtask(&self, parent: String, title: String) -> Result<ListedTask, TasksError> {
-        Ok(self.listed(self.0.create_subtask(&parent, &title)?))
+    /// `create` for a Subtask under a Task; it follows its top-level Task's
+    /// Active or Backlog.
+    pub fn create_subtask(
+        &self,
+        parent: String,
+        title: String,
+        priority: u8,
+        tags: Vec<String>,
+    ) -> Result<ListedTask, TasksError> {
+        Ok(self.listed(self.0.create_subtask(&parent, &title, priority, &tags)?))
     }
 
     /// Sets a Task's Title, Description and Priority, refusing an empty Title.
@@ -341,7 +429,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pkm-bindings-{}", std::process::id()));
         let path = |name: &str| dir.join(name).to_string_lossy().into_owned();
         let store = TaskStore::open(path("Tasks"), path("Device")).unwrap();
-        let task = store.create("t".into(), Planning::Active).unwrap();
+        let task = store
+            .create("t".into(), Planning::Active, 4, vec![])
+            .unwrap();
         store.add_tag(task.id.clone(), "home".into()).unwrap();
         let task = store.add_tag(task.id, "work".into()).unwrap();
         assert_eq!(colors(&task), [("home", None), ("work", None)]);
@@ -368,7 +458,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pkm-bindings-del-{}", std::process::id()));
         let path = |name: &str| dir.join(name).to_string_lossy().into_owned();
         let store = TaskStore::open(path("Tasks"), path("Device")).unwrap();
-        let task = store.create("t".into(), Planning::Active).unwrap();
+        let task = store
+            .create("t".into(), Planning::Active, 4, vec![])
+            .unwrap();
         store.add_tag(task.id.clone(), "home".into()).unwrap();
         store.add_tag(task.id, "work".into()).unwrap();
         store

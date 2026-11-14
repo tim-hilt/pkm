@@ -195,7 +195,7 @@ impl TaskStore {
     /// Creates a Task, refusing an empty Title; its Item ID.
     pub fn create(&self, title: &str, planning: Planning) -> Result<String, JsError> {
         self.tasks
-            .create(title, planning.into())
+            .create(title, planning.into(), 4, &[])
             .map(|task| task.id)
             .map_err(error)
     }
@@ -205,7 +205,7 @@ impl TaskStore {
     #[wasm_bindgen(js_name = createSubtask)]
     pub fn create_subtask(&self, parent: &str, title: &str) -> Result<String, JsError> {
         self.tasks
-            .create_subtask(parent, title)
+            .create_subtask(parent, title, 4, &[])
             .map(|task| task.id)
             .map_err(error)
     }

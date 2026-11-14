@@ -20,6 +20,20 @@ _Avoid_: Note (that is a Context of its own), body, details
 How urgent a Task is: P1 (highest) to P4, the default.
 _Avoid_: Importance, level
 
+### Quick Add
+
+**Quick Add**:
+Typing a Task's Title with Shortcuts in it, picked out as they are typed.
+_Avoid_: Smart recognition, magic input, natural language input
+
+**Shortcut**:
+A part of the typed Title that sets a property instead, like `p1` for a Priority or `@work` for a Tag.
+_Avoid_: Token, magic input, marker
+
+**Ignore**:
+Turning a Shortcut back into plain text of the Title.
+_Avoid_: Escape, dismiss, unmark
+
 ### Planning
 
 **Open**:

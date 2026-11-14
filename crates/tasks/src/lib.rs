@@ -8,8 +8,10 @@
 mod cache;
 mod files;
 mod history;
+mod quick_add;
 mod store;
 pub mod sync;
 
 pub use files::{DiskFiles, Files, Listed, MemoryFiles, Stamp};
+pub use quick_add::{QuickAdd, QuickShortcut, ShortcutMeaning};
 pub use store::{Blocker, Closing, Error, Planning, Row, Task, Tasks};
