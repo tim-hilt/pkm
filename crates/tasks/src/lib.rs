@@ -13,5 +13,5 @@ mod store;
 pub mod sync;
 
 pub use files::{DiskFiles, Files, Listed, MemoryFiles, Stamp};
-pub use quick_add::{QuickAdd, QuickShortcut, ShortcutMeaning};
+pub use quick_add::{QuickAdd, QuickShortcut, ShortcutMeaning, TagQuery};
 pub use store::{Blocker, Closing, Error, Planning, Row, Task, Tasks};

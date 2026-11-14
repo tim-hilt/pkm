@@ -6,7 +6,8 @@ use std::sync::Mutex;
 
 use pkm_base::tags::{Entry as TagEntry, Suggestions as TagSuggestions, Tags};
 use pkm_tasks::{
-    Blocker, Closing, Error, Planning, QuickAdd, QuickShortcut, Row, ShortcutMeaning, Task, Tasks,
+    Blocker, Closing, Error, Planning, QuickAdd, QuickShortcut, Row, ShortcutMeaning, TagQuery,
+    Task, Tasks,
 };
 
 /// Why a Task wasn't saved or the Tasks couldn't be read.
@@ -167,6 +168,7 @@ impl ListedTask {
 #[uniffi::remote(Enum)]
 pub enum ShortcutMeaning {
     Priority(u8),
+    Tag(String),
 }
 
 /// A Shortcut in a Quick Add text, at `start..end` in UTF-16 code units.
@@ -175,6 +177,13 @@ pub struct QuickShortcut {
     pub start: u32,
     pub end: u32,
     pub meaning: ShortcutMeaning,
+}
+
+/// What to suggest while the cursor is in an `@` word.
+#[uniffi::remote(Record)]
+pub struct TagQuery {
+    pub query: String,
+    pub leave_out: Vec<String>,
 }
 
 /// The text of a Title field with Shortcuts in it, see `pkm_tasks::QuickAdd`.
@@ -201,6 +210,11 @@ impl TaskQuickAdd {
         self.lock().move_cursor(at);
     }
 
+    /// Where the cursor is, in UTF-16 code units.
+    pub fn cursor(&self) -> u32 {
+        self.lock().cursor()
+    }
+
     /// The text as typed.
     pub fn text(&self) -> String {
         self.lock().text()
@@ -224,6 +238,16 @@ impl TaskQuickAdd {
     /// The Tags to add.
     pub fn tags(&self) -> Vec<String> {
         self.lock().tags()
+    }
+
+    /// What to suggest, if the cursor is in an `@` word.
+    pub fn tag_query(&self) -> Option<TagQuery> {
+        self.lock().tag_query()
+    }
+
+    /// Completes the `@` word under the cursor to `@tag `, cursor behind it.
+    pub fn pick_tag(&self, tag: String) {
+        self.lock().pick_tag(&tag);
     }
 }
 

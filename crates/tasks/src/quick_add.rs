@@ -2,22 +2,32 @@
 //! Shortcut rule, so clients only draw the field and forward edits; no I/O.
 //!
 //! Positions and ranges are in UTF-16 code units, which is how Swift's text
-//! views and JavaScript count. Only Priority Shortcuts exist so far, so
-//! `tags` is always empty.
+//! views and JavaScript count.
 
 /// What a Shortcut sets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShortcutMeaning {
     /// `p1` to `p4`.
     Priority(u8),
+    /// `@tag`, holding the Tag without the `@`.
+    Tag(String),
 }
 
 /// A Shortcut in the text, at `start..end` (UTF-16 code units).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuickShortcut {
     pub start: u32,
     pub end: u32,
     pub meaning: ShortcutMeaning,
+}
+
+/// What to suggest while the cursor is in an `@` word.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagQuery {
+    /// The word after its `@`; empty for a lone `@`.
+    pub query: String,
+    /// Tags typed as Shortcuts in other words, which need no suggesting again.
+    pub leave_out: Vec<String>,
 }
 
 /// The text of one Title field, with the cursor in it.
@@ -47,6 +57,12 @@ impl QuickAdd {
     /// Puts the cursor at `at`, clamped to the text.
     pub fn move_cursor(&mut self, at: u32) {
         self.cursor = (at as usize).min(self.text.len());
+    }
+
+    /// Where the cursor is (UTF-16 position), which `replace` and `pick_tag`
+    /// move and a client must follow.
+    pub fn cursor(&self) -> u32 {
+        self.cursor as u32
     }
 
     /// The text as typed, Shortcuts included.
@@ -80,28 +96,79 @@ impl QuickAdd {
 
     /// The Priority to apply, if a Shortcut sets one; the last one wins.
     pub fn priority(&self) -> Option<u8> {
-        let ShortcutMeaning::Priority(p) = self.shortcuts().first()?.meaning;
-        Some(p)
+        self.shortcuts().iter().find_map(|s| match s.meaning {
+            ShortcutMeaning::Priority(p) => Some(p),
+            ShortcutMeaning::Tag(_) => None,
+        })
     }
 
-    /// The Tags to add.
+    /// The Tags to add: every Tag Shortcut, a repeated one once, in order.
     pub fn tags(&self) -> Vec<String> {
-        Vec::new()
+        let mut tags = Vec::new();
+        for s in self.shortcuts() {
+            if let ShortcutMeaning::Tag(tag) = s.meaning
+                && !tags.contains(&tag)
+            {
+                tags.push(tag);
+            }
+        }
+        tags
+    }
+
+    /// What to suggest, if the cursor is in or at the end of an `@` word.
+    pub fn tag_query(&self) -> Option<TagQuery> {
+        let (start, end) = self.tag_word()?;
+        let others = self
+            .shortcuts()
+            .into_iter()
+            .filter_map(|s| match s.meaning {
+                ShortcutMeaning::Tag(tag) if (s.start as usize, s.end as usize) != (start, end) => {
+                    Some(tag)
+                }
+                _ => None,
+            });
+        Some(TagQuery {
+            query: String::from_utf16_lossy(&self.text[start + 1..end]),
+            leave_out: others.collect(),
+        })
+    }
+
+    /// Completes the `@` word under the cursor to `@tag ` and puts the cursor
+    /// behind the space. Does nothing outside an `@` word.
+    pub fn pick_tag(&mut self, tag: &str) {
+        if let Some((start, end)) = self.tag_word() {
+            self.replace(start as u32, end as u32, &format!("@{tag} "));
+        }
+    }
+
+    /// The range of the `@` word the cursor is in or at the end of.
+    fn tag_word(&self) -> Option<(usize, usize)> {
+        words(&self.text).find(|&(start, end)| {
+            self.text[start] == u16::from(b'@') && (start..=end).contains(&self.cursor)
+        })
     }
 
     /// Every Shortcut in the text, in order, under the cursor or not. Of
     /// several Priority Shortcuts only the last counts; earlier ones are plain.
     fn shortcuts(&self) -> Vec<QuickShortcut> {
-        let last = words(&self.text)
+        let mut found: Vec<QuickShortcut> = words(&self.text)
             .filter_map(|(start, end)| {
-                priority_of(&self.text[start..end]).map(|p| QuickShortcut {
+                meaning_of(&self.text[start..end]).map(|meaning| QuickShortcut {
                     start: start as u32,
                     end: end as u32,
-                    meaning: ShortcutMeaning::Priority(p),
+                    meaning,
                 })
             })
-            .last();
-        last.into_iter().collect()
+            .collect();
+        let is_priority = |s: &QuickShortcut| matches!(s.meaning, ShortcutMeaning::Priority(_));
+        if let Some(last) = found.iter().rposition(is_priority) {
+            let mut at = 0;
+            found.retain(|s| {
+                at += 1;
+                !is_priority(s) || at - 1 == last
+            });
+        }
+        found
     }
 }
 
@@ -126,6 +193,19 @@ fn words(text: &[u16]) -> impl Iterator<Item = (usize, usize)> + '_ {
         at = end;
         Some((start, end))
     })
+}
+
+/// What a word sets, if it is a Shortcut.
+fn meaning_of(word: &[u16]) -> Option<ShortcutMeaning> {
+    if let Some(p) = priority_of(word) {
+        return Some(ShortcutMeaning::Priority(p));
+    }
+    let (at, tag) = word.split_first()?;
+    if *at != u16::from(b'@') {
+        return None;
+    }
+    let tag = String::from_utf16(tag).ok()?;
+    pkm_base::tag::is_valid(&tag).then_some(ShortcutMeaning::Tag(tag))
 }
 
 /// The Priority a word sets: `p1` to `p4`, lowercase.
@@ -162,6 +242,14 @@ mod tests {
             start,
             end,
             meaning: ShortcutMeaning::Priority(p),
+        }
+    }
+
+    fn tag(start: u32, end: u32, name: &str) -> QuickShortcut {
+        QuickShortcut {
+            start,
+            end,
+            meaning: ShortcutMeaning::Tag(name.to_owned()),
         }
     }
 
@@ -312,5 +400,151 @@ mod tests {
         assert_eq!(quick.text(), "abc");
         quick.move_cursor(99);
         assert_eq!(quick.highlights(), []);
+    }
+
+    #[test]
+    fn a_tag_shortcut_adds_the_tag_and_leaves_the_title() {
+        let quick = typed_cursor_at_start("Fix login @bug");
+        assert_eq!(quick.tags(), ["bug"]);
+        assert_eq!(quick.title(), "Fix login");
+        assert_eq!(quick.highlights(), [tag(10, 14, "bug")]);
+    }
+
+    #[test]
+    fn a_tag_shortcut_runs_to_the_next_whitespace() {
+        let quick = typed_cursor_at_start("@work/project-x go");
+        assert_eq!(quick.tags(), ["work/project-x"]);
+        assert_eq!(quick.title(), "go");
+    }
+
+    #[test]
+    fn only_an_at_at_the_start_of_a_valid_tag_word_matches() {
+        for text in [
+            "me@mail.com",
+            "@Work",
+            "@a//b",
+            "@",
+            "@a_b",
+            "@/a",
+            "a@b",
+            "@@a",
+        ] {
+            let quick = typed_cursor_at_start(&format!("x {text}"));
+            assert!(quick.tags().is_empty(), "{text}");
+            assert!(quick.highlights().is_empty(), "{text}");
+            assert_eq!(quick.title(), format!("x {text}"), "{text}");
+        }
+    }
+
+    #[test]
+    fn several_tag_shortcuts_all_apply() {
+        let quick = typed_cursor_at_start("@a x @b p2 @c");
+        assert_eq!(quick.tags(), ["a", "b", "c"]);
+        assert_eq!(quick.priority(), Some(2));
+        assert_eq!(quick.title(), "x");
+    }
+
+    #[test]
+    fn a_repeated_tag_is_added_once_and_both_stay_highlighted() {
+        let quick = typed_cursor_at_start(" @a x @a");
+        assert_eq!(quick.tags(), ["a"]);
+        assert_eq!(quick.highlights(), [tag(1, 3, "a"), tag(6, 8, "a")]);
+    }
+
+    #[test]
+    fn a_losing_priority_does_not_hide_tags_between() {
+        let quick = typed_cursor_at_start("p1 @a p2");
+        assert_eq!(quick.highlights(), [tag(3, 5, "a"), priority(6, 8, 2)]);
+        assert_eq!(quick.title(), "p1");
+    }
+
+    #[test]
+    fn a_tag_under_the_cursor_is_not_highlighted_but_counts() {
+        let quick = typed("Fix @bug");
+        assert!(quick.highlights().is_empty());
+        assert_eq!(quick.tags(), ["bug"]);
+        assert_eq!(quick.title(), "Fix");
+    }
+
+    #[test]
+    fn tag_positions_count_utf16_code_units() {
+        let quick = typed_cursor_at_start("🚀 @a");
+        assert_eq!(quick.highlights(), [tag(3, 5, "a")]);
+    }
+
+    #[test]
+    fn no_query_outside_an_at_word() {
+        assert_eq!(typed("Fix login").tag_query(), None);
+        assert_eq!(typed("a@b").tag_query(), None);
+        let mut quick = typed("Fix @bug now");
+        quick.move_cursor(3); // in the space before the word
+        assert_eq!(quick.tag_query(), None);
+        quick.move_cursor(12); // behind `now`
+        assert_eq!(quick.tag_query(), None);
+    }
+
+    #[test]
+    fn a_lone_at_queries_everything() {
+        let query = typed("Fix @").tag_query().unwrap();
+        assert_eq!((query.query.as_str(), query.leave_out.len()), ("", 0));
+    }
+
+    #[test]
+    fn the_query_is_the_word_after_the_at_wherever_the_cursor_is_in_it() {
+        let mut quick = typed("Fix @bu");
+        assert_eq!(quick.tag_query().unwrap().query, "bu");
+        quick.move_cursor(5); // just behind the `@`
+        assert_eq!(quick.tag_query().unwrap().query, "bu");
+        quick.move_cursor(4); // just before the `@`
+        assert_eq!(quick.tag_query().unwrap().query, "bu");
+    }
+
+    #[test]
+    fn an_invalid_half_typed_word_is_still_queried() {
+        assert_eq!(typed("@Wo").tag_query().unwrap().query, "Wo");
+    }
+
+    #[test]
+    fn the_query_leaves_out_tags_typed_in_other_words_but_not_its_own() {
+        let mut quick = typed("@a @b @c");
+        quick.move_cursor(5); // in `@b`
+        let query = quick.tag_query().unwrap();
+        assert_eq!(query.query, "b");
+        assert_eq!(query.leave_out, ["a", "c"]);
+    }
+
+    #[test]
+    fn picking_completes_the_word_and_moves_the_cursor_behind_the_space() {
+        let mut quick = typed("Fix @bu now");
+        quick.move_cursor(7);
+        quick.pick_tag("bug/ui");
+        assert_eq!(quick.text(), "Fix @bug/ui  now");
+        assert_eq!(quick.cursor(), 12);
+    }
+
+    #[test]
+    fn a_picked_tag_applies_and_is_highlighted_once_the_cursor_leaves() {
+        let mut quick = typed("Fix @b");
+        quick.pick_tag("bug");
+        assert_eq!(quick.text(), "Fix @bug ");
+        assert_eq!(quick.tags(), ["bug"]);
+        assert_eq!(quick.title(), "Fix");
+        assert_eq!(quick.tag_query(), None); // the cursor is behind the space
+        assert_eq!(quick.highlights(), [tag(4, 8, "bug")]);
+    }
+
+    #[test]
+    fn picking_outside_an_at_word_changes_nothing() {
+        let mut quick = typed("Fix");
+        quick.pick_tag("bug");
+        assert_eq!(quick.text(), "Fix");
+    }
+
+    #[test]
+    fn picking_after_non_ascii_text_uses_utf16_positions() {
+        let mut quick = typed("🚀 @b");
+        quick.pick_tag("bug");
+        assert_eq!(quick.text(), "🚀 @bug ");
+        assert_eq!(quick.cursor(), 8);
     }
 }

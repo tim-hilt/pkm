@@ -23,6 +23,16 @@ import Testing
         #expect(model.tasks.map(\.priority) == [1])
     }
 
+    @Test func aTaskIsAddedWithTheTagsOfQuickAddCreatingNewOnes() throws {
+        let model = try openModel()
+        let quickAdd = TaskQuickAdd()
+        quickAdd.replace(start: 0, end: 0, with: "Fix login @bug @ui/nav @bug")
+        #expect(model.add(title: quickAdd.title(), priority: quickAdd.priority() ?? 4, tags: quickAdd.tags()))
+        #expect(model.tasks.map(\.title) == ["Fix login"])
+        #expect(model.tasks[0].tags.map(\.name) == ["bug", "ui/nav"])
+        #expect(model.allTags.map(\.name) == ["bug", "ui/nav"])
+    }
+
     @Test func aSubtaskIsAddedWithThePriorityOfQuickAdd() throws {
         let model = try openModel()
         #expect(model.add(title: "Parent"))
