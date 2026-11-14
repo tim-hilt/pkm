@@ -73,11 +73,11 @@ struct TasksView: View {
                     ToolbarItem(placement: .topBarTrailing) { SettingsButton() }
                 #endif
             }
-            .safeAreaInset(edge: .bottom) {
+            .addButton("New Task", identifier: "add-task") { isAdding = true }
+            .safeAreaInset(edge: .bottom) {  // below the "+", so the toast stays clear of it
                 if let pendingClose = model.pendingClose { ClosedToast(pendingClose: pendingClose) }
             }
             .animation(.default, value: model.pendingClose)
-            .addButton("New Task", identifier: "add-task") { isAdding = true }
             .sheet(isPresented: $isAdding) { NewTaskSheet() }
             .sheet(item: $subtaskParent) { NewTaskSheet(parent: $0) }
             .sheet(item: $model.editing) { EditTaskSheet(task: $0) }
