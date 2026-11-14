@@ -616,6 +616,29 @@ describe("Tags", () => {
     expect(first().tagColors).toEqual({});
   });
 
+  it("deletes a Tag from every Task, Open or Closed, and forgets its Tag Color", () => {
+    model.add("Old");
+    const old = () => model.tasks.find((t) => t.title === "Old")!;
+    model.edit(old(), { title: "Old", description: "", priority: 4, tags: ["work"] });
+    model.close(old(), Closing.Done);
+    model.setTagColor("work", "#d0021b");
+    const changed = vi.fn();
+    model.onChange = changed;
+    model.deleteTag("work");
+    expect(model.allTags.map((t) => t.name)).toEqual(["home"]);
+    expect(first().tags).toEqual(["home"]);
+    expect(old().tags).toEqual([]);
+    expect(changed).toHaveBeenCalled();
+    model.edit(first(), { title: "Buy milk", description: "", priority: 4, tags: ["work"] });
+    expect(tag("work")?.color).toBeUndefined();
+  });
+
+  it("changes nothing when the Tag is not deleted", () => {
+    model.setTagColor("work", "#d0021b");
+    expect(model.allTags.map((t) => t.name)).toEqual(["home", "work"]);
+    expect(first().tags).toEqual(["work", "home"]);
+  });
+
   it("keeps a Tag Color after a reload from the saved files", async () => {
     model.setTagColor("work", "#d0021b");
     await model.saved();

@@ -1,5 +1,6 @@
 import { button, make } from "../Dom";
 import { tagLabel } from "../tasks/TagLabel";
+import { deleteTagDialog } from "../tasks/TaskDialogs";
 import type { TasksModel } from "../tasks/TasksModel";
 
 /** What the color input shows for a Tag of Default: the grey of `.tag`. */
@@ -7,7 +8,7 @@ const defaultGrey = "#808080";
 
 /**
  * Settings' "Manage Tags" subpage: every Tag, alphabetically, in its Tag
- * Color, each with a color input and a Default button; "No Tags" if there are
+ * Color, each with a color input, a Default and a Delete button; "No Tags" if there are
  * none. `back` returns to Settings. Call `show` to list the Tags as they are.
  */
 export class ManageTagsPage {
@@ -44,7 +45,11 @@ export class ManageTagsPage {
         });
         reset.disabled = color === undefined;
         reset.setAttribute("aria-label", `Reset ${name} to Default`);
-        return make("li", "", [tagLabel(name, color), input, reset]);
+        const remove = button("manage-tags-default", "Delete", () => {
+          deleteTagDialog(this.tasks, this.element, name, () => this.show());
+        });
+        remove.setAttribute("aria-label", `Delete ${name}`);
+        return make("li", "", [tagLabel(name, color), input, reset, remove]);
       }),
     );
   }

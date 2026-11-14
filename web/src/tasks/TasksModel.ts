@@ -375,6 +375,11 @@ export class TasksModel {
     this.apply(() => this.files.store.setTagColor(tag, color));
   }
 
+  /** Deletes a Tag: Removes it from every Task, Open or Closed, and forgets it and its Tag Color. */
+  deleteTag(tag: string): void {
+    this.apply(() => this.files.store.deleteTag(tag));
+  }
+
   /** `text` without the characters a Tag can never contain. */
   static allowedTagText(text: string): string {
     return stripForbiddenTagCharacters(text);

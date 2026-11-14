@@ -95,6 +95,28 @@ function choice<T extends string | number>(
   return group;
 }
 
+/** Asks to Delete a Tag, which is Removed from every Item, then calls `deleted`; Cancel changes nothing. */
+export function deleteTagDialog(
+  model: TasksModel,
+  host: HTMLElement,
+  tag: string,
+  deleted: () => void,
+): void {
+  const confirm = confirmButton("Delete");
+  const { dialog, form } = modal(
+    host,
+    `Delete '${tag}'? It is Removed from every Item.`,
+    [],
+    [button("", "Cancel", () => dialog.close()), confirm],
+  );
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    model.deleteTag(tag);
+    dialog.close();
+    deleted();
+  });
+}
+
 /** Asks for a Title and adds the Task, Active; a Subtask of `under` follows its top-level Task's list. */
 export function newTaskDialog(model: TasksModel, host: HTMLElement, under?: ListedTask): void {
   const title = textInput("");
