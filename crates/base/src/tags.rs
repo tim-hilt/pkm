@@ -114,6 +114,16 @@ impl Tags {
             .collect()
     }
 
+    /// Whether `tag` is known.
+    pub fn contains(&self, tag: &str) -> bool {
+        self.0.contains_key(tag)
+    }
+
+    /// The Tag Color of `tag` (`#rrggbb`); `None` for Default or an unknown Tag.
+    pub fn color(&self, tag: &str) -> Option<&str> {
+        self.0.get(tag)?.color.as_deref()
+    }
+
     /// The names of the Tags starting with `prefix`, alphabetically.
     pub fn with_prefix(&self, prefix: &str) -> Vec<String> {
         self.0
@@ -127,7 +137,7 @@ impl Tags {
     /// Adds `tag` (valid, as `updated`) in Default; a known Tag stays as it
     /// is. Whether anything changed.
     pub fn add(&mut self, tag: &str, updated: &str) -> bool {
-        if self.0.contains_key(tag) {
+        if self.contains(tag) {
             return false;
         }
         let meta = Meta {
@@ -211,7 +221,8 @@ mod tests {
     fn a_tag_color_is_set_and_reset_bumping_updated() {
         let mut tags = tags(&["work"]);
         assert!(tags.set_color("work", Some("#D0021B"), "2027-02-02T00:00:00Z"));
-        assert_eq!(tags.list()[0].color.as_deref(), Some("#d0021b"));
+        assert_eq!(tags.color("work"), Some("#d0021b"));
+        assert_eq!(tags.color("unknown"), None);
         assert!(tags.render().contains("2027-02-02T00:00:00Z"));
         assert!(tags.set_color("work", None, "2027-03-03T00:00:00Z"));
         assert_eq!(tags.list()[0].color, None);
@@ -233,8 +244,10 @@ mod tests {
     #[test]
     fn a_forgotten_tag_is_gone() {
         let mut tags = tags(&["a", "b"]);
+        assert!(tags.contains("a"));
         assert!(tags.forget("a"));
         assert!(!tags.forget("a"));
+        assert!(!tags.contains("a"));
         assert_eq!(names(&tags), ["b"]);
     }
 

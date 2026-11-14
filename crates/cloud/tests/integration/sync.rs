@@ -2344,6 +2344,7 @@ impl TaggingDevice {
         let _ = store.tasks(pkm_tasks::Planning::Active); // reads what Sync brought
         store
             .tags()
+            .list()
             .into_iter()
             .map(|e| (e.name, e.color))
             .collect()

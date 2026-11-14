@@ -579,27 +579,21 @@ impl Tasks {
         Ok(self.read_tags().with_prefix(prefix))
     }
 
-    /// Every known Tag with its Tag Color, alphabetically.
-    pub fn tags(&self) -> Vec<pkm_base::tags::Entry> {
-        self.read_tags().list()
+    /// Every known Tag with its Tag Color.
+    pub fn tags(&self) -> Tags {
+        self.read_tags()
     }
 
     /// Gives the Tag its Tag Color (`#rrggbb`), or Default for `None`. A Tag
     /// that isn't known is left alone; a malformed color is `InvalidData`.
     pub fn set_tag_color(&self, tag: &str, color: Option<&str>) -> io::Result<()> {
-        let _held = self
-            .tags_lock
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let mut tags = self.read_tags();
-        let known = tags.list().iter().any(|e| e.name == tag);
-        if known && !tags.set_color(tag, color, &iso8601(now_ms())) {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "not #rrggbb"));
-        }
-        if known {
-            self.files.write(&self.tags_path(), &tags.render())?;
-        }
-        Ok(())
+        self.change_tags(|tags| {
+            let known = tags.contains(tag);
+            if known && !tags.set_color(tag, color, &iso8601(now_ms())) {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "not #rrggbb"));
+            }
+            Ok(known)
+        })
     }
 
     /// Removes `tag` from every Task, Open or Closed, saving each changed file
@@ -630,15 +624,7 @@ impl Tasks {
     /// Forgets `tag` and its Tag Color. Call `remove_tag_everywhere` first, or
     /// a Task still carrying it brings it back, grey.
     pub fn forget_tag(&self, tag: &str) -> io::Result<()> {
-        let _held = self
-            .tags_lock
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let mut tags = self.read_tags();
-        if tags.forget(tag) {
-            self.files.write(&self.tags_path(), &tags.render())?;
-        }
-        Ok(())
+        self.change_tags(|tags| Ok(tags.forget(tag)))
     }
 
     /// The file of the Open Task `id` and the Task it describes.
@@ -779,19 +765,32 @@ impl Tasks {
     }
 
     /// Adds the valid `found` Tags to the Tags file, leaving known ones as
-    /// they are; writes nothing if all are known.
+    /// they are; reads nothing if none are found, writes nothing if all are
+    /// known.
     fn remember_tags(&self, found: impl IntoIterator<Item = String>) -> io::Result<()> {
+        let mut found = found.into_iter().peekable();
+        if found.peek().is_none() {
+            return Ok(());
+        }
+        let updated = iso8601(now_ms());
+        self.change_tags(|tags| {
+            let mut changed = false;
+            for tag in found {
+                changed |= tags.add(&tag, &updated);
+            }
+            Ok(changed)
+        })
+    }
+
+    /// Reads the Tags, lets `change` change them and writes them back if it
+    /// says it did, all under `tags_lock`.
+    fn change_tags(&self, change: impl FnOnce(&mut Tags) -> io::Result<bool>) -> io::Result<()> {
         let _held = self
             .tags_lock
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         let mut tags = self.read_tags();
-        let updated = iso8601(now_ms());
-        let mut changed = false;
-        for tag in found {
-            changed |= tags.add(&tag, &updated);
-        }
-        if changed {
+        if change(&mut tags)? {
             self.files.write(&self.tags_path(), &tags.render())?;
         }
         Ok(())
@@ -1446,11 +1445,11 @@ mod tests {
         let tasks = dir.store();
         tagged(&tasks, &["home"]);
         tasks.set_tag_color("home", Some("#d0021b")).unwrap();
-        assert_eq!(tasks.tags()[0].color.as_deref(), Some("#d0021b"));
+        assert_eq!(tasks.tags().color("home"), Some("#d0021b"));
         tasks.set_tag_color("home", None).unwrap();
-        assert_eq!(tasks.tags()[0].color, None);
+        assert_eq!(tasks.tags().color("home"), None);
         tasks.set_tag_color("unknown", Some("#d0021b")).unwrap();
-        assert_eq!(tasks.tags().len(), 1);
+        assert!(!tasks.tags().contains("unknown"));
         assert!(tasks.set_tag_color("home", Some("red")).is_err());
     }
 
@@ -1540,9 +1539,10 @@ mod tests {
         tasks.set_tag_color("work", Some("#d0021b")).unwrap();
         tasks.remove_tag_everywhere("work").unwrap();
         tasks.forget_tag("work").unwrap();
-        assert!(tasks.tags().is_empty());
+        assert!(!tasks.tags().contains("work"));
         tasks.add_tag(&task.id, "work").unwrap();
-        assert_eq!(tasks.tags()[0].color, None);
+        assert!(tasks.tags().contains("work"));
+        assert_eq!(tasks.tags().color("work"), None);
     }
 
     fn history(dir: &Scratch) -> Vec<String> {

@@ -57,7 +57,11 @@ struct ManageTagsView: View {
     private func color(of tag: TagEntry) -> Binding<Color> {
         Binding(
             get: { tag.color.flatMap(Color.init(tagColor:)) ?? .gray },
-            set: { tasks.setTagColor(tag.name, to: $0.tagColor) })
+            set: {
+                // The picker reports often; a pick that changes nothing writes nothing.
+                let picked = $0.tagColor
+                if picked != tag.color { tasks.setTagColor(tag.name, to: picked) }
+            })
     }
 }
 

@@ -123,6 +123,11 @@ private struct ClosedToast: View {
 /// it the Title, the Description faded on one line, and the Tags fainter still.
 /// A Subtask is indented, a Parent has a chevron to collapse it, a Closed Subtask
 /// is struck through, a Blocked Task has a lock at the end. `onCircle` is a tap on the circle.
+/// A Tag's name in its Tag Color, Default being the tertiary grey.
+private func tagText(_ tag: TagEntry) -> Text {
+    Text(tag.name).foregroundStyle(tag.style())
+}
+
 private struct TaskRow: View {
     let task: ListedTask
     let isCollapsed: Bool
@@ -160,13 +165,11 @@ private struct TaskRow: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
-                if !task.tags.isEmpty {
-                    HStack(spacing: 4) {
-                        ForEach(task.tags, id: \.name) { tag in
-                            Text(tag.name).foregroundStyle(tag.style()).lineLimit(1)
-                        }
-                    }
-                    .font(.subheadline)
+                if let first = task.tags.first {
+                    // One Text, so that too many Tags are cut off at the end, not each.
+                    task.tags.dropFirst().reduce(tagText(first)) { Text("\($0) \(tagText($1))") }
+                        .font(.subheadline)
+                        .lineLimit(1)
                 }
             }
             if task.blocked {

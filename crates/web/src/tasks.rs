@@ -94,14 +94,11 @@ impl ListedTask {
 
 impl ListedTask {
     /// `row` with each of its Tags in the Tag Color `known` gives it.
-    fn new(row: Row, known: &[pkm_base::tags::Entry]) -> Self {
+    fn new(row: Row, known: &pkm_base::tags::Tags) -> Self {
         let t = row.task;
-        let tags = t.tags.into_iter().map(|name| {
-            let color = known.iter().find(|k| k.name == name);
-            TagEntry {
-                color: color.and_then(|k| k.color.clone()),
-                name,
-            }
+        let tags = t.tags.into_iter().map(|name| TagEntry {
+            color: known.color(&name).map(str::to_owned),
+            name,
         });
         Self {
             tags: tags.collect(),
@@ -294,7 +291,12 @@ impl TaskStore {
     /// Every known Tag with its Tag Color, alphabetically.
     #[wasm_bindgen(js_name = allTags)]
     pub fn all_tags(&self) -> Vec<TagEntry> {
-        self.tasks.tags().into_iter().map(Into::into).collect()
+        self.tasks
+            .tags()
+            .list()
+            .into_iter()
+            .map(Into::into)
+            .collect()
     }
 
     /// Gives a Tag its Tag Color (`#rrggbb`), or Default for none.

@@ -4,6 +4,7 @@
 mod books;
 mod tasks;
 
+use std::convert::Infallible;
 use std::fmt;
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -366,24 +367,9 @@ impl CloudSync {
         directories: SyncDirectories,
         observer: Arc<dyn SyncObserver>,
     ) -> Result<Arc<Self>, SyncStartError> {
-        let drawings = WebDavStorage::resume(&url, &username, &password, Drawings::FOLDER)
-            .map_err(|_| SyncStartError::NotHttps)?;
-        let books = WebDavStorage::resume(&url, &username, &password, Books::FOLDER)
-            .map_err(|_| SyncStartError::NotHttps)?;
-        let tasks = WebDavStorage::resume(&url, &username, &password, TaskFiles::FOLDER)
-            .map_err(|_| SyncStartError::NotHttps)?;
-        let tags = WebDavStorage::resume(&url, &username, &password, TagsFile::FOLDER)
-            .map_err(|_| SyncStartError::NotHttps)?;
-        Self::start_contexts(
-            directories,
-            ContextStorages {
-                drawings: Arc::new(drawings),
-                books: Arc::new(books),
-                tasks: Arc::new(tasks),
-                tags: Arc::new(tags),
-            },
-            observer,
-        )
+        let storages =
+            ContextStorages::open(|folder| webdav_storage(&url, &username, &password, folder))?;
+        Self::start_contexts(directories, storages, observer)
     }
 
     /// Starts Syncing like `start_webdav`, with the `pkm` folder
@@ -396,16 +382,9 @@ impl CloudSync {
         directories: SyncDirectories,
         observer: Arc<dyn SyncObserver>,
     ) -> Result<Arc<Self>, SyncStartError> {
-        let drawings = icloud_storage(&folder, Drawings::FOLDER, downloader.clone())?;
-        let books = icloud_storage(&folder, Books::FOLDER, downloader.clone())?;
-        let tasks = icloud_storage(&folder, TaskFiles::FOLDER, downloader.clone())?;
-        let tags = icloud_storage(&folder, TagsFile::FOLDER, downloader)?;
-        let storages = ContextStorages {
-            drawings,
-            books,
-            tasks,
-            tags,
-        };
+        let storages = ContextStorages::open(|context| {
+            Ok(icloud_storage(&folder, context, downloader.clone())?)
+        })?;
         Self::start_contexts(directories, storages, observer)
     }
 
@@ -420,31 +399,14 @@ impl CloudSync {
         directories: SyncDirectories,
         observer: Arc<dyn SyncObserver>,
     ) -> Result<Arc<Self>, SyncStartError> {
-        let drawings = google_drive_storage(
-            &client_id,
-            &refresh_token,
-            Drawings::FOLDER,
-            Arc::clone(&tokens),
-        );
-        let books = google_drive_storage(
-            &client_id,
-            &refresh_token,
-            Books::FOLDER,
-            Arc::clone(&tokens),
-        );
-        let tasks = google_drive_storage(
-            &client_id,
-            &refresh_token,
-            TaskFiles::FOLDER,
-            Arc::clone(&tokens),
-        );
-        let tags = google_drive_storage(&client_id, &refresh_token, TagsFile::FOLDER, tokens);
-        let storages = ContextStorages {
-            drawings,
-            books,
-            tasks,
-            tags,
-        };
+        let storages = ContextStorages::open(|folder| {
+            Ok(google_drive_storage(
+                &client_id,
+                &refresh_token,
+                folder,
+                tokens.clone(),
+            ))
+        })?;
         Self::start_contexts(directories, storages, observer)
     }
 
@@ -459,31 +421,14 @@ impl CloudSync {
         directories: SyncDirectories,
         observer: Arc<dyn SyncObserver>,
     ) -> Result<Arc<Self>, SyncStartError> {
-        let drawings = one_drive_storage(
-            &client_id,
-            &refresh_token,
-            Drawings::FOLDER,
-            Arc::clone(&tokens),
-        );
-        let books = one_drive_storage(
-            &client_id,
-            &refresh_token,
-            Books::FOLDER,
-            Arc::clone(&tokens),
-        );
-        let tasks = one_drive_storage(
-            &client_id,
-            &refresh_token,
-            TaskFiles::FOLDER,
-            Arc::clone(&tokens),
-        );
-        let tags = one_drive_storage(&client_id, &refresh_token, TagsFile::FOLDER, tokens);
-        let storages = ContextStorages {
-            drawings,
-            books,
-            tasks,
-            tags,
-        };
+        let storages = ContextStorages::open(|folder| {
+            Ok(one_drive_storage(
+                &client_id,
+                &refresh_token,
+                folder,
+                tokens.clone(),
+            ))
+        })?;
         Self::start_contexts(directories, storages, observer)
     }
 
@@ -518,33 +463,15 @@ impl CloudSync {
         refresh_token: String,
         tokens: Arc<dyn TokenObserver>,
     ) {
-        let drawings = one_drive_storage(
-            &client_id,
-            &refresh_token,
-            Drawings::FOLDER,
-            Arc::clone(&tokens),
-        );
-        let books: Arc<dyn Storage> = one_drive_storage(
-            &client_id,
-            &refresh_token,
-            Books::FOLDER,
-            Arc::clone(&tokens),
-        );
-        let tasks: Arc<dyn Storage> = one_drive_storage(
-            &client_id,
-            &refresh_token,
-            TaskFiles::FOLDER,
-            Arc::clone(&tokens),
-        );
-        let tags = one_drive_storage(&client_id, &refresh_token, TagsFile::FOLDER, tokens);
-        self.sync_loop.reconnect(vec![
-            drawings,
-            books.clone(),
-            books,
-            tasks.clone(),
-            tasks,
-            tags,
-        ]);
+        let Ok(storages) = ContextStorages::open(|folder| {
+            Ok::<_, Infallible>(one_drive_storage(
+                &client_id,
+                &refresh_token,
+                folder,
+                tokens.clone(),
+            ))
+        });
+        self.sync_loop.reconnect(storages.per_folder());
     }
 
     /// Like `reconnect_one_drive`, for Google Drive.
@@ -554,33 +481,15 @@ impl CloudSync {
         refresh_token: String,
         tokens: Arc<dyn TokenObserver>,
     ) {
-        let drawings = google_drive_storage(
-            &client_id,
-            &refresh_token,
-            Drawings::FOLDER,
-            Arc::clone(&tokens),
-        );
-        let books: Arc<dyn Storage> = google_drive_storage(
-            &client_id,
-            &refresh_token,
-            Books::FOLDER,
-            Arc::clone(&tokens),
-        );
-        let tasks: Arc<dyn Storage> = google_drive_storage(
-            &client_id,
-            &refresh_token,
-            TaskFiles::FOLDER,
-            Arc::clone(&tokens),
-        );
-        let tags = google_drive_storage(&client_id, &refresh_token, TagsFile::FOLDER, tokens);
-        self.sync_loop.reconnect(vec![
-            drawings,
-            books.clone(),
-            books,
-            tasks.clone(),
-            tasks,
-            tags,
-        ]);
+        let Ok(storages) = ContextStorages::open(|folder| {
+            Ok::<_, Infallible>(google_drive_storage(
+                &client_id,
+                &refresh_token,
+                folder,
+                tokens.clone(),
+            ))
+        });
+        self.sync_loop.reconnect(storages.per_folder());
     }
 
     /// Like `reconnect_one_drive`, for WebDAV.
@@ -590,26 +499,23 @@ impl CloudSync {
         username: String,
         password: String,
     ) -> Result<(), SyncStartError> {
-        let drawings = WebDavStorage::resume(&url, &username, &password, Drawings::FOLDER)
-            .map_err(|_| SyncStartError::NotHttps)?;
-        let books = WebDavStorage::resume(&url, &username, &password, Books::FOLDER)
-            .map_err(|_| SyncStartError::NotHttps)?;
-        let tasks = WebDavStorage::resume(&url, &username, &password, TaskFiles::FOLDER)
-            .map_err(|_| SyncStartError::NotHttps)?;
-        let books: Arc<dyn Storage> = Arc::new(books);
-        let tags = WebDavStorage::resume(&url, &username, &password, TagsFile::FOLDER)
-            .map_err(|_| SyncStartError::NotHttps)?;
-        let tasks: Arc<dyn Storage> = Arc::new(tasks);
-        self.sync_loop.reconnect(vec![
-            Arc::new(drawings),
-            books.clone(),
-            books,
-            tasks.clone(),
-            tasks,
-            Arc::new(tags),
-        ]);
+        let storages =
+            ContextStorages::open(|folder| webdav_storage(&url, &username, &password, folder))?;
+        self.sync_loop.reconnect(storages.per_folder());
         Ok(())
     }
+}
+
+/// The storage of `context`'s folder on the WebDAV server, contacting nobody.
+fn webdav_storage(
+    url: &str,
+    username: &str,
+    password: &str,
+    context: &str,
+) -> Result<Arc<dyn Storage>, SyncStartError> {
+    let storage = WebDavStorage::resume(url, username, password, context)
+        .map_err(|_| SyncStartError::NotHttps)?;
+    Ok(Arc::new(storage))
 }
 
 /// The cloud folder of each Context, one `pkm/<Context>` on the Cloud Provider.
@@ -618,6 +524,29 @@ struct ContextStorages {
     books: Arc<dyn Storage>,
     tasks: Arc<dyn Storage>,
     tags: Arc<dyn Storage>,
+}
+
+impl ContextStorages {
+    /// Each cloud folder, as `open` opens the one named.
+    fn open<E>(open: impl Fn(&str) -> Result<Arc<dyn Storage>, E>) -> Result<Self, E> {
+        Ok(Self {
+            drawings: open(Drawings::FOLDER)?,
+            books: open(Books::FOLDER)?,
+            tasks: open(TaskFiles::FOLDER)?,
+            tags: open(TagsFile::FOLDER)?,
+        })
+    }
+
+    /// The cloud folder of each Sync folder, in `start_contexts`' order.
+    fn per_folder(self) -> Vec<Arc<dyn Storage>> {
+        let Self {
+            drawings,
+            books,
+            tasks,
+            tags,
+        } = self;
+        vec![drawings, books.clone(), books, tasks.clone(), tasks, tags]
+    }
 }
 
 impl CloudSync {
