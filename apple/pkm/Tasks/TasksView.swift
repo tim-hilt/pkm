@@ -79,8 +79,8 @@ struct TasksView: View {
             }
             .animation(.default, value: model.pendingClose)
             .addButton("New Task", identifier: "add-task") { isAdding = true }
-            .sheet(isPresented: $isAdding) { NewTaskSheet(planning: model.planning) }
-            .sheet(item: $subtaskParent) { NewTaskSheet(planning: $0.planning, parent: $0) }
+            .sheet(isPresented: $isAdding) { NewTaskSheet() }
+            .sheet(item: $subtaskParent) { NewTaskSheet(parent: $0) }
             .sheet(item: $model.editing) { EditTaskSheet(task: $0) }
         }
     }
@@ -182,18 +182,15 @@ extension ListedTask {
     }
 }
 
-/// Asks for a Title and Active or Backlog (Active unless the Backlog is shown),
-/// or only a Title for a Subtask of `parent`.
+/// Asks for a Title; the Task is added Active. Also used for a Subtask of `parent`.
 private struct NewTaskSheet: View {
     @Environment(TasksModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var title = ""
-    @State private var planning: Planning
     @FocusState private var isTitleFocused: Bool
     private let parent: ListedTask?
 
-    init(planning: Planning, parent: ListedTask? = nil) {
-        _planning = State(initialValue: planning)
+    init(parent: ListedTask? = nil) {
         self.parent = parent
     }
 
@@ -206,13 +203,6 @@ private struct NewTaskSheet: View {
                     .focused($isTitleFocused)
                     .onSubmit(add)
                     .accessibilityIdentifier("task-title")
-                if parent == nil {
-                    Picker("List", selection: $planning) {
-                        Text("Active").tag(Planning.active)
-                        Text("Backlog").tag(Planning.backlog)
-                    }
-                    .pickerStyle(.segmented)
-                }
             }
             .formStyle(.grouped)
             .navigationTitle(parent == nil ? "New Task" : "New Subtask")
@@ -236,7 +226,7 @@ private struct NewTaskSheet: View {
     private func add() {
         let added =
             if let parent { model.addSubtask(title: title, under: parent) } else {
-                model.add(title: title, planning: planning)
+                model.add(title: title)
             }
         if added { dismiss() }
     }

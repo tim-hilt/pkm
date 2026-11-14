@@ -69,7 +69,7 @@ final class TasksModel {
     /// Adds a Task and shows the list it landed in. False, adding nothing, if
     /// the Title is empty.
     @discardableResult
-    func add(title: String, planning: Planning) -> Bool {
+    func add(title: String, planning: Planning = .active) -> Bool {
         guard (try? store.create(title: title, planning: planning)) != nil else { return false }
         if self.planning == planning { reload() } else { self.planning = planning }
         return true

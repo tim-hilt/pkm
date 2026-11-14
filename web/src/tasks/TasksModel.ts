@@ -166,7 +166,7 @@ export class TasksModel {
   }
 
   /** Adds a Task and shows the list it landed in. False, adding nothing, if the Title is empty. */
-  add(title: string, planning = this.list): boolean {
+  add(title: string, planning = Planning.Active): boolean {
     if (!this.change(() => this.files.store.create(title, planning))) return false;
     this.list = planning;
     this.reload();

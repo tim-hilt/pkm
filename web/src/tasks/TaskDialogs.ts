@@ -1,6 +1,6 @@
 import { isValidTag } from "../core/Core";
 import { button, make } from "../Dom";
-import { type Blocker, type ListedTask, TasksModel, lists } from "./TasksModel";
+import { type Blocker, type ListedTask, TasksModel } from "./TasksModel";
 
 let nextId = 0;
 
@@ -69,35 +69,17 @@ function choice<T extends string | number>(
   return group;
 }
 
-/**
- * Asks for a Title and adds the Task: Active or Backlog (the list shown at
- * first), or, for a Subtask of `under`, only a Title, as it follows its
- * top-level Task's list.
- */
+/** Asks for a Title and adds the Task, Active; a Subtask of `under` follows its top-level Task's list. */
 export function newTaskDialog(model: TasksModel, host: HTMLElement, under?: ListedTask): void {
   const title = textInput("");
   title.setAttribute("aria-label", "Title");
   title.placeholder = "Title";
-  let planning = model.planning;
-  const listChoice = under
-    ? []
-    : [
-        choice(
-          "List",
-          lists.map(({ planning, title }) => ({
-            value: planning,
-            text: title,
-          })),
-          planning,
-          (value) => (planning = value),
-        ),
-      ];
   openDialog(
     host,
     under ? "New Subtask" : "New Task",
     "Add",
-    [title, ...listChoice],
-    () => (under ? model.addSubtask(title.value, under) : model.add(title.value, planning)),
+    [title],
+    () => (under ? model.addSubtask(title.value, under) : model.add(title.value)),
     () => title.value.trim() !== "",
   );
   title.focus();
