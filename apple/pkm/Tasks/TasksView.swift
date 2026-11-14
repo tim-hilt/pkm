@@ -33,6 +33,11 @@ struct TasksView: View {
                                 return true
                             }
                             .onTapGesture { if !task.closed { model.startEditing(task) } }
+                            .swipeActions(edge: .trailing) {
+                                if !task.closed && !task.done {
+                                    Button("Reject", role: .destructive) { model.close(task, as: .rejected) }
+                                }
+                            }
                             .contextMenu {
                                 if !task.closed && !task.done {  // a pending Done is Reverted at its circle
                                     Button("Add Subtask", systemImage: "plus.circle") { subtaskParent = task }
@@ -370,16 +375,13 @@ private struct EditTaskForm: View {
             .onChange(of: priority) { save() }
             Section("Tags") {
                 ForEach(tags, id: \.self) { tag in
-                    HStack {
-                        Text(tag).foregroundStyle(model.tagEntry(tag).style(default: .primary))
-                        Spacer()
-                        Button("Remove \(tag)", systemImage: "minus.circle") {
-                            tags.removeAll { $0 == tag }
-                            save()
+                    Text(tag).foregroundStyle(model.tagEntry(tag).style(default: .primary))
+                        .swipeActions(edge: .trailing) {
+                            Button("Remove", role: .destructive) {
+                                tags.removeAll { $0 == tag }
+                                save()
+                            }
                         }
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.borderless)
-                    }
                 }
                 TextField("Add Tag", text: $newTag)
                     .onSubmit { addTag(newTag) }
@@ -404,19 +406,18 @@ private struct EditTaskForm: View {
             }
             Section("Blocked by") {
                 ForEach(blockedBy, id: \.id) { blocker in
-                    HStack {
+                    Group {
                         if blocker.closed {
                             Text(blocker.title).strikethrough().foregroundStyle(.secondary)
                         } else {
                             NavigationLink(blocker.title, value: blocker.id).disabled(!hasTitle)
                         }
-                        Spacer()
-                        Button("Remove \(blocker.title)", systemImage: "minus.circle") {
+                    }
+                    .swipeActions(edge: .trailing) {
+                        Button("Remove", role: .destructive) {
                             blockedBy.removeAll { $0.id == blocker.id }
                             saveBlockedBy()
                         }
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.borderless)
                     }
                 }
                 if !blockerCandidates.isEmpty {
