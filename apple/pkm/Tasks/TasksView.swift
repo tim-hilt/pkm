@@ -56,6 +56,7 @@ struct TasksView: View {
                         .onMove { model.move(from: $0, to: $1) }
                     }
                     .listStyle(.plain)
+                    .contentMargins(.bottom, 80, for: .scrollContent)  // scroll the last Task clear of the "+"
                 }
             }
             .toolbar {
