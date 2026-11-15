@@ -65,8 +65,10 @@ struct QuickAddField: View {
                 }
                 .foregroundStyle(model.tagEntry(suggestion.tag).style(default: .primary))
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 2)
-                .background(index == selected ? Color.accentColor.opacity(0.2) : .clear, in: .rect(cornerRadius: 6))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(index == selected ? Color.accentColor.opacity(0.2) : .clear, in: .rect(cornerRadius: 10))
+                .padding(.horizontal, -8)  // the highlight's margin, without moving the label
             }
             .buttonStyle(.plain)
         }
