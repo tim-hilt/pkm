@@ -11,27 +11,32 @@ struct TagsSettingsSection: View {
     }
 }
 
-/// Every Tag, alphabetically, each `a/b` as one flat row in its Tag Color, which
-/// the row's color picker changes and "Default" resets; "No Tags" if there are none.
+/// Every Tag, alphabetically, each `a/b` as one flat row written in its Tag Color;
+/// "No Tags" if there are none. Swiping a row offers Edit, which picks the Tag
+/// Color, and Delete, which a full swipe runs.
 struct ManageTagsView: View {
     @Environment(TasksModel.self) private var tasks
     @State private var deletion = TagDeletion()
+    @State private var editing: String?
 
     var body: some View {
         List(tasks.allTags, id: \.name) { tag in
-            HStack {
-                ColorPicker(selection: color(of: tag), supportsOpacity: false) {
-                    Text(tag.name).foregroundStyle(tag.style(default: .primary))
+            Text(tag.name).foregroundStyle(tag.style(default: .primary))
+                .swipeActions(edge: .trailing) {
+                    Button("Delete", systemImage: "trash", role: .destructive) { deletion.ask(for: tag.name) }
+                    Button("Edit", systemImage: "pencil") { editing = tag.name }.tint(.blue)
                 }
-                Button("Default") { tasks.setTagColor(tag.name, to: nil) }
-                    .buttonStyle(.borderless)
-                    .disabled(tag.color == nil)
-            }
-            .swipeActions(edge: .trailing) {
-                Button("Delete", role: .destructive) { deletion.ask(for: tag.name) }
-            }
-            .contextMenu {
-                Button("Delete", role: .destructive) { deletion.ask(for: tag.name) }
+                .contextMenu {
+                    Button("Edit", systemImage: "pencil") { editing = tag.name }
+                    Button("Default Color") { tasks.setTagColor(tag.name, to: nil) }
+                        .disabled(tag.color == nil)
+                    Button("Delete", systemImage: "trash", role: .destructive) { deletion.ask(for: tag.name) }
+                }
+        }
+        .listStyle(.plain)
+        .sheet(isPresented: isEditing) {
+            if let tag = tasks.allTags.first(where: { $0.name == editing }) {
+                TagColorPicker(title: tag.name, color: color(of: tag))
             }
         }
         .confirmationDialog(
@@ -53,6 +58,11 @@ struct ManageTagsView: View {
         Binding(get: { deletion.pending != nil }, set: { if !$0 { deletion.cancel() } })
     }
 
+    /// The color picker shows while a Tag is being edited.
+    private var isEditing: Binding<Bool> {
+        Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })
+    }
+
     /// The picker's color: the Tag Color, or the grey of Default.
     private func color(of tag: TagEntry) -> Binding<Color> {
         Binding(
@@ -64,6 +74,60 @@ struct ManageTagsView: View {
             })
     }
 }
+
+#if os(iOS)
+    /// The system color picker as a sheet, titled after the Tag; it writes each
+    /// finished pick (not every step of a drag) and closes with its own button.
+    private struct TagColorPicker: UIViewControllerRepresentable {
+        let title: String
+        let color: Binding<Color>
+        @Environment(\.dismiss) private var dismiss
+
+        func makeUIViewController(context: Context) -> UIColorPickerViewController {
+            let picker = UIColorPickerViewController()
+            picker.title = title
+            picker.supportsAlpha = false
+            picker.selectedColor = UIColor(color.wrappedValue)
+            picker.delegate = context.coordinator
+            return picker
+        }
+
+        func updateUIViewController(_ picker: UIColorPickerViewController, context: Context) {
+            context.coordinator.picker = self
+        }
+
+        func makeCoordinator() -> Coordinator { Coordinator(picker: self) }
+
+        final class Coordinator: NSObject, UIColorPickerViewControllerDelegate {
+            var picker: TagColorPicker
+
+            init(picker: TagColorPicker) { self.picker = picker }
+
+            func colorPickerViewController(
+                _ controller: UIColorPickerViewController, didSelect color: UIColor, continuously: Bool
+            ) {
+                if !continuously { picker.color.wrappedValue = Color(uiColor: color) }
+            }
+
+            func colorPickerViewControllerDidFinish(_ controller: UIColorPickerViewController) {
+                picker.dismiss()
+            }
+        }
+    }
+#else
+    /// The system color picker in a sheet titled after the Tag.
+    private struct TagColorPicker: View {
+        let title: String
+        let color: Binding<Color>
+        @Environment(\.dismiss) private var dismiss
+
+        var body: some View {
+            Form { ColorPicker(title, selection: color, supportsOpacity: false) }
+                .padding()
+                .toolbar { Button("Done") { dismiss() } }
+        }
+    }
+#endif
 
 /// The Tag awaiting the user's answer to "Delete 'work'?"; none when nobody is asked.
 struct TagDeletion {
