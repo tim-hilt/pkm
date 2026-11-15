@@ -33,11 +33,21 @@ import XCTest
 
         app.buttons["Reply to Anna's email"].firstMatch.tap()
         XCTAssertTrue(showsForm(of: "Reply to Anna's email"))
-        XCTAssertEqual(app.textFields["task-title"].value as? String, "Reply to Anna's email")
+        XCTAssertEqual(
+            app.descendants(matching: .any)["task-title"].firstMatch.value as? String, "Reply to Anna's email")
 
         app.navigationBars.buttons["Book the dentist"].tap()
         XCTAssertTrue(showsForm(of: "Book the dentist"))
         XCTAssertFalse(app.navigationBars["Reply to Anna's email"].exists)
+    }
+
+    func testTheBottomTabsSwitchTheLists() throws {
+        try XCTSkipUnless(app.buttons["tasks-tab-backlog"].exists, "the Mac switches lists in its toolbar")
+        app.buttons["tasks-tab-backlog"].tap()
+        XCTAssertTrue(app.staticTexts["Learn Rust"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Book the dentist"].exists)
+        app.buttons["tasks-tab-active"].tap()
+        XCTAssertTrue(app.staticTexts["Book the dentist"].waitForExistence(timeout: 5))
     }
 
     func testAParentIsSetInTheEditSheet() {

@@ -54,19 +54,27 @@ struct TasksView: View {
                 }
             }
             #if os(iOS)
-                .navigationBarTitleDisplayMode(.inline)  // no large-title space above the list
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Picker("List", selection: $model.planning) {
-                        Text("Active").tag(Planning.active)
-                        Text("Backlog").tag(Planning.backlog)
+                .navigationBarTitleDisplayMode(.inline)  // slim top bar: the sidebar button, no title
+                .toolbar {
+                    // Tabs in the bottom bar; the "+" and the toast sit above it, in its safe area.
+                    ToolbarItemGroup(placement: .bottomBar) {
+                        PlanningTab(.active, title: "Active", symbol: "checklist", selection: $model.planning)
+                        PlanningTab(.backlog, title: "Backlog", symbol: "tray.full", selection: $model.planning)
                     }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .accessibilityIdentifier("tasks-planning")
                 }
-            }
+            #else
+                .toolbar {
+                    ToolbarItem(placement: .principal) {
+                        Picker("List", selection: $model.planning) {
+                            Text("Active").tag(Planning.active)
+                            Text("Backlog").tag(Planning.backlog)
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .accessibilityIdentifier("tasks-planning")
+                    }
+                }
+            #endif
             .safeAreaInset(edge: .bottom) {
                 if let pendingClose = model.pendingClose { ClosedToast(closing: pendingClose) }
             }
@@ -80,6 +88,34 @@ struct TasksView: View {
         }
     }
 }
+
+#if os(iOS)
+    /// One of the bottom bar's tabs: shows its list, tinted while it is the one shown.
+    private struct PlanningTab: View {
+        let planning: Planning
+        let title: LocalizedStringKey
+        let symbol: String
+        @Binding var selection: Planning
+
+        init(_ planning: Planning, title: LocalizedStringKey, symbol: String, selection: Binding<Planning>) {
+            self.planning = planning
+            self.title = title
+            self.symbol = symbol
+            _selection = selection
+        }
+
+        var body: some View {
+            Button {
+                selection = planning
+            } label: {
+                Label(title, systemImage: symbol).labelStyle(.titleAndIcon)
+            }
+            .foregroundStyle(selection == planning ? Color.accentColor : .secondary)
+            .accessibilityIdentifier("tasks-tab-\(planning == .active ? "active" : "backlog")")
+            .accessibilityAddTraits(selection == planning ? .isSelected : [])
+        }
+    }
+#endif
 
 /// Tells that a Task was just Closed and offers to Revert it.
 private struct ClosedToast: View {
