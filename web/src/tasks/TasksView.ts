@@ -12,7 +12,7 @@ const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" s
  * The Tasks Context: the Active list and the Backlog as Todoist-style rows: a
  * circle coloured by Priority, the Title, the Description faded on one line
  * and the Tags fainter still. The circle marks the Task Done, and a toast
- * offers to Revert a Close. A Parent shows how many of its Subtasks are Done,
+ * offers to Revert a Close, in the edit view while that is shown. A Parent shows how many of its Subtasks are Done,
  * a Subtask its Parent's Title, before the Tags; rows are dragged to reorder. A row opens the edit view; its
  * menu (right click, long press) adds a Subtask, plans, moves or Rejects. A
  * port of the Swift `TasksView`, in native elements.
@@ -83,7 +83,14 @@ export class TasksView {
     this.failure.hidden = model.failure === undefined;
     this.failure.textContent = model.failure ?? "";
     this.showEditor();
+    this.placeToast();
     this.editor?.refresh();
+  }
+
+  /** A modal dialog covers the list's toast, so while the edit view is shown the toast is in it. */
+  private placeToast(): void {
+    const host = this.editor?.dialog ?? this.element;
+    if (this.toast.parentElement !== host) host.append(this.toast);
   }
 
   /**
@@ -102,6 +109,7 @@ export class TasksView {
       // Closed by the model's say-so (the address left the Task): nothing to tell.
       if (this.editor?.dialog !== dialog) return;
       this.editor = undefined;
+      this.placeToast(); // the dialog is removed with what is in it
       this.places.close();
     });
     this.editor = { dialog, task: editing.id, refresh };

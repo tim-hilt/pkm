@@ -3,7 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { type Core, Closing, Planning, TaskQuickAdd, loadCore } from "../core/Core";
 import { MemoryStorage } from "../storage/MemoryStorage";
 import { TaskFiles } from "./TaskFiles";
-import { TasksModel } from "./TasksModel";
+import { type ListedTask, TasksModel } from "./TasksModel";
 
 const generated = new URL("../../generated/", import.meta.url);
 let core: Core;
@@ -695,6 +695,40 @@ describe("Subtasks of a Task", () => {
     model.add("Alone");
     expect(model.subtasks(first().id)).toEqual([]);
     expect(model.subtasks("unknown")).toEqual([]);
+  });
+
+  describe("closed in the section", () => {
+    let parent: ListedTask;
+    const counts = () => {
+      const { subtasksDone, subtasksTotal } = model.find(parent.id)!;
+      return [subtasksDone, subtasksTotal];
+    };
+    beforeEach(() => {
+      model.add("Parent");
+      parent = first();
+      model.addSubtask("One", parent);
+      model.addSubtask("Two", parent);
+    });
+
+    it("keeps a Done Subtask, marked, and counts it; Revert takes it back", () => {
+      model.close(model.subtasks(parent.id)[0], Closing.Done);
+      expect(model.subtasks(parent.id).map((t) => [t.title, t.done])).toEqual([
+        ["One", true],
+        ["Two", false],
+      ]);
+      expect(counts()).toEqual([1, 2]);
+      model.revert();
+      expect(model.subtasks(parent.id).map((t) => t.done)).toEqual([false, false]);
+      expect(counts()).toEqual([0, 2]);
+    });
+
+    it("drops a Rejected Subtask from the section and the counter", () => {
+      model.close(model.subtasks(parent.id)[0], Closing.Rejected);
+      expect(model.subtasks(parent.id).map((t) => t.title)).toEqual(["Two"]);
+      expect(counts()).toEqual([0, 1]);
+      model.revert();
+      expect(model.subtasks(parent.id)).toHaveLength(2);
+    });
   });
 
   it("opens a Subtask over its Parent, and back returns", () => {

@@ -1350,6 +1350,14 @@
         color: var(--control-ink);
         box-shadow: 0 4px 24px rgb(0 0 0 / 0.35);
       }
+      /* In the edit view, centered over the dialog's own viewport, whatever the list's layout. */
+      .tasks-dialog > .tasks-toast {
+        left: 50%;
+        right: auto;
+        bottom: max(20px, env(safe-area-inset-bottom));
+        width: min(420px, calc(100vw - 32px));
+        transform: translateX(-50%);
+      }
       .tasks-dialog::backdrop {
         background: rgb(0 0 0 / 0.4);
       }

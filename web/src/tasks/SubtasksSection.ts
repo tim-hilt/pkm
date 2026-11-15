@@ -1,6 +1,7 @@
-import { TaskQuickAdd } from "../core/Core";
+import { Closing, TaskQuickAdd } from "../core/Core";
 import { button, make } from "../Dom";
 import { QuickAddField } from "./QuickAddField";
+import { RowMenu } from "./RowMenu";
 import { taskLine } from "./TaskRow";
 import type { TasksModel } from "./TasksModel";
 
@@ -12,7 +13,8 @@ const chevronGlyph = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none
  * rows, then an "Add Subtask" button that turns into a focused Quick Add field:
  * Enter adds the Subtask at the end and empties the field, which keeps the focus;
  * Enter on an empty field, or blur, closes it. A click opens a Subtask via
- * `open`. Starts unfolded; the fold is not saved; folding hides the button too.
+ * `open`. A row's circle marks it Done or Reverts that; its menu (right click,
+ * long press) holds only Reject. Starts unfolded; the fold is not saved; folding hides the button too.
  * `refresh` redraws it from the model, as last saved.
  */
 export class SubtasksSection {
@@ -25,6 +27,7 @@ export class SubtasksSection {
   );
   /** Holds the "Add Subtask" button, or the Quick Add field it turned into. */
   private readonly adder = make("div", "tasks-subtasks-add", [this.addButton]);
+  private readonly menu = new RowMenu(document.body);
   private readonly body = make("div", "", [this.rows, this.adder]);
   /** The open Quick Add field and the Shortcuts it owns, until closed. */
   private adding: { field: QuickAddField; quickAdd: TaskQuickAdd } | undefined;
@@ -48,6 +51,7 @@ export class SubtasksSection {
         this.fold,
       ]),
       this.body,
+      this.menu.element,
     );
     this.refresh();
   }
@@ -94,12 +98,20 @@ export class SubtasksSection {
     this.fold.setAttribute("aria-expanded", String(!this.folded));
     this.fold.classList.toggle("folded", this.folded);
     this.body.hidden = this.folded;
+    this.menu.hide();
     this.rows.replaceChildren(
       ...model.subtasks(this.taskId).map((subtask) => {
-        const { line } = taskLine(subtask, model, () => this.open(subtask.id), {
+        const { line, open } = taskLine(subtask, model, () => this.open(subtask.id), {
           showsParent: false,
         });
-        return make("li", "task-row", [line]);
+        open.setAttribute("aria-haspopup", "menu");
+        const row = make("li", "task-row", [line]);
+        // A pending Done is Reverted at its circle, so it has no menu.
+        const items = subtask.done
+          ? []
+          : [{ label: "Reject", run: () => model.close(subtask, Closing.Rejected), danger: true }];
+        this.menu.attach(row, () => items, open);
+        return row;
       }),
     );
   }
