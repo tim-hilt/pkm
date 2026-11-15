@@ -1459,8 +1459,8 @@
         opacity: 0.4;
         cursor: default;
       }
-      /* The shell: the Contexts as a sidebar, a bottom tab bar at phone widths
-         (the same query as the Drawing layout, see ShellLayout). */
+      /* The shell: the Contexts as a sidebar; at phone widths (the same query as the
+         Drawing layout, see ShellLayout) a full-screen list that a button opens. */
       .shell {
         display: flex;
         width: 100%;
@@ -1502,8 +1502,11 @@
         background: var(--checked-fill);
         color: var(--checked-ink);
       }
-      .shell-gear {
+      .shell-settings {
         margin-top: auto;
+      }
+      .shell-menu {
+        display: none;
       }
       /* Containing the fixed buttons of a Context (the Gallery's +) to its pane. */
       .shell-content {
@@ -1516,7 +1519,8 @@
         position: absolute;
         inset: 0;
       }
-      .shell.focused .shell-bar {
+      .shell.focused .shell-bar,
+      .shell.focused .shell-menu {
         display: none;
       }
       .shell-placeholder {
@@ -1533,29 +1537,35 @@
         height: 48px;
       }
       @media (max-width: 599px), (max-height: 499px) and (max-width: 999px) {
-        .shell {
-          flex-direction: column-reverse;
-        }
         .shell-bar {
+          display: none;
+          position: fixed;
+          inset: 0;
+          z-index: 10;
           width: auto;
-          flex-direction: row;
-          gap: 0;
-          padding: 4px max(4px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom))
-            max(4px, env(safe-area-inset-left));
           border-right: 0;
-          border-top: 1px solid var(--divider);
         }
-        .shell-link {
-          flex: 1;
-          min-width: 0;
-          flex-direction: column;
+        .shell.sidebar-open:not(.focused) .shell-bar {
+          display: flex;
+        }
+        .shell-menu {
+          position: absolute;
+          z-index: 1;
+          top: max(4px, env(safe-area-inset-top));
+          left: max(4px, env(safe-area-inset-left));
+          display: flex;
+          align-items: center;
           justify-content: center;
-          gap: 2px;
-          padding: 0 2px;
-          font-size: 0.7rem;
-        }
-        .shell-gear {
-          margin-top: 0;
+          width: 44px;
+          height: 44px;
+          padding: 0;
+          border: 0;
+          border-radius: 8px;
+          background: none;
+          color: inherit;
+          cursor: pointer;
+          touch-action: manipulation;
+          -webkit-tap-highlight-color: transparent;
         }
       }
       .unsupported {
