@@ -269,6 +269,27 @@ import Testing
         #expect(model.subtasks(of: "unknown").isEmpty)
     }
 
+    @Test func aSubtaskIsDoneRevertedAndRejectedInItsParentsSection() throws {
+        let model = try openModel()
+        model.add(title: "p")
+        let p = model.tasks[0]
+        for title in ["a", "b"] { model.addSubtask(title: title, under: p) }
+        model.addSubtask(title: "deep", under: model.subtasks(of: p.id)[0])
+
+        model.toggleDone(model.subtasks(of: p.id)[0])
+        #expect(model.subtasks(of: p.id).map(\.done) == [true, false])
+        #expect(model.task(id: p.id)?.subtasksDone == 1 && model.task(id: p.id)?.subtasksTotal == 2)
+
+        model.toggleDone(model.subtasks(of: p.id)[0])
+        #expect(model.subtasks(of: p.id).map(\.done) == [false, false])
+        #expect(model.task(id: p.id)?.subtasksDone == 0)
+
+        model.close(model.subtasks(of: p.id)[0], as: .rejected)
+        #expect(model.subtasks(of: p.id).map(\.title) == ["b"])
+        #expect(model.task(id: p.id)?.subtasksTotal == 1)
+        #expect(model.tasks.map(\.title) == ["p", "b"])  // "a" and its Subtask "deep" went together
+    }
+
     @Test func aBlockerOnTheOtherListOpensWithoutChangingTheListShown() throws {
         let model = try openModel()
         model.add(title: "far", planning: .backlog)

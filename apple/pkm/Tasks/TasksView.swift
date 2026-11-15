@@ -78,7 +78,10 @@ struct TasksView: View {
                 #endif
             }
             .safeAreaInset(edge: .bottom) {
-                if let pendingClose = model.pendingClose { ClosedToast(closing: pendingClose) }
+                // While the edit sheet is open, its own toast shows instead.
+                if let pendingClose = model.pendingClose, model.editing.isEmpty {
+                    ClosedToast(closing: pendingClose)
+                }
             }
             .animation(.default, value: model.pendingClose)
             #if os(macOS)
@@ -307,6 +310,10 @@ private struct EditTaskSheet: View {
             form(model.editing.first)
                 .navigationDestination(for: String.self) { form($0) }
         }
+        .safeAreaInset(edge: .bottom) {
+            if let pendingClose = model.pendingClose { ClosedToast(closing: pendingClose) }
+        }
+        .animation(.default, value: model.pendingClose)
         .interactiveDismissDisabled(model.isLeavingBlocked)
         #if os(macOS)
             .frame(minWidth: 360)
