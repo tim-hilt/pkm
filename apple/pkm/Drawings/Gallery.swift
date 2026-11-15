@@ -19,9 +19,9 @@ final class Gallery {
     var syncProgress: SyncProgress?
     var syncStatus: SyncStatus?
 
-    /// "Syncing 3 of 40 Drawings" while Drawings transfer.
+    /// "Syncing 3 of 40 Items" while Items of any Context transfer.
     var syncText: String? {
-        syncProgress.map { String(localized: "Syncing \($0.done) of \($0.total) Drawings") }
+        syncProgress.map { String(localized: "Syncing \($0.done) of \($0.total) Items") }
     }
 
     /// Whether the Gallery shows its warning icon: Sync is blocked because

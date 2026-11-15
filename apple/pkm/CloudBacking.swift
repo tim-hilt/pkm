@@ -92,7 +92,7 @@ private final class RotatedTokens: TokenObserver {
     }
 }
 
-/// How many of the Drawings a Sync step transfers are done.
+/// How many of the Items (Drawings, Books, Tasks) a Sync step transfers are done.
 struct SyncProgress: Equatable {
     let done: Int
     let total: Int
@@ -165,7 +165,7 @@ final class CloudBackingModel {
 
     /// What Sync is doing; nil until the first step is through.
     private(set) var status: SyncStatus?
-    /// Drawings done of all Drawings a running Sync step transfers.
+    /// Items done of all Items a running Sync step transfers.
     private(set) var progress: SyncProgress?
     /// When a Sync step last went through.
     private(set) var lastSync: Date?
@@ -179,7 +179,7 @@ final class CloudBackingModel {
         case nil: String(localized: "Not synced yet")
         case .upToDate: String(localized: "Up to date")
         case .syncing:
-            progress.map { String(localized: "Syncing \($0.done) of \($0.total) Drawings") }
+            progress.map { String(localized: "Syncing \($0.done) of \($0.total) Items") }
                 ?? String(localized: "Syncing")
         case .offline: String(localized: "Offline")
         case .accessLost: String(localized: "Access lost")
