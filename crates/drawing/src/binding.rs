@@ -10,9 +10,10 @@
 //!
 //! * `orbit`: the arrow stops short of the shape, at a gap of 5 plus half the
 //!   shape's stroke width from its outline, on the line towards the arrow's
-//!   other end. Arrows bind this way when drawn.
-//! * `inside`: the arrow ends exactly at the fixed point. Only read from
-//!   files.
+//!   other end. Ends put near a shape bind this way.
+//! * `inside`: the arrow ends exactly at the fixed point. Ends put inside a
+//!   shape, or on the shape the other end is bound to, bind this way, so that
+//!   arrows can be drawn on shapes and images.
 //!
 //! Ends are bound when a pointer puts them near a shape ([`bind_end`]) and
 //! unbound when it puts them elsewhere or when the arrow moves without the
@@ -210,8 +211,9 @@ pub(crate) fn bind_end(
     Some(shape)
 }
 
-/// Binds `end` of the arrow `arrow_id` to the shape `shape_id`, orbiting it
-/// and aimed at `at`.
+/// Binds `end` of the arrow `arrow_id` to the shape `shape_id`, aimed at `at`:
+/// inside it if `at` is inside it or the other end is bound to it too, else
+/// orbiting it (Excalidraw's `getBindingStrategyForDraggingBindingElementEndpoints_simple`).
 fn bind(
     scene: &mut Scene,
     entropy: &mut Entropy,
@@ -227,10 +229,17 @@ fn bind(
     let Some(outline) = scene.element_by_id(shape_id).and_then(|s| Outline::of(&s)) else {
         return;
     };
+    let other = match end {
+        End::Start => End::End,
+        End::End => End::Start,
+    };
+    let inside =
+        outline.distance(at) <= 0.0 || bound(&arrow, other).is_some_and(|b| b.shape == shape_id);
     let (rx, ry) = outline.fixed_point(at);
     let mut binding = Object::new();
     binding.insert("elementId".into(), Value::String(shape_id.to_owned()));
-    binding.insert("mode".into(), Value::String("orbit".into()));
+    let mode = if inside { "inside" } else { "orbit" };
+    binding.insert("mode".into(), Value::String(mode.into()));
     binding.insert(
         "fixedPoint".into(),
         Value::Array(vec![Value::Number(rx), Value::Number(ry)]),
@@ -676,29 +685,52 @@ mod tests {
     // --- Binding while drawing ---------------------------------------------------------
 
     #[test]
-    fn an_arrow_drawn_onto_a_shape_binds_to_it() {
+    fn an_arrow_drawn_into_a_shape_binds_inside_it_where_it_ends() {
         // The arrow runs along y = 40 and ends inside the box at (120, 40), a
         // fifth of its width and two fifths of its height from its corner.
         let editor = with_arrow(&[BOX], (0.0, 40.0), (120.0, 40.0));
 
         let arrow = arrow(&editor);
         let (shape, mode, (fx, fy)) = binding(&arrow, "endBinding").expect("bound at its end");
-        assert_eq!((shape.as_str(), mode.as_str()), ("box", "orbit"));
+        assert_eq!((shape.as_str(), mode.as_str()), ("box", "inside"));
         assert_near(fx, 0.2, "fixedPoint x");
         assert_near(fy, 0.4, "fixedPoint y");
         assert_eq!(binding(&arrow, "startBinding"), None);
         assert_eq!(bound_arrows(&element(&editor, "box")), [text(&arrow, "id")]);
-        // It stops at the gap of 6 short of the box's left side.
-        assert_points(&saved_points(&arrow), &[(0.0, 0.0), (94.0, 0.0)]);
+        assert_points(&saved_points(&arrow), &[(0.0, 0.0), (120.0, 0.0)]);
+    }
+
+    #[test]
+    fn an_arrow_drawn_from_inside_a_shape_starts_where_it_was_drawn() {
+        // From (160, 40) inside the box to (260, 40) out of reach of it.
+        let editor = with_arrow(&[BOX], (160.0, 40.0), (260.0, 40.0));
+
+        let arrow = arrow(&editor);
+        let (shape, mode, _) = binding(&arrow, "startBinding").expect("bound at its start");
+        assert_eq!((shape.as_str(), mode.as_str()), ("box", "inside"));
+        assert_near(arrow.get("x").and_then(Value::as_f64).unwrap(), 160.0, "x");
+        assert_points(&saved_points(&arrow), &[(0.0, 0.0), (100.0, 0.0)]);
+    }
+
+    #[test]
+    fn an_arrow_from_inside_a_shape_to_near_it_stays_inside_at_both_ends() {
+        // From (160, 40) inside the box to (205, 40), just right of it.
+        let editor = with_arrow(&[BOX], (160.0, 40.0), (205.0, 40.0));
+
+        let arrow = arrow(&editor);
+        let (shape, mode, _) = binding(&arrow, "endBinding").expect("bound at its end");
+        assert_eq!((shape.as_str(), mode.as_str()), ("box", "inside"));
+        assert_near(arrow.get("x").and_then(Value::as_f64).unwrap(), 160.0, "x");
+        assert_points(&saved_points(&arrow), &[(0.0, 0.0), (45.0, 0.0)]);
     }
 
     #[test]
     fn an_arrow_between_two_shapes_binds_at_both_ends() {
-        // From (150, 40) inside the box to (320, 40) inside the other one. The
-        // arrow aims at both of them along y = 40 and stops short of each, at
-        // x = 206 of the box's right side (200 + 6) and at x = 294 of the other's
-        // left side (300 - 6).
-        let editor = with_arrow(&[BOX, OTHER], (150.0, 40.0), (320.0, 40.0));
+        // From (205, 40) right of the box to (295, 40) left of the other one,
+        // both within reach. The arrow aims at both of them along y = 40 and
+        // stops short of each, at x = 206 of the box's right side (200 + 6) and
+        // at x = 294 of the other's left side (300 - 6).
+        let editor = with_arrow(&[BOX, OTHER], (205.0, 40.0), (295.0, 40.0));
 
         let arrow = arrow(&editor);
         let (start, start_mode, (sx, sy)) =
@@ -710,9 +742,9 @@ mod tests {
             "start"
         );
         assert_eq!((end.as_str(), end_mode.as_str()), ("other", "orbit"), "end");
-        assert_near(sx, 0.5001, "start x (a half is nudged)");
+        assert_near(sx, 1.05, "start x");
         assert_near(sy, 0.4, "start y");
-        assert_near(ex, 0.2, "end x");
+        assert_near(ex, -0.05, "end x");
         assert_near(ey, 0.4, "end y");
         assert_eq!(bound_arrows(&element(&editor, "box")), [text(&arrow, "id")]);
         assert_eq!(
@@ -728,8 +760,8 @@ mod tests {
         // 10 to the left of the box, which is within the 15 units of reach.
         let editor = with_arrow(&[BOX], (0.0, 40.0), (90.0, 40.0));
 
-        let (shape, _, (fx, fy)) = binding(&arrow(&editor), "endBinding").expect("bound");
-        assert_eq!(shape, "box");
+        let (shape, mode, (fx, fy)) = binding(&arrow(&editor), "endBinding").expect("bound");
+        assert_eq!((shape.as_str(), mode.as_str()), ("box", "orbit"));
         assert_near(fx, -0.1, "fixedPoint x lies outside the box");
         assert_near(fy, 0.4, "fixedPoint y");
     }
@@ -775,11 +807,11 @@ mod tests {
     #[test]
     fn an_arrow_binds_to_ellipses_and_diamonds_at_their_outline() {
         // The ellipse is 100 wide and 100 high around (150, 50): a circle of
-        // radius 50, gap 6. An arrow along y = 50 from the left stops at
-        // x = 150 - 56 = 94.
+        // radius 50, gap 6. An arrow along y = 50 from the left ending 3 short
+        // of it stops at x = 150 - 56 = 94.
         let ellipse = r#"{"id":"e","type":"ellipse","x":100,"y":0,"width":100,"height":100,
         "strokeWidth":2,"roundness":null}"#;
-        let editor = with_arrow(&[ellipse], (0.0, 50.0), (140.0, 50.0));
+        let editor = with_arrow(&[ellipse], (0.0, 50.0), (97.0, 50.0));
         assert_eq!(binding(&arrow(&editor), "endBinding").unwrap().0, "e");
         let points = saved_points(&arrow(&editor));
         assert!((points[1].0 - 94.0).abs() < 1e-3, "{points:?}");
@@ -789,7 +821,7 @@ mod tests {
         // in an arc, so an arrow along y = 50 stops 6 short of it, at x = 94.
         let diamond = r#"{"id":"d","type":"diamond","x":100,"y":0,"width":100,"height":100,
         "strokeWidth":2,"roundness":null}"#;
-        let editor = with_arrow(&[diamond], (0.0, 50.0), (140.0, 50.0));
+        let editor = with_arrow(&[diamond], (0.0, 50.0), (97.0, 50.0));
         assert_eq!(binding(&arrow(&editor), "endBinding").unwrap().0, "d");
         let points = saved_points(&arrow(&editor));
         assert!((points[1].0 - 94.0).abs() < 1e-3, "{points:?}");
@@ -802,26 +834,22 @@ mod tests {
 
         tap(&mut editor, "finger", (0.0, 40.0), 0.0);
         tap(&mut editor, "finger", (50.0, 100.0), 1.0);
-        tap(&mut editor, "finger", (120.0, 40.0), 2.0);
+        tap(&mut editor, "finger", (97.0, 40.0), 2.0);
 
-        // The last point is aimed at (0.2, 0.4) of the box from the point before
-        // it, (50, 100), and so stops at the offset left side after 26 of the 70
-        // across.
+        // The last point, 3 left of the box, is aimed at it from the point
+        // before it, (50, 100), and so stops at the offset left side after 3 of
+        // the 47 across.
         let arrow = arrow(&editor);
         assert_eq!(binding(&arrow, "startBinding"), None);
         assert_eq!(binding(&arrow, "endBinding").unwrap().0, "box");
         assert_points(
             &shown(&editor),
-            &[
-                (0.0, 40.0),
-                (50.0, 100.0),
-                (94.0, 40.0 + 60.0 * 26.0 / 70.0),
-            ],
+            &[(0.0, 40.0), (50.0, 100.0), (94.0, 40.0 + 60.0 * 3.0 / 47.0)],
         );
         assert_eq!(editor.tool(), Tool::Arrow, "still placing points");
 
         // Tapping the end where it is shown finishes the arrow.
-        tap(&mut editor, "finger", (94.0, 62.0), 3.0);
+        tap(&mut editor, "finger", (94.0, 44.0), 3.0);
 
         assert_eq!(editor.tool(), Tool::Selection);
         assert_eq!(saved_points(&self::arrow(&editor)).len(), 3);
@@ -1033,10 +1061,11 @@ mod tests {
 
     // --- Following the shapes ----------------------------------------------------------
 
-    /// The box with an arrow from (0, 40) bound to it at (120, 40): the arrow's
-    /// end is at (94, 40), its fixed point on the box is (0.2, 0.4).
+    /// The box and the other shape with an arrow from (0, 40) orbiting the box,
+    /// aimed at (120, 40), as excalidraw.com saves it: the arrow's end is at
+    /// (94, 40), its fixed point on the box is (0.2, 0.4).
     fn bound_to_box() -> Editor {
-        with_arrow(&[BOX, OTHER], (0.0, 40.0), (120.0, 40.0))
+        editor_with(&[&bound_box(), OTHER, &excalidraw_arrow("", ORBIT_END)])
     }
 
     /// Where the arrow's points are in the Scene.
@@ -1091,10 +1120,11 @@ mod tests {
 
     #[test]
     fn a_bound_start_follows_a_moved_shape_too() {
-        // An arrow from the box to the other shape, both bound; the box moves up
-        // by 30. The arrow starts at the box's fixed point (0.5001, 0.4), which is
-        // now at (150.01, 10), and aims at the other's (320, 40).
-        let mut editor = with_arrow(&[BOX, OTHER], (150.0, 40.0), (320.0, 40.0));
+        // An arrow from just right of the box to just left of the other shape,
+        // orbiting both; the box moves up by 30. The arrow starts at the box's
+        // fixed point (1.05, 0.4), which is now at (205, 10), and aims at the
+        // other's (295, 40).
+        let mut editor = with_arrow(&[BOX, OTHER], (205.0, 40.0), (295.0, 40.0));
 
         replay(
             &mut editor,
@@ -1104,14 +1134,11 @@ mod tests {
         let points = shown(&editor);
         // The start is on the box's offset right side, x = 206, and the end on the
         // other's offset left side, x = 294, both on the line between the fixed
-        // points (150.01, 10) and (320, 40).
-        let slope = 30.0 / (320.0 - 150.01);
+        // points (205, 10) and (295, 40).
+        let slope = 30.0 / 90.0;
         assert_points(
             &points,
-            &[
-                (206.0, 10.0 + slope * (206.0 - 150.01)),
-                (294.0, 10.0 + slope * (294.0 - 150.01)),
-            ],
+            &[(206.0, 10.0 + slope * 1.0), (294.0, 10.0 + slope * 89.0)],
         );
     }
 
@@ -1309,14 +1336,13 @@ mod tests {
     fn dragging_a_bound_end_onto_another_shape_rebinds_it() {
         let mut editor = arrow_selected();
 
-        // To (320, 40) inside the other shape: the arrow stops at its offset left
-        // side, x = 294.
+        // To (320, 40) inside the other shape, where the arrow ends.
         hold_drag(&mut editor, (94.0, 40.0), (320.0, 40.0));
         lift(&mut editor, (320.0, 40.0));
 
         let arrow = arrow(&editor);
         let (shape, mode, (fx, fy)) = binding(&arrow, "endBinding").unwrap();
-        assert_eq!((shape.as_str(), mode.as_str()), ("other", "orbit"));
+        assert_eq!((shape.as_str(), mode.as_str()), ("other", "inside"));
         assert_near(fx, 0.2, "fixedPoint x");
         assert_near(fy, 0.4, "fixedPoint y");
         assert_eq!(bound_arrows(&element(&editor, "box")), Vec::<String>::new());
@@ -1324,27 +1350,23 @@ mod tests {
             bound_arrows(&element(&editor, "other")),
             [text(&arrow, "id")]
         );
-        assert_points(&shown(&editor), &[(0.0, 40.0), (294.0, 40.0)]);
+        assert_points(&shown(&editor), &[(0.0, 40.0), (320.0, 40.0)]);
     }
 
     #[test]
-    fn dragging_a_bound_end_over_the_same_shape_aims_it_elsewhere() {
+    fn dragging_a_bound_end_into_its_shape_puts_it_inside() {
         let mut editor = arrow_selected();
 
         // To (150, 80), which is (0.5001, 0.8) of the box, as a half is nudged:
-        // the arrow from (0, 40) to (150.01, 80) meets the offset left side after
-        // 94 of the 150.01 across, at y = 40 + 40 * 94 / 150.01.
+        // the arrow ends there, at (150.01, 80).
         hold_drag(&mut editor, (94.0, 40.0), (150.0, 80.0));
         lift(&mut editor, (150.0, 80.0));
 
-        let (shape, _, (fx, fy)) = binding(&arrow(&editor), "endBinding").unwrap();
-        assert_eq!(shape, "box");
+        let (shape, mode, (fx, fy)) = binding(&arrow(&editor), "endBinding").unwrap();
+        assert_eq!((shape.as_str(), mode.as_str()), ("box", "inside"));
         assert_near(fx, 0.5001, "fixedPoint x");
         assert_near(fy, 0.8, "fixedPoint y");
-        assert_points(
-            &shown(&editor),
-            &[(0.0, 40.0), (94.0, 40.0 + 40.0 * 94.0 / 150.01)],
-        );
+        assert_points(&shown(&editor), &[(0.0, 40.0), (150.01, 80.0)]);
         assert_eq!(bound_arrows(&element(&editor, "box")).len(), 1);
     }
 
@@ -1360,12 +1382,11 @@ mod tests {
 
         let arrow = arrow(&editor);
         assert_eq!(binding(&arrow, "endBinding"), None);
-        let (shape, _, (fx, fy)) = binding(&arrow, "startBinding").expect("bound at start");
-        assert_eq!(shape, "box");
+        let (shape, mode, (fx, fy)) = binding(&arrow, "startBinding").expect("bound at start");
+        assert_eq!((shape.as_str(), mode.as_str()), ("box", "inside"));
         assert_near(fx, 0.2, "fixedPoint x");
         assert_near(fy, 0.4, "fixedPoint y");
-        // Aiming from inside the box at the end (50, 40): out through its left side.
-        assert_points(&shown(&editor), &[(94.0, 40.0), (50.0, 40.0)]);
+        assert_points(&shown(&editor), &[(120.0, 40.0), (50.0, 40.0)]);
     }
 
     #[test]
@@ -1536,12 +1557,12 @@ mod tests {
         editor.set_tool(Tool::Arrow);
         tap(&mut editor, "mouse", (0.0, 40.0), 0.0);
         tap(&mut editor, "mouse", (50.0, 100.0), 1.0);
-        tap(&mut editor, "mouse", (120.0, 40.0), 2.0);
-        tap(&mut editor, "mouse", (94.0, 62.0), 3.0);
+        tap(&mut editor, "mouse", (97.0, 40.0), 2.0);
+        tap(&mut editor, "mouse", (94.0, 44.0), 3.0);
         assert_eq!(binding(&arrow(&editor), "endBinding").unwrap().0, "box");
         // Select the arrow by its first segment, then its end by its handle.
         tap(&mut editor, "mouse", (25.0, 70.0), 4.0);
-        tap(&mut editor, "mouse", (94.0, 62.286), 5.0);
+        tap(&mut editor, "mouse", (94.0, 43.83), 5.0);
         assert_eq!(editor.selected_points(), [2]);
 
         editor.delete_selection();

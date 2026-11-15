@@ -53,7 +53,7 @@ The grip on a point of a selected line or arrow (and a smaller one in the middle
 _Avoid_: Vertex, node, anchor
 
 **Binding**:
-The attachment of an arrow's end to a shape: the arrow stops short of the shape and follows it when it moves, resizes or turns. Made by putting an arrow's end on the shape, undone by putting it elsewhere or by moving the arrow without the shape. The shape an end is over is shown with a binding highlight.
+The attachment of an arrow's end to a shape: the end stays where it was put inside the shape, or stops short of the shape when put near it, and follows the shape when it moves, resizes or turns. Made by putting an arrow's end on or near the shape, undone by putting it elsewhere or by moving the arrow without the shape. The shape an end is over is shown with a binding highlight.
 _Avoid_: Connection, glue, snap
 
 **Stroke**:
