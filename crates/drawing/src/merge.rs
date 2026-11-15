@@ -6,7 +6,8 @@
 //!   versions the lower `versionNonce` does. Erased Elements are `isDeleted`
 //!   Elements like any other, so an erase merges as any other change.
 //! - The Elements are ordered by fractional index (then id), colliding or
-//!   missing indices repaired.
+//!   missing indices repaired; missing ones first on each side, from where
+//!   the Element is there.
 //! - `files` is the union by id.
 //! - `appState` and the other top-level members are merged key by key
 //!   against the last-Synced state; the remote wins a key both sides changed,
@@ -187,6 +188,20 @@ fn repair_indices(elements: &mut [Value]) {
         let indices: Vec<_> = elements.iter().map(index_of).collect();
         index_sync::sync_moved(&indices, &vec![false; elements.len()])
     };
+    set_indices(elements, updates);
+}
+
+/// Gives the Elements without a valid index one from their place, see
+/// [`index_sync::fill_missing`].
+fn fill_missing_indices(elements: &mut [Value]) {
+    let updates = {
+        let indices: Vec<_> = elements.iter().map(index_of).collect();
+        index_sync::fill_missing(&indices)
+    };
+    set_indices(elements, updates);
+}
+
+fn set_indices(elements: &mut [Value], updates: Vec<(usize, String)>) {
     for (position, index) in updates {
         if let Some(element) = elements[position].as_object_mut() {
             element.insert("index".into(), Value::String(index));
@@ -209,7 +224,11 @@ fn wins(a: &Value, b: &Value) -> bool {
     a.to_json() < b.to_json()
 }
 
-fn reconcile_elements(local: Vec<Value>, remote: Vec<Value>) -> Vec<Value> {
+fn reconcile_elements(mut local: Vec<Value>, mut remote: Vec<Value>) -> Vec<Value> {
+    // An Element without an index (a new one) gets one from its place on its
+    // side, not the bottom of the merge.
+    fill_missing_indices(&mut local);
+    fill_missing_indices(&mut remote);
     let mut by_id: HashMap<String, Value> = HashMap::new();
     for element in local.into_iter().chain(remote) {
         let id = id_of(&element).unwrap_or_default().to_owned();
@@ -502,6 +521,21 @@ mod tests {
 
             let ids: Vec<_> = summary(&merged).into_iter().map(|e| e.0).collect();
             assert_eq!(ids, ["a", "b", "c"]);
+        }
+
+        #[test]
+        fn an_element_without_an_index_keeps_its_place_in_its_side() {
+            // A new Element has no index until a merge gives it one.
+            let new = element("new", 1, 1, "").replace(r#""index":"""#, r#""index":null"#);
+            let local = elements_only(&[element("image", 1, 1, "a0"), new]);
+            let remote = elements_only(&[element("image", 1, 1, "a0")]);
+
+            let merged = merge(None, &local, &remote);
+
+            let ids: Vec<_> = summary(&merged).into_iter().map(|e| e.0).collect();
+            assert_eq!(ids, ["image", "new"]);
+            let indices = indices(&merged);
+            assert!(indices[0] < indices[1], "{indices:?}");
         }
 
         #[test]
@@ -834,6 +868,26 @@ mod tests {
             replay(&mut editor, "0.2 up 1 mouse 60 40");
             assert_eq!(editor.element_count(), 2);
             assert_eq!(x_of(&editor, "b"), 400.0);
+        }
+
+        #[test]
+        fn a_new_shape_stays_on_top_when_sync_brings_a_drawing_without_it() {
+            let mut editor = editor_with(&[A]);
+            editor.set_tool(Tool::Ellipse);
+            replay(
+                &mut editor,
+                "0.0 down 1 mouse 120 110
+         0.1 move 1 mouse 260 240
+         0.2 up 1 mouse 260 240",
+            );
+            // Sync rewrites the file before the save with the ellipse reached it.
+            editor.merge_synced(&drawing(&[A])).unwrap();
+
+            let types: Vec<_> = saved_elements(&editor)
+                .iter()
+                .map(|e| e.get("type").and_then(Value::as_str).unwrap().to_owned())
+                .collect();
+            assert_eq!(types, ["rectangle", "ellipse"]);
         }
 
         #[test]

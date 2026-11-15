@@ -27,6 +27,32 @@ pub(crate) fn sync_moved(indices: &[Index], moved: &[bool]) -> Vec<(usize, Strin
     updates
 }
 
+/// Keys for the Elements without a valid index (new ones), between the
+/// nearest Elements below and above them that have one, or just above the one
+/// below where those two are out of order. Other keys are kept as they are.
+pub(crate) fn fill_missing(indices: &[Index]) -> Vec<(usize, String)> {
+    let has_key = |i: usize| indices[i].is_some_and(|key| keys::validate(key).is_ok());
+    let mut updates = Vec::new();
+    let mut i = 0;
+    while i < indices.len() {
+        if has_key(i) {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < indices.len() && !has_key(i) {
+            i += 1;
+        }
+        let below = start.checked_sub(1).and_then(|b| indices[b]);
+        let above = indices.get(i).copied().flatten();
+        let new = keys::keys_between(below, above, i - start)
+            .or_else(|_| keys::keys_between(below, None, i - start))
+            .unwrap_or_default();
+        updates.extend((start..i).zip(new));
+    }
+    updates
+}
+
 /// New keys for the moved Elements alone; fails if the result is not valid.
 fn moved_keys(indices: &[Index], moved: &[bool]) -> Result<Vec<(usize, String)>, Invalid> {
     let updates = generate(indices, &moved_groups(moved))?;
@@ -240,6 +266,23 @@ mod tests {
         let updates = sync(&[None, None, None], &[2]);
 
         assert_eq!(updates, keys(&[(0, "a0"), (1, "a1"), (2, "a2")]));
+    }
+
+    #[test]
+    fn missing_keys_are_filled_between_their_neighbours() {
+        let updates = fill_missing(&[None, Some("a1"), None, None, Some("a2"), None]);
+
+        assert_eq!(
+            updates,
+            keys(&[(0, "a0"), (2, "a1G"), (3, "a1V"), (5, "a3")])
+        );
+    }
+
+    #[test]
+    fn filling_missing_keys_leaves_keys_out_of_order_alone() {
+        let updates = fill_missing(&[Some("a2"), None, Some("a0")]);
+
+        assert_eq!(updates, keys(&[(1, "a3")]));
     }
 
     #[test]
