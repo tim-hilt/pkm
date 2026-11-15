@@ -1,16 +1,5 @@
 import SwiftUI
 
-/// Settings' Tags section: one entry, "Manage Tags", which opens the page of
-/// Tags.
-struct TagsSettingsSection: View {
-    var body: some View {
-        Section("Tags") {
-            NavigationLink("Manage Tags") { ManageTagsView() }
-                .accessibilityIdentifier("manage-tags")
-        }
-    }
-}
-
 /// Every Tag, alphabetically, each `a/b` as one flat row written in its Tag Color;
 /// "No Tags" if there are none. Swiping a row offers Edit, which picks the Tag
 /// Color or resets it to Default, and Delete, which a full swipe runs.

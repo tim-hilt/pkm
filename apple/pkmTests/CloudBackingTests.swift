@@ -29,6 +29,15 @@ import Testing
         #expect(model().connection == nil)
     }
 
+    @Test func summarySaysNoneIsConnectedOrNamesTheProviderAndStatus() async throws {
+        let cloud = model()
+        #expect(cloud.summary == "Not connected")
+
+        try await cloud.connect(url: "https://dav.example.com", username: "me", password: "pw")
+
+        #expect(cloud.summary == "WebDAV · Not synced yet")
+    }
+
     @Test func connectingShowsTheServerAndKeepsTheCredentials() async throws {
         let cloud = model()
 

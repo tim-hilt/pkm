@@ -187,6 +187,13 @@ final class CloudBackingModel {
         }
     }
 
+    /// One line for Settings' Cloud Backing row: the Connected Cloud Provider
+    /// and the Sync status, or that none is Connected.
+    var summary: String {
+        guard let connection else { return String(localized: "Not connected") }
+        return "\(connection.provider.name) · \(statusText)"
+    }
+
     /// Whether Sync is blocked until the user acts, which the Gallery shows
     /// with a warning icon: the cloud rejected the credentials or is full.
     var hasProblem: Bool { status == .accessLost || status == .full }

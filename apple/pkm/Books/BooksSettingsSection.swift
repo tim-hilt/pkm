@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Settings' Books section: the Page Style and Page Colors of the Reader, then
+/// The Books settings page, opened from Settings' Contexts: the Page Style and Page Colors of the Reader, then
 /// the Highlight Colors, the selected one being the Default Highlight Color.
 /// The Reader shares these, so changing one shows there at once; "Match
 /// Appearance" follows the app's Appearance, as the Reader does.
@@ -11,7 +11,7 @@ struct BooksSettingsSection: View {
 
     var body: some View {
         @Bindable var reader = reader
-        Section("Books") {
+        Section("Page Style") {
             Picker("Page Style", selection: $reader.pageStyle) {
                 ForEach(PageStyle.allCases) { Text($0.title).tag($0) }
             }

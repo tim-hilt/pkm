@@ -1,10 +1,12 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The Settings: Appearance, the Books' Page Style, Page Colors and Highlight
-/// Colors, Tags, and Cloud Backing. A window on the Mac (⌘,), the sidebar's
-/// Settings destination on iPhone and iPad.
+/// The Settings, grouped: Common (Appearance, Tags, Cloud Backing), then a row
+/// per Context with settings of its own (today only Books). A window on the Mac
+/// (⌘,), the sidebar's Settings destination on iPhone and iPad.
 struct SettingsView: View {
+    @Environment(CloudBackingModel.self) private var cloud
+
     var body: some View {
         #if os(macOS)
             NavigationStack { form }.frame(width: 460, height: 460)
@@ -15,10 +17,23 @@ struct SettingsView: View {
 
     private var form: some View {
         Form {
-            Section { AppearancePicker() }
-            BooksSettingsSection()
-            TagsSettingsSection()
-            CloudBackingSection()
+            Section("Common") {
+                AppearancePicker().pickerStyle(.inline)
+                NavigationLink("Tags") { ManageTagsView().navigationTitle("Tags") }
+                    .accessibilityIdentifier("manage-tags")
+                NavigationLink {
+                    Form { CloudBackingSection() }.formStyle(.grouped).navigationTitle("Cloud Backing")
+                } label: {
+                    LabeledContent("Cloud Backing", value: cloud.summary)
+                }
+                .accessibilityIdentifier("cloud-backing")
+            }
+            Section("Contexts") {
+                NavigationLink("Books") {
+                    Form { BooksSettingsSection() }.formStyle(.grouped).navigationTitle("Books")
+                }
+                .accessibilityIdentifier("books-settings")
+            }
         }
         .formStyle(.grouped)
     }
@@ -39,7 +54,7 @@ struct CloudBackingSection: View {
     @State private var isPickingFolder = false
 
     var body: some View {
-        Section("Cloud Backing") {
+        Section {
             Picker("Cloud Provider", selection: pickedProvider) {
                 ForEach(CloudProvider.allCases, id: \.self) { provider in
                     Label {
