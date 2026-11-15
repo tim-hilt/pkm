@@ -23,28 +23,13 @@ final class TasksModel {
     private(set) var tasks: [ListedTask] = []
     /// Every known Tag with its Tag Color, alphabetically, whether or not a Task carries it.
     private(set) var allTags: [TagEntry] = []
-    /// Parents whose Subtasks are hidden.
-    private var collapsed: Set<String> = []
-
-    /// `tasks` without the Subtasks of a collapsed Parent.
-    var rows: [ListedTask] {
-        var hiddenBelow: UInt32?
-        return tasks.filter { task in
-            if let depth = hiddenBelow {
-                if task.depth > depth { return false }
-                hiddenBelow = nil
-            }
-            if collapsed.contains(task.id) { hiddenBelow = task.depth }
-            return true
-        }
-    }
 
     /// Opens the sheet of the Open Task `id`, over the list it is in. `nil` opens
     /// no sheet; an unknown or Closed `id` shows the Active list.
     func open(id: String?) {
         closeEditing()
         guard let id else { return }
-        let isTask = { (task: ListedTask) in task.id == id && !task.closed }
+        let isTask = { (task: ListedTask) in task.id == id }
         let list = [Planning.active, .backlog].first {
             ((try? store.tasks(planning: $0)) ?? []).contains(where: isTask)
         }
@@ -62,7 +47,7 @@ final class TasksModel {
     /// False, pushing nothing, if it is Closed or gone, or while the Title on top is empty.
     @discardableResult
     func openBlocker(id: String) -> Bool {
-        guard !editing.isEmpty, !isLeavingBlocked, let blocker = task(id: id), !blocker.closed else { return false }
+        guard !editing.isEmpty, !isLeavingBlocked, let blocker = task(id: id) else { return false }
         editing.append(id)
         return true
     }
@@ -86,13 +71,6 @@ final class TasksModel {
         if let task = tasks.first(where: { $0.id == id }) { return task }
         let other: Planning = planning == .active ? .backlog : .active
         return ((try? store.tasks(planning: other)) ?? []).first { $0.id == id }
-    }
-
-    func isCollapsed(_ task: ListedTask) -> Bool { collapsed.contains(task.id) }
-
-    /// Hides or shows a Parent's Subtasks.
-    func toggleCollapsed(_ task: ListedTask) {
-        if !collapsed.insert(task.id).inserted { collapsed.remove(task.id) }
     }
 
     /// The Close that can still be Reverted, for the toast.
@@ -129,7 +107,6 @@ final class TasksModel {
             let task = try? store.createSubtask(parent: parent.id, title: title, priority: priority, tags: tags)
         else { return false }
         describe(task, description)
-        collapsed.remove(parent.id)
         reload()
         return true
     }
@@ -203,14 +180,13 @@ final class TasksModel {
         reload()
     }
 
-    /// Moves the rows at `source` to land before the row at `destination` of `rows`
+    /// Moves the rows at `source` to land before the row at `destination` of `tasks`
     /// (`onMove`'s meaning), as a sibling of that row; past the last row, to the end
     /// of the top level. Refused moves, e.g. under the Task's own Subtask, change nothing.
     func move(from source: IndexSet, to destination: Int) {
-        let rows = rows
         guard let index = source.first, index != destination else { return }
-        let target = destination < rows.count ? rows[destination] : nil
-        move(rows[index], under: target?.parent, before: target)
+        let target = destination < tasks.count ? tasks[destination] : nil
+        move(tasks[index], under: target?.parent, before: target)
     }
 
     /// Moves a Task to be the last Subtask of `parent`.

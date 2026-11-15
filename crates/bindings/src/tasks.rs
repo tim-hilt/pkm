@@ -102,7 +102,7 @@ pub struct TagSuggestions {
     pub create: bool,
 }
 
-/// A Task as the lists show it, one row of the flattened tree, see
+/// A Task as the lists show it, one row of a flat list, see
 /// `pkm_tasks::Task` (named apart from Swift's `Task`).
 #[derive(uniffi::Record)]
 pub struct ListedTask {
@@ -117,14 +117,14 @@ pub struct ListedTask {
     pub tags: Vec<TagEntry>,
     /// Closed as Done, the Close still pending: shown in place, marked.
     pub done: bool,
-    /// A Closed Subtask of an Open Task: shown struck through.
-    pub closed: bool,
     /// The Parent's ID, if it is a Subtask.
     pub parent: Option<String>,
-    /// How deep it sits in the tree, 0 for a top-level Task.
-    pub depth: u32,
-    /// Whether it has Subtasks, which follow it in the list.
-    pub has_subtasks: bool,
+    /// The Parent's Title, if it is a Subtask.
+    pub parent_title: Option<String>,
+    /// How many of its direct Subtasks, Open or Done, are Done.
+    pub subtasks_done: u32,
+    /// How many direct Subtasks it has, Open or Done.
+    pub subtasks_total: u32,
     /// Whether any Task it's Blocked by is Open.
     pub blocked: bool,
     /// The Tasks it's Blocked by, Open or Closed.
@@ -146,10 +146,10 @@ impl ListedTask {
             description: t.description,
             tags: tags.collect(),
             done: t.done,
-            closed: t.closed,
             parent: t.parent,
-            depth: 0,
-            has_subtasks: false,
+            parent_title: None,
+            subtasks_done: 0,
+            subtasks_total: 0,
             blocked: t.blocked,
             blocked_by: t.blocked_by,
         }
@@ -157,8 +157,9 @@ impl ListedTask {
 
     fn of_row(row: Row, known: &Tags) -> Self {
         Self {
-            depth: row.depth,
-            has_subtasks: row.has_subtasks,
+            parent_title: row.parent_title,
+            subtasks_done: row.subtasks_done,
+            subtasks_total: row.subtasks_total,
             ..Self::new(row.task, known)
         }
     }
@@ -440,8 +441,8 @@ impl TaskStore {
         self.0.tags().list()
     }
 
-    /// The Tasks planned as `planning`, in their order, as a pre-order walk of
-    /// the tree: each Task is followed by its Subtasks, marked by `depth`.
+    /// The Tasks planned as `planning`, in their order, as a flat pre-order
+    /// walk of the tree: each Task is followed by its Subtasks.
     pub fn tasks(&self, planning: Planning) -> Result<Vec<ListedTask>, TasksError> {
         Ok(self.listed_rows(self.0.rows(planning)?))
     }

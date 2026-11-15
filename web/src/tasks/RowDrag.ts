@@ -16,9 +16,8 @@ export class RowDrag {
 
   constructor(private readonly model: TasksModel) {}
 
-  /** Makes `row`, which shows `task`, draggable and a drop target; a Closed Subtask is neither. */
+  /** Makes `row`, which shows `task`, draggable and a drop target. */
   attachRow(row: HTMLElement, task: ListedTask): void {
-    if (task.closed) return;
     row.addEventListener("pointerdown", (event) => (row.draggable = event.pointerType === "mouse"));
     row.addEventListener("dragstart", (event) => {
       this.dragged = task;

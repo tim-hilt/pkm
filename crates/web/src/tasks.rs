@@ -197,14 +197,17 @@ pub struct ListedTask {
     pub description: String,
     /// The Parent's ID, if it is a Subtask.
     pub parent: Option<String>,
-    /// How deep it sits in the tree, 0 for a top-level Task.
-    pub depth: u32,
-    #[wasm_bindgen(js_name = hasSubtasks)]
-    pub has_subtasks: bool,
+    /// The Parent's Title, if it is a Subtask.
+    #[wasm_bindgen(js_name = parentTitle)]
+    pub parent_title: Option<String>,
+    /// How many of its direct Subtasks, Open or Done, are Done.
+    #[wasm_bindgen(js_name = subtasksDone)]
+    pub subtasks_done: u32,
+    /// How many direct Subtasks it has, Open or Done.
+    #[wasm_bindgen(js_name = subtasksTotal)]
+    pub subtasks_total: u32,
     /// Closed as Done, the Close still pending.
     pub done: bool,
-    /// A Closed Subtask of an Open Task.
-    pub closed: bool,
     /// Whether any Task it's Blocked by is Open.
     pub blocked: bool,
     blocked_by: Vec<pkm_tasks::Blocker>,
@@ -248,10 +251,10 @@ impl ListedTask {
             planning: t.planning.into(),
             description: t.description,
             parent: t.parent,
-            depth: row.depth,
-            has_subtasks: row.has_subtasks,
+            parent_title: row.parent_title,
+            subtasks_done: row.subtasks_done,
+            subtasks_total: row.subtasks_total,
             done: t.done,
-            closed: t.closed,
             blocked: t.blocked,
             blocked_by: t.blocked_by,
         }

@@ -383,29 +383,29 @@ describe("Subtasks", () => {
     model.addSubtask("child", first());
   });
 
-  it("lists a Subtask indented under its Parent", () => {
-    expect(model.tasks.map((t) => [t.title, t.depth, t.hasSubtasks])).toEqual([
-      ["parent", 0, true],
-      ["child", 1, false],
+  it("lists a Subtask after its Parent, with the markers", () => {
+    expect(
+      model.tasks.map((t) => [t.title, t.parentTitle, t.subtasksDone, t.subtasksTotal]),
+    ).toEqual([
+      ["parent", undefined, 0, 1],
+      ["child", "parent", 0, 0],
     ]);
+  });
+
+  it("shows both markers on a Task that is Parent and Subtask, and counts Done Subtasks", () => {
+    model.addSubtask("grandchild", model.tasks[1]);
+    model.close(model.tasks[2], Closing.Done);
+    model.commit();
+    expect(model.tasks.map((t) => t.title)).toEqual(["parent", "child"]);
+    expect(model.tasks[1]).toMatchObject({
+      parentTitle: "parent",
+      subtasksDone: 1,
+      subtasksTotal: 1,
+    });
   });
 
   it("refuses an empty Subtask Title", () => {
     expect(model.addSubtask(" ", first())).toBe(false);
-  });
-
-  it("hides the Subtasks of a collapsed Parent", () => {
-    model.toggleCollapsed(first());
-    expect(model.isCollapsed(first())).toBe(true);
-    expect(model.rows.map((t) => t.title)).toEqual(["parent"]);
-    model.toggleCollapsed(first());
-    expect(model.rows.map((t) => t.title)).toEqual(["parent", "child"]);
-  });
-
-  it("expands a Parent that got a new Subtask", () => {
-    model.toggleCollapsed(first());
-    model.addSubtask("second", first());
-    expect(model.rows.map((t) => t.title)).toEqual(["parent", "child", "second"]);
   });
 
   it("follows the Parent to the Backlog", () => {
@@ -421,13 +421,14 @@ describe("Subtasks", () => {
     expect(titles()).toEqual(["parent", "child"]);
   });
 
-  it("shows a Closed Subtask under its Open Parent, marked", () => {
+  it("drops a Closed Subtask from the list once the Close is committed", () => {
     model.close(model.tasks[1], Closing.Done);
-    model.commit();
-    expect(model.tasks.map((t) => [t.title, t.closed])).toEqual([
+    expect(model.tasks.map((t) => [t.title, t.done])).toEqual([
       ["parent", false],
       ["child", true],
     ]);
+    model.commit();
+    expect(titles()).toEqual(["parent"]);
   });
 });
 
@@ -449,20 +450,20 @@ describe("order and moving", () => {
 
   it("moves a Task under another, and back to the top level", () => {
     model.moveUnder(task("c"), task("a"));
-    expect(model.tasks.map((t) => [t.title, t.depth])).toEqual([
-      ["a", 0],
-      ["c", 1],
-      ["b", 0],
+    expect(model.tasks.map((t) => [t.title, t.parentTitle])).toEqual([
+      ["a", undefined],
+      ["c", "a"],
+      ["b", undefined],
     ]);
     model.moveBefore(task("c"), undefined);
-    expect(task("c").depth).toBe(0);
+    expect(task("c").parent).toBeUndefined();
   });
 
   it("refuses moving a Task under its own Subtask, changing nothing", () => {
     model.moveUnder(task("b"), task("a"));
     model.moveUnder(task("a"), task("b"));
     expect(titles()).toEqual(["a", "b", "c"]);
-    expect(task("a").depth).toBe(0);
+    expect(task("a").parent).toBeUndefined();
   });
 
   it("keeps the order after reopening", async () => {

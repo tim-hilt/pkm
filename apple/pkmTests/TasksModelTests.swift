@@ -392,26 +392,27 @@ import Testing
         #expect(TasksModel.allowedTagText("Work 1/x") == "ork1/x")
     }
 
-    @Test func aSubtaskIsListedAfterItsParentOneLevelDeeper() throws {
+    @Test func aSubtaskIsListedAfterItsParentWithTheMarkers() throws {
         let model = try openModel()
         model.add(title: "Parent", planning: .backlog)
         #expect(model.addSubtask(title: "Child", under: model.tasks[0]))
         #expect(!model.addSubtask(title: " ", under: model.tasks[0]))
         #expect(model.tasks.map(\.title) == ["Parent", "Child"])
-        #expect(model.tasks.map(\.depth) == [0, 1])
-        #expect(model.tasks.map(\.hasSubtasks) == [true, false])
+        #expect(model.tasks.map(\.parentTitle) == [nil, "Parent"])
+        #expect(model.tasks.map(\.subtasksDone) == [0, 0])
+        #expect(model.tasks.map(\.subtasksTotal) == [1, 0])
     }
 
-    @Test func collapsingAParentHidesItsWholeSubtree() throws {
+    @Test func aTaskThatIsParentAndSubtaskHasBothMarkersAndDoneSubtasksAreCounted() throws {
         let model = try openModel()
         model.add(title: "Parent", planning: .active)
         model.addSubtask(title: "Child", under: model.tasks[0])
         model.addSubtask(title: "Grandchild", under: model.tasks[1])
-        model.add(title: "Other", planning: .active)
-        model.toggleCollapsed(model.tasks[0])
-        #expect(model.rows.map(\.title) == ["Parent", "Other"])
-        model.toggleCollapsed(model.tasks[0])
-        #expect(model.rows.map(\.title) == ["Parent", "Child", "Grandchild", "Other"])
+        model.toggleDone(model.tasks[2])
+        model.commit()
+        #expect(model.tasks.map(\.title) == ["Parent", "Child"])
+        #expect(model.tasks[1].parentTitle == "Parent")
+        #expect(model.tasks[1].subtasksTotal == 1 && model.tasks[1].subtasksDone == 1)
     }
 
     @Test func aSubtaskCannotBeMadeActiveByItself() throws {
@@ -432,13 +433,13 @@ import Testing
         #expect(model.tasks.map(\.done) == [false, false])
     }
 
-    @Test func aClosedSubtaskStaysListedMarkedClosed() throws {
+    @Test func aClosedSubtaskLeavesTheList() throws {
         let model = try openModel()
         model.add(title: "Parent", planning: .active)
         model.addSubtask(title: "Child", under: model.tasks[0])
         model.close(model.tasks[1], as: .rejected)
         model.commit()
-        #expect(model.tasks.map(\.closed) == [false, true])
+        #expect(model.tasks.map(\.title) == ["Parent"])
     }
 
     @Test func aTaskIsDraggedBeforeAnotherAndToTheEnd() throws {
@@ -455,9 +456,9 @@ import Testing
         let model = try openModel()
         for title in ["a", "b"] { model.add(title: title, planning: .active) }
         model.move(model.tasks[1], under: model.tasks[0])
-        #expect(model.tasks.map(\.title) == ["a", "b"] && model.tasks.map(\.depth) == [0, 1])
+        #expect(model.tasks.map(\.parent) == [nil, model.tasks[0].id])
         model.move(from: [1], to: 2)
-        #expect(model.tasks.map(\.depth) == [0, 0])
+        #expect(model.tasks.map(\.parent) == [nil, nil])
     }
 
     @Test func aTaskCannotBeDroppedUnderItsOwnSubtask() throws {
@@ -465,7 +466,7 @@ import Testing
         model.add(title: "a", planning: .active)
         model.addSubtask(title: "b", under: model.tasks[0])
         model.move(model.tasks[0], under: model.tasks[1])
-        #expect(model.tasks.map(\.depth) == [0, 1])
+        #expect(model.tasks.map(\.parent) == [nil, model.tasks[0].id])
     }
 
     @Test func aTaskIsBlockedWhileATaskItIsBlockedByIsOpen() throws {

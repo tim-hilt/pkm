@@ -22,14 +22,14 @@ export interface ListedTask {
   tagColors: Record<string, string>;
   /** The Parent's ID, if it is a Subtask. */
   parent: string | undefined;
-  /** How deep it sits in the tree, 0 for a top-level Task. */
-  depth: number;
-  /** Whether it has Subtasks, which follow it in the list. */
-  hasSubtasks: boolean;
+  /** The Parent's Title, if it is a Subtask. */
+  parentTitle: string | undefined;
+  /** How many of its direct Subtasks, Open or Done, are Done. */
+  subtasksDone: number;
+  /** How many direct Subtasks it has, Open or Done. */
+  subtasksTotal: number;
   /** Closed as Done, the Close still pending. */
   done: boolean;
-  /** A Closed Subtask of an Open Task. */
-  closed: boolean;
   /** Whether any Task it's Blocked by is Open. */
   blocked: boolean;
   /** The Tasks it's Blocked by, Open or Closed. */
@@ -109,8 +109,6 @@ export class TasksModel {
   private list = Planning.Active;
   private saving: Promise<void> = Promise.resolve();
   private commitTimer: ReturnType<typeof setTimeout> | undefined;
-  /** Parents whose Subtasks are hidden. */
-  private readonly collapsed = new Set<string>();
 
   constructor(
     private readonly files: TaskFiles,
@@ -150,19 +148,6 @@ export class TasksModel {
     return this.shown;
   }
 
-  /** `tasks` without the Subtasks of a collapsed Parent. */
-  get rows(): ListedTask[] {
-    let hiddenBelow: number | undefined;
-    return this.shown.filter((task) => {
-      if (hiddenBelow !== undefined) {
-        if (task.depth > hiddenBelow) return false;
-        hiddenBelow = undefined;
-      }
-      if (this.collapsed.has(task.id)) hiddenBelow = task.depth;
-      return true;
-    });
-  }
-
   /**
    * Shows the edit view of the Open Task `id`, over the list it is in;
    * `undefined` shows none. An unknown or Closed `id` shows the Active list.
@@ -174,7 +159,7 @@ export class TasksModel {
     if (id !== undefined && id === this.stack.at(-2)) return this.back();
     this.clearStack();
     if (id !== undefined) {
-      const isTask = (task: ListedTask) => task.id === id && !task.closed;
+      const isTask = (task: ListedTask) => task.id === id;
       const found = lists
         .map(({ planning }) => ({
           planning,
@@ -195,7 +180,7 @@ export class TasksModel {
    */
   openBlocker(id: string): boolean {
     const blocker = this.find(id);
-    if (this.stack.length === 0 || this.titleMissing || !blocker || blocker.closed) return false;
+    if (this.stack.length === 0 || this.titleMissing || !blocker) return false;
     this.stack.push(id);
     this.onChange();
     return true;
@@ -235,16 +220,6 @@ export class TasksModel {
     clearTimeout(this.commitTimer);
     this.pendingClose = undefined;
     this.reload();
-    this.onChange();
-  }
-
-  isCollapsed(task: ListedTask): boolean {
-    return this.collapsed.has(task.id);
-  }
-
-  /** Hides or shows a Parent's Subtasks. */
-  toggleCollapsed(task: ListedTask): void {
-    if (!this.collapsed.delete(task.id)) this.collapsed.add(task.id);
     this.onChange();
   }
 
@@ -308,7 +283,6 @@ export class TasksModel {
 
   /** Adds a Subtask under `parent` and shows it. False, adding nothing, if the Title is empty or a Tag invalid. */
   addSubtask(title: string, parent: ListedTask, extras: NewTask = {}): boolean {
-    this.collapsed.delete(parent.id);
     const { description, priority = 4, tags = [] } = extras;
     const create = () => this.files.store.createSubtask(parent.id, title, priority, tags);
     return this.apply(() => this.describe(create(), title, priority, description));
@@ -504,10 +478,10 @@ export class TasksModel {
           tags.filter((tag) => tag.color).map((tag) => [tag.name, tag.color!]),
         ),
         parent: row.parent ?? undefined,
-        depth: row.depth,
-        hasSubtasks: row.hasSubtasks,
+        parentTitle: row.parentTitle ?? undefined,
+        subtasksDone: row.subtasksDone,
+        subtasksTotal: row.subtasksTotal,
         done: row.done,
-        closed: row.closed,
         blocked: row.blocked,
         blockedBy: row.blockedBy().map((b) => {
           const blocker = { id: b.id, title: b.title, closed: b.closed };

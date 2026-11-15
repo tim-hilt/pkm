@@ -6,7 +6,8 @@ import { RowMenu, type RowMenuItem } from "./RowMenu";
 import { type TaskPlaces, editTaskDialog, newTaskDialog } from "./TaskDialogs";
 import { type ListedTask, type TasksModel, lists } from "./TasksModel";
 
-const chevronGlyph = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>`;
+const subtasksGlyph = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 7 2 2 3-3M4 17l2 2 3-3M13 8h7M13 18h7"/></svg>`;
+const parentGlyph = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5v8a2 2 0 0 0 2 2h11m-4-4 4 4-4 4"/></svg>`;
 const lockGlyph = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M7 10V8a5 5 0 0 1 10 0v2h1a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1zm2 0h6V8a3 3 0 0 0-6 0z"/></svg>`;
 const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
 
@@ -14,8 +15,8 @@ const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" s
  * The Tasks Context: the Active list and the Backlog as Todoist-style rows: a
  * circle coloured by Priority, the Title, the Description faded on one line
  * and the Tags fainter still. The circle marks the Task Done, and a toast
- * offers to Revert a Close. Subtasks are indented and collapse under their
- * Parent; rows are dragged to reorder and move. A row opens the edit view; its
+ * offers to Revert a Close. A Parent shows how many of its Subtasks are Done,
+ * a Subtask its Parent's Title, before the Tags; rows are dragged to reorder and move. A row opens the edit view; its
  * menu (right click, long press) adds a Subtask, plans, moves or Rejects. A
  * port of the Swift `TasksView`, in native elements.
  */
@@ -75,7 +76,7 @@ export class TasksView {
       choose.setAttribute("aria-checked", String(planning === model.planning));
     }
     this.menu.hide();
-    this.list.replaceChildren(...model.rows.map((task) => this.row(task)));
+    this.list.replaceChildren(...model.tasks.map((task) => this.row(task)));
     this.showToast();
     this.empty.hidden = model.tasks.length > 0;
     this.empty.replaceChildren(
@@ -122,34 +123,26 @@ export class TasksView {
 
   private row(task: ListedTask): HTMLElement {
     const { model } = this;
-    const disclose = make("button", "task-disclose");
-    disclose.type = "button";
-    disclose.innerHTML = chevronGlyph;
-    disclose.disabled = !task.hasSubtasks;
-    disclose.setAttribute("aria-label", model.isCollapsed(task) ? "Expand" : "Collapse");
-    disclose.setAttribute("aria-expanded", String(!model.isCollapsed(task)));
-    disclose.classList.toggle("collapsed", model.isCollapsed(task));
-    disclose.addEventListener("click", () => model.toggleCollapsed(task));
     const circle = make("button", `task-circle priority-${task.priority}`);
     circle.type = "button";
     circle.classList.toggle("done", task.done);
-    circle.disabled = task.closed;
     circle.setAttribute("aria-label", task.done ? "Revert Done" : "Done");
     circle.addEventListener("click", () => model.toggleDone(task));
     const title = make("span", "task-title", [task.title]);
     const text = make("span", "task-text", [title]);
     if (task.description) text.append(make("span", "task-description", [task.description]));
-    if (task.tags.length > 0) {
+    const marks = this.markers(task);
+    if (marks.length > 0 || task.tags.length > 0) {
       const labels = task.tags.map((tag) => tagLabel(tag, task.tagColors[tag]));
       // Separate nodes of one line, by name, without chips.
-      text.append(make("span", "task-tags", labels.flatMap((label) => [label, " "]).slice(0, -1)));
+      const tags = make("span", "task-tags", labels.flatMap((label) => [label, " "]).slice(0, -1));
+      text.append(make("span", "task-meta", [...marks, tags]));
     }
     const open = make("button", "task-open", [text]);
     open.type = "button";
     open.setAttribute("aria-haspopup", "menu");
     open.addEventListener("click", () => this.places.open(task.id));
-    open.disabled = task.closed;
-    const line = make("div", "task-line", [disclose, circle, open]);
+    const line = make("div", "task-line", [circle, open]);
     if (task.blocked) {
       const lock = make("span", "task-blocked");
       lock.innerHTML = lockGlyph;
@@ -157,17 +150,33 @@ export class TasksView {
       lock.setAttribute("aria-label", "Blocked");
       line.append(lock);
     }
-    line.style.paddingLeft = `${task.depth * 24}px`;
     const row = make("li", "task-row", [line]);
-    row.classList.toggle("closed", task.closed);
     this.menu.attach(row, () => this.menuItems(task), open);
     this.drag.attachRow(row, task);
     return row;
   }
 
+  /** The Parent marker ("Done/total") and the Subtask marker (its Parent's Title) of a row. */
+  private markers(task: ListedTask): HTMLElement[] {
+    const marks: HTMLElement[] = [];
+    if (task.subtasksTotal > 0) {
+      const mark = make("span", "task-mark", [`${task.subtasksDone}/${task.subtasksTotal}`]);
+      mark.insertAdjacentHTML("afterbegin", subtasksGlyph);
+      mark.title = `${task.subtasksDone} of ${task.subtasksTotal} Subtasks Done`;
+      marks.push(mark);
+    }
+    if (task.parentTitle !== undefined) {
+      const mark = make("span", "task-mark task-parent", [task.parentTitle]);
+      mark.insertAdjacentHTML("afterbegin", parentGlyph);
+      mark.title = `Subtask of ${task.parentTitle}`;
+      marks.push(mark);
+    }
+    return marks;
+  }
+
   private menuItems(task: ListedTask): RowMenuItem[] {
     // A pending Done is Reverted at its circle.
-    if (task.closed || task.done) return [];
+    if (task.done) return [];
     const { model } = this;
     const items: RowMenuItem[] = [
       {
@@ -176,7 +185,7 @@ export class TasksView {
       },
     ];
     // A Subtask follows its top-level Task's list.
-    if (task.depth === 0) {
+    if (task.parent === undefined) {
       items.push(
         task.planning === Planning.Backlog
           ? {

@@ -2,12 +2,12 @@
 //! modification stamp and what it said, until the stamp changes. Listing then
 //! reads only files that are new or changed.
 //!
-//! A Closed Task is kept as a `Node::closed` stub (place, Title and Parent),
-//! which is all that is written to the cache file between launches. An Open
+//! A Closed Task is kept as a `Node::closed` stub (how it was Closed, place,
+//! Title and Parent), which is all that is written to the cache file between launches. An Open
 //! Task is kept in memory only and read again on launch: there are few.
 
 use crate::files::{Files, Stamp};
-use crate::store::Node;
+use crate::store::{Closing, Node};
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -22,7 +22,7 @@ struct Entry {
 
 impl Entry {
     fn is_closed(&self) -> bool {
-        self.node.as_ref().is_some_and(|n| n.task.closed)
+        self.node.as_ref().is_some_and(|n| n.is_closed())
     }
 }
 
@@ -103,18 +103,19 @@ impl Cache {
 }
 
 /// One Closed Task per line, tab-separated, the Title last:
-/// `name mtime size id parent order title`.
+/// `name mtime size id state parent order title`.
 fn persist(files: &dyn Files, file: &Path, entries: &HashMap<String, Entry>) -> io::Result<()> {
     let mut text = String::new();
     for (name, entry) in entries {
-        if let Some(node) = entry.node.as_ref().filter(|n| n.task.closed) {
+        if let Some(node) = entry.node.as_ref().filter(|n| n.is_closed()) {
             let (mtime, size) = entry.stamp;
             let task = &node.task;
+            let state = node.closing.map_or("", Closing::state);
             let parent = task.parent.as_deref().unwrap_or("");
             let order = node.order;
             let (id, title) = (&task.id, &task.title);
             text.push_str(&format!(
-                "{name}\t{mtime}\t{size}\t{id}\t{parent}\t{order}\t{title}\n"
+                "{name}\t{mtime}\t{size}\t{id}\t{state}\t{parent}\t{order}\t{title}\n"
             ));
         }
     }
@@ -128,15 +129,17 @@ fn restore(files: &dyn Files, file: &Path) -> HashMap<String, Entry> {
 }
 
 fn restore_line(line: &str) -> Option<(String, Entry)> {
-    let mut parts = line.splitn(7, '\t');
+    let mut parts = line.splitn(8, '\t');
     let name = parts.next()?;
     let stamp = (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);
     let id = parts.next()?;
+    let closing = Closing::parse(parts.next()?)?;
     let parent = Some(parts.next()?).filter(|p| !p.is_empty());
     let order = parts.next()?.parse().ok()?;
     let title = parts.next()?;
     let node = Node::closed(
         id.to_owned(),
+        closing,
         title.to_owned(),
         parent.map(str::to_owned),
         order,

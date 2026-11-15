@@ -45,10 +45,18 @@ pub enum Closing {
 }
 
 impl Closing {
-    fn state(self) -> &'static str {
+    pub(crate) fn state(self) -> &'static str {
         match self {
             Self::Done => "done",
             Self::Rejected => "rejected",
+        }
+    }
+
+    pub(crate) fn parse(state: &str) -> Option<Self> {
+        match state {
+            "done" => Some(Self::Done),
+            "rejected" => Some(Self::Rejected),
+            _ => None,
         }
     }
 
@@ -79,7 +87,7 @@ pub struct Blocker {
     pub closed: bool,
 }
 
-/// A Task as the lists show it: Open, or a Closed Subtask of an Open one.
+/// An Open Task as the lists show it (a pending Done included).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Task {
     pub id: String,
@@ -94,11 +102,9 @@ pub struct Task {
     /// Closed as Done, but the Close is still pending: the list keeps the Task
     /// in place, marked.
     pub done: bool,
-    /// Already Closed: only Subtasks of an Open Task are listed so.
-    pub closed: bool,
     /// The Parent's ID, if this is a Subtask.
     pub parent: Option<String>,
-    /// In their order; empty for a Closed Task.
+    /// The Open ones, in their order.
     pub subtasks: Vec<Task>,
     /// Whether any Task it's Blocked by is Open. Only listings fill this and
     /// `blocked_by`; a Task a change returns has neither.
@@ -108,28 +114,18 @@ pub struct Task {
     pub blocked_by: Vec<Blocker>,
 }
 
-/// A Task as one row of a flattened list: its Subtasks follow it.
+/// A Task as one row of a flat list: its Subtasks follow it, at the same
+/// level.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Row {
     /// Without its `subtasks`, which are rows of their own.
     pub task: Task,
-    /// How deep it sits in the tree, 0 for a top-level Task.
-    pub depth: u32,
-    pub has_subtasks: bool,
-}
-
-impl Row {
-    fn flatten(mut task: Task, depth: u32, rows: &mut Vec<Self>) {
-        let subtasks = std::mem::take(&mut task.subtasks);
-        rows.push(Self {
-            task,
-            depth,
-            has_subtasks: !subtasks.is_empty(),
-        });
-        for subtask in subtasks {
-            Self::flatten(subtask, depth + 1, rows);
-        }
-    }
+    /// The Title of its Parent (whose ID is `task.parent`), if it is a Subtask.
+    pub parent_title: Option<String>,
+    /// How many of its direct Subtasks, Open or Done, are Done.
+    pub subtasks_done: u32,
+    /// How many direct Subtasks it has, Open or Done; Rejected ones don't count.
+    pub subtasks_total: u32,
 }
 
 #[derive(Debug)]
@@ -278,7 +274,7 @@ impl Tasks {
         let nodes = self.load()?;
         let parent = nodes
             .get(parent)
-            .filter(|n| !n.task.closed)
+            .filter(|n| !n.is_closed())
             .ok_or(io::ErrorKind::NotFound)?;
         let planning = parent.task.planning;
         let order = next_order(&nodes, Some(&parent.task.id), planning);
@@ -369,7 +365,7 @@ impl Tasks {
         let nodes = self.load()?;
         let task = &nodes
             .get(id)
-            .filter(|n| !n.task.closed)
+            .filter(|n| !n.is_closed())
             .ok_or(io::ErrorKind::NotFound)?
             .task;
         if task.parent.is_some() {
@@ -400,7 +396,7 @@ impl Tasks {
         before: Option<&str>,
     ) -> Result<Task, Error> {
         let nodes = self.load()?;
-        let open = |id: &str| nodes.get(id).filter(|n| !n.task.closed);
+        let open = |id: &str| nodes.get(id).filter(|n| !n.is_closed());
         open(id).ok_or(io::ErrorKind::NotFound)?;
         let planning = match parent {
             Some(parent) => {
@@ -486,7 +482,7 @@ impl Tasks {
         let nodes = self.load()?;
         nodes
             .get(id.as_str())
-            .filter(|n| !n.task.closed)
+            .filter(|n| !n.is_closed())
             .ok_or(io::ErrorKind::NotFound)?;
         *self.pending() = Some(Pending {
             ids: open_subtree(&nodes, id.as_str()),
@@ -560,7 +556,7 @@ impl Tasks {
     /// `id`, directly or through others) for a Blocked by that makes no sense.
     pub fn add_blocker(&self, id: &str, blocker: &str) -> Result<Task, Error> {
         let nodes = self.load()?;
-        let open = |id: &str| nodes.get(id).filter(|n| !n.task.closed);
+        let open = |id: &str| nodes.get(id).filter(|n| !n.is_closed());
         open(id).ok_or(io::ErrorKind::NotFound)?;
         open(blocker).ok_or(io::ErrorKind::NotFound)?;
         if let Some(refusal) = blocker_refusal(&nodes, id, blocker) {
@@ -582,14 +578,13 @@ impl Tasks {
         let nodes = self.load()?;
         let task = nodes
             .get(id)
-            .filter(|n| !n.task.closed)
+            .filter(|n| !n.is_closed())
             .ok_or(io::ErrorKind::NotFound)?;
         let mut rows = self.rows(Planning::Active)?;
         rows.extend(self.rows(Planning::Backlog)?);
         rows.retain(|row| {
             let candidate = &row.task;
-            !candidate.closed
-                && !candidate.done
+            !candidate.done
                 && !task.blocked_by.contains(&candidate.id)
                 && blocker_refusal(&nodes, id, &candidate.id).is_none()
         });
@@ -706,10 +701,15 @@ impl Tasks {
     }
 
     /// The Open top-level Tasks planned as `planning`, in their order, each
-    /// with its Subtasks. Closed Subtasks of an Open Task are included, marked
-    /// closed; a pending Done shows marked, a pending Rejected not at all.
-    /// Structure Sync left broken is repaired here, not in the files.
+    /// with its Open Subtasks. A pending Done shows marked, a pending Rejected
+    /// not at all. Structure Sync left broken is repaired here, not in the
+    /// files.
     pub fn tasks(&self, planning: Planning) -> io::Result<Vec<Task>> {
+        Ok(self.listing(planning)?.0)
+    }
+
+    /// `tasks` and the nodes it was built from, with the pending Close applied.
+    fn listing(&self, planning: Planning) -> io::Result<(Vec<Task>, Nodes)> {
         let mut nodes = self.load()?;
         if let Some(Pending { ids, closing, .. }) = self.pending().clone() {
             for id in ids {
@@ -726,25 +726,44 @@ impl Tasks {
         resolve_blockers(&mut nodes);
         let mut children: HashMap<String, Vec<Node>> = HashMap::new();
         let mut roots = Vec::new();
-        for node in nodes.into_values() {
+        for node in nodes.values().filter(|n| !n.is_closed()) {
             match node.task.parent.clone() {
-                Some(parent) => children.entry(parent).or_default().push(node),
-                None if !node.task.closed && node.task.planning == planning => roots.push(node),
+                Some(parent) => children.entry(parent).or_default().push(node.clone()),
+                None if node.task.planning == planning => roots.push(node.clone()),
                 None => {}
             }
         }
         roots.sort_by(by_order);
-        Ok(roots
+        let tasks = roots
             .into_iter()
             .map(|root| attach(root, &mut children))
-            .collect())
+            .collect();
+        Ok((tasks, nodes))
     }
 
-    /// `tasks` as a pre-order walk: each Task is followed by its Subtasks.
+    /// `tasks` as a flat pre-order walk: each Task is followed by its
+    /// Subtasks, none indented. The counts of Done Subtasks come from the
+    /// cache, which keeps Closed Tasks without their files.
     pub fn rows(&self, planning: Planning) -> io::Result<Vec<Row>> {
+        let (tasks, nodes) = self.listing(planning)?;
+        let counts = subtask_counts(&nodes);
         let mut rows = Vec::new();
-        for task in self.tasks(planning)? {
-            Row::flatten(task, 0, &mut rows);
+        let mut todo: Vec<Task> = tasks.into_iter().rev().collect();
+        while let Some(mut task) = todo.pop() {
+            todo.extend(std::mem::take(&mut task.subtasks).into_iter().rev());
+            let (subtasks_done, subtasks_total) =
+                counts.get(task.id.as_str()).copied().unwrap_or_default();
+            let parent_title = task
+                .parent
+                .as_ref()
+                .and_then(|p| nodes.get(p))
+                .map(|p| p.task.title.clone());
+            rows.push(Row {
+                task,
+                parent_title,
+                subtasks_done,
+                subtasks_total,
+            });
         }
         Ok(rows)
     }
@@ -840,15 +859,27 @@ enum Overwrite {
 #[derive(Debug, Clone)]
 pub(crate) struct Node {
     pub(crate) task: Task,
+    /// How it was Closed; `None` while it is Open.
+    pub(crate) closing: Option<Closing>,
     pub(crate) order: f64,
     /// The IDs the file lists, whether or not such a Task exists.
     blocked_by: Vec<String>,
 }
 
 impl Node {
+    pub(crate) fn is_closed(&self) -> bool {
+        self.closing.is_some()
+    }
+
     /// A Closed Task as the cache keeps it: what Open Tasks and lists need of
-    /// it (its place, Title and Parent), nothing more.
-    pub(crate) fn closed(id: String, title: String, parent: Option<String>, order: f64) -> Self {
+    /// it (how it was Closed, its place, Title and Parent), nothing more.
+    pub(crate) fn closed(
+        id: String,
+        closing: Closing,
+        title: String,
+        parent: Option<String>,
+        order: f64,
+    ) -> Self {
         let task = Task {
             id,
             title,
@@ -857,7 +888,6 @@ impl Node {
             description: String::new(),
             tags: Vec::new(),
             done: false,
-            closed: true,
             parent,
             subtasks: Vec::new(),
             blocked: false,
@@ -865,6 +895,7 @@ impl Node {
         };
         Self {
             task,
+            closing: Some(closing),
             order,
             blocked_by: Vec::new(),
         }
@@ -884,10 +915,11 @@ fn read_node(files: &dyn Files, path: &Path) -> Option<(Node, Vec<String>)> {
 
 /// The Task a file describes, Open or Closed; `None` for a malformed one.
 fn node_of(file: &Document) -> Option<Node> {
-    let (closed, planning) = match file.scalar("state")? {
-        "active" => (false, Planning::Active),
-        "backlog" => (false, Planning::Backlog),
-        "done" | "rejected" => (true, Planning::Active), // set by `repair`
+    let (closing, planning) = match file.scalar("state")? {
+        "active" => (None, Planning::Active),
+        "backlog" => (None, Planning::Backlog),
+        "done" => (Some(Closing::Done), Planning::Active), // planning set by `repair`
+        "rejected" => (Some(Closing::Rejected), Planning::Active),
         _ => return None,
     };
     let task = Task {
@@ -902,7 +934,6 @@ fn node_of(file: &Document) -> Option<Node> {
         description: file.body.trim().to_owned(),
         tags: tags_of(file),
         done: false,
-        closed,
         parent: file
             .scalar("parent")
             .filter(|p| !p.is_empty())
@@ -915,11 +946,18 @@ fn node_of(file: &Document) -> Option<Node> {
         .scalar("order")
         .and_then(|o| o.parse().ok())
         .unwrap_or(0.0);
-    if closed {
-        return Some(Node::closed(task.id, task.title, task.parent, order));
+    if let Some(closing) = closing {
+        return Some(Node::closed(
+            task.id,
+            closing,
+            task.title,
+            task.parent,
+            order,
+        ));
     }
     Some(Node {
         task,
+        closing,
         order,
         blocked_by: blockers_of(file),
     })
@@ -932,7 +970,7 @@ pub(crate) fn is_task(file: &Document) -> bool {
 
 /// The Open Task a file describes; `None` for a closed or malformed one.
 fn task_of(file: &Document) -> Option<Task> {
-    node_of(file).map(|n| n.task).filter(|task| !task.closed)
+    node_of(file).filter(|n| !n.is_closed()).map(|n| n.task)
 }
 
 /// Fixes what no Device allowed but Sync can leave (ADR-0021): an Open Task
@@ -945,7 +983,7 @@ fn repair(nodes: &mut Nodes) {
             n.task.parent.as_ref().is_some_and(|p| {
                 nodes
                     .get(p)
-                    .is_none_or(|parent| parent.task.closed && !n.task.closed)
+                    .is_none_or(|parent| parent.is_closed() && !n.is_closed())
             })
         })
         .map(|n| n.task.id.clone())
@@ -993,7 +1031,7 @@ fn resolve_blockers(nodes: &mut Nodes) {
             let blocker = Blocker {
                 id: n.task.id.clone(),
                 title: n.task.title.clone(),
-                closed: n.task.closed || n.task.done,
+                closed: n.is_closed() || n.task.done,
             };
             (blocker.id.clone(), blocker)
         })
@@ -1054,7 +1092,7 @@ fn open_subtree(nodes: &Nodes, root: &str) -> Vec<ItemId> {
         next += 1;
         let mut subtasks: Vec<&Node> = nodes
             .values()
-            .filter(|n| !n.task.closed && n.task.parent.as_deref() == Some(&parent))
+            .filter(|n| !n.is_closed() && n.task.parent.as_deref() == Some(&parent))
             .collect();
         subtasks.sort_by(|a, b| by_order(a, b));
         ids.extend(subtasks.into_iter().map(|n| n.task.id.clone()));
@@ -1069,7 +1107,7 @@ fn siblings<'a>(nodes: &'a Nodes, parent: Option<&str>, planning: Planning) -> V
         .values()
         .filter(|n| {
             n.task.parent.as_deref() == parent
-                && (parent.is_some() || (!n.task.closed && n.task.planning == planning))
+                && (parent.is_some() || (!n.is_closed() && n.task.planning == planning))
         })
         .collect();
     found.sort_by(|a, b| by_order(a, b));
@@ -1102,15 +1140,31 @@ fn by_order(a: &Node, b: &Node) -> Ordering {
         .then_with(|| a.task.id.cmp(&b.task.id))
 }
 
-/// `node` with its Subtasks taken from `children`; a Closed Task has none.
+/// `node` with its Subtasks taken from `children`.
 fn attach(node: Node, children: &mut HashMap<String, Vec<Node>>) -> Task {
     let mut task = node.task;
-    if !task.closed {
-        let mut subtasks = children.remove(&task.id).unwrap_or_default();
-        subtasks.sort_by(by_order);
-        task.subtasks = subtasks.into_iter().map(|s| attach(s, children)).collect();
-    }
+    let mut subtasks = children.remove(&task.id).unwrap_or_default();
+    subtasks.sort_by(by_order);
+    task.subtasks = subtasks.into_iter().map(|s| attach(s, children)).collect();
     task
+}
+
+/// What a Parent's marker shows, by Parent ID: its direct Subtasks that are
+/// Done, and all of them but the Rejected.
+fn subtask_counts(nodes: &Nodes) -> HashMap<&str, (u32, u32)> {
+    let mut counts: HashMap<&str, (u32, u32)> = HashMap::new();
+    for node in nodes.values() {
+        let Some(parent) = node.task.parent.as_deref() else {
+            continue;
+        };
+        if node.closing == Some(Closing::Rejected) {
+            continue;
+        }
+        let count = counts.entry(parent).or_default();
+        count.0 += u32::from(node.closing == Some(Closing::Done) || node.task.done);
+        count.1 += 1;
+    }
+    counts
 }
 
 /// The valid Tags in a file; others, which only other tools could have
@@ -2012,7 +2066,7 @@ mod tests {
         );
         assert_eq!(
             sub_titles(&tasks.tasks(Planning::Active).unwrap()[0]),
-            ["c", "cccccccccccc"]
+            ["c"]
         );
     }
 
@@ -2060,7 +2114,7 @@ mod tests {
     }
 
     #[test]
-    fn a_closed_subtask_stays_listed_under_its_open_parent_marked_closed() {
+    fn a_closed_subtask_leaves_the_list_once_the_close_is_committed() {
         let dir = Scratch::new();
         let tasks = dir.store();
         let parent = tasks.create("p", Planning::Active, 4, &[]).unwrap();
@@ -2073,8 +2127,7 @@ mod tests {
         );
         tasks.commit().unwrap();
         let listed = tasks.tasks(Planning::Active).unwrap();
-        let flags: Vec<_> = listed[0].subtasks.iter().map(|t| t.closed).collect();
-        assert_eq!(flags, [false, true]);
+        assert_eq!(sub_titles(&listed[0]), ["open"]);
         assert_eq!(listed[0].subtasks[0].id, open.id);
         tasks.close(&parent.id, Closing::Done).unwrap();
         tasks.commit().unwrap();
@@ -2558,13 +2611,13 @@ mod tests {
         let (tasks, gone) = cache_fixture(&dir);
         tasks.tasks(Planning::Active).unwrap();
         lock_file(&dir.0.join(format!("{}.md", gone.id)));
-        let listed = dir.store().tasks(Planning::Active).unwrap();
-        let closed = &listed[0].subtasks[0];
+        let rows = dir.store().rows(Planning::Active).unwrap();
         assert_eq!(
-            (closed.id.as_str(), closed.title.as_str()),
-            (&*gone.id, "gone")
+            (rows[0].subtasks_done, rows[0].subtasks_total),
+            (1, 2),
+            "{}",
+            gone.id
         );
-        assert!(closed.closed);
     }
 
     #[test]
@@ -2658,16 +2711,77 @@ mod tests {
             .rows(Planning::Active)
             .unwrap()
             .into_iter()
-            .map(|r| (r.task.title, r.depth, r.has_subtasks))
+            .map(|r| {
+                (
+                    r.task.title,
+                    r.parent_title,
+                    r.subtasks_done,
+                    r.subtasks_total,
+                )
+            })
             .collect();
+        let some = |t: &str| Some(t.to_owned());
         assert_eq!(
             rows,
             [
-                ("parent".to_owned(), 0, true),
-                ("child".to_owned(), 1, false),
-                ("other".to_owned(), 0, false)
+                ("parent".to_owned(), None, 0, 1),
+                ("child".to_owned(), some("parent"), 0, 0),
+                ("other".to_owned(), None, 0, 0)
             ]
         );
+    }
+
+    #[test]
+    fn a_task_that_is_parent_and_subtask_has_both_markers() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let top = tasks.create("top", Planning::Active, 4, &[]).unwrap();
+        let mid = subtask(&tasks, &top, "mid");
+        subtask(&tasks, &mid, "leaf");
+        let rows = tasks.rows(Planning::Active).unwrap();
+        let mid = &rows[1];
+        assert_eq!(mid.parent_title.as_deref(), Some("top"));
+        assert_eq!((mid.subtasks_done, mid.subtasks_total), (0, 1));
+    }
+
+    #[test]
+    fn done_subtasks_count_but_rejected_ones_do_not() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let parent = tasks.create("p", Planning::Active, 4, &[]).unwrap();
+        let done = subtask(&tasks, &parent, "done");
+        let rejected = subtask(&tasks, &parent, "rejected");
+        subtask(&tasks, &parent, "open");
+        tasks.close(&done.id, Closing::Done).unwrap();
+        tasks.commit().unwrap();
+        tasks.close(&rejected.id, Closing::Rejected).unwrap();
+        tasks.commit().unwrap();
+        let rows = tasks.rows(Planning::Active).unwrap();
+        assert_eq!((rows[0].subtasks_done, rows[0].subtasks_total), (1, 2));
+        assert_eq!(rows.len(), 2);
+    }
+
+    #[test]
+    fn a_pending_done_subtask_stays_listed_and_counts_as_done() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let parent = tasks.create("p", Planning::Active, 4, &[]).unwrap();
+        let child = subtask(&tasks, &parent, "c");
+        tasks.close(&child.id, Closing::Done).unwrap();
+        let rows = tasks.rows(Planning::Active).unwrap();
+        assert!(rows[1].task.done);
+        assert_eq!((rows[0].subtasks_done, rows[0].subtasks_total), (1, 1));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_counts_read_no_task_file() {
+        let dir = Scratch::new();
+        let (tasks, _) = cache_fixture(&dir);
+        let before = tasks.rows(Planning::Active).unwrap();
+        lock_files(&dir);
+        assert_eq!(tasks.rows(Planning::Active).unwrap(), before);
+        assert_eq!((before[0].subtasks_done, before[0].subtasks_total), (1, 2));
     }
 
     #[test]

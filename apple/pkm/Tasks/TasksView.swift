@@ -18,45 +18,42 @@ struct TasksView: View {
                     }
                 } else {
                     List {
-                        ForEach(model.rows) { task in
-                            TaskRow(
-                                task: task, isCollapsed: model.isCollapsed(task),
-                                onCircle: { model.toggleDone(task) }, onDisclose: { model.toggleCollapsed(task) }
-                            )
-                            .contentShape(Rectangle())
-                            .draggable(task.id)
-                            .dropDestination(for: String.self) { ids, _ in
-                                guard !task.closed, let moved = model.tasks.first(where: { $0.id == ids.first }) else {
-                                    return false
+                        ForEach(model.tasks) { task in
+                            TaskRow(task: task, onCircle: { model.toggleDone(task) })
+                                .contentShape(Rectangle())
+                                .draggable(task.id)
+                                .dropDestination(for: String.self) { ids, _ in
+                                    guard let moved = model.tasks.first(where: { $0.id == ids.first }) else {
+                                        return false
+                                    }
+                                    model.move(moved, under: task)
+                                    return true
                                 }
-                                model.move(moved, under: task)
-                                return true
-                            }
-                            .onTapGesture { if !task.closed { model.startEditing(task) } }
-                            .swipeActions(edge: .trailing) {
-                                if !task.closed && !task.done {
-                                    Button("Reject", role: .destructive) { model.close(task, as: .rejected) }
+                                .onTapGesture { model.startEditing(task) }
+                                .swipeActions(edge: .trailing) {
+                                    if !task.done {
+                                        Button("Reject", role: .destructive) { model.close(task, as: .rejected) }
+                                    }
                                 }
-                            }
-                            .contextMenu {
-                                if !task.closed && !task.done {  // a pending Done is Reverted at its circle
-                                    Button("Add Subtask", systemImage: "plus.circle") { subtaskParent = task }
-                                    if task.depth == 0 {  // a Subtask follows its top-level Task
-                                        if task.planning == .backlog {
-                                            Button("Make Active", systemImage: "arrow.up.circle") {
-                                                model.plan(task, as: .active)
-                                            }
-                                        } else {
-                                            Button("Move to Backlog", systemImage: "tray") {
-                                                model.plan(task, as: .backlog)
+                                .contextMenu {
+                                    if !task.done {  // a pending Done is Reverted at its circle
+                                        Button("Add Subtask", systemImage: "plus.circle") { subtaskParent = task }
+                                        if task.parent == nil {  // a Subtask follows its top-level Task
+                                            if task.planning == .backlog {
+                                                Button("Make Active", systemImage: "arrow.up.circle") {
+                                                    model.plan(task, as: .active)
+                                                }
+                                            } else {
+                                                Button("Move to Backlog", systemImage: "tray") {
+                                                    model.plan(task, as: .backlog)
+                                                }
                                             }
                                         }
-                                    }
-                                    Button("Reject", systemImage: "xmark.circle", role: .destructive) {
-                                        model.close(task, as: .rejected)
+                                        Button("Reject", systemImage: "xmark.circle", role: .destructive) {
+                                            model.close(task, as: .rejected)
+                                        }
                                     }
                                 }
-                            }
                         }
                         .onMove { model.move(from: $0, to: $1) }
                     }
@@ -126,43 +123,36 @@ private struct ClosedToast: View {
 
 /// One Task: a circle, coloured by Priority and filled while Done, and beside
 /// it the Title, the Description faded on one line, and the Tags fainter still.
-/// A Subtask is indented, a Parent has a chevron to collapse it, a Closed Subtask
-/// is struck through, a Blocked Task has a lock at the end. `onCircle` is a tap on the circle.
+/// A Parent shows how many of its Subtasks are Done, a Subtask its Parent's Title, before
+/// the Tags. A Blocked Task has a lock at the end. `onCircle` is a tap on the circle.
 /// A Tag's name in its Tag Color, Default being the tertiary grey.
 private func tagText(_ tag: TagEntry) -> Text {
     Text(tag.name).foregroundStyle(tag.style())
 }
 
+/// A symbol and a text, close together, for the line of Tags.
+private func marker(_ text: String, symbol: String) -> some View {
+    HStack(spacing: 3) {
+        Image(systemName: symbol).imageScale(.small)
+        Text(text)
+    }
+}
+
 private struct TaskRow: View {
     let task: ListedTask
-    let isCollapsed: Bool
     let onCircle: () -> Void
-    let onDisclose: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
-            Button(action: onDisclose) {
-                Image(systemName: "chevron.right")
-                    .rotationEffect(.degrees(isCollapsed ? 0 : 90))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 16)
-            }
-            .buttonStyle(.plain)
-            .opacity(task.hasSubtasks ? 1 : 0)
-            .disabled(!task.hasSubtasks)
-            .accessibilityLabel(isCollapsed ? "Expand" : "Collapse")
             Button(action: onCircle) {
                 Image(systemName: task.done ? "circle.inset.filled" : "circle")
                     .font(.title2)
                     .foregroundStyle(task.priorityColor)
             }
             .buttonStyle(.plain)
-            .disabled(task.closed)
             .accessibilityLabel(task.done ? "Revert Done" : "Done")
             VStack(alignment: .leading, spacing: 2) {
                 Text(task.title)
-                    .strikethrough(task.closed)
-                    .foregroundStyle(task.closed ? .secondary : .primary)
                 if !task.description.isEmpty {
                     Text(task.description)
                         .font(.subheadline)
@@ -170,11 +160,26 @@ private struct TaskRow: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
-                if let first = task.tags.first {
-                    // One Text, so that too many Tags are cut off at the end, not each.
-                    task.tags.dropFirst().reduce(tagText(first)) { Text("\($0) \(tagText($1))") }
-                        .font(.subheadline)
-                        .lineLimit(1)
+                if task.hasMarkers || !task.tags.isEmpty {
+                    HStack(spacing: 8) {
+                        if task.subtasksTotal > 0 {
+                            marker("\(task.subtasksDone)/\(task.subtasksTotal)", symbol: "checklist")
+                                .accessibilityLabel("\(task.subtasksDone) of \(task.subtasksTotal) Subtasks Done")
+                        }
+                        if let parentTitle = task.parentTitle {
+                            marker(parentTitle, symbol: "arrow.turn.down.right")
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .opacity(0.7)
+                        }
+                        if let first = task.tags.first {
+                            // One Text, so that too many Tags are cut off at the end, not each.
+                            task.tags.dropFirst().reduce(tagText(first)) { Text("\($0) \(tagText($1))") }
+                                .lineLimit(1)
+                        }
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                 }
             }
             if task.blocked {
@@ -185,11 +190,12 @@ private struct TaskRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)  // the whole row opens the Task, not just its text
-        .padding(.leading, CGFloat(task.depth) * 24)
     }
 }
 
 extension ListedTask {
+    fileprivate var hasMarkers: Bool { subtasksTotal > 0 || parentTitle != nil }
+
     fileprivate var priorityColor: Color {
         switch priority {
         case 1: .red

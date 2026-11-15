@@ -1053,25 +1053,6 @@
         align-items: flex-start;
         gap: 8px;
       }
-      .task-disclose {
-        flex: none;
-        width: 24px;
-        height: 24px;
-        margin-top: 9px;
-        padding: 0;
-        border: 0;
-        background: none;
-        color: color-mix(in srgb, var(--control-ink) 65%, transparent);
-        cursor: pointer;
-        touch-action: manipulation;
-        transform: rotate(90deg);
-      }
-      .task-disclose.collapsed {
-        transform: none;
-      }
-      .task-disclose:disabled {
-        visibility: hidden;
-      }
       .task-open {
         flex: 1;
         min-width: 0;
@@ -1128,9 +1109,30 @@
       .task-title {
         overflow-wrap: anywhere;
       }
-      .task-row.closed .task-title {
-        text-decoration: line-through;
+      .task-meta {
+        display: flex;
+        gap: 8px;
+        min-width: 0;
+        font-size: 0.875rem;
+        white-space: nowrap;
         color: color-mix(in srgb, var(--control-ink) 65%, transparent);
+      }
+      .task-mark {
+        display: inline-flex;
+        flex: none;
+        align-items: center;
+        gap: 3px;
+      }
+      .task-parent {
+        flex: 0 1 auto;
+        min-width: 0;
+        opacity: 0.7;
+      }
+      .task-parent svg {
+        flex: none;
+      }
+      .task-meta > .task-tags {
+        min-width: 0;
       }
       .task-blocked {
         flex: none;
