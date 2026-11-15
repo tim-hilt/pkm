@@ -1,12 +1,13 @@
 import { Planning, TaskQuickAdd, isValidTag } from "../core/Core";
 import { button, make } from "../Dom";
 import { QuickAddField } from "./QuickAddField";
+import { SubtasksSection } from "./SubtasksSection";
 import { tagLabel } from "./TagLabel";
 import { type Blocker, type ListedTask, TasksModel } from "./TasksModel";
 
 /** How the edit view moves between Tasks, each of which has an address of its own. */
 export interface TaskPlaces {
-  /** Shows the Task `id`, a Blocker just pushed on the model's stack, at its address. */
+  /** Shows the Task `id`, a Blocker or Subtask just pushed on the model's stack, at its address. */
   open(id: string): void;
   /** Returns to the Task before, at its address. */
   back(): void;
@@ -180,15 +181,15 @@ const typingPause = 500;
  * the Title is empty the last saved one is kept, a hint says why, and the
  * dialog can't be left (Done is off, Esc ignored).
  * The Tags are one line of pills that opens a picker. Closing saves what is pending.
- * An Open Blocker's title opens it over this Task; Back (with a Task below) returns,
- * and is off while the Title is empty.
+ * An Open Blocker's title or a Subtask row opens it over this Task; Back (with a Task
+ * below) returns, and is off while the Title is empty. `refresh` redraws the Subtasks.
  */
 export function editTaskDialog(
   model: TasksModel,
   task: ListedTask,
   parent: HTMLElement,
   places: Pick<TaskPlaces, "open" | "back">,
-): HTMLDialogElement {
+): { dialog: HTMLDialogElement; refresh: () => void } {
   let quickAdd = TaskQuickAdd.fromTitle(task.title);
   const tags = new TagField(model, [...task.tags], parent, () => save());
   const title = new QuickAddField(model, quickAdd, {
@@ -225,15 +226,16 @@ export function editTaskDialog(
     quickAdd = TaskQuickAdd.fromTitle(saved.title);
     title.use(quickAdd);
   };
-  const openBlocker = (id: string) => {
+  const openTask = (id: string) => {
     save();
-    if (model.openBlocker(id)) places.open(id);
+    if (model.open(id)) places.open(id);
   };
+  const subtasks = new SubtasksSection(model, task.id, openTask);
   const blockers = new BlockedByField(
     model.blockerCandidates(task),
     [...task.blockedBy],
     save,
-    openBlocker,
+    openTask,
   );
   const parentChoice = parentSelect(task, model.parentCandidates(task), (parent) =>
     model.setParent(task, parent),
@@ -264,6 +266,7 @@ export function editTaskDialog(
       tags.element,
       parentChoice,
       blockers.element,
+      subtasks.element,
     ],
     [done],
   );
@@ -303,7 +306,7 @@ export function editTaskDialog(
     save();
     quickAdd.free();
   });
-  return dialog;
+  return { dialog, refresh: () => subtasks.refresh() };
 }
 
 /**

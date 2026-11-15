@@ -129,7 +129,7 @@ export async function startApp(
     // The Title on top is empty: the address is put back, whatever the browser went to.
     const held = selected === "tasks" && tasks.isLeavingBlocked ? tasks.editing?.id : undefined;
     if (held !== undefined && held !== task) return navigation.openItem(held);
-    tasks.open(task);
+    tasks.openLinked(task);
     if (task !== undefined && !tasks.editing) return navigation.closeItem();
     if (drawing === undefined) void gallery.close();
     else if (gallery.openId === drawing) return;

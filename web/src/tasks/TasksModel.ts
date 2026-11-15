@@ -100,7 +100,7 @@ export class TasksModel {
   onSaved: () => void = () => {};
   /** The Close the toast offers to Revert. */
   pendingClose: PendingClose | undefined;
-  /** The IDs of the Tasks of the edit view, the first opened first: each Blocker opened is pushed. */
+  /** The IDs of the Tasks of the edit view, the first opened first: each Blocker or Subtask opened is pushed. */
   private stack: string[] = [];
   /** Whether the Task on top was last saved with an empty Title, which keeps the stack as it is. */
   private titleMissing = false;
@@ -154,7 +154,7 @@ export class TasksModel {
    * The `id` on top of the stack stays as it is, and the one below it is popped
    * to; any other starts a stack of its own.
    */
-  open(id: string | undefined): void {
+  openLinked(id: string | undefined): void {
     if (id !== undefined && id === this.stack.at(-1)) return;
     if (id !== undefined && id === this.stack.at(-2)) return this.back();
     this.clearStack();
@@ -174,16 +174,28 @@ export class TasksModel {
   }
 
   /**
-   * Pushes the Open Task `id`, a Blocker of the one on top, onto the stack; the
-   * list shown stays. False, pushing nothing, if it is Closed or gone, or
-   * while the Title on top is empty.
+   * Pushes the Open Task `id`, a Blocker or Subtask of the one on top, onto the
+   * stack; the list shown stays. False, pushing nothing, if it is Closed or
+   * gone, or while the Title on top is empty.
    */
-  openBlocker(id: string): boolean {
+  open(id: string): boolean {
     const blocker = this.find(id);
     if (this.stack.length === 0 || this.titleMissing || !blocker) return false;
     this.stack.push(id);
     this.onChange();
     return true;
+  }
+
+  /**
+   * The direct Subtasks of the Open Task `id`, in list order: Open, or Done and
+   * still Revertable; never Rejected. From either list.
+   */
+  subtasks(id: string): ListedTask[] {
+    try {
+      return this.listed(this.files.store.subtasks(id));
+    } catch {
+      return [];
+    }
   }
 
   /** Pops the Task on top, to show the one below as last saved; refused while its Title is empty or it is the last. */
@@ -199,7 +211,7 @@ export class TasksModel {
   }
 
   /** `id` as last saved, from either list. */
-  private find(id: string): ListedTask | undefined {
+  find(id: string): ListedTask | undefined {
     return (
       this.shown.find((t) => t.id === id) ?? this.read(this.otherList).find((t) => t.id === id)
     );

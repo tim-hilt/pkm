@@ -1479,6 +1479,37 @@
         padding: 0 10px 0 6px;
         background: none;
       }
+      .tasks-subtasks-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .tasks-subtasks-header h3 {
+        flex: 1;
+        margin: 0;
+        font-size: 0.85rem;
+        font-weight: 600;
+      }
+      .tasks-subtasks-count {
+        font-size: 0.85rem;
+        opacity: 0.65;
+      }
+      .tasks-subtasks-fold {
+        display: inline-flex;
+        padding: 4px;
+        border: 0;
+        background: none;
+        color: inherit;
+        cursor: pointer;
+      }
+      .tasks-subtasks-fold.folded svg {
+        transform: rotate(-90deg);
+      }
+      .tasks-subtasks-list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
       .tasks-back {
         align-self: flex-start;
         min-height: 32px;

@@ -547,16 +547,16 @@ describe("opening a Task by its id", () => {
     model.add("Later", Planning.Backlog);
     const { id } = first();
     model.planning = Planning.Active;
-    model.open(id);
+    model.openLinked(id);
     expect(model.planning).toBe(Planning.Backlog);
     expect(model.editing?.id).toBe(id);
-    model.open(undefined);
+    model.openLinked(undefined);
     expect(model.editing).toBeUndefined();
   });
 
   it("shows the Active list for an unknown id", () => {
     model.add("Later", Planning.Backlog);
-    model.open("unknown");
+    model.openLinked("unknown");
     expect(model.planning).toBe(Planning.Active);
     expect(model.editing).toBeUndefined();
   });
@@ -567,7 +567,7 @@ describe("opening a Task by its id", () => {
     const sub = model.tasks[1];
     model.close(sub, Closing.Done);
     model.commit();
-    model.open(sub.id);
+    model.openLinked(sub.id);
     expect(model.planning).toBe(Planning.Active);
     expect(model.editing).toBeUndefined();
   });
@@ -576,12 +576,12 @@ describe("opening a Task by its id", () => {
     model.add("Now");
     let changes = 0;
     model.onChange = () => changes++;
-    model.open(first().id);
+    model.openLinked(first().id);
     expect(changes).toBe(1);
   });
 });
 
-describe("opening Blockers", () => {
+describe("opening Blockers and Subtasks", () => {
   /** "Top" (opened) Blocked by "Mid", itself Blocked by "Low", the last of which is in the Backlog. */
   function chain() {
     model.add("Low", Planning.Backlog);
@@ -599,9 +599,9 @@ describe("opening Blockers", () => {
 
   it("pushes a Blocker on the stack, to any depth, and pops it with back", () => {
     const { low, mid, top } = chain();
-    model.open(top.id);
-    expect(model.openBlocker(mid.id)).toBe(true);
-    expect(model.openBlocker(low.id)).toBe(true);
+    model.openLinked(top.id);
+    expect(model.open(mid.id)).toBe(true);
+    expect(model.open(low.id)).toBe(true);
     expect(model.depth).toBe(3);
     expect(model.editing?.id).toBe(low.id);
     model.back();
@@ -613,39 +613,39 @@ describe("opening Blockers", () => {
 
   it("leaves the list shown when the Blocker is on the other list", () => {
     const { low, mid, top } = chain();
-    model.open(mid.id);
-    expect(model.openBlocker(low.id)).toBe(true);
+    model.openLinked(mid.id);
+    expect(model.open(low.id)).toBe(true);
     expect(model.planning).toBe(Planning.Active);
     expect(top.planning).toBe(Planning.Active);
   });
 
   it("refuses a Closed Blocker", () => {
     const { mid, top } = chain();
-    model.open(top.id);
+    model.openLinked(top.id);
     model.close(mid, Closing.Done);
     model.commit();
-    expect(model.openBlocker(mid.id)).toBe(false);
+    expect(model.open(mid.id)).toBe(false);
     expect(model.depth).toBe(1);
   });
 
   it("refuses opening while the Title on top is empty, and popping", () => {
     const { low, mid, top } = chain();
-    model.open(top.id);
-    model.openBlocker(mid.id);
+    model.openLinked(top.id);
+    model.open(mid.id);
     model.edit(model.editing!, { title: " ", description: "", priority: 4, tags: [] });
     expect(model.isLeavingBlocked).toBe(true);
-    expect(model.openBlocker(low.id)).toBe(false);
+    expect(model.open(low.id)).toBe(false);
     model.back();
     expect(model.editing?.id).toBe(mid.id);
     model.edit(model.editing!, { title: "Mid", description: "", priority: 4, tags: [] });
     expect(model.isLeavingBlocked).toBe(false);
-    expect(model.openBlocker(low.id)).toBe(true);
+    expect(model.open(low.id)).toBe(true);
   });
 
   it("shows the latest saved state after back", () => {
     const { mid, top } = chain();
-    model.open(top.id);
-    model.openBlocker(mid.id);
+    model.openLinked(top.id);
+    model.open(mid.id);
     model.edit(model.editing!, { title: "Renamed", description: "", priority: 1, tags: [] });
     model.back();
     expect(model.editing?.blockedBy.map((b) => b.title)).toEqual(["Renamed"]);
@@ -653,18 +653,53 @@ describe("opening Blockers", () => {
 
   it("pops to the Task below, or starts over for another one, when opened by id", () => {
     const { low, mid, top } = chain();
-    model.open(top.id);
-    model.openBlocker(mid.id);
-    model.open(top.id);
-    expect(model.depth).toBe(1);
-    model.openBlocker(mid.id);
+    model.openLinked(top.id);
     model.open(mid.id);
+    model.openLinked(top.id);
+    expect(model.depth).toBe(1);
+    model.open(mid.id);
+    model.openLinked(mid.id);
     expect(model.depth).toBe(2);
-    model.open(low.id);
+    model.openLinked(low.id);
     expect(model.depth).toBe(1);
     expect(model.planning).toBe(Planning.Backlog);
-    model.open(undefined);
+    model.openLinked(undefined);
     expect(model.depth).toBe(0);
+  });
+});
+
+describe("Subtasks of a Task", () => {
+  it("lists the direct Subtasks in order, from either list, without Rejected ones", () => {
+    model.add("Parent", Planning.Backlog);
+    const parent = first();
+    model.addSubtask("One", parent);
+    model.addSubtask("Two", parent);
+    model.addSubtask("Gone", parent);
+    model.close(
+      model.tasks.find((t) => t.title === "Gone")!,
+      Closing.Rejected,
+    );
+    model.commit();
+    model.planning = Planning.Active;
+    expect(model.subtasks(parent.id).map((t) => t.title)).toEqual(["Two", "One"]); // the newest first
+  });
+
+  it("is empty for a Task without Subtasks or an unknown one", () => {
+    model.add("Alone");
+    expect(model.subtasks(first().id)).toEqual([]);
+    expect(model.subtasks("unknown")).toEqual([]);
+  });
+
+  it("opens a Subtask over its Parent, and back returns", () => {
+    model.add("Parent");
+    const parent = first();
+    model.addSubtask("Sub", parent);
+    model.openLinked(parent.id);
+    const [sub] = model.subtasks(parent.id);
+    expect(model.open(sub.id)).toBe(true);
+    expect(model.editing?.id).toBe(sub.id);
+    model.back();
+    expect(model.editing?.id).toBe(parent.id);
   });
 });
 
