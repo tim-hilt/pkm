@@ -75,7 +75,7 @@ doubles upstream produced. Tests compare with a small tolerance anyway.
 
 ## Reading from Rust
 
-`crates/drawing/tests/integration/common/mod.rs` reads both files with the core's own JSON
+`crates/drawing/src/test_support.rs` reads both files with the core's own JSON
 (`pkm_base::json`) into `Shape`, `OpSet` and `Op` values:
 `Fixture::load("shapes").shapes("rectangle-r0-solid-sharp")`.
-`crates/drawing/tests/integration/golden.rs` checks that the fixtures are complete.
+The `golden` tests in `crates/drawing/src/rough.rs` check that the fixtures are complete.

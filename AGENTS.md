@@ -64,7 +64,7 @@ Search with `rg` or `git grep`: they skip the gitignored `node_modules` folders,
 
 ## Checking
 
-`make check` formats, lints, then runs the Rust tests, failing at the cheapest step; run it before committing. Rust integration tests are modules of `crates/drawing/tests/integration/main.rs`.
+`make check` formats, lints, then runs the Rust tests, failing at the cheapest step; run it before committing.
 
 ## Seeing the app
 

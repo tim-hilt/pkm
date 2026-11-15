@@ -105,9 +105,6 @@ record-references: apple-project
 
 # The pre-commit hook runs this (enable: git config core.hooksPath .githooks).
 lint:
-	@# One integration-test binary: each extra one costs linking and a ~13 s first-launch scan on macOS.
-	@! ls crates/*/tests/*.rs >/dev/null 2>&1 \
-		|| { echo 'error: add integration tests as modules of crates/drawing/tests/integration/main.rs, not as files in tests/'; exit 1; }
 	swift format lint --strict -r $(SWIFT_SRC)
 	cargo fmt --all --check
 	cargo clippy --workspace --all-targets --locked -q -- -D warnings
@@ -165,7 +162,7 @@ visual-parity-app: apple-project
 # share of one input event in the 5,000-Element one.
 # See docs/performance-benchmarks.md for the full procedure.
 bench:
-	cargo test --release --locked -q -p pkm-drawing --test integration -- --ignored --nocapture --test-threads=1 benchmarks::
+	cargo test --release --locked -q -p pkm-drawing --lib -- --ignored --nocapture --test-threads=1 benchmarks::
 
 clean:
 	rm -rf apple/pkm.xcodeproj apple/build apple/Generated target web/generated web/dist

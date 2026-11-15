@@ -414,4 +414,438 @@ mod tests {
         assert_eq!(corner_radius(60.0, Roundness::Proportional), 15.0);
         assert_eq!(corner_radius(60.0, Roundness::Other), 0.0);
     }
+
+    mod fills {
+        //! Fills of rectangles, diamonds and ellipses (ADR-0004), tested through
+        //! `Editor::geometry`.
+        //!
+        //! Parity with excalidraw.com is checked against the golden fixtures: rough.js
+        //! gives every shape a list of op sets (the fill, then the outline), and the
+        //! core must emit one part for each, in that order. The style tests use
+        //! literals taken from Excalidraw's and rough.js' sources, never values
+        //! recomputed from the code under test.
+
+        use crate::test_support as common;
+
+        use crate::{Geometry, PartKind, Verb};
+        use common::{assert_rough_elements_match_golden, editor_with_element, ops};
+
+        // --- Parity with rough.js ---------------------------------------------------
+
+        #[test]
+        fn every_fill_style_matches_the_golden_output_for_every_shape_roughness_and_stroke_width() {
+            let checked = assert_rough_elements_match_golden("fills", |_| true);
+            // 3 shapes x 4 fill styles x 3 roughnesses, rounded shapes, stroke widths.
+            assert!(checked >= 44, "only {checked} elements checked");
+        }
+
+        // --- Style ------------------------------------------------------------------
+
+        fn kinds(geometry: &Geometry) -> Vec<u32> {
+            geometry.parts().iter().map(|p| p.kind).collect()
+        }
+
+        const SHAPE: &str = r##""id":"a","type":"rectangle","width":100,"height":60,"seed":5,"backgroundColor":"#a5d8ff""##;
+
+        #[test]
+        fn an_element_without_a_background_colour_has_no_fill() {
+            for style in ["solid", "hachure", "cross-hatch", "zigzag"] {
+                let editor = editor_with_element(&format!(
+                    r#""id":"a","type":"ellipse","width":100,"height":60,"fillStyle":"{style}","backgroundColor":"transparent""#
+                ));
+
+                assert_eq!(
+                    kinds(&editor.geometry()),
+                    [PartKind::Stroke as u32],
+                    "{style}"
+                );
+            }
+        }
+
+        #[test]
+        fn a_fully_transparent_background_colour_has_no_fill_either() {
+            let editor = editor_with_element(
+                r##""id":"a","type":"rectangle","width":100,"height":60,"backgroundColor":"#a5d8ff00""##,
+            );
+
+            assert_eq!(kinds(&editor.geometry()), [PartKind::Stroke as u32]);
+        }
+
+        #[test]
+        fn the_fill_is_drawn_first_so_the_outline_lies_over_it() {
+            for (style, fill_kind) in [
+                ("solid", PartKind::Fill),
+                ("hachure", PartKind::Stroke),
+                ("cross-hatch", PartKind::Stroke),
+                ("zigzag", PartKind::Stroke),
+            ] {
+                let editor = editor_with_element(&format!(r#"{SHAPE},"fillStyle":"{style}""#));
+                let geometry = editor.geometry();
+
+                let [fill, outline] = geometry.parts() else {
+                    panic!("{style}: a fill and an outline")
+                };
+                assert_eq!(fill.kind, fill_kind as u32, "{style}");
+                assert_eq!(outline.kind, PartKind::Stroke as u32, "{style}");
+                assert_eq!(outline.color, 0x1e1e_1eff, "{style}: stroke colour");
+                assert_eq!(fill.color, 0xa5d8_ffff, "{style}: background colour");
+            }
+        }
+
+        #[test]
+        fn background_colour_with_alpha_keeps_its_alpha() {
+            let editor = editor_with_element(&format!(
+                r##"{SHAPE},"fillStyle":"solid","backgroundColor":"#a5d8ff80""##
+            ));
+
+            assert_eq!(editor.geometry().parts()[0].color, 0xa5d8_ff80);
+        }
+
+        #[test]
+        fn fill_and_outline_share_the_elements_opacity_and_version() {
+            let editor = editor_with_element(&format!(
+                r#"{SHAPE},"fillStyle":"solid","opacity":40,"version":7"#
+            ));
+            let geometry = editor.geometry();
+
+            for part in geometry.parts() {
+                assert_eq!(part.opacity, 0.4);
+                assert_eq!(part.version, 7);
+                assert_eq!(part.element, 0);
+            }
+        }
+
+        #[test]
+        fn hatch_lines_are_half_as_thick_as_the_stroke_and_never_dashed() {
+            // shape.ts: fillWeight is strokeWidth / 2, whatever the stroke style.
+            let editor = editor_with_element(&format!(
+                r#"{SHAPE},"fillStyle":"hachure","strokeWidth":4,"strokeStyle":"dashed""#
+            ));
+            let geometry = editor.geometry();
+
+            let hatch = geometry.parts()[0];
+            assert_eq!(hatch.width, 2.0);
+            assert_eq!((hatch.dash_on, hatch.dash_off), (0.0, 0.0));
+            // The outline still gets its dashes and the extra half unit.
+            let outline = geometry.parts()[1];
+            assert_eq!(outline.width, 4.5);
+            assert_eq!((outline.dash_on, outline.dash_off), (8.0, 12.0));
+        }
+
+        #[test]
+        fn hatch_lines_are_four_stroke_widths_apart() {
+            // shape.ts: hachureGap is strokeWidth * 4. Architect lines on a 100 x 60
+            // rectangle at -41 degrees: neighbouring lines start 8 units apart
+            // measured across the lines, so there are about 100 / 8 of them per unit
+            // length of the slanted direction; thicker strokes thin them out.
+            let lines = |stroke_width: u32| {
+                let editor = editor_with_element(&format!(
+                    r#"{SHAPE},"roughness":0,"fillStyle":"hachure","strokeWidth":{stroke_width}"#
+                ));
+                let geometry = editor.geometry();
+                let hatch = geometry.parts()[0];
+                // Every line is drawn twice: a move and a curve each.
+                hatch.verb_count / 4
+            };
+
+            let (thin, thick) = (lines(1), lines(4));
+            assert!(
+                thin > 3 * thick,
+                "{thin} lines at width 1, {thick} at width 4"
+            );
+        }
+
+        #[test]
+        fn a_rotated_element_turns_its_fill_with_it() {
+            // A quarter turn about the centre (50, 30) takes the architect rectangle's
+            // top left corner (0, 0) to (80, -20); the solid fill starts there too.
+            let editor = editor_with_element(&format!(
+                r#"{SHAPE},"roughness":0,"fillStyle":"solid","angle":{}"#,
+                std::f64::consts::FRAC_PI_2
+            ));
+            let geometry = editor.geometry();
+
+            let (verb, first) = &ops(&geometry, &geometry.parts()[0])[0];
+            assert_eq!(*verb, Verb::Move);
+            assert!((first[0] - 80.0).abs() < 1e-3 && (first[1] + 20.0).abs() < 1e-3);
+        }
+
+        #[test]
+        fn a_solid_fill_is_one_closed_shape_through_the_corners() {
+            // Architect rectangle: the fill goes through all four corners, in order.
+            let editor = editor_with_element(&format!(
+                r#"{SHAPE},"roughness":0,"fillStyle":"solid","x":10,"y":20"#
+            ));
+            let geometry = editor.geometry();
+
+            assert_eq!(
+                ops(&geometry, &geometry.parts()[0]),
+                [
+                    (Verb::Move, vec![10.0, 20.0]),
+                    (Verb::Line, vec![110.0, 20.0]),
+                    (Verb::Line, vec![110.0, 80.0]),
+                    (Verb::Line, vec![10.0, 80.0]),
+                ]
+            );
+        }
+
+        #[test]
+        fn hatching_stays_inside_the_shape() {
+            // Rough lines stray a few units over the edge, no further.
+            for pattern in ["hachure", "cross-hatch", "zigzag"] {
+                let editor = editor_with_element(&format!(
+                    r#"{SHAPE},"fillStyle":"{pattern}","x":10,"y":20"#
+                ));
+                let geometry = editor.geometry();
+
+                for (_, operands) in ops(&geometry, &geometry.parts()[0]) {
+                    for xy in operands.chunks(2) {
+                        assert!(
+                            (5.0..=115.0).contains(&xy[0]) && (15.0..=85.0).contains(&xy[1]),
+                            "{pattern}: ({}, {})",
+                            xy[0],
+                            xy[1]
+                        );
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn the_same_seed_gives_the_same_fill() {
+            let drawing = |seed: u32| {
+                editor_with_element(&format!(
+                    r#"{SHAPE},"fillStyle":"cross-hatch","seed":{seed}"#
+                ))
+                .geometry()
+            };
+            let (a, b, c) = (drawing(3), drawing(3), drawing(4));
+
+            assert_eq!(a.coords(), b.coords());
+            assert_ne!(a.coords(), c.coords());
+        }
+
+        #[test]
+        fn a_fill_does_not_change_the_outline() {
+            // rough.js sketches the outline first, so the fill cannot move it.
+            let outline_of = |extra: &str| {
+                let editor = editor_with_element(&format!(r#"{SHAPE}{extra}"#));
+                let geometry = editor.geometry();
+                let last = *geometry.parts().last().unwrap();
+                ops(&geometry, &last)
+            };
+
+            let plain = outline_of(r#","backgroundColor":"transparent""#);
+            for style in ["solid", "hachure", "cross-hatch", "zigzag"] {
+                assert_eq!(
+                    plain,
+                    outline_of(&format!(r#","fillStyle":"{style}""#)),
+                    "{style}"
+                );
+            }
+        }
+    }
+
+    mod hand_drawn_shapes {
+        //! Hand-drawn rectangles, diamonds and ellipses (ADR-0004), tested through
+        //! `Editor::geometry`.
+        //!
+        //! Parity with excalidraw.com is checked against the golden fixtures, which
+        //! hold what rough.js produced for the same seeds. The style tests use
+        //! literals taken from Excalidraw's source (`shape.ts` at the pinned commit),
+        //! never values recomputed from the code under test.
+
+        use crate::test_support as common;
+
+        use std::f64::consts::FRAC_PI_2;
+
+        use crate::{Editor, Geometry, Part, Verb};
+        use common::{Fixture, assert_rough_elements_match_golden, editor_with_element, ops};
+
+        // --- Parity with rough.js ---------------------------------------------------
+
+        #[test]
+        fn shapes_match_the_golden_output_for_every_roughness_stroke_style_and_roundness() {
+            let checked = assert_rough_elements_match_golden("shapes", |_| true);
+
+            // Every type x roughness x stroke style x roundness, small and big ones.
+            assert_eq!(checked, Fixture::load("shapes").elements().len());
+            assert!(checked >= 51, "only {checked} elements checked");
+        }
+
+        #[test]
+        fn the_same_seed_gives_the_same_strokes_and_another_seed_another_sketch() {
+            let drawing = |seed: u32| {
+                editor_with_element(&format!(
+                    r#""id":"a","type":"rectangle","width":100,"height":60,"seed":{seed}"#
+                ))
+                .geometry()
+            };
+            let (a, b, c) = (drawing(7), drawing(7), drawing(8));
+
+            assert_eq!(a.coords(), b.coords());
+            assert_ne!(a.coords(), c.coords());
+        }
+
+        #[test]
+        fn seeds_beyond_32_bits_wrap_like_javascripts_imul() {
+            // Math.imul converts its operands to int32, so 2^32 + 7 behaves as 7.
+            let drawing = |seed: u64| {
+                editor_with_element(&format!(
+                    r#""id":"a","type":"ellipse","width":100,"height":60,"seed":{seed}"#
+                ))
+                .geometry()
+            };
+
+            assert_eq!(drawing(7).coords(), drawing((1 << 32) + 7).coords());
+        }
+
+        // --- Style ------------------------------------------------------------------
+
+        fn only_stroke(editor: &Editor) -> (Geometry, Part) {
+            let geometry = editor.geometry();
+            let [part] = geometry.parts() else {
+                panic!("one part")
+            };
+            let part = *part;
+            (geometry, part)
+        }
+
+        #[test]
+        fn solid_strokes_use_the_elements_width_and_colour() {
+            let editor = editor_with_element(
+                r##""id":"a","type":"rectangle","width":100,"height":60,"strokeWidth":4,"strokeColor":"#e03131""##,
+            );
+            let (_, part) = only_stroke(&editor);
+
+            assert_eq!(part.width, 4.0);
+            assert_eq!(part.color, 0xe031_31ff);
+            assert_eq!((part.dash_on, part.dash_off), (0.0, 0.0));
+        }
+
+        #[test]
+        fn css_colour_names_and_functions_draw_in_that_colour() {
+            // Values from tinycolor2 1.6.0 (`toHex8`), the reader of Excalidraw's colour input.
+            let editor = editor_with_element(
+                r#""id":"a","type":"rectangle","width":100,"height":60,"strokeColor":"rebeccapurple","backgroundColor":"rgb(255, 0, 0)","fillStyle":"solid""#,
+            );
+            let geometry = editor.geometry();
+            let colours: Vec<u32> = geometry.parts().iter().map(|part| part.color).collect();
+
+            assert!(colours.contains(&0x6633_99ff), "stroke: {colours:x?}");
+            assert!(colours.contains(&0xff00_00ff), "fill: {colours:x?}");
+        }
+
+        #[test]
+        fn an_unknown_colour_string_draws_in_the_default_ink() {
+            let editor = editor_with_element(
+                r#""id":"a","type":"rectangle","width":100,"height":60,"strokeColor":"not a colour""#,
+            );
+            let (_, part) = only_stroke(&editor);
+
+            assert_eq!(part.color, 0x1e1e_1eff);
+        }
+
+        #[test]
+        fn dashed_strokes_are_slightly_wider_with_8_on_and_8_plus_width_off() {
+            // shape.ts: dash [8, 8 + strokeWidth], strokeWidth + 0.5.
+            let editor = editor_with_element(
+                r#""id":"a","type":"rectangle","width":100,"height":60,"strokeStyle":"dashed""#,
+            );
+            let (_, part) = only_stroke(&editor);
+
+            assert_eq!(part.width, 2.5);
+            assert_eq!((part.dash_on, part.dash_off), (8.0, 10.0));
+        }
+
+        #[test]
+        fn dotted_strokes_are_slightly_wider_with_1_5_on_and_6_plus_width_off() {
+            // shape.ts: dash [1.5, 6 + strokeWidth], strokeWidth + 0.5.
+            let editor = editor_with_element(
+                r#""id":"a","type":"ellipse","width":100,"height":60,"strokeStyle":"dotted""#,
+            );
+            let (_, part) = only_stroke(&editor);
+
+            assert_eq!(part.width, 2.5);
+            assert_eq!((part.dash_on, part.dash_off), (1.5, 8.0));
+        }
+
+        #[test]
+        fn opacity_and_version_come_from_the_element() {
+            let editor = editor_with_element(
+                r#""id":"a","type":"diamond","width":100,"height":60,"opacity":30,"version":12"#,
+            );
+            let (_, part) = only_stroke(&editor);
+
+            assert_eq!(part.opacity, 0.3);
+            assert_eq!(part.version, 12);
+        }
+
+        #[test]
+        fn a_transparent_stroke_colour_is_invisible() {
+            let editor = editor_with_element(
+                r#""id":"a","type":"rectangle","width":100,"height":60,"strokeColor":"transparent""#,
+            );
+            let (_, part) = only_stroke(&editor);
+
+            assert_eq!(part.color & 0xff, 0);
+        }
+
+        #[test]
+        fn architect_sloppiness_draws_exact_straight_edges() {
+            // roughness 0: the box of the rectangle, every stroke exactly on its edge.
+            let editor = editor_with_element(
+                r#""id":"a","type":"rectangle","x":10,"y":20,"width":100,"height":60,"roughness":0"#,
+            );
+            let (geometry, part) = only_stroke(&editor);
+
+            for (_, p) in ops(&geometry, &part) {
+                for xy in p.chunks(2) {
+                    assert!((10.0..=110.0).contains(&xy[0]) && (20.0..=80.0).contains(&xy[1]));
+                }
+            }
+            // First op: the top left corner.
+            assert_eq!(ops(&geometry, &part)[0], (Verb::Move, vec![10.0, 20.0]));
+        }
+
+        // --- Placement --------------------------------------------------------------
+
+        #[test]
+        fn a_rotated_element_turns_about_its_centre() {
+            // Centre (50, 30) before moving by (x, y) = (0, 0). A quarter turn
+            // clockwise (y points down) takes the architect rectangle's corner (0, 0)
+            // to (80, -20): the offset (-50, -30) becomes (30, -50).
+            let editor = editor_with_element(&format!(
+                r#""id":"a","type":"rectangle","width":100,"height":60,"roughness":0,"angle":{FRAC_PI_2}"#
+            ));
+            let (geometry, part) = only_stroke(&editor);
+
+            let (verb, first) = &ops(&geometry, &part)[0];
+            assert_eq!(*verb, Verb::Move);
+            assert!((first[0] - 80.0).abs() < 1e-3 && (first[1] + 20.0).abs() < 1e-3);
+        }
+
+        // --- Client caching ---------------------------------------------------------
+
+        #[test]
+        fn geometry_says_when_handles_stop_meaning_the_same_element() {
+            // Clients cache per (element handle, version). Handles are positions in
+            // the file, so loading another Drawing makes every cached entry wrong.
+            let drawing = r#"{"type":"excalidraw","version":2,"elements":[
+        {"id":"a","type":"rectangle","width":10,"height":10}]}"#;
+            let mut editor = Editor::new();
+            editor.load(drawing.as_bytes()).unwrap();
+
+            let before = editor.geometry().generation();
+            assert_eq!(editor.geometry().generation(), before, "unchanged scene");
+
+            editor.load(drawing.as_bytes()).unwrap();
+            assert_ne!(editor.geometry().generation(), before, "loaded again");
+            assert_ne!(
+                Editor::new().geometry().generation(),
+                editor.geometry().generation(),
+                "other editors never share one"
+            );
+        }
+    }
 }

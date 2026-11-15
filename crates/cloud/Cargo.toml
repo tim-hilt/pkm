@@ -34,8 +34,3 @@ ureq = { version = "3.1", default-features = false, features = ["native-tls", "g
 
 [target.'cfg(not(target_vendor = "apple"))'.dependencies]
 ureq = { version = "3.1", default-features = false, features = ["rustls", "gzip"], optional = true }
-
-[[test]]
-name = "integration"
-path = "tests/integration/main.rs"
-required-features = ["native"]

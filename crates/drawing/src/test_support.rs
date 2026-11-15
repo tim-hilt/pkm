@@ -7,11 +7,11 @@
 use std::fs;
 use std::path::PathBuf;
 
-use pkm_base::json::{Object, Value, parse};
-use pkm_drawing::{
+use crate::{
     Editor, Geometry, Modifiers, Part, PartKind, PointerButton, PointerEvent, PointerKind,
     PointerPhase, TextMeasurer, Verb,
 };
+use pkm_base::json::{Object, Value, parse};
 
 /// The only `TextMeasurer` of the tests (spec, Testing Decisions): every
 /// character is half as wide as the font is high, so at font size 20 a
