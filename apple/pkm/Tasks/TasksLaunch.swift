@@ -9,7 +9,8 @@ extension TasksModel {
 
     /// The Tasks for this launch: the Tasks folder. For UI tests and screenshots
     /// (`-UITesting…`) it is empty and temporary, with sample Tasks when
-    /// launched with `-UITestingOpenTasks`.
+    /// launched with `-UITestingOpenTasks`, and the sheet of "Buy milk" open with
+    /// `-UITestingOpenTaskSheet`.
     @MainActor
     static func forLaunch() -> TasksModel {
         let arguments = ProcessInfo.processInfo.arguments
@@ -17,7 +18,8 @@ extension TasksModel {
             return TasksModel(store: openOrTemporary(documentsFolder))
         }
         let store = openOrTemporary(temporaryFolder())
-        if arguments.contains("-UITestingOpenTasks") {
+        let opensSheet = arguments.contains("-UITestingOpenTaskSheet")
+        if opensSheet || arguments.contains("-UITestingOpenTasks") {
             let samples = [
                 (
                     "Buy milk", "Two litres of oat milk, and a loaf of bread if the bakery is still open.", UInt8(1),
@@ -38,7 +40,9 @@ extension TasksModel {
             }
             _ = try? store.create(title: "Learn Rust", planning: .backlog, priority: 4, tags: [])
         }
-        return TasksModel(store: store)
+        let model = TasksModel(store: store)
+        if opensSheet, let task = model.tasks.first { model.startEditing(task) }
+        return model
     }
 
     private static func temporaryFolder() -> URL {

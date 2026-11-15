@@ -179,8 +179,7 @@ export class TasksModel {
    * gone, or while the Title on top is empty.
    */
   open(id: string): boolean {
-    const blocker = this.find(id);
-    if (this.stack.length === 0 || this.titleMissing || !blocker) return false;
+    if (this.stack.length === 0 || this.titleMissing || !this.find(id)) return false;
     this.stack.push(id);
     this.onChange();
     return true;

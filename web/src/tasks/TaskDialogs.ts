@@ -305,6 +305,7 @@ export function editTaskDialog(
     commit();
     save();
     quickAdd.free();
+    subtasks.stopAdding();
   });
   return { dialog, refresh: () => subtasks.refresh() };
 }

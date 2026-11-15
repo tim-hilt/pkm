@@ -133,23 +133,23 @@ private struct ClosedToast: View {
     }
 }
 
-/// One Task: a circle, coloured by Priority and filled while Done, and beside
-/// it the Title, the Description faded on one line, and the Tags fainter still.
-/// A Parent shows how many of its Subtasks are Done, a Subtask its Parent's Title, before
-/// the Tags. A Blocked Task has a lock at the end. `onCircle` is a tap on the circle.
 /// A Tag's name in its Tag Color, Default being the tertiary grey.
-func tagText(_ tag: TagEntry) -> Text {
+private func tagText(_ tag: TagEntry) -> Text {
     Text(tag.name).foregroundStyle(tag.style())
 }
 
 /// A symbol and a text, close together, for the line of Tags.
-func marker(_ text: String, symbol: String) -> some View {
+private func marker(_ text: String, symbol: String) -> some View {
     HStack(spacing: 3) {
         Image(systemName: symbol).imageScale(.small)
         Text(text)
     }
 }
 
+/// One Task: a circle, coloured by Priority and filled while Done, and beside
+/// it the Title, the Description faded on one line, and the Tags fainter still.
+/// A Parent shows how many of its Subtasks are Done, a Subtask its Parent's Title, before
+/// the Tags. A Blocked Task has a lock at the end. `onCircle` is a tap on the circle.
 struct TaskRow: View {
     let task: ListedTask
     /// Whether the Parent's Title is shown as a marker; not where the Parent is already in view.
@@ -406,7 +406,6 @@ private struct EditTaskForm: View {
             }
             .onChange(of: parent) { saveParent() }
             .accessibilityIdentifier("task-parent")
-            SubtasksSection(task: task, canOpen: hasTitle)
             Section("Blocked by") {
                 ForEach(blockedBy, id: \.id) { blocker in
                     Group {
@@ -435,6 +434,7 @@ private struct EditTaskForm: View {
                     .accessibilityIdentifier("task-add-blocker")
                 }
             }
+            SubtasksSection(task: task, canOpen: hasTitle)
         }
         .formStyle(.grouped)
         .navigationTitle(task.title)  // as last saved; also the back button's label on the Blocker's form

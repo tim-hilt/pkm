@@ -12,14 +12,19 @@ const chevronGlyph = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none
  * rows, then an "Add Subtask" button that turns into a focused Quick Add field:
  * Enter adds the Subtask at the end and empties the field, which keeps the focus;
  * Enter on an empty field, or blur, closes it. A click opens a Subtask via
- * `open`. Starts unfolded; the fold is not saved; folding hides the button too. `refresh` redraws it from the model, as last saved.
+ * `open`. Starts unfolded; the fold is not saved; folding hides the button too.
+ * `refresh` redraws it from the model, as last saved.
  */
 export class SubtasksSection {
   readonly element = make("section", "tasks-subtasks");
   private readonly counter = make("span", "tasks-subtasks-count");
   private readonly fold = make("button", "tasks-subtasks-fold");
   private readonly rows = make("ul", "tasks-subtasks-list");
-  private readonly adder = make("div", "tasks-subtasks-add");
+  private readonly addButton = button("tasks-subtasks-add-button", "Add Subtask", () =>
+    this.startAdding(),
+  );
+  /** Holds the "Add Subtask" button, or the Quick Add field it turned into. */
+  private readonly adder = make("div", "tasks-subtasks-add", [this.addButton]);
   private readonly body = make("div", "", [this.rows, this.adder]);
   /** The open Quick Add field and the Shortcuts it owns, until closed. */
   private adding: { field: QuickAddField; quickAdd: TaskQuickAdd } | undefined;
@@ -44,22 +49,24 @@ export class SubtasksSection {
       ]),
       this.body,
     );
-    this.showAdder();
     this.refresh();
   }
 
-  /** Shows the "Add Subtask" button, freeing the Quick Add field if open. */
-  private showAdder(): void {
-    this.adding?.quickAdd.free();
+  /** Turns the Quick Add field, if open, back into the "Add Subtask" button and frees its Quick Add. */
+  stopAdding(): void {
+    const { adding } = this;
+    if (!adding) return;
+    // Cleared first: removing the focused field blurs it, which calls this again.
     this.adding = undefined;
-    this.adder.replaceChildren(button("tasks-subtasks-add-button", "Add Subtask", () => this.startAdding()));
+    this.adder.replaceChildren(this.addButton);
+    adding.quickAdd.free();
   }
 
   private startAdding(): void {
     const quickAdd = new TaskQuickAdd();
     const field = new QuickAddField(this.model, quickAdd, {
       submit: () => this.submit(),
-      blur: () => this.showAdder(),
+      blur: () => this.stopAdding(),
     });
     this.adding = { field, quickAdd };
     this.adder.replaceChildren(field.element);
@@ -71,7 +78,7 @@ export class SubtasksSection {
     const parent = model.find(this.taskId);
     if (!adding || !parent) return;
     const { field, quickAdd } = adding;
-    if (field.title === "") return this.showAdder();
+    if (field.title === "") return this.stopAdding();
     const extras = { priority: quickAdd.priority(), tags: quickAdd.tags() };
     if (model.addSubtask(field.title, parent, extras)) field.clear();
   }
@@ -89,7 +96,9 @@ export class SubtasksSection {
     this.body.hidden = this.folded;
     this.rows.replaceChildren(
       ...model.subtasks(this.taskId).map((subtask) => {
-        const { line } = taskLine(subtask, model, () => this.open(subtask.id), false);
+        const { line } = taskLine(subtask, model, () => this.open(subtask.id), {
+          showsParent: false,
+        });
         return make("li", "task-row", [line]);
       }),
     );

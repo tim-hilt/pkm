@@ -128,7 +128,8 @@ extension AppNavigation {
 
     /// The navigation for this launch. The `-UITesting…` launch arguments
     /// (temporary stores, `make screenshot`) start on Drawings (Books for
-    /// `-UITestingOpenBooks` and `-UITestingOpenReader`, Tasks for `-UITestingOpenTasks`) and leave the Device's last AppContext alone.
+    /// `-UITestingOpenBooks` and `-UITestingOpenReader`, Tasks for `-UITestingOpenTasks`
+    /// and `-UITestingOpenTaskSheet`) and leave the Device's last AppContext alone.
     @MainActor
     static func forLaunch() -> AppNavigation {
         guard ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("-UITesting") }) else {
@@ -138,7 +139,7 @@ extension AppNavigation {
         let arguments = ProcessInfo.processInfo.arguments
         if opensSettingsAtLaunch || arguments.contains("-UITestingOpenSampleDrawing") {
             navigation.selected = .drawings
-        } else if arguments.contains("-UITestingOpenTasks") {
+        } else if arguments.contains("-UITestingOpenTasks") || arguments.contains("-UITestingOpenTaskSheet") {
             navigation.selected = .tasks
         } else if arguments.contains("-UITestingOpenBooks") || arguments.contains("-UITestingOpenReader") {
             navigation.selected = .books

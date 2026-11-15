@@ -16,7 +16,7 @@ export function taskLine(
   task: ListedTask,
   model: TasksModel,
   onOpen: () => void,
-  showsParent = true,
+  { showsParent = true } = {},
 ): { line: HTMLElement; open: HTMLButtonElement } {
   const circle = make("button", `task-circle priority-${task.priority}`);
   circle.type = "button";
