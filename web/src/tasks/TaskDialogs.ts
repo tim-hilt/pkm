@@ -43,7 +43,7 @@ function confirmButton(label: string): HTMLButtonElement {
   return confirm;
 }
 
-/** A modal form saved with its confirm button or Enter, closed once `save` succeeds, or with Cancel. */
+/** A modal form saved with its confirm button or Enter, closed once `save` returns true, or with Cancel. */
 function openDialog(
   parent: HTMLElement,
   title: string,
@@ -61,6 +61,7 @@ function openDialog(
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     if (save()) dialog.close();
+    confirm.disabled = !canSave();
   });
   dialog.addEventListener("close", closed);
   form.addEventListener("input", () => (confirm.disabled = !canSave()));
@@ -124,7 +125,8 @@ export function deleteTagDialog(
 
 /**
  * Asks for a Title, typed with Quick Add Shortcuts, and a Description and adds
- * the Task, Active, with the Priority and Tags the Shortcuts give.
+ * the Task, Active, with the Priority and Tags the Shortcuts give. The dialog
+ * stays open after each Add, cleared and focused for the next Task.
  */
 export function newTaskDialog(model: TasksModel, host: HTMLElement): void {
   const quickAdd = new TaskQuickAdd();
@@ -133,6 +135,11 @@ export function newTaskDialog(model: TasksModel, host: HTMLElement): void {
   description.rows = 4;
   description.setAttribute("aria-label", "Description");
   description.placeholder = "Description";
+  const reset = () => {
+    title.clear();
+    description.value = "";
+    title.focus();
+  };
   openDialog(
     host,
     "New Task",
@@ -144,7 +151,9 @@ export function newTaskDialog(model: TasksModel, host: HTMLElement): void {
         priority: quickAdd.priority(),
         tags: quickAdd.tags(),
       };
-      return model.add(title.title, Planning.Active, extras);
+      // Stays open, cleared, for the next Task; Cancel or Esc ends the chain.
+      if (model.add(title.title, Planning.Active, extras)) reset();
+      return false;
     },
     () => title.title !== "",
     () => quickAdd.free(),

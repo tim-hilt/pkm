@@ -129,8 +129,11 @@ export class QuickAddField {
     editor.setAttribute("aria-label", "Title");
     editor.setAttribute("aria-autocomplete", "list");
     editor.dataset.placeholder = "Title";
-    editor.spellcheck = false;
-    editor.autocapitalize = "off";
+    // The email keyboard has "@" beside the space bar for Tags, without the `#` Quick Add doesn't use.
+    editor.inputMode = "email";
+    editor.autocapitalize = "sentences";
+    editor.setAttribute("autocorrect", "on");
+    editor.spellcheck = true;
     this.list.id = `tasks-quick-suggestions-${nextId++}`;
     this.list.setAttribute("role", "listbox");
     editor.setAttribute("aria-controls", this.list.id);
