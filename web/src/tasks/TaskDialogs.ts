@@ -100,19 +100,6 @@ function choice<T extends string | number>(
   return group;
 }
 
-/** The Parent of `task`: one of `candidates` or None; `change` gets the pick as soon as it is made. */
-function parentSelect(
-  task: ListedTask,
-  candidates: ListedTask[],
-  change: (parent: ListedTask | undefined) => void,
-): HTMLLabelElement {
-  const select = make("select", "tasks-input");
-  select.append(new Option("None", ""), ...candidates.map((t) => new Option(t.title, t.id)));
-  select.value = task.parent ?? "";
-  select.addEventListener("change", () => change(candidates.find((t) => t.id === select.value)));
-  return field("Parent", select);
-}
-
 /** Asks to Delete a Tag, which is Removed from every Item, then calls `deleted`; Cancel changes nothing. */
 export function deleteTagDialog(
   model: TasksModel,
@@ -137,10 +124,9 @@ export function deleteTagDialog(
 
 /**
  * Asks for a Title, typed with Quick Add Shortcuts, and a Description and adds
- * the Task, Active, with the Priority and Tags the Shortcuts give; a Subtask of
- * `under` follows its top-level Task's list.
+ * the Task, Active, with the Priority and Tags the Shortcuts give.
  */
-export function newTaskDialog(model: TasksModel, host: HTMLElement, under?: ListedTask): void {
+export function newTaskDialog(model: TasksModel, host: HTMLElement): void {
   const quickAdd = new TaskQuickAdd();
   const title = new QuickAddField(model, quickAdd);
   const description = make("textarea", "tasks-input");
@@ -149,7 +135,7 @@ export function newTaskDialog(model: TasksModel, host: HTMLElement, under?: List
   description.placeholder = "Description";
   openDialog(
     host,
-    under ? "New Subtask" : "New Task",
+    "New Task",
     "Add",
     [title.element, description],
     () => {
@@ -158,9 +144,7 @@ export function newTaskDialog(model: TasksModel, host: HTMLElement, under?: List
         priority: quickAdd.priority(),
         tags: quickAdd.tags(),
       };
-      return under
-        ? model.addSubtask(title.title, under, extras)
-        : model.add(title.title, Planning.Active, extras);
+      return model.add(title.title, Planning.Active, extras);
     },
     () => title.title !== "",
     () => quickAdd.free(),
@@ -237,9 +221,6 @@ export function editTaskDialog(
     save,
     openTask,
   );
-  const parentChoice = parentSelect(task, model.parentCandidates(task), (parent) =>
-    model.setParent(task, parent),
-  );
   const back = button("tasks-back", "Back", () => places.back());
   back.hidden = model.depth < 2;
   const priorities = [1, 2, 3, 4].map((value) => ({ value, text: `P${value}` }));
@@ -264,7 +245,6 @@ export function editTaskDialog(
       field("Description", description),
       priorityChoice,
       tags.element,
-      parentChoice,
       blockers.element,
       subtasks.element,
     ],

@@ -21,8 +21,6 @@ pub enum TasksError {
     BlockedByParent,
     BlockedBySubtask,
     BlockedByLoop,
-    ParentIsItself,
-    ParentIsSubtask,
     NotASibling,
     Failed(String),
 }
@@ -37,8 +35,6 @@ impl std::fmt::Display for TasksError {
             Self::BlockedByParent => Error::BlockedByParent.fmt(f),
             Self::BlockedBySubtask => Error::BlockedBySubtask.fmt(f),
             Self::BlockedByLoop => Error::BlockedByLoop.fmt(f),
-            Self::ParentIsItself => Error::ParentIsItself.fmt(f),
-            Self::ParentIsSubtask => Error::ParentIsSubtask.fmt(f),
             Self::NotASibling => Error::NotASibling.fmt(f),
             Self::Failed(message) => f.write_str(message),
         }
@@ -61,8 +57,6 @@ impl From<Error> for TasksError {
             Error::BlockedByParent => Self::BlockedByParent,
             Error::BlockedBySubtask => Self::BlockedBySubtask,
             Error::BlockedByLoop => Self::BlockedByLoop,
-            Error::ParentIsItself => Self::ParentIsItself,
-            Error::ParentIsSubtask => Self::ParentIsSubtask,
             Error::NotASibling => Self::NotASibling,
             Error::Io(e) => e.into(),
         }
@@ -417,19 +411,6 @@ impl TaskStore {
     /// `add_blocker` accepts, minus its current Blockers.
     pub fn blocker_candidates(&self, id: String) -> Result<Vec<ListedTask>, TasksError> {
         Ok(self.listed_rows(self.0.blocker_candidates(&id)?))
-    }
-
-    /// Makes a Task the Subtask of another Open Task, or top-level with
-    /// `None`; refused for itself and its own Subtasks. Across lists it moves
-    /// with its Subtasks below the new Parent; else it keeps its place.
-    pub fn set_parent(&self, id: String, parent: Option<String>) -> Result<ListedTask, TasksError> {
-        Ok(self.listed(self.0.set_parent(&id, parent.as_deref())?))
-    }
-
-    /// The Open Tasks of both lists a Task could get as its Parent: all but
-    /// itself and its Subtasks.
-    pub fn parent_candidates(&self, id: String) -> Result<Vec<ListedTask>, TasksError> {
-        Ok(self.listed_rows(self.0.parent_candidates(&id)?))
     }
 
     /// Removes a Blocked by from a Task.

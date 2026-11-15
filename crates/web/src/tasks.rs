@@ -407,24 +407,6 @@ impl TaskStore {
         Ok(self.listed(self.tasks.blocker_candidates(id).map_err(error)?))
     }
 
-    /// Makes a Task the Subtask of another Open Task, or top-level with
-    /// `undefined`; refused for itself and its own Subtasks. See
-    /// `pkm_tasks::Tasks::set_parent`.
-    #[wasm_bindgen(js_name = setParent)]
-    pub fn set_parent(&self, id: &str, parent: Option<String>) -> Result<(), JsError> {
-        self.tasks
-            .set_parent(id, parent.as_deref())
-            .map(drop)
-            .map_err(error)
-    }
-
-    /// The Open Tasks of both lists a Task could get as its Parent: all but
-    /// itself and its Subtasks.
-    #[wasm_bindgen(js_name = parentCandidates)]
-    pub fn parent_candidates(&self, id: &str) -> Result<Vec<ListedTask>, JsError> {
-        Ok(self.listed(self.tasks.parent_candidates(id).map_err(error)?))
-    }
-
     /// Removes a Blocked by from a Task.
     #[wasm_bindgen(js_name = removeBlocker)]
     pub fn remove_blocker(&self, id: &str, blocker: &str) -> Result<(), JsError> {

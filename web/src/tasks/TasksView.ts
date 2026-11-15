@@ -140,12 +140,7 @@ export class TasksView {
     // A pending Done is Reverted at its circle.
     if (task.done) return [];
     const { model } = this;
-    const items: RowMenuItem[] = [
-      {
-        label: "Add Subtask",
-        run: () => newTaskDialog(model, this.element, task),
-      },
-    ];
+    const items: RowMenuItem[] = [];
     // A Subtask follows its top-level Task's list.
     if (task.parent === undefined) {
       items.push(

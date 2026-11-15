@@ -1475,17 +1475,6 @@
         }
       }
     },
-    "New Subtask": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "New Subtask"
-          }
-        }
-      }
-    },
     "New Task": {
       "extractionState": "manual",
       "localizations": {
@@ -1614,17 +1603,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Page Style"
-          }
-        }
-      }
-    },
-    "Parent": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Parent"
           }
         }
       }

@@ -4,7 +4,6 @@ import SwiftUI
 struct TasksView: View {
     @Environment(TasksModel.self) private var model
     @State private var isAdding = false
-    @State private var subtaskParent: ListedTask?
 
     var body: some View {
         @Bindable var model = model
@@ -30,7 +29,6 @@ struct TasksView: View {
                                 }
                                 .contextMenu {
                                     if !task.done {  // a pending Done is Reverted at its circle
-                                        Button("Add Subtask", systemImage: "plus.circle") { subtaskParent = task }
                                         if task.parent == nil {  // a Subtask follows its top-level Task
                                             if task.planning == .backlog {
                                                 Button("Make Active", systemImage: "arrow.up.circle") {
@@ -93,7 +91,6 @@ struct TasksView: View {
                 }
             #endif
             .sheet(isPresented: $isAdding) { NewTaskSheet() }
-            .sheet(item: $subtaskParent) { NewTaskSheet(parent: $0) }
             .sheet(isPresented: Binding(get: { !model.editing.isEmpty }, set: { if !$0 { model.closeEditing() } })) {
                 EditTaskSheet()
             }
@@ -222,7 +219,7 @@ extension ListedTask {
     }
 }
 
-/// Asks for a Title and a Description; the Task is added Active. Also used for a Subtask of `parent`.
+/// Asks for a Title and a Description; the Task is added Active.
 private struct NewTaskSheet: View {
     @Environment(TasksModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -230,12 +227,6 @@ private struct NewTaskSheet: View {
     /// Quick Add's Title, kept up to date by the field.
     @State private var title = ""
     @State private var description = ""
-    private let parent: ListedTask?
-
-    init(parent: ListedTask? = nil) {
-        self.parent = parent
-    }
-
     var body: some View {
         NavigationStack {
             Form {
@@ -246,7 +237,7 @@ private struct NewTaskSheet: View {
                     .accessibilityIdentifier("task-description")
             }
             .formStyle(.grouped)
-            .navigationTitle(parent == nil ? "New Task" : "New Subtask")
+            .navigationTitle("New Task")
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
             #endif
@@ -268,13 +259,7 @@ private struct NewTaskSheet: View {
     private func add() {
         let priority = quickAdd.priority() ?? 4
         let tags = quickAdd.tags()
-        let added =
-            if let parent {
-                model.addSubtask(title: title, description: description, priority: priority, tags: tags, under: parent)
-            } else {
-                model.add(title: title, description: description, priority: priority, tags: tags)
-            }
-        if added { dismiss() }
+        if model.add(title: title, description: description, priority: priority, tags: tags) { dismiss() }
     }
 }
 
@@ -341,7 +326,6 @@ private struct EditTaskForm: View {
     @State private var tags: [String]
     @State private var isPickingTags = false
     @State private var blockedBy: [Blocker]
-    @State private var parent: String?
     @FocusState private var focus: Field?
 
     private enum Field { case description }
@@ -358,7 +342,6 @@ private struct EditTaskForm: View {
         _priority = State(initialValue: task.priority)
         _tags = State(initialValue: task.tags.map(\.name))
         _blockedBy = State(initialValue: task.blockedBy)
-        _parent = State(initialValue: task.parent)
     }
 
     /// Open Tasks it could be Blocked by, not yet chosen here.
@@ -366,8 +349,6 @@ private struct EditTaskForm: View {
         let chosen = Set(blockedBy.map(\.id))
         return model.blockerCandidates(for: task).filter { !chosen.contains($0.id) }
     }
-
-    private var parentCandidates: [ListedTask] { model.parentCandidates(for: task) }
 
     private var hasTitle: Bool { !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
@@ -400,12 +381,6 @@ private struct EditTaskForm: View {
                 save()
             }
             TagsRow(tags: tags) { isPickingTags = true }
-            Picker("Parent", selection: $parent) {
-                Text("None").tag(String?.none)
-                ForEach(parentCandidates) { candidate in Text(candidate.title).tag(candidate.id as String?) }
-            }
-            .onChange(of: parent) { saveParent() }
-            .accessibilityIdentifier("task-parent")
             Section("Blocked by") {
                 ForEach(blockedBy, id: \.id) { blocker in
                     Group {
@@ -472,8 +447,8 @@ private struct EditTaskForm: View {
     /// Shows what is saved now: this Task may have been edited from a Blocker's form on top.
     private func refresh() {
         guard let saved = model.task(id: task.id) else { return }
-        (title, description, priority, tags, blockedBy, parent) =
-            (saved.title, saved.description, saved.priority, saved.tags.map(\.name), saved.blockedBy, saved.parent)
+        (title, description, priority, tags, blockedBy) =
+            (saved.title, saved.description, saved.priority, saved.tags.map(\.name), saved.blockedBy)
         startQuickAdd(from: saved.title)
     }
 
@@ -495,12 +470,6 @@ private struct EditTaskForm: View {
     /// Saves what is edited, if the Tags are valid.
     private func save() {
         model.edit(task, title: title, description: description, priority: priority, tags: tags)
-    }
-
-    private func saveParent() {
-        let chosen = parentCandidates.first { $0.id == parent }
-        guard parent == nil || chosen != nil, parent != model.task(id: task.id)?.parent else { return }
-        model.setParent(task, to: chosen)
     }
 
     private func saveBlockedBy() {

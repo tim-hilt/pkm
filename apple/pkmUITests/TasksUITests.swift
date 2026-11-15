@@ -50,15 +50,17 @@ import XCTest
         XCTAssertTrue(app.staticTexts["Book the dentist"].waitForExistence(timeout: 5))
     }
 
-    func testAParentIsSetInTheEditSheet() {
+    func testASubtaskIsAddedFromTheSubtasksSection() {
         app.staticTexts["Book the dentist"].tap()
         XCTAssertTrue(showsForm(of: "Book the dentist"))
 
-        let picker = app.buttons["task-parent"]
-        for _ in 0..<4 where !picker.isHittable { app.collectionViews.firstMatch.swipeUp() }
-        picker.tap()
-        app.buttons["Reply to Anna's email"].firstMatch.tap()
-        XCTAssertEqual(picker.label, "Parent, Reply to Anna's email")
+        let add = app.buttons["add-subtask"]
+        for _ in 0..<4 where !add.isHittable { app.collectionViews.firstMatch.swipeUp() }
+        add.tap()
+        let field = app.textFields["subtask-title"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.typeText("Call the clinic\n")
+        XCTAssertTrue(app.staticTexts["Call the clinic"].waitForExistence(timeout: 5))
     }
 
     func testTagsArePickedInTheirOwnSheet() {
