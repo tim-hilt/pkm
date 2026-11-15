@@ -13,7 +13,7 @@ struct TagsSettingsSection: View {
 
 /// Every Tag, alphabetically, each `a/b` as one flat row written in its Tag Color;
 /// "No Tags" if there are none. Swiping a row offers Edit, which picks the Tag
-/// Color, and Delete, which a full swipe runs.
+/// Color or resets it to Default, and Delete, which a full swipe runs.
 struct ManageTagsView: View {
     @Environment(TasksModel.self) private var tasks
     @State private var deletion = TagDeletion()
@@ -37,6 +37,14 @@ struct ManageTagsView: View {
         .sheet(isPresented: isEditing) {
             if let tag = tasks.allTags.first(where: { $0.name == editing }) {
                 TagColorPicker(title: tag.name, color: color(of: tag))
+                    .safeAreaInset(edge: .bottom) {
+                        Button("Default Color") {
+                            tasks.setTagColor(tag.name, to: nil)
+                            editing = nil
+                        }
+                        .disabled(tag.color == nil)
+                        .padding()
+                    }
             }
         }
         .confirmationDialog(
