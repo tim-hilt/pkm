@@ -684,6 +684,13 @@ describe("Subtasks of a Task", () => {
     expect(model.subtasks(parent.id).map((t) => t.title)).toEqual(["One", "Two"]);
   });
 
+  it("keeps the order of Subtasks added in a row", () => {
+    model.add("Parent");
+    const parent = first();
+    for (const title of ["A", "B", "C", "D"]) model.addSubtask(title, parent);
+    expect(model.subtasks(parent.id).map((t) => t.title)).toEqual(["A", "B", "C", "D"]);
+  });
+
   it("is empty for a Task without Subtasks or an unknown one", () => {
     model.add("Alone");
     expect(model.subtasks(first().id)).toEqual([]);

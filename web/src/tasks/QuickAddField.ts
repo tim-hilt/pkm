@@ -110,12 +110,16 @@ export class QuickAddField {
   /**
    * `taskTags` gives the Tags the Task has now, which the list doesn't suggest;
    * `submit` is what Return does while the list is closed, submitting the form
-   * if omitted.
+   * if omitted; `blur` is called when the field loses focus.
    */
   constructor(
     private readonly model: TasksModel,
     private quickAdd: TaskQuickAdd,
-    options: { taskTags?: () => readonly string[]; submit?: () => void } = {},
+    options: {
+      taskTags?: () => readonly string[];
+      submit?: () => void;
+      blur?: () => void;
+    } = {},
   ) {
     this.taskTags = options.taskTags ?? (() => []);
     this.submit = options.submit ?? (() => this.element.closest("form")?.requestSubmit());
@@ -153,6 +157,7 @@ export class QuickAddField {
     editor.addEventListener("blur", () => {
       document.removeEventListener("selectionchange", this.moved);
       this.drawSuggestions(false);
+      options.blur?.();
     });
     this.draw();
   }
@@ -170,6 +175,12 @@ export class QuickAddField {
 
   /** Draws again after Quick Add was changed from outside, e.g. its Priority Ignored. */
   redraw(): void {
+    this.draw();
+  }
+
+  /** Empties the field, which keeps the focus. */
+  clear(): void {
+    this.quickAdd.replace(0, this.quickAdd.text().length, "");
     this.draw();
   }
 
