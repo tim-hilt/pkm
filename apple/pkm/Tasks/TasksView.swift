@@ -219,7 +219,8 @@ extension ListedTask {
     }
 }
 
-/// Asks for a Title and a Description; the Task is added Active.
+/// Asks for a Title and a Description; the Task is added Active. The sheet stays open after each
+/// Add, cleared and focused for the next Task; Cancel or swiping down ends it.
 private struct NewTaskSheet: View {
     @Environment(TasksModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -227,10 +228,13 @@ private struct NewTaskSheet: View {
     /// Quick Add's Title, kept up to date by the field.
     @State private var title = ""
     @State private var description = ""
+    /// Changes per Task, so that the field starts over: empty, and focused.
+    @State private var generation = 0
     var body: some View {
         NavigationStack {
             Form {
                 QuickAddField(quickAdd: quickAdd, title: $title, onSubmit: add)
+                    .id(generation)
                     .accessibilityIdentifier("task-title")
                 TextField("Description", text: $description, axis: .vertical)
                     .lineLimit(3...8)
@@ -242,9 +246,7 @@ private struct NewTaskSheet: View {
                 .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
-                #if os(macOS)
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                #endif
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add", action: add).disabled(title.isEmpty)
                 }
@@ -253,13 +255,17 @@ private struct NewTaskSheet: View {
         #if os(macOS)
             .frame(minWidth: 360)
         #endif
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
     }
 
     private func add() {
         let priority = quickAdd.priority() ?? 4
         let tags = quickAdd.tags()
-        if model.add(title: title, description: description, priority: priority, tags: tags) { dismiss() }
+        guard model.add(title: title, description: description, priority: priority, tags: tags) else { return }
+        quickAdd = TaskQuickAdd()
+        title = ""
+        description = ""
+        generation += 1
     }
 }
 
@@ -303,7 +309,7 @@ private struct EditTaskSheet: View {
         #if os(macOS)
             .frame(minWidth: 360)
         #endif
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
     }
 }
 
