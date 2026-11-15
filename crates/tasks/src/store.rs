@@ -2670,6 +2670,24 @@ mod tests {
     }
 
     #[test]
+    fn a_subtask_lands_directly_below_its_parent_and_a_task_at_the_end() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let parent = tasks.create("p", Planning::Active, 4, &[]).unwrap();
+        tasks.create("next", Planning::Active, 4, &[]).unwrap();
+        let child = subtask(&tasks, &parent, "child");
+        subtask(&tasks, &child, "grandchild");
+        tasks.create("last", Planning::Active, 4, &[]).unwrap();
+        let rows: Vec<_> = tasks
+            .rows(Planning::Active)
+            .unwrap()
+            .into_iter()
+            .map(|r| r.task.title)
+            .collect();
+        assert_eq!(rows, ["p", "child", "grandchild", "next", "last"]);
+    }
+
+    #[test]
     fn planning_a_task_appends_it_then_its_subtasks_in_their_order() {
         let dir = Scratch::new();
         let tasks = dir.store();
