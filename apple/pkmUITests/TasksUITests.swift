@@ -60,4 +60,20 @@ import XCTest
         app.buttons["Reply to Anna's email"].firstMatch.tap()
         XCTAssertEqual(picker.label, "Parent, Reply to Anna's email")
     }
+
+    func testTagsArePickedInTheirOwnSheet() {
+        app.staticTexts["Book the dentist"].tap()
+        XCTAssertTrue(showsForm(of: "Book the dentist"))
+
+        let row = app.buttons["task-tags"]
+        for _ in 0..<4 where !row.isHittable { app.collectionViews.firstMatch.swipeUp() }
+        row.tap()
+        XCTAssertTrue(app.navigationBars["Tags"].waitForExistence(timeout: 5))
+        app.buttons["home"].firstMatch.tap()
+        app.navigationBars["Tags"].buttons["Done"].tap()
+
+        XCTAssertTrue(app.navigationBars["Book the dentist"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["task-tags"].staticTexts["home"].exists)
+        XCTAssertTrue(app.buttons["task-tags"].staticTexts["health"].exists)
+    }
 }

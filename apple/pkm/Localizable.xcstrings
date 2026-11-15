@@ -133,13 +133,13 @@
         }
       }
     },
-    "Add Tag": {
+    "Add Tags": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Add Tag"
+            "value": "Add Tags"
           }
         }
       }
@@ -1922,6 +1922,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Save"
+          }
+        }
+      }
+    },
+    "Search or create": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search or create"
           }
         }
       }

@@ -312,9 +312,8 @@ private struct EditTaskSheet: View {
 }
 
 /// Edits a Task, saving as it goes: Title and Description after a pause in typing
-/// and when their field loses focus, everything else at once, and a Tag typed but
-/// not submitted when the view is left. The Title is Quick Add: the pause saves it without
-/// pending Shortcuts, and Return, losing focus and leaving the view apply them. While the Title is empty the rest still
+/// and when their field loses focus, everything else at once; the Tags are picked in their own
+/// sheet. The Title is Quick Add: the pause saves it without pending Shortcuts, and Return, losing focus and leaving the view apply them. While the Title is empty the rest still
 /// saves (the last saved Title stays), a hint shows, and the view can't be left.
 /// On macOS `done` closes the whole sheet. An Open Blocker is a row that opens its
 /// own form on top; Back then shows this one as last saved.
@@ -329,8 +328,7 @@ private struct EditTaskForm: View {
     @State private var description: String
     @State private var priority: UInt8
     @State private var tags: [String]
-    @State private var newTag = ""
-    @State private var refusedTagText = false
+    @State private var isPickingTags = false
     @State private var blockedBy: [Blocker]
     @State private var parent: String?
     @FocusState private var focus: Field?
@@ -350,17 +348,6 @@ private struct EditTaskForm: View {
         _tags = State(initialValue: task.tags.map(\.name))
         _blockedBy = State(initialValue: task.blockedBy)
         _parent = State(initialValue: task.parent)
-    }
-
-    /// Known Tags matching what is typed, not yet on the Task, and whether to offer Create.
-    private var suggestions: TagSuggestions { model.suggestTags(newTag, leaveOut: tags) }
-
-    private func addTag(_ tag: String) {
-        guard isValidTag(tag: tag) else { return }
-        if !tags.contains(tag) { tags.append(tag) }
-        newTag = ""
-        refusedTagText = false
-        save()
     }
 
     /// Open Tasks it could be Blocked by, not yet chosen here.
@@ -401,41 +388,7 @@ private struct EditTaskForm: View {
                 quickAddRevision += 1
                 save()
             }
-            Section("Tags") {
-                ForEach(tags, id: \.self) { tag in
-                    Text(tag).foregroundStyle(model.tagEntry(tag).style(default: .primary))
-                        .swipeActions(edge: .trailing) {
-                            Button("Remove", role: .destructive) {
-                                tags.removeAll { $0 == tag }
-                                save()
-                            }
-                        }
-                }
-                TextField("Add Tag", text: $newTag)
-                    .onSubmit { addTag(newTag) }
-                    .onChange(of: newTag) { _, text in
-                        let allowed = TasksModel.allowedTagText(text)
-                        refusedTagText = allowed != text
-                        if refusedTagText { newTag = allowed }
-                    }
-                    #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                    #endif
-                    .autocorrectionDisabled()
-                    .accessibilityIdentifier("task-tag")
-                if refusedTagText {
-                    Text("Tags use a–z, 0–9, - and / only.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                let suggested = suggestions
-                ForEach(suggested.matches, id: \.self) { tag in
-                    Button(tag) { addTag(tag) }
-                }
-                if suggested.create {
-                    Button("Create Tag '\(newTag)'") { addTag(newTag) }
-                }
-            }
+            TagsRow(tags: tags) { isPickingTags = true }
             Picker("Parent", selection: $parent) {
                 Text("None").tag(String?.none)
                 ForEach(parentCandidates) { candidate in Text(candidate.title).tag(candidate.id as String?) }
@@ -491,7 +444,14 @@ private struct EditTaskForm: View {
         }
         .onDisappear {
             commitQuickAdd()
-            save(includingTypedTag: true)
+            save()
+        }
+        .sheet(isPresented: $isPickingTags) {
+            TagPicker(selected: tags) {
+                tags = $0
+                isPickingTags = false
+                save()
+            }
         }
         .navigationBarBackButtonHidden(!hasTitle)
         .onAppear(perform: refresh)
@@ -520,12 +480,9 @@ private struct EditTaskForm: View {
         startQuickAdd(from: saved.title)
     }
 
-    /// Saves what is edited, if the Tags are valid; `includingTypedTag` adds a valid
-    /// Tag typed but not submitted, as when the view is left.
-    private func save(includingTypedTag: Bool = false) {
-        var saved = tags
-        if includingTypedTag, isValidTag(tag: newTag), !saved.contains(newTag) { saved.append(newTag) }
-        model.edit(task, title: title, description: description, priority: priority, tags: saved)
+    /// Saves what is edited, if the Tags are valid.
+    private func save() {
+        model.edit(task, title: title, description: description, priority: priority, tags: tags)
     }
 
     private func saveParent() {
