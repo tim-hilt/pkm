@@ -241,6 +241,18 @@ import Testing
         #expect(model.editing == [p.id])
     }
 
+    @Test func subtasksAddedInARowKeepTheirOrder() throws {
+        let model = try openModel()
+        model.add(title: "p")
+        let p = model.tasks[0]
+        for title in ["one", "two", "three"] { model.addSubtask(title: title, under: p) }
+        model.addSubtask(title: "nested", under: model.subtasks(of: p.id)[0])
+        model.addSubtask(title: "four", under: p)
+        #expect(model.subtasks(of: p.id).map(\.title) == ["one", "two", "three", "four"])
+        #expect(model.tasks.map(\.title) == ["p", "one", "nested", "two", "three", "four"])
+        #expect(model.editing.isEmpty)
+    }
+
     @Test func subtasksAreTheDirectOpenOnesInListOrderEvenFromTheOtherList() throws {
         let model = try openModel()
         model.add(title: "p", planning: .backlog)
@@ -249,7 +261,7 @@ import Testing
         model.addSubtask(title: "rejected", under: p)
         model.addSubtask(title: "deep", under: model.subtasks(of: p.id)[0])
         model.addSubtask(title: "kept", under: p)
-        model.close(model.subtasks(of: p.id)[1], as: .rejected)
+        model.close(model.subtasks(of: p.id)[0], as: .rejected)
         model.commit()
         model.planning = .active
         #expect(model.subtasks(of: p.id).map(\.title) == ["kept"])

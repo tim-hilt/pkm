@@ -266,8 +266,8 @@ impl Tasks {
         self.insert(&new, planning, None, position)
     }
 
-    /// `create` for a Subtask directly below the Open Task `parent`. It
-    /// follows its top-level Task's Active or Backlog. Fails with `NotFound`
+    /// `create` for a Subtask directly below the Open Task `parent`, after its
+    /// other Subtasks. It follows its top-level Task's Active or Backlog. Fails with `NotFound`
     /// if there is no such Open Task.
     pub fn create_subtask(
         &self,
@@ -283,7 +283,12 @@ impl Tasks {
             .filter(|n| !n.is_closed())
             .ok_or(io::ErrorKind::NotFound)?;
         let planning = parent.task.planning;
-        let position = positions_below(&list(&nodes, planning), &parent.task.id, 1)[0];
+        // After the Parent's last Subtask at any depth, so the list keeps the tree order.
+        let subtree = open_subtree(&nodes, &parent.task.id);
+        let last = subtree
+            .last()
+            .map_or(parent.task.id.as_str(), ItemId::as_str);
+        let position = positions_below(&list(&nodes, planning), last, 1)[0];
         self.insert(&new, planning, Some(&parent.task.id), position)
     }
 
@@ -1172,9 +1177,9 @@ fn position_before(list: &[&Node], before: Option<&str>) -> f64 {
 }
 
 /// `count` positions, evenly spaced, that put Tasks right below the Task
-/// `parent` of `list`.
-fn positions_below(list: &[&Node], parent: &str, count: usize) -> Vec<f64> {
-    let at = list.iter().position(|n| n.task.id == parent);
+/// `above` of `list`.
+fn positions_below(list: &[&Node], above: &str, count: usize) -> Vec<f64> {
+    let at = list.iter().position(|n| n.task.id == above);
     let low = at.map_or(0.0, |at| list[at].position);
     let high = at.and_then(|at| list.get(at + 1)).map(|n| n.position);
     (1..=count)
@@ -2119,9 +2124,9 @@ mod tests {
             tree(&tasks, Planning::Backlog),
             [
                 sub("parent", None),
-                sub("second", Some("parent")),
                 sub("child", Some("parent")),
                 sub("grandchild", Some("child")),
+                sub("second", Some("parent")),
             ]
         );
     }
@@ -3077,7 +3082,7 @@ mod tests {
             .collect();
         assert_eq!(
             shown,
-            [("done", true, 0), ("second", false, 0), ("first", false, 1)]
+            [("first", false, 1), ("second", false, 0), ("done", true, 0)]
         );
         assert_eq!(rows[1].task.id, second.id);
         assert_eq!(rows[2].parent_title.as_deref(), Some("top"));

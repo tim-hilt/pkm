@@ -681,7 +681,7 @@ describe("Subtasks of a Task", () => {
     );
     model.commit();
     model.planning = Planning.Active;
-    expect(model.subtasks(parent.id).map((t) => t.title)).toEqual(["Two", "One"]); // the newest first
+    expect(model.subtasks(parent.id).map((t) => t.title)).toEqual(["One", "Two"]);
   });
 
   it("is empty for a Task without Subtasks or an unknown one", () => {
