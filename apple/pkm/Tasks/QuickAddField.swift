@@ -196,7 +196,10 @@ struct QuickAddField: View {
         var drawn = AttributedString(plain)
         for shortcut in highlighted {
             let range = NSRange(location: Int(shortcut.start), length: Int(shortcut.end - shortcut.start))
-            if let range = Range(range, in: drawn) { drawn[range].backgroundColor = Color.accentColor.opacity(0.25) }
+            if let range = Range(range, in: drawn) {
+                drawn[range].foregroundColor = .accentColor
+                drawn[range].inlinePresentationIntent = .stronglyEmphasized
+            }
         }
         let moved = plain != String(text.characters)
         shown = plain
