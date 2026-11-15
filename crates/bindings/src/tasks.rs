@@ -122,11 +122,12 @@ pub struct ListedTask {
     pub done: bool,
     /// The Parent's ID, if it is a Subtask.
     pub parent: Option<String>,
-    /// The Parent's Title, if it is a Subtask.
+    /// The Parent's Title, if it is a Subtask. Only listings fill this and
+    /// the Subtask counts; a Task a change returns has none.
     pub parent_title: Option<String>,
     /// How many of its direct Subtasks, Open or Done, are Done.
     pub subtasks_done: u32,
-    /// How many direct Subtasks it has, Open or Done.
+    /// How many direct Subtasks it has, Open or Done; Rejected ones don't count.
     pub subtasks_total: u32,
     /// Whether any Task it's Blocked by is Open.
     pub blocked: bool,
@@ -452,8 +453,8 @@ impl TaskStore {
         self.0.tags().list()
     }
 
-    /// The Tasks planned as `planning`, in their order, as a flat pre-order
-    /// walk of the tree: each Task is followed by its Subtasks.
+    /// The Open Tasks planned as `planning`, Subtasks included, in their
+    /// manual order.
     pub fn tasks(&self, planning: Planning) -> Result<Vec<ListedTask>, TasksError> {
         Ok(self.listed_rows(self.0.rows(planning)?))
     }

@@ -47,7 +47,7 @@ final class TasksModel {
     /// False, pushing nothing, if it is Closed or gone, or while the Title on top is empty.
     @discardableResult
     func openBlocker(id: String) -> Bool {
-        guard !editing.isEmpty, !isLeavingBlocked, let blocker = task(id: id) else { return false }
+        guard !editing.isEmpty, !isLeavingBlocked, task(id: id) != nil else { return false }
         editing.append(id)
         return true
     }

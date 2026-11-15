@@ -12,12 +12,12 @@ import XCTest
         app.launch()
     }
 
-    /// Shows the Context's sidebar row: the sidebar is a column on an iPad and
-    /// a Mac, and on an iPhone a list behind the navigation bar's first button.
+    /// Taps the Context's sidebar row: the sidebar is a column on an iPad and
+    /// a Mac, and on an iPhone a list behind the navigation bar's back button.
     private func openSidebarRow(_ name: String) {
-        let row = app.buttons[name]
-        if !row.waitForExistence(timeout: 10) {
-            app.navigationBars.buttons.firstMatch.tap()
+        let row = app.cells.staticTexts[name]
+        if !row.waitForExistence(timeout: 5) {
+            app.navigationBars.buttons["BackButton"].tap()
         }
         XCTAssertTrue(row.waitForExistence(timeout: 10), name)
         row.tap()
@@ -45,7 +45,7 @@ import XCTest
         let back = app.buttons["back-to-gallery"]
         XCTAssertTrue(back.waitForExistence(timeout: 10), "the Canvas is shown")
         XCTAssertFalse(newDrawing.exists, "the Gallery is gone")
-        XCTAssertFalse(app.buttons["Tasks"].exists, "the sidebar is hidden")
+        XCTAssertFalse(app.cells.staticTexts["Tasks"].exists, "the sidebar is hidden")
 
         drawARectangle()
         back.tap()
@@ -104,12 +104,17 @@ import XCTest
             openSidebarRow(name)
             XCTAssertFalse(app.navigationBars.buttons["settings"].exists, name)
         }
-        if !app.buttons["settings"].exists { app.navigationBars.buttons.firstMatch.tap() }
+        let back = app.navigationBars.buttons["BackButton"]
+        if back.waitForExistence(timeout: 5) {  // an iPhone's list is one step back
+            back.tap()
+            XCTAssertTrue(back.waitForNonExistence(timeout: 5))  // a push during the pop is dropped
+        }
         app.buttons["settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
     }
 
     func testAPlaceholderSaysComingSoon() throws {
+        openSidebarRow("Notes")
         XCTAssertTrue(app.staticTexts["Coming soon"].waitForExistence(timeout: 10))
     }
 

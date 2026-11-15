@@ -63,7 +63,9 @@ extension ContentView {
             selection: Binding(
                 get: { navigation.destination },
                 set: { destination in
-                    if let destination { navigation.destination = destination }
+                    // nil when an iPhone goes back to the list: it stays there.
+                    guard let destination else { return }
+                    navigation.destination = destination
                     column = .detail
                 })
         ) {

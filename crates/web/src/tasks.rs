@@ -185,7 +185,7 @@ impl Default for TaskQuickAdd {
     }
 }
 
-/// A Task as the lists show it, one row of the flattened tree.
+/// A Task as the lists show it, one row of a flat list.
 #[wasm_bindgen(getter_with_clone)]
 pub struct ListedTask {
     pub id: String,
@@ -203,7 +203,7 @@ pub struct ListedTask {
     /// How many of its direct Subtasks, Open or Done, are Done.
     #[wasm_bindgen(js_name = subtasksDone)]
     pub subtasks_done: u32,
-    /// How many direct Subtasks it has, Open or Done.
+    /// How many direct Subtasks it has, Open or Done; Rejected ones don't count.
     #[wasm_bindgen(js_name = subtasksTotal)]
     pub subtasks_total: u32,
     /// Closed as Done, the Close still pending.
@@ -495,7 +495,7 @@ impl TaskStore {
         self.tasks.forget_tag(tag).map_err(error)
     }
 
-    /// The Tasks planned as `planning`, in their order, each followed by its Subtasks.
+    /// The Open Tasks planned as `planning`, Subtasks included, in their manual order.
     pub fn tasks(&self, planning: Planning) -> Result<Vec<ListedTask>, JsError> {
         Ok(self.listed(self.tasks.rows(planning.into()).map_err(error)?))
     }

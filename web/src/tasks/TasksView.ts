@@ -166,7 +166,9 @@ export class TasksView {
       marks.push(mark);
     }
     if (task.parentTitle !== undefined) {
-      const mark = make("span", "task-mark task-parent", [task.parentTitle]);
+      // The Title in its own span, which alone can end in an ellipsis.
+      const title = make("span", "task-parent-title", [task.parentTitle]);
+      const mark = make("span", "task-mark task-parent", [title]);
       mark.insertAdjacentHTML("afterbegin", parentGlyph);
       mark.title = `Subtask of ${task.parentTitle}`;
       marks.push(mark);

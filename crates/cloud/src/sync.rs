@@ -2962,7 +2962,7 @@ mod tests {
             /// The Tags with their Tag Colors, as the store lists them.
             fn tags(&self) -> Vec<(String, Option<String>)> {
                 let store = self.store();
-                let _ = store.tasks(pkm_tasks::Planning::Active); // reads what Sync brought
+                let _ = store.rows(pkm_tasks::Planning::Active); // reads what Sync brought
                 store
                     .tags()
                     .list()
@@ -3044,11 +3044,11 @@ mod tests {
                 assert_eq!(device.tags(), [tag("work", None)]);
                 let tagged: Vec<_> = device
                     .store()
-                    .tasks(planning)
+                    .rows(planning)
                     .unwrap()
                     .into_iter()
-                    .filter(|t| t.tags.contains(&"work".to_owned()))
-                    .map(|t| t.title)
+                    .filter(|r| r.task.tags.contains(&"work".to_owned()))
+                    .map(|r| r.task.title)
                     .collect();
                 assert_eq!(tagged, ["Eggs"]);
             }
