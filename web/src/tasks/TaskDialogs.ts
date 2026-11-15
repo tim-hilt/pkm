@@ -43,31 +43,6 @@ function confirmButton(label: string): HTMLButtonElement {
   return confirm;
 }
 
-/** A modal form saved with its confirm button or Enter, closed once `save` returns true, or with Cancel. */
-function openDialog(
-  parent: HTMLElement,
-  title: string,
-  confirmLabel: string,
-  fields: HTMLElement[],
-  save: () => boolean,
-  canSave: () => boolean,
-  closed: () => void = () => {},
-): void {
-  const confirm = confirmButton(confirmLabel);
-  const { dialog, form } = modal(parent, title, fields, [
-    button("", "Cancel", () => dialog.close()),
-    confirm,
-  ]);
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    if (save()) dialog.close();
-    confirm.disabled = !canSave();
-  });
-  dialog.addEventListener("close", closed);
-  form.addEventListener("input", () => (confirm.disabled = !canSave()));
-  confirm.disabled = !canSave();
-}
-
 function field(label: string, control: HTMLElement): HTMLLabelElement {
   return make("label", "tasks-field", [make("span", "", [label]), control]);
 }
@@ -125,8 +100,9 @@ export function deleteTagDialog(
 
 /**
  * Asks for a Title, typed with Quick Add Shortcuts, and a Description and adds
- * the Task, Active, with the Priority and Tags the Shortcuts give. The dialog
- * stays open after each Add, cleared and focused for the next Task.
+ * the Task, Active, with the Priority and Tags the Shortcuts give. Add or Enter
+ * keeps the dialog open, cleared and focused for the next Task; Cancel or Esc
+ * closes it. Add is off while the Title is empty.
  */
 export function newTaskDialog(model: TasksModel, host: HTMLElement): void {
   const quickAdd = new TaskQuickAdd();
@@ -135,29 +111,32 @@ export function newTaskDialog(model: TasksModel, host: HTMLElement): void {
   description.rows = 4;
   description.setAttribute("aria-label", "Description");
   description.placeholder = "Description";
-  const reset = () => {
-    title.clear();
-    description.value = "";
-    title.focus();
-  };
-  openDialog(
+  const add = confirmButton("Add");
+  const { dialog, form } = modal(
     host,
     "New Task",
-    "Add",
     [title.element, description],
-    () => {
-      const extras = {
-        description: description.value,
-        priority: quickAdd.priority(),
-        tags: quickAdd.tags(),
-      };
-      // Stays open, cleared, for the next Task; Cancel or Esc ends the chain.
-      if (model.add(title.title, Planning.Active, extras)) reset();
-      return false;
-    },
-    () => title.title !== "",
-    () => quickAdd.free(),
+    [button("", "Cancel", () => dialog.close()), add],
   );
+  const enableAdd = () => (add.disabled = title.title === "");
+  form.addEventListener("input", enableAdd);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const extras = {
+      description: description.value,
+      priority: quickAdd.priority(),
+      tags: quickAdd.tags(),
+    };
+    if (model.add(title.title, Planning.Active, extras)) {
+      title.clear();
+      description.value = "";
+      enableAdd();
+    }
+    // Clicking Add moved the focus off the Title.
+    title.focus();
+  });
+  dialog.addEventListener("close", () => quickAdd.free());
+  enableAdd();
   title.focus();
 }
 
