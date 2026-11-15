@@ -78,6 +78,9 @@ struct QuickAddField: View {
             .scrollDisabled(true)
             .padding(.horizontal, -5)  // the editor's own inset, to line up with the other fields
             .focused($isFocused)
+            #if os(iOS)
+                .keyboardType(.twitter)  // "@" (and "#") beside the space bar, for Tag shortcuts
+            #endif
             .onAppear {
                 draw()
                 isFocused = autofocus
