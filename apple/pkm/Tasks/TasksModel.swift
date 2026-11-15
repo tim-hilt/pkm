@@ -174,6 +174,19 @@ final class TasksModel {
         (try? store.blockerCandidates(id: task.id)) ?? []
     }
 
+    /// Makes `task` a Subtask of `parent`, or top-level with nil. A Parent in the other list takes the
+    /// Task there (see the store). False if refused, which `parentCandidates` never offers.
+    @discardableResult
+    func setParent(_ task: ListedTask, to parent: ListedTask?) -> Bool {
+        defer { reload() }
+        return (try? store.setParent(id: task.id, parent: parent?.id)) != nil
+    }
+
+    /// The Open Tasks of both lists that can be `task`'s Parent (see the store).
+    func parentCandidates(for task: ListedTask) -> [ListedTask] {
+        (try? store.parentCandidates(id: task.id)) ?? []
+    }
+
     /// Makes a Task Active or moves it to the Backlog; it leaves the list shown.
     func plan(_ task: ListedTask, as planning: Planning) {
         guard (try? store.plan(id: task.id, planning: planning)) != nil else { return }

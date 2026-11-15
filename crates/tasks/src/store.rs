@@ -145,6 +145,10 @@ pub enum Error {
     BlockedBySubtask,
     /// The Blocked by would make Tasks wait on each other.
     BlockedByLoop,
+    /// A Task can't be its own Parent.
+    ParentIsItself,
+    /// A Task can't be the Subtask of one of its own Subtasks.
+    ParentIsSubtask,
     Io(io::Error),
 }
 
@@ -174,6 +178,8 @@ impl std::fmt::Display for Error {
             Self::BlockedByParent => f.write_str("A Task can't be Blocked by its Parent."),
             Self::BlockedBySubtask => f.write_str("A Task can't be Blocked by its Subtask."),
             Self::BlockedByLoop => f.write_str("Tasks can't be Blocked by each other in a loop."),
+            Self::ParentIsItself => f.write_str("A Task can't be its own Parent."),
+            Self::ParentIsSubtask => f.write_str("A Task can't be the Subtask of its Subtask."),
             Self::Io(e) => e.fmt(f),
         }
     }
@@ -273,12 +279,7 @@ impl Tasks {
             .filter(|n| !n.is_closed())
             .ok_or(io::ErrorKind::NotFound)?;
         let planning = parent.task.planning;
-        let list = list(&nodes, planning);
-        let at = list.iter().position(|n| n.task.id == parent.task.id);
-        let next = at
-            .and_then(|at| list.get(at + 1))
-            .map(|n| n.task.id.as_str());
-        let position = position_before(&list, next);
+        let position = positions_below(&list(&nodes, planning), &parent.task.id, 1)[0];
         self.insert(&new, planning, Some(&parent.task.id), position)
     }
 
@@ -438,6 +439,94 @@ impl Tasks {
             })
             .map(|file| task_of(&file))?
             .ok_or(io::ErrorKind::InvalidData)?)
+    }
+
+    /// Makes the Open Task `id` a Subtask of the Open Task `parent`, or
+    /// top-level if that is `None`. In the same list the Task keeps its place.
+    /// If `parent` follows the other list's Active or Backlog, the Task and its
+    /// Open Subtasks move there, directly below `parent` in their relative
+    /// order, and the History records each. Fails with `NotFound` if either
+    /// is no Open Task, `ParentIsItself` for the Task itself and
+    /// `ParentIsSubtask` for one of its own Subtasks, before saving anything.
+    pub fn set_parent(&self, id: &str, parent: Option<&str>) -> Result<Task, Error> {
+        let nodes = self.load()?;
+        let open = |id: &str| nodes.get(id).filter(|n| !n.is_closed());
+        let task = &open(id).ok_or(io::ErrorKind::NotFound)?.task;
+        let mut subtree = open_subtree(&nodes, id);
+        let planning = match parent {
+            Some(parent) => {
+                let parent = &open(parent).ok_or(io::ErrorKind::NotFound)?.task;
+                if parent.id == id {
+                    return Err(Error::ParentIsItself);
+                }
+                if subtree.iter().any(|s| s.as_str() == parent.id) {
+                    return Err(Error::ParentIsSubtask);
+                }
+                parent.planning
+            }
+            None => task.planning,
+        };
+        let moves = planning != task.planning;
+        let positions = match parent {
+            Some(parent) if moves => {
+                positions_below(&list(&nodes, planning), parent, subtree.len())
+            }
+            _ => Vec::new(),
+        };
+        // The Task first, then its Subtasks in their relative order.
+        subtree.sort_by(|a, b| {
+            let (a, b) = (a.as_str(), b.as_str());
+            (a != id)
+                .cmp(&(b != id))
+                .then_with(|| by_position(&nodes[a], &nodes[b]))
+        });
+        let event = match planning {
+            Planning::Active => Event::MadeActive,
+            Planning::Backlog => Event::MovedToBacklog,
+        };
+        let mut placed = None;
+        for (n, item) in subtree.iter().enumerate() {
+            let file = self.rewrite(item, |file| {
+                // Also settles a `state` Sync left differing from the Task's.
+                file.set_scalar("state", planning.state());
+                if n == 0 {
+                    match parent {
+                        Some(parent) => file.set_scalar("parent", parent),
+                        None => file.remove("parent"),
+                    }
+                }
+                if let Some(position) = positions.get(n) {
+                    file.set_scalar(POSITION, position.to_string());
+                }
+            })?;
+            if moves {
+                self.history.record(event, item, now_ms())?;
+            }
+            if n == 0 {
+                placed = Some(file);
+            }
+        }
+        Ok(placed
+            .as_ref()
+            .and_then(task_of)
+            .ok_or(io::ErrorKind::InvalidData)?)
+    }
+
+    /// The Open Tasks of both lists, as rows, that `set_parent` accepts as the
+    /// Parent of the Open Task `id`: all but the Task and its Subtasks. The
+    /// current Parent is among them. Fails with `NotFound` if there is no such
+    /// Task.
+    pub fn parent_candidates(&self, id: &str) -> Result<Vec<Row>, Error> {
+        let nodes = self.load()?;
+        nodes
+            .get(id)
+            .filter(|n| !n.is_closed())
+            .ok_or(io::ErrorKind::NotFound)?;
+        let subtree = open_subtree(&nodes, id);
+        let mut rows = self.rows(Planning::Active)?;
+        rows.extend(self.rows(Planning::Backlog)?);
+        rows.retain(|row| !row.task.done && !subtree.iter().any(|s| s.as_str() == row.task.id));
+        Ok(rows)
     }
 
     /// Closes the Open Task `id` and its Open Subtasks as one pending change:
@@ -1103,6 +1192,20 @@ fn position_before(list: &[&Node], before: Option<&str>) -> f64 {
     }
 }
 
+/// `count` positions, evenly spaced, that put Tasks right below the Task
+/// `parent` of `list`.
+fn positions_below(list: &[&Node], parent: &str, count: usize) -> Vec<f64> {
+    let at = list.iter().position(|n| n.task.id == parent);
+    let low = at.map_or(0.0, |at| list[at].position);
+    let high = at.and_then(|at| list.get(at + 1)).map(|n| n.position);
+    (1..=count)
+        .map(|n| match high {
+            Some(high) => low + (high - low) * n as f64 / (count + 1) as f64,
+            None => low + n as f64,
+        })
+        .collect()
+}
+
 /// Gives every Open Task still without a `position` one, as the migration from
 /// `order` (ADR-0021): in today's tree order (top-level Tasks by `order`, each
 /// followed by its Subtasks, depth first), after the Tasks that have one. It
@@ -1295,6 +1398,11 @@ mod tests {
         fn drop(&mut self) {
             drop(fs::remove_dir_all(self.0.parent().unwrap()));
         }
+    }
+
+    fn row_titles(tasks: &Tasks, planning: Planning) -> Vec<String> {
+        let rows = tasks.rows(planning).unwrap();
+        rows.into_iter().map(|r| r.task.title).collect()
     }
 
     fn titles(tasks: &Tasks, planning: Planning) -> Vec<String> {
@@ -2317,6 +2425,110 @@ mod tests {
             ["a", "sub", "c", "b"]
         );
         assert!(rows[2].task.parent.is_none() && rows[3].task.parent.is_none());
+    }
+
+    #[test]
+    fn set_parent_in_the_same_list_keeps_the_place() {
+        let dir = Scratch::new();
+        let (tasks, [a, b, c]) = move_fixture(&dir);
+        let before = file_of(&dir, &a);
+        let moved = tasks.set_parent(&c.id, Some(&a.id)).unwrap();
+        assert_eq!(moved.parent.as_deref(), Some(a.id.as_str()));
+        assert_eq!(row_titles(&tasks, Planning::Active), ["a", "b", "c"]);
+        assert_eq!(file_of(&dir, &a), before);
+        assert!(file_of(&dir, &b).contains("position"));
+        let none = tasks.set_parent(&c.id, None).unwrap();
+        assert!(none.parent.is_none());
+        assert_eq!(row_titles(&dir.store(), Planning::Active), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn set_parent_across_lists_moves_the_subtree_below_the_new_parent() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let p = tasks.create("p", Planning::Backlog, 4, &[]).unwrap();
+        tasks.create("q", Planning::Backlog, 4, &[]).unwrap();
+        let t = tasks.create("t", Planning::Active, 4, &[]).unwrap();
+        let t1 = subtask(&tasks, &t, "t1");
+        let t2 = subtask(&tasks, &t1, "t2");
+        let before = history(&dir).len();
+        tasks.set_parent(&t.id, Some(&p.id)).unwrap();
+        assert!(row_titles(&tasks, Planning::Active).is_empty());
+        let rows = tasks.rows(Planning::Backlog).unwrap();
+        let listed: Vec<_> = rows.iter().map(|r| &*r.task.title).collect();
+        assert_eq!(listed, ["p", "t", "t1", "t2", "q"]);
+        assert_eq!(rows[1].parent_title.as_deref(), Some("p"));
+        for id in [&t.id, &t1.id, &t2.id] {
+            assert!(
+                fs::read_to_string(dir.0.join(format!("{id}.md")))
+                    .unwrap()
+                    .contains("state: backlog")
+            );
+        }
+        let lines = history(&dir);
+        let moved = lines[before..]
+            .iter()
+            .filter(|l| l.contains(" moved-to-backlog "))
+            .count();
+        assert_eq!((lines.len() - before, moved), (3, 3));
+        assert_eq!(row_titles(&dir.store(), Planning::Backlog).len(), 5);
+    }
+
+    #[test]
+    fn set_parent_to_none_keeps_the_list_and_the_place() {
+        let dir = Scratch::new();
+        let (tasks, [a, ..]) = move_fixture(&dir);
+        let sub = subtask(&tasks, &a, "sub");
+        tasks.set_parent(&sub.id, None).unwrap();
+        assert_eq!(row_titles(&tasks, Planning::Active), ["a", "sub", "b", "c"]);
+        assert!(
+            tasks.rows(Planning::Active).unwrap()[1]
+                .task
+                .parent
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn set_parent_refuses_the_task_and_its_subtree_and_changes_nothing() {
+        let dir = Scratch::new();
+        let (tasks, [a, b, _]) = move_fixture(&dir);
+        let sub = subtask(&tasks, &a, "sub");
+        let deep = subtask(&tasks, &sub, "deep");
+        let before = file_of(&dir, &a);
+        assert!(matches!(
+            tasks.set_parent(&a.id, Some(&a.id)),
+            Err(Error::ParentIsItself)
+        ));
+        for descendant in [&sub, &deep] {
+            assert!(matches!(
+                tasks.set_parent(&a.id, Some(&descendant.id)),
+                Err(Error::ParentIsSubtask)
+            ));
+        }
+        assert_eq!(file_of(&dir, &a), before);
+        assert!(matches!(
+            tasks.set_parent(&a.id, Some("zzzzzzzzzzzz")),
+            Err(Error::Io(e)) if e.kind() == io::ErrorKind::NotFound
+        ));
+        assert!(tasks.set_parent(&deep.id, Some(&b.id)).is_ok());
+    }
+
+    #[test]
+    fn parent_candidates_leave_out_the_task_and_its_subtree() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let a = tasks.create("a", Planning::Active, 4, &[]).unwrap();
+        let sub = subtask(&tasks, &a, "sub");
+        subtask(&tasks, &sub, "deep");
+        tasks.create("b", Planning::Backlog, 4, &[]).unwrap();
+        let titles = |id: &str| -> Vec<String> {
+            let rows = tasks.parent_candidates(id).unwrap();
+            rows.into_iter().map(|r| r.task.title).collect()
+        };
+        assert_eq!(titles(&a.id), ["b"]);
+        assert_eq!(titles(&sub.id), ["a", "b"]);
+        assert!(tasks.parent_candidates("zzzzzzzzzzzz").is_err());
     }
 
     #[test]

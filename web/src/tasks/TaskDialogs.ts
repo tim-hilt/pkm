@@ -99,6 +99,19 @@ function choice<T extends string | number>(
   return group;
 }
 
+/** The Parent of `task`: one of `candidates` or None; `change` gets the pick as soon as it is made. */
+function parentSelect(
+  task: ListedTask,
+  candidates: ListedTask[],
+  change: (parent: ListedTask | undefined) => void,
+): HTMLLabelElement {
+  const select = make("select", "tasks-input");
+  select.append(new Option("None", ""), ...candidates.map((t) => new Option(t.title, t.id)));
+  select.value = task.parent ?? "";
+  select.addEventListener("change", () => change(candidates.find((t) => t.id === select.value)));
+  return field("Parent", select);
+}
+
 /** Asks to Delete a Tag, which is Removed from every Item, then calls `deleted`; Cancel changes nothing. */
 export function deleteTagDialog(
   model: TasksModel,
@@ -222,6 +235,9 @@ export function editTaskDialog(
     save,
     openBlocker,
   );
+  const parentChoice = parentSelect(task, model.parentCandidates(task), (parent) =>
+    model.setParent(task, parent),
+  );
   const back = button("tasks-back", "Back", () => places.back());
   back.hidden = model.depth < 2;
   const priorities = [1, 2, 3, 4].map((value) => ({ value, text: `P${value}` }));
@@ -246,6 +262,7 @@ export function editTaskDialog(
       field("Description", description),
       priorityChoice,
       tags.element,
+      parentChoice,
       blockers.element,
     ],
     [done],

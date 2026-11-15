@@ -500,4 +500,36 @@ import Testing
         #expect(model.blockerCandidates(for: model.tasks[0]).map(\.title) == ["later"])
         #expect(model.blockerCandidates(for: model.tasks[2]).map(\.title) == ["sub", "later"])
     }
+
+    @Test func parentCandidatesLeaveOutTheTaskAndItsSubtasksButNotOtherLists() throws {
+        let model = try openModel()
+        model.add(title: "a", planning: .active)
+        model.addSubtask(title: "sub", under: model.tasks[0])
+        model.add(title: "later", planning: .backlog)
+        model.planning = .active
+        #expect(model.parentCandidates(for: model.tasks[0]).map(\.title) == ["later"])
+        #expect(model.parentCandidates(for: model.tasks[1]).map(\.title) == ["a", "later"])
+    }
+
+    @Test func aParentInTheOtherListTakesTheTaskThereAndNoneMakesItTopLevel() throws {
+        let model = try openModel()
+        model.add(title: "a", planning: .active)
+        model.add(title: "later", planning: .backlog)
+        model.planning = .active
+        let later = try #require(model.parentCandidates(for: model.tasks[0]).first)
+        #expect(model.setParent(model.tasks[0], to: later))
+        #expect(model.tasks.isEmpty)
+        model.planning = .backlog
+        #expect(model.tasks.map(\.title) == ["later", "a"])
+        #expect(model.tasks[1].parent == later.id)
+        #expect(model.setParent(model.tasks[1], to: nil))
+        #expect(model.tasks[1].parent == nil)
+    }
+
+    @Test func aTaskCannotBecomeTheSubtaskOfItsSubtask() throws {
+        let model = try openModel()
+        model.add(title: "a", planning: .active)
+        model.addSubtask(title: "sub", under: model.tasks[0])
+        #expect(!model.setParent(model.tasks[0], to: model.tasks[1]))
+    }
 }

@@ -315,6 +315,7 @@ private struct EditTaskForm: View {
     @State private var newTag = ""
     @State private var refusedTagText = false
     @State private var blockedBy: [Blocker]
+    @State private var parent: String?
     @FocusState private var focus: Field?
 
     private enum Field { case description }
@@ -331,6 +332,7 @@ private struct EditTaskForm: View {
         _priority = State(initialValue: task.priority)
         _tags = State(initialValue: task.tags.map(\.name))
         _blockedBy = State(initialValue: task.blockedBy)
+        _parent = State(initialValue: task.parent)
     }
 
     /// Known Tags matching what is typed, not yet on the Task, and whether to offer Create.
@@ -349,6 +351,8 @@ private struct EditTaskForm: View {
         let chosen = Set(blockedBy.map(\.id))
         return model.blockerCandidates(for: task).filter { !chosen.contains($0.id) }
     }
+
+    private var parentCandidates: [ListedTask] { model.parentCandidates(for: task) }
 
     private var hasTitle: Bool { !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
@@ -415,6 +419,12 @@ private struct EditTaskForm: View {
                     Button("Create Tag '\(newTag)'") { addTag(newTag) }
                 }
             }
+            Picker("Parent", selection: $parent) {
+                Text("None").tag(String?.none)
+                ForEach(parentCandidates) { candidate in Text(candidate.title).tag(candidate.id as String?) }
+            }
+            .onChange(of: parent) { saveParent() }
+            .accessibilityIdentifier("task-parent")
             Section("Blocked by") {
                 ForEach(blockedBy, id: \.id) { blocker in
                     Group {
@@ -473,8 +483,8 @@ private struct EditTaskForm: View {
     /// Shows what is saved now: this Task may have been edited from a Blocker's form on top.
     private func refresh() {
         guard let saved = model.task(id: task.id) else { return }
-        (title, description, priority, tags, blockedBy) =
-            (saved.title, saved.description, saved.priority, saved.tags.map(\.name), saved.blockedBy)
+        (title, description, priority, tags, blockedBy, parent) =
+            (saved.title, saved.description, saved.priority, saved.tags.map(\.name), saved.blockedBy, saved.parent)
         startQuickAdd(from: saved.title)
     }
 
@@ -499,6 +509,12 @@ private struct EditTaskForm: View {
         var saved = tags
         if includingTypedTag, isValidTag(tag: newTag), !saved.contains(newTag) { saved.append(newTag) }
         model.edit(task, title: title, description: description, priority: priority, tags: saved)
+    }
+
+    private func saveParent() {
+        let chosen = parentCandidates.first { $0.id == parent }
+        guard parent == nil || chosen != nil, parent != model.task(id: task.id)?.parent else { return }
+        model.setParent(task, to: chosen)
     }
 
     private func saveBlockedBy() {

@@ -1,6 +1,6 @@
 import XCTest
 
-/// A Task's sheet: a Blocker opens on top of it, and Back returns to the Task.
+/// A Task's sheet: a Blocker opens on top of it, and Back returns to the Task; a Parent is picked in it.
 @MainActor final class TasksUITests: XCTestCase {
     private var app: XCUIApplication!
 
@@ -38,5 +38,16 @@ import XCTest
         app.navigationBars.buttons["Book the dentist"].tap()
         XCTAssertTrue(showsForm(of: "Book the dentist"))
         XCTAssertFalse(app.navigationBars["Reply to Anna's email"].exists)
+    }
+
+    func testAParentIsSetInTheEditSheet() {
+        app.staticTexts["Book the dentist"].tap()
+        XCTAssertTrue(showsForm(of: "Book the dentist"))
+
+        let picker = app.buttons["task-parent"]
+        for _ in 0..<4 where !picker.isHittable { app.collectionViews.firstMatch.swipeUp() }
+        picker.tap()
+        app.buttons["Reply to Anna's email"].firstMatch.tap()
+        XCTAssertEqual(picker.label, "Parent, Reply to Anna's email")
     }
 }

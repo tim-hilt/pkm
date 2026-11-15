@@ -304,6 +304,19 @@ export class TasksModel {
   }
 
   /**
+   * Makes a Task the Subtask of `parent`, or top-level with none. A Parent in the other list
+   * takes the Task there (see the store). False if refused, which `parentCandidates` never offers.
+   */
+  setParent(task: ListedTask, parent: ListedTask | undefined): boolean {
+    return this.apply(() => this.files.store.setParent(task.id, parent?.id));
+  }
+
+  /** The Open Tasks of both lists that can be `task`'s Parent (see the store). */
+  parentCandidates(task: ListedTask): ListedTask[] {
+    return this.listed(this.files.store.parentCandidates(task.id));
+  }
+
+  /**
    * Makes a Task Blocked by exactly the Tasks `ids` (adding and removing what
    * differs). False if one is refused, which `blockerCandidates` never offers.
    */

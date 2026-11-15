@@ -1530,6 +1530,17 @@
         }
       }
     },
+    "None": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "None"
+          }
+        }
+      }
+    },
     "Not a valid color": {
       "extractionState": "manual",
       "localizations": {
@@ -1603,6 +1614,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Page Style"
+          }
+        }
+      }
+    },
+    "Parent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parent"
           }
         }
       }

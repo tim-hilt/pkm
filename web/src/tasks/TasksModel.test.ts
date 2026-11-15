@@ -505,6 +505,36 @@ describe("Blocked by", () => {
     expect(model.blockerCandidates(task("a")).map((t) => t.title)).toEqual([]);
   });
 
+  it("offers every Open Task but the Task and its Subtasks as a Parent, of both lists", () => {
+    model.add("c", Planning.Backlog);
+    model.planning = Planning.Active;
+    expect(model.setParent(task("b"), task("a"))).toBe(true);
+    expect(model.parentCandidates(task("a")).map((t) => t.title)).toEqual(["c"]);
+    expect(model.parentCandidates(task("b")).map((t) => t.title)).toEqual(["a", "c"]);
+  });
+
+  it("makes a Task a Subtask, or top-level again, and refuses its Subtask", () => {
+    expect(model.setParent(task("b"), task("a"))).toBe(true);
+    expect(task("b")).toMatchObject({ parent: task("a").id, parentTitle: "a" });
+    expect(model.setParent(task("a"), task("b"))).toBe(false);
+    expect(model.setParent(task("b"), undefined)).toBe(true);
+    expect(task("b").parent).toBeUndefined();
+  });
+
+  it("moves a Task with a Parent of the other list there", () => {
+    model.add("c", Planning.Backlog);
+    model.planning = Planning.Active;
+    expect(
+      model.setParent(
+        task("a"),
+        model.parentCandidates(task("a")).find((t) => t.title === "c"),
+      ),
+    ).toBe(true);
+    expect(model.tasks.map((t) => t.title)).toEqual(["b"]);
+    model.planning = Planning.Backlog;
+    expect(model.tasks.map((t) => t.title)).toEqual(["c", "a"]);
+  });
+
   it("unblocks a Task once its blocker is Done", () => {
     model.setBlockedBy(task("a"), [task("b").id]);
     model.close(task("b"), Closing.Done);
