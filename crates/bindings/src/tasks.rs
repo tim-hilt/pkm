@@ -23,6 +23,7 @@ pub enum TasksError {
     BlockedByLoop,
     ParentIsItself,
     ParentIsSubtask,
+    NotASibling,
     Failed(String),
 }
 
@@ -38,6 +39,7 @@ impl std::fmt::Display for TasksError {
             Self::BlockedByLoop => Error::BlockedByLoop.fmt(f),
             Self::ParentIsItself => Error::ParentIsItself.fmt(f),
             Self::ParentIsSubtask => Error::ParentIsSubtask.fmt(f),
+            Self::NotASibling => Error::NotASibling.fmt(f),
             Self::Failed(message) => f.write_str(message),
         }
     }
@@ -61,6 +63,7 @@ impl From<Error> for TasksError {
             Error::BlockedByLoop => Self::BlockedByLoop,
             Error::ParentIsItself => Self::ParentIsItself,
             Error::ParentIsSubtask => Self::ParentIsSubtask,
+            Error::NotASibling => Self::NotASibling,
             Error::Io(e) => e.into(),
         }
     }
@@ -326,6 +329,16 @@ impl TaskStore {
         before: Option<String>,
     ) -> Result<ListedTask, TasksError> {
         Ok(self.listed(self.0.move_before(&id, before.as_deref())?))
+    }
+
+    /// Moves a Subtask before its sibling `before`, or after its last sibling;
+    /// its Parent stays. See `pkm_tasks::Tasks::move_subtask`.
+    pub fn move_subtask(
+        &self,
+        id: String,
+        before: Option<String>,
+    ) -> Result<ListedTask, TasksError> {
+        Ok(self.listed(self.0.move_subtask(&id, before.as_deref())?))
     }
 
     /// Closes a Task as a pending change, committing the previous one first.

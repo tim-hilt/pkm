@@ -211,6 +211,16 @@ final class TasksModel {
         reload()
     }
 
+    /// Moves the Subtask at `source` of `subtasks(of: parent)` to land before the one at
+    /// `destination` (`onMove`'s meaning); past the last, after it. It stays among its siblings.
+    func moveSubtask(of parent: String, from source: IndexSet, to destination: Int) {
+        let siblings = subtasks(of: parent)
+        guard let index = source.first, index != destination else { return }
+        let target = destination < siblings.count ? siblings[destination] : nil
+        _ = try? store.moveSubtask(id: siblings[index].id, before: target?.id)
+        reload()
+    }
+
     /// Closes a Task, committing the previous Close first. Done leaves it in
     /// place, marked, Rejected removes it; either way nothing is saved until
     /// `commit`, which follows `revertWindow` later.

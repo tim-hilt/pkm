@@ -367,6 +367,16 @@ impl TaskStore {
             .map_err(error)
     }
 
+    /// Moves a Subtask before its sibling `before`, or after its last sibling;
+    /// its Parent stays. See `pkm_tasks::Tasks::move_subtask`.
+    #[wasm_bindgen(js_name = moveSubtask)]
+    pub fn move_subtask(&self, id: &str, before: Option<String>) -> Result<(), JsError> {
+        self.tasks
+            .move_subtask(id, before.as_deref())
+            .map(drop)
+            .map_err(error)
+    }
+
     /// Closes a Task as a pending change, committing the previous one first.
     /// Nothing is saved until `commit`; `revert` takes it back.
     pub fn close(&self, id: &str, closing: Closing) -> Result<(), JsError> {

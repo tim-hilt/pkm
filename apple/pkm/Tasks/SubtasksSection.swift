@@ -3,7 +3,7 @@ import SwiftUI
 /// A Task's Subtasks in its edit form: a header with the "Done/total" counter and a
 /// fold chevron, then the direct Subtasks as list rows. A tap opens a Subtask's form on top
 /// (the sheet's stack, as for a Blocker), unless `canOpen` is false (the Title on top is
-/// empty). The circle marks a Subtask Done or Reverts it, a swipe Rejects it. Ends with an
+/// empty). The circle marks a Subtask Done or Reverts it, a swipe Rejects it, a drag reorders it among its siblings. Ends with an
 /// "Add Subtask" row. Starts unfolded; the fold is not saved.
 struct SubtasksSection: View {
     @Environment(TasksModel.self) private var model
@@ -27,6 +27,7 @@ struct SubtasksSection: View {
                             }
                         }
                 }
+                .onMove { model.moveSubtask(of: task.id, from: $0, to: $1) }
                 AddSubtaskRow(parent: task)
             }
         } header: {

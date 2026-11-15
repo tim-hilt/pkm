@@ -526,6 +526,21 @@ import Testing
         #expect(model.tasks.map(\.parent) == [parent, nil])
     }
 
+    @Test func aSubtaskIsDraggedAmongItsSiblingsAndTheNewOrderShowsInTheList() throws {
+        let model = try openModel()
+        model.add(title: "p", planning: .active)
+        model.add(title: "other", planning: .active)
+        let p = model.tasks[0]
+        for title in ["x", "y", "z"] { model.addSubtask(title: title, under: p) }
+        model.moveSubtask(of: p.id, from: [2], to: 0)
+        #expect(model.subtasks(of: p.id).map(\.title) == ["z", "x", "y"])
+        #expect(model.tasks.map(\.title) == ["p", "z", "x", "y", "other"])
+        model.moveSubtask(of: p.id, from: [0], to: 3)
+        #expect(model.subtasks(of: p.id).map(\.title) == ["x", "y", "z"])
+        #expect(model.subtasks(of: p.id).map(\.parent) == [p.id, p.id, p.id])
+        #expect(try openModel().subtasks(of: p.id).map(\.title) == ["x", "y", "z"])
+    }
+
     @Test func aTaskIsBlockedWhileATaskItIsBlockedByIsOpen() throws {
         let model = try openModel()
         for title in ["a", "b"] { model.add(title: title, planning: .active) }

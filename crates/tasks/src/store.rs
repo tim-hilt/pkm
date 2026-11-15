@@ -153,6 +153,9 @@ pub enum Error {
     ParentIsItself,
     /// A Task can't be the Subtask of one of its own Subtasks.
     ParentIsSubtask,
+    /// A Subtask only moves among its siblings: the Task to move isn't a
+    /// Subtask, or the Task to move before isn't its sibling.
+    NotASibling,
     Io(io::Error),
 }
 
@@ -184,6 +187,7 @@ impl std::fmt::Display for Error {
             Self::BlockedByLoop => f.write_str("Tasks can't be Blocked by each other in a loop."),
             Self::ParentIsItself => f.write_str("A Task can't be its own Parent."),
             Self::ParentIsSubtask => f.write_str("A Task can't be the Subtask of its Subtask."),
+            Self::NotASibling => f.write_str("A Subtask moves only among its siblings."),
             Self::Io(e) => e.fmt(f),
         }
     }
@@ -431,6 +435,50 @@ impl Tasks {
             return Err(io::ErrorKind::NotFound.into());
         }
         let position = position_before(&list, before);
+        Ok(self
+            .rewrite(&ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?, |file| {
+                file.set_scalar(POSITION, position.to_string());
+            })
+            .map(|file| task_of(&file))?
+            .ok_or(io::ErrorKind::InvalidData)?)
+    }
+
+    /// Moves the Open Subtask `id` before its sibling `before`, or after its
+    /// last sibling if that is `None`; `before` is the Subtask itself: nothing
+    /// changes. Writes one `position`, never the Parent. At the end it lands
+    /// below the last sibling's own Subtasks, so the list keeps the tree
+    /// order. Fails with `NotFound` for an unknown or Closed Task and
+    /// `NotASibling` for a top-level Task or a `before` that isn't a sibling,
+    /// before saving anything.
+    pub fn move_subtask(&self, id: &str, before: Option<&str>) -> Result<Task, Error> {
+        let nodes = self.load()?;
+        let moved = nodes
+            .get(id)
+            .filter(|n| !n.is_closed())
+            .ok_or(io::ErrorKind::NotFound)?;
+        let parent = moved.task.parent.as_deref().ok_or(Error::NotASibling)?;
+        if before == Some(id) {
+            return Ok(moved.task.clone());
+        }
+        let mut list = list(&nodes, moved.task.planning);
+        list.retain(|n| n.task.id != id);
+        let siblings: Vec<&Node> = (list.iter().copied())
+            .filter(|n| n.task.parent.as_deref() == Some(parent))
+            .collect();
+        let position = match before {
+            Some(before) if siblings.iter().any(|n| n.task.id == before) => {
+                position_before(&list, Some(before))
+            }
+            Some(_) => return Err(Error::NotASibling),
+            None => {
+                let Some(last) = siblings.last() else {
+                    return Ok(moved.task.clone());
+                };
+                let tail = open_subtree(&nodes, &last.task.id);
+                let end = tail.last().map_or(last.task.id.as_str(), ItemId::as_str);
+                positions_below(&list, end, 1)[0]
+            }
+        };
         Ok(self
             .rewrite(&ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?, |file| {
                 file.set_scalar(POSITION, position.to_string());
@@ -2383,6 +2431,76 @@ mod tests {
             listed,
             [("sub", Some("a")), ("a", None), ("b", None), ("c", None)]
         );
+    }
+
+    fn subtask_titles(tasks: &Tasks, parent: &Task) -> Vec<String> {
+        let rows = tasks.subtasks(&parent.id).unwrap();
+        rows.into_iter().map(|r| r.task.title).collect()
+    }
+
+    #[test]
+    fn a_subtask_moves_before_a_sibling_or_after_the_last() {
+        let dir = Scratch::new();
+        let (tasks, [a, ..]) = move_fixture(&dir);
+        let [x, y, z] = ["x", "y", "z"].map(|t| subtask(&tasks, &a, t));
+        let moved = tasks.move_subtask(&z.id, Some(&x.id)).unwrap();
+        assert_eq!(moved.parent.as_deref(), Some(a.id.as_str()));
+        assert_eq!(subtask_titles(&tasks, &a), ["z", "x", "y"]);
+        tasks.move_subtask(&z.id, None).unwrap();
+        assert_eq!(subtask_titles(&tasks, &a), ["x", "y", "z"]);
+        tasks.move_subtask(&y.id, Some(&y.id)).unwrap();
+        assert_eq!(subtask_titles(&dir.store(), &a), ["x", "y", "z"]);
+        assert_eq!(
+            titles(&tasks, Planning::Active),
+            ["a", "x", "y", "z", "b", "c"]
+        );
+    }
+
+    #[test]
+    fn a_subtask_moved_to_the_end_lands_below_the_last_siblings_subtasks() {
+        let dir = Scratch::new();
+        let (tasks, [a, ..]) = move_fixture(&dir);
+        let x = subtask(&tasks, &a, "x");
+        let y = subtask(&tasks, &a, "y");
+        subtask(&tasks, &y, "y1");
+        tasks.move_subtask(&x.id, None).unwrap();
+        assert_eq!(
+            titles(&tasks, Planning::Active),
+            ["a", "y", "y1", "x", "b", "c"]
+        );
+    }
+
+    #[test]
+    fn a_subtask_move_rewrites_only_the_moved_subtask() {
+        let dir = Scratch::new();
+        let (tasks, [a, ..]) = move_fixture(&dir);
+        let [x, y, z] = ["x", "y", "z"].map(|t| subtask(&tasks, &a, t));
+        let before = (file_of(&dir, &a), file_of(&dir, &x), file_of(&dir, &y));
+        tasks.move_subtask(&z.id, Some(&y.id)).unwrap();
+        assert_eq!(
+            (file_of(&dir, &a), file_of(&dir, &x), file_of(&dir, &y)),
+            before
+        );
+    }
+
+    #[test]
+    fn a_subtask_is_refused_a_move_before_a_non_sibling() {
+        let dir = Scratch::new();
+        let (tasks, [a, b, _]) = move_fixture(&dir);
+        let x = subtask(&tasks, &a, "x");
+        let y = subtask(&tasks, &b, "y");
+        let nested = subtask(&tasks, &x, "nested");
+        for other in [&a, &b, &y, &nested] {
+            assert!(matches!(
+                tasks.move_subtask(&x.id, Some(&other.id)),
+                Err(Error::NotASibling)
+            ));
+        }
+        assert!(matches!(
+            tasks.move_subtask(&a.id, None),
+            Err(Error::NotASibling)
+        ));
+        assert_eq!(subtask_titles(&tasks, &a), ["x"]);
     }
 
     #[test]
