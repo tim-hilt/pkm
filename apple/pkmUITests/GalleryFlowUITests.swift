@@ -12,13 +12,18 @@ import XCTest
         app.launch()
     }
 
-    /// The app opens on Tasks; Drawings is a tab, or a sidebar row on an iPad
-    /// and a Mac.
-    private func openDrawings() {
-        let tab = app.tabBars.buttons["Drawings"]
-        let row = app.buttons["Drawings"]
-        if tab.waitForExistence(timeout: 10) { tab.tap() } else if row.waitForExistence(timeout: 10) { row.tap() }
+    /// Shows the Context's sidebar row: the sidebar is a column on an iPad and
+    /// a Mac, and on an iPhone a list behind the navigation bar's first button.
+    private func openSidebarRow(_ name: String) {
+        let row = app.buttons[name]
+        if !row.waitForExistence(timeout: 10) {
+            app.navigationBars.buttons.firstMatch.tap()
+        }
+        XCTAssertTrue(row.waitForExistence(timeout: 10), name)
+        row.tap()
     }
+
+    private func openDrawings() { openSidebarRow("Drawings") }
 
     /// An empty Drawing is not kept when left, so these tests draw something.
     private func drawARectangle() {
@@ -40,7 +45,7 @@ import XCTest
         let back = app.buttons["back-to-gallery"]
         XCTAssertTrue(back.waitForExistence(timeout: 10), "the Canvas is shown")
         XCTAssertFalse(newDrawing.exists, "the Gallery is gone")
-        XCTAssertFalse(app.tabBars.firstMatch.exists, "the tab bar is hidden")
+        XCTAssertFalse(app.buttons["Tasks"].exists, "the sidebar is hidden")
 
         drawARectangle()
         back.tap()
@@ -91,13 +96,17 @@ import XCTest
         XCTAssertTrue(card.waitForNonExistence(timeout: 5), "the Drawing is gone")
     }
 
-    func testEveryContextsRootHasTheSettingsGearOnPhonesAndPads() throws {
-        let tabs = app.tabBars.firstMatch
-        try XCTSkipUnless(tabs.waitForExistence(timeout: 10), "a Mac has a sidebar and ⌘,")
+    func testSettingsIsASidebarRowOnPhonesAndPadsAndNoGearIsInAToolbar() throws {
+        #if os(macOS)
+            throw XCTSkip("a Mac has ⌘, and no Settings row")
+        #endif
         for name in ["Tasks", "Notes", "Drawings", "Bookmarks", "Books"] {
-            tabs.buttons[name].tap()
-            XCTAssertTrue(app.navigationBars.buttons["settings"].waitForExistence(timeout: 5), name)
+            openSidebarRow(name)
+            XCTAssertFalse(app.navigationBars.buttons["settings"].exists, name)
         }
+        if !app.buttons["settings"].exists { app.navigationBars.buttons.firstMatch.tap() }
+        app.buttons["settings"].tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
     }
 
     func testAPlaceholderSaysComingSoon() throws {

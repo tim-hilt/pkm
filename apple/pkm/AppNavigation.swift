@@ -1,20 +1,41 @@
 import Foundation
 import Observation
 
-/// Where the user is in the app: the selected Context, whether an Item of it
-/// fills the window, and Settings. The selected Context is the last one,
+/// Where the user is in the app: the selected Context or Settings, and whether
+/// an Item of it fills the window. The selected Context is the last one,
 /// remembered per Device; Tasks on the first launch.
 @MainActor @Observable
 final class AppNavigation {
-    /// The Context shown; changing it is remembered.
+    /// The Context shown, unless `isShowingSettings`; changing it is remembered
+    /// and leaves Settings.
     var selected: AppContext {
-        didSet { defaults?.set(selected.rawValue, forKey: Self.lastContextKey) }
+        didSet {
+            defaults?.set(selected.rawValue, forKey: Self.lastContextKey)
+            isShowingSettings = false
+        }
+    }
+
+    /// A sidebar row: a Context, or on iPhone and iPad Settings.
+    enum Destination: Hashable {
+        case context(AppContext)
+        case settings
+    }
+
+    /// What the detail column shows. Settings is not remembered as the last Context.
+    var destination: Destination {
+        get { isShowingSettings ? .settings : .context(selected) }
+        set {
+            switch newValue {
+            case .context(let context): selected = context
+            case .settings: isShowingSettings = true
+            }
+        }
     }
 
     /// Whether an Item (an open Drawing) fills the window.
     var isItemOpen = false
 
-    /// Whether Settings is shown as a sheet (iPhone and iPad).
+    /// Whether Settings is shown instead of the Context (iPhone and iPad).
     var isShowingSettings = false
 
     /// Focused work is not left by accident: no switching while an Item is open.

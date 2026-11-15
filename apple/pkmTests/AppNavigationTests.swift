@@ -60,6 +60,31 @@ import Testing
         #expect(navigation.canSwitchContext)
     }
 
+    @Test func theSettingsDestinationReplacesTheContextUntilOneIsSelected() {
+        let navigation = AppNavigation(remembering: nil)
+        navigation.selected = .books
+        navigation.isShowingSettings = true
+        #expect(navigation.destination == .settings)
+        navigation.destination = .context(.drawings)
+        #expect(navigation.destination == .context(.drawings))
+        #expect(!navigation.isShowingSettings)
+    }
+
+    @Test func settingsAreNotRememberedAsTheLastContext() {
+        let defaults = device()
+        let navigation = AppNavigation(remembering: defaults)
+        navigation.selected = .notes
+        navigation.destination = .settings
+        #expect(AppNavigation(remembering: defaults).selected == .notes)
+    }
+
+    @Test func aLinkLeavesSettings() {
+        let navigation = AppNavigation(remembering: nil)
+        navigation.destination = .settings
+        _ = navigation.follow(URL(string: "pkm://tasks")!)
+        #expect(navigation.destination == .context(.tasks))
+    }
+
     @Test func aContextLinkSwitchesToTheContext() {
         let navigation = AppNavigation(remembering: nil)
         #expect(navigation.follow(URL(string: "pkm://books")!) == .init(context: .books, itemID: nil))

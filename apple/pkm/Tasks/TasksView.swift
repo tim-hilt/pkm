@@ -66,9 +66,6 @@ struct TasksView: View {
                     .labelsHidden()
                     .accessibilityIdentifier("tasks-planning")
                 }
-                #if os(iOS)
-                    ToolbarItem(placement: .topBarTrailing) { SettingsButton() }
-                #endif
             }
             .safeAreaInset(edge: .bottom) {
                 if let pendingClose = model.pendingClose { ClosedToast(closing: pendingClose) }

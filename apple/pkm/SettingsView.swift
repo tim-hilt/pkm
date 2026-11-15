@@ -2,14 +2,14 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// The Settings: Appearance, the Books' Page Style, Page Colors and Highlight
-/// Colors, Tags, and Cloud Backing. A window on the Mac (⌘,), a sheet from a
-/// Context's gear on iPhone and iPad.
+/// Colors, Tags, and Cloud Backing. A window on the Mac (⌘,), the sidebar's
+/// Settings destination on iPhone and iPad.
 struct SettingsView: View {
     var body: some View {
         #if os(macOS)
             NavigationStack { form }.frame(width: 460, height: 460)
         #else
-            form  // inside `SettingsSheet`'s stack
+            NavigationStack { form.navigationTitle("Settings").navigationBarTitleDisplayMode(.inline) }
         #endif
     }
 
@@ -277,19 +277,3 @@ struct CloudBackingSection: View {
         }
     }
 }
-
-#if os(iOS)
-    /// `SettingsView` in a sheet with a Done button.
-    struct SettingsSheet: View {
-        @Environment(\.dismiss) private var dismiss
-
-        var body: some View {
-            NavigationStack {
-                SettingsView()
-                    .navigationTitle("Settings")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar { Button("Done") { dismiss() } }
-            }
-        }
-    }
-#endif

@@ -67,9 +67,6 @@ struct BooksView: View {
             .searchFocused($isSearchFocused)
             .toolbar {
                 ToolbarItem { SortMenu(sort: Bindable(library).sort) }
-                #if os(iOS)
-                    ToolbarItem(placement: .topBarTrailing) { SettingsButton() }
-                #endif
             }
         }
         .onKeyPress(phases: [.down, .repeat]) { press in
