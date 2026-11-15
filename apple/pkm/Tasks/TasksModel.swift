@@ -13,7 +13,7 @@ final class TasksModel {
         didSet { reload() }
     }
     /// The Tasks of the open sheet's stack, by id, first opened first: a Blocker
-    /// opened from a Task is pushed on it. Empty when no sheet is open. Over the
+    /// or Subtask opened from a Task is pushed on it. Empty when no sheet is open. Over the
     /// list shown, which opening a Blocker never changes.
     private(set) var editing: [String] = []
     /// Whether the sheet can't be left or popped: the Task on top was last
@@ -24,9 +24,10 @@ final class TasksModel {
     /// Every known Tag with its Tag Color, alphabetically, whether or not a Task carries it.
     private(set) var allTags: [TagEntry] = []
 
-    /// Opens the sheet of the Open Task `id`, over the list it is in. `nil` opens
-    /// no sheet; an unknown or Closed `id` shows the Active list.
-    func open(id: String?) {
+    /// Opens the sheet of the Open Task a link or address names, over the list it
+    /// is in, as the only one in the stack. `nil` opens no sheet; an unknown or
+    /// Closed `id` shows the Active list.
+    func openLinked(id: String?) {
         closeEditing()
         guard let id else { return }
         let isTask = { (task: ListedTask) in task.id == id }
@@ -43,10 +44,11 @@ final class TasksModel {
         isLeavingBlocked = false
     }
 
-    /// Pushes the Open Task `id`, a Blocker of the one on top, onto the stack.
-    /// False, pushing nothing, if it is Closed or gone, or while the Title on top is empty.
+    /// Pushes the Open Task `id`, a Blocker or Subtask of the one on top, onto the stack,
+    /// leaving the list shown as it is. False, pushing nothing, if it is Closed or gone,
+    /// or while the Title on top is empty.
     @discardableResult
-    func openBlocker(id: String) -> Bool {
+    func open(id: String) -> Bool {
         guard !editing.isEmpty, !isLeavingBlocked, task(id: id) != nil else { return false }
         editing.append(id)
         return true
@@ -71,6 +73,13 @@ final class TasksModel {
         if let task = tasks.first(where: { $0.id == id }) { return task }
         let other: Planning = planning == .active ? .backlog : .active
         return ((try? store.tasks(planning: other)) ?? []).first { $0.id == id }
+    }
+
+    /// The direct Subtasks of the Open Task `id`, in list order: Open, or Done and still
+    /// Revertable; never Rejected. From either list.
+    func subtasks(of id: String) -> [ListedTask] {
+        _ = tasks  // reloads change it: views asking for Subtasks update with the list
+        return (try? store.subtasks(parent: id)) ?? []
     }
 
     /// The Close that can still be Reverted, for the toast.

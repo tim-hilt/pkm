@@ -218,12 +218,43 @@ import Testing
         let (a, b) = (model.tasks[1], model.tasks[0])
         model.setBlockedBy(a, to: [b.id])
         model.startEditing(model.tasks[1])
-        #expect(model.openBlocker(id: model.tasks[1].blockedBy[0].id))
+        #expect(model.open(id: model.tasks[1].blockedBy[0].id))
         #expect(model.editing == [a.id, b.id])
         model.back()
         #expect(model.editing == [a.id])
         model.closeEditing()
         #expect(model.editing.isEmpty)
+    }
+
+    @Test func aSubtaskOpensOnTopOfItsParentAndMixesWithBlockers() throws {
+        let model = try openModel()
+        model.add(title: "p", planning: .backlog)
+        model.planning = .backlog
+        let p = model.tasks[0]
+        model.addSubtask(title: "s", under: p)
+        let s = model.subtasks(of: p.id)[0]
+        model.startEditing(p)
+        #expect(model.open(id: s.id))
+        #expect(model.editing == [p.id, s.id])
+        #expect(model.planning == .backlog)
+        model.back()
+        #expect(model.editing == [p.id])
+    }
+
+    @Test func subtasksAreTheDirectOpenOnesInListOrderEvenFromTheOtherList() throws {
+        let model = try openModel()
+        model.add(title: "p", planning: .backlog)
+        model.planning = .backlog
+        let p = model.tasks[0]
+        model.addSubtask(title: "rejected", under: p)
+        model.addSubtask(title: "deep", under: model.subtasks(of: p.id)[0])
+        model.addSubtask(title: "kept", under: p)
+        model.close(model.subtasks(of: p.id)[1], as: .rejected)
+        model.commit()
+        model.planning = .active
+        #expect(model.subtasks(of: p.id).map(\.title) == ["kept"])
+        #expect(model.subtasks(of: p.id).first?.parentTitle == "p")
+        #expect(model.subtasks(of: "unknown").isEmpty)
     }
 
     @Test func aBlockerOnTheOtherListOpensWithoutChangingTheListShown() throws {
@@ -235,7 +266,7 @@ import Testing
         model.planning = .active
         model.setBlockedBy(model.tasks[0], to: [farTask.id])
         model.startEditing(model.tasks[0])
-        #expect(model.openBlocker(id: model.tasks[0].blockedBy[0].id))
+        #expect(model.open(id: model.tasks[0].blockedBy[0].id))
         #expect(model.editing.last == farTask.id)
         #expect(model.planning == .active)
     }
@@ -248,13 +279,13 @@ import Testing
         model.setBlockedBy(a, to: [b.id])
         model.startEditing(a)
         model.edit(a, title: " ", description: "", priority: 4, tags: [])
-        #expect(!model.openBlocker(id: b.id))
+        #expect(!model.open(id: b.id))
         model.edit(a, title: "a", description: "", priority: 4, tags: [])
-        #expect(model.openBlocker(id: b.id))
+        #expect(model.open(id: b.id))
         model.back()
         model.close(model.tasks[0], as: .rejected)
         model.commit()
-        #expect(!model.openBlocker(id: b.id))
+        #expect(!model.open(id: b.id))
         #expect(model.editing == [a.id])
     }
 
@@ -265,7 +296,7 @@ import Testing
         let (a, b) = (model.tasks[1], model.tasks[0])
         model.setBlockedBy(a, to: [b.id])
         model.startEditing(a)
-        model.openBlocker(id: model.tasks[1].blockedBy[0].id)
+        model.open(id: model.tasks[1].blockedBy[0].id)
         model.edit(b, title: "", description: "", priority: 4, tags: [])
         model.back()
         #expect(model.editing == [a.id, b.id])

@@ -135,20 +135,22 @@ private struct ClosedToast: View {
 /// A Parent shows how many of its Subtasks are Done, a Subtask its Parent's Title, before
 /// the Tags. A Blocked Task has a lock at the end. `onCircle` is a tap on the circle.
 /// A Tag's name in its Tag Color, Default being the tertiary grey.
-private func tagText(_ tag: TagEntry) -> Text {
+func tagText(_ tag: TagEntry) -> Text {
     Text(tag.name).foregroundStyle(tag.style())
 }
 
 /// A symbol and a text, close together, for the line of Tags.
-private func marker(_ text: String, symbol: String) -> some View {
+func marker(_ text: String, symbol: String) -> some View {
     HStack(spacing: 3) {
         Image(systemName: symbol).imageScale(.small)
         Text(text)
     }
 }
 
-private struct TaskRow: View {
+struct TaskRow: View {
     let task: ListedTask
+    /// Whether the Parent's Title is shown as a marker; not where the Parent is already in view.
+    var showsParent = true
     let onCircle: () -> Void
 
     var body: some View {
@@ -169,13 +171,13 @@ private struct TaskRow: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
-                if task.hasMarkers || !task.tags.isEmpty {
+                if task.hasMarkers(showsParent: showsParent) || !task.tags.isEmpty {
                     HStack(spacing: 8) {
                         if task.subtasksTotal > 0 {
                             marker("\(task.subtasksDone)/\(task.subtasksTotal)", symbol: "checklist")
                                 .accessibilityLabel("\(task.subtasksDone) of \(task.subtasksTotal) Subtasks Done")
                         }
-                        if let parentTitle = task.parentTitle {
+                        if showsParent, let parentTitle = task.parentTitle {
                             marker(parentTitle, symbol: "arrow.turn.down.right")
                                 .lineLimit(1)
                                 .truncationMode(.tail)
@@ -203,7 +205,9 @@ private struct TaskRow: View {
 }
 
 extension ListedTask {
-    fileprivate var hasMarkers: Bool { subtasksTotal > 0 || parentTitle != nil }
+    fileprivate func hasMarkers(showsParent: Bool) -> Bool {
+        subtasksTotal > 0 || (showsParent && parentTitle != nil)
+    }
 
     fileprivate var priorityColor: Color {
         switch priority {
@@ -272,7 +276,7 @@ private struct NewTaskSheet: View {
 }
 
 /// The sheet over the list: a stack of Tasks following the model's, the Task
-/// opened first at the bottom and each Blocker opened from one pushed on it.
+/// opened first at the bottom and each Blocker or Subtask opened from one pushed on it.
 /// While the Title on top is empty the sheet can't be left.
 private struct EditTaskSheet: View {
     @Environment(TasksModel.self) private var model
@@ -285,7 +289,7 @@ private struct EditTaskSheet: View {
             get: { Array(model.editing.dropFirst()) },
             set: { path in
                 if path.count > model.editing.count - 1, let id = path.last {
-                    model.openBlocker(id: id)
+                    model.open(id: id)
                 } else {
                     while model.editing.count > path.count + 1, model.back() {}
                 }
@@ -315,7 +319,7 @@ private struct EditTaskSheet: View {
 /// and when their field loses focus, everything else at once; the Tags are picked in their own
 /// sheet. The Title is Quick Add: the pause saves it without pending Shortcuts, and Return, losing focus and leaving the view apply them. While the Title is empty the rest still
 /// saves (the last saved Title stays), a hint shows, and the view can't be left.
-/// On macOS `done` closes the whole sheet. An Open Blocker is a row that opens its
+/// On macOS `done` closes the whole sheet. An Open Blocker or a Subtask is a row that opens its
 /// own form on top; Back then shows this one as last saved.
 private struct EditTaskForm: View {
     @Environment(TasksModel.self) private var model
@@ -395,6 +399,7 @@ private struct EditTaskForm: View {
             }
             .onChange(of: parent) { saveParent() }
             .accessibilityIdentifier("task-parent")
+            SubtasksSection(task: task, canOpen: hasTitle)
             Section("Blocked by") {
                 ForEach(blockedBy, id: \.id) { blocker in
                     Group {

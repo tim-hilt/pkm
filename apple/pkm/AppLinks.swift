@@ -14,12 +14,12 @@ struct AppLinks {
         guard let link = navigation.follow(url) else { return }
         gallery.close()
         library.closeBook()
-        tasks.open(id: nil)
+        tasks.openLinked(id: nil)
         guard let itemID = link.itemID else { return }
         switch link.context {
         case .drawings: gallery.openDrawing(linkedItemID: itemID)
         case .books: library.openBook(id: itemID)
-        case .tasks: tasks.open(id: itemID)
+        case .tasks: tasks.openLinked(id: itemID)
         case .notes, .bookmarks: break
         }
     }

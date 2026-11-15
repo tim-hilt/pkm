@@ -499,6 +499,12 @@ impl TaskStore {
     pub fn tasks(&self, planning: Planning) -> Result<Vec<ListedTask>, JsError> {
         Ok(self.listed(self.tasks.rows(planning.into()).map_err(error)?))
     }
+
+    /// The direct Subtasks of an Open Task, in either list: Open or pending
+    /// Done, in their manual order.
+    pub fn subtasks(&self, parent: &str) -> Result<Vec<ListedTask>, JsError> {
+        Ok(self.listed(self.tasks.subtasks(parent).map_err(error)?))
+    }
 }
 
 /// `text` without the characters a Tag can never contain.

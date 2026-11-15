@@ -745,6 +745,26 @@ impl Tasks {
     /// the files. The counts of Done Subtasks come from the cache, which keeps
     /// Closed Tasks without their files.
     pub fn rows(&self, planning: Planning) -> io::Result<Vec<Row>> {
+        let nodes = self.shown()?;
+        Ok(rows_of(&nodes, list(&nodes, planning)))
+    }
+
+    /// The direct Subtasks of the Open Task `parent`, in either list, as
+    /// `rows` shows them: Open or pending Done, never Rejected, in their order.
+    /// Empty for a Task that has none or isn't there.
+    pub fn subtasks(&self, parent: &str) -> io::Result<Vec<Row>> {
+        let nodes = self.shown()?;
+        let mut found: Vec<&Node> = (nodes.values())
+            .filter(|n| !n.is_closed() && n.task.parent.as_deref() == Some(parent))
+            .collect();
+        found.sort_by(|a, b| by_position(a, b));
+        Ok(rows_of(&nodes, found))
+    }
+
+    /// Every Task as the lists show it: repaired, with the pending Close
+    /// applied (a pending Done marked, a pending Rejected gone) and Blockers
+    /// resolved.
+    fn shown(&self) -> io::Result<Nodes> {
         let mut nodes = self.load()?;
         if let Some(Pending { ids, closing, .. }) = self.pending().clone() {
             for id in ids {
@@ -759,23 +779,7 @@ impl Tasks {
             }
         }
         resolve_blockers(&mut nodes);
-        let counts = subtask_counts(&nodes);
-        Ok(list(&nodes, planning)
-            .into_iter()
-            .map(|node| {
-                let task = &node.task;
-                let (subtasks_done, subtasks_total) =
-                    counts.get(task.id.as_str()).copied().unwrap_or_default();
-                Row {
-                    task: task.clone(),
-                    parent_title: (task.parent.as_ref())
-                        .and_then(|p| nodes.get(p))
-                        .map(|p| p.task.title.clone()),
-                    subtasks_done,
-                    subtasks_total,
-                }
-            })
-            .collect())
+        Ok(nodes)
     }
 
     /// Every Task in the folder, repaired. Only `<id>.md` is the Task `id`: a
@@ -1122,6 +1126,27 @@ fn open_subtree(nodes: &Nodes, root: &str) -> Vec<ItemId> {
     }
     ids[1..].sort_by(|a, b| by_position(&nodes[a], &nodes[b]));
     ids.iter().filter_map(|id| ItemId::parse(id)).collect()
+}
+
+/// `found` as Rows, with the markers counted over all `nodes`.
+fn rows_of(nodes: &Nodes, found: Vec<&Node>) -> Vec<Row> {
+    let counts = subtask_counts(nodes);
+    found
+        .into_iter()
+        .map(|node| {
+            let task = &node.task;
+            let (subtasks_done, subtasks_total) =
+                counts.get(task.id.as_str()).copied().unwrap_or_default();
+            Row {
+                task: task.clone(),
+                parent_title: (task.parent.as_ref())
+                    .and_then(|p| nodes.get(p))
+                    .map(|p| p.task.title.clone()),
+                subtasks_done,
+                subtasks_total,
+            }
+        })
+        .collect()
 }
 
 /// The Open Tasks planned as `planning`, Subtasks included, in their order.
@@ -3029,6 +3054,34 @@ mod tests {
                 ("other".to_owned(), None, 0, 0)
             ]
         );
+    }
+
+    #[test]
+    fn subtasks_are_the_direct_open_ones_in_order_with_list_markers() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let top = tasks.create("top", Planning::Backlog, 4, &[]).unwrap();
+        let first = subtask(&tasks, &top, "first");
+        let second = subtask(&tasks, &top, "second");
+        subtask(&tasks, &first, "grandchild");
+        let done = subtask(&tasks, &top, "done");
+        let rejected = subtask(&tasks, &top, "rejected");
+        tasks.create("other", Planning::Backlog, 4, &[]).unwrap();
+        tasks.close(&rejected.id, Closing::Rejected).unwrap();
+        tasks.commit().unwrap();
+        tasks.close(&done.id, Closing::Done).unwrap();
+        let rows = tasks.subtasks(&top.id).unwrap();
+        let shown: Vec<_> = rows
+            .iter()
+            .map(|r| (r.task.title.as_str(), r.task.done, r.subtasks_total))
+            .collect();
+        assert_eq!(
+            shown,
+            [("done", true, 0), ("second", false, 0), ("first", false, 1)]
+        );
+        assert_eq!(rows[1].task.id, second.id);
+        assert_eq!(rows[2].parent_title.as_deref(), Some("top"));
+        assert!(tasks.subtasks(&second.id).unwrap().is_empty());
     }
 
     #[test]
