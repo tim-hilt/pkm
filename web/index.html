@@ -1277,6 +1277,36 @@
         cursor: pointer;
         touch-action: manipulation;
       }
+      /* The phone layout (the same rule as the shell's): the List switch is a
+         bottom bar of the Tasks Context, and the "+" and the Revert toast
+         float above it. */
+      .tasks {
+        --tasks-bar: calc(52px + env(safe-area-inset-bottom));
+      }
+      @media (max-width: 599px), (max-height: 499px) and (max-width: 999px) {
+        .tasks-header {
+          order: 1;
+          padding: 8px 16px env(safe-area-inset-bottom);
+          border-top: 1px solid var(--divider);
+          box-sizing: border-box;
+          height: var(--tasks-bar);
+        }
+        .tasks-switch {
+          flex: 1;
+        }
+        .tasks-switch-button {
+          flex: 1;
+        }
+        .tasks-scroll {
+          padding-top: max(12px, env(safe-area-inset-top));
+        }
+        .tasks-toast {
+          bottom: calc(var(--tasks-bar) + 12px);
+        }
+        .tasks-new {
+          bottom: calc(var(--tasks-bar) + 12px);
+        }
+      }
       .row-menu {
         position: fixed;
         z-index: 2;
