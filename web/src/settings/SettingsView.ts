@@ -30,7 +30,7 @@ export class SettingsView {
     const cloudStatus = make("span", "settings-detail");
     const showCloudStatus = () => {
       cloudStatus.textContent = cloud.connection
-        ? statusText(cloud.syncReport, "WebDAV")
+        ? `WebDAV · ${statusText(cloud.syncReport, "WebDAV")}`
         : "Not connected";
       cloudStatus.classList.toggle("problem", cloud.hasProblem);
     };

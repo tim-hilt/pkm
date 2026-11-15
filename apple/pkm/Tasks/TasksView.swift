@@ -55,26 +55,20 @@ struct TasksView: View {
             }
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)  // slim top bar: the sidebar button, no title
-                .toolbar {
-                    // Tabs in the bottom bar; the "+" and the toast sit above it, in its safe area.
-                    ToolbarItemGroup(placement: .bottomBar) {
-                        PlanningTab(.active, title: "Active", symbol: "checklist", selection: $model.planning)
-                        PlanningTab(.backlog, title: "Backlog", symbol: "tray.full", selection: $model.planning)
-                    }
-                }
-            #else
-                .toolbar {
-                    ToolbarItem(placement: .principal) {
-                        Picker("List", selection: $model.planning) {
-                            Text("Active").tag(Planning.active)
-                            Text("Backlog").tag(Planning.backlog)
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
-                        .accessibilityIdentifier("tasks-planning")
-                    }
-                }
             #endif
+            .toolbar {
+                // On iPhone and iPad the List switch sits in the bottom bar, in thumb reach; the "+"
+                // and the toast sit above it, in its safe area. The Mac keeps it in its toolbar.
+                ToolbarItem(placement: planningPlacement) {
+                    Picker("List", selection: $model.planning) {
+                        Text("Active").tag(Planning.active)
+                        Text("Backlog").tag(Planning.backlog)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .accessibilityIdentifier("tasks-planning")
+                }
+            }
             .safeAreaInset(edge: .bottom) {
                 if let pendingClose = model.pendingClose { ClosedToast(closing: pendingClose) }
             }
@@ -87,35 +81,16 @@ struct TasksView: View {
             }
         }
     }
-}
 
-#if os(iOS)
-    /// One of the bottom bar's tabs: shows its list, tinted while it is the one shown.
-    private struct PlanningTab: View {
-        let planning: Planning
-        let title: LocalizedStringKey
-        let symbol: String
-        @Binding var selection: Planning
-
-        init(_ planning: Planning, title: LocalizedStringKey, symbol: String, selection: Binding<Planning>) {
-            self.planning = planning
-            self.title = title
-            self.symbol = symbol
-            _selection = selection
-        }
-
-        var body: some View {
-            Button {
-                selection = planning
-            } label: {
-                Label(title, systemImage: symbol).labelStyle(.titleAndIcon)
-            }
-            .foregroundStyle(selection == planning ? Color.accentColor : .secondary)
-            .accessibilityIdentifier("tasks-tab-\(planning == .active ? "active" : "backlog")")
-            .accessibilityAddTraits(selection == planning ? .isSelected : [])
-        }
+    /// Where the List switch sits: the bottom bar on iPhone and iPad, the toolbar's middle on the Mac.
+    private var planningPlacement: ToolbarItemPlacement {
+        #if os(iOS)
+            .bottomBar
+        #else
+            .principal
+        #endif
     }
-#endif
+}
 
 /// Tells that a Task was just Closed and offers to Revert it.
 private struct ClosedToast: View {

@@ -47,7 +47,7 @@ struct ManageTagsView: View {
             Button("Cancel", role: .cancel) { deletion.cancel() }
         }
         .overlay { if tasks.allTags.isEmpty { Text("No Tags").foregroundStyle(.secondary) } }
-        .navigationTitle("Manage Tags")
+        .navigationTitle("Tags")
     }
 
     /// The dialog shows while a Tag is pending; dismissing it cancels.

@@ -1298,10 +1298,15 @@
           flex: 1;
         }
         .tasks-scroll {
-          padding-top: max(12px, env(safe-area-inset-top));
+          padding-top: var(--shell-top);
         }
+        /* Left of the "+", which it would cover when centered. */
         .tasks-toast {
+          left: max(16px, env(safe-area-inset-left));
+          right: calc(max(20px, env(safe-area-inset-right)) + 68px);
           bottom: calc(var(--tasks-bar) + 12px);
+          width: auto;
+          transform: none;
         }
         .tasks-new {
           bottom: calc(var(--tasks-bar) + 12px);
@@ -1623,6 +1628,10 @@
         height: 48px;
       }
       @media (max-width: 599px), (max-height: 499px) and (max-width: 999px) {
+        /* Clears the sidebar button: where a Context's content starts. */
+        .shell {
+          --shell-top: calc(max(4px, env(safe-area-inset-top)) + 48px);
+        }
         .shell-bar {
           display: none;
           position: fixed;
@@ -1632,7 +1641,7 @@
           border-right: 0;
         }
         .settings-page {
-          padding-top: max(56px, calc(env(safe-area-inset-top) + 52px));
+          padding-top: var(--shell-top);
         }
         .shell.sidebar-open:not(.focused) .shell-bar {
           display: flex;
@@ -1650,7 +1659,7 @@
           padding: 0;
           border: 0;
           border-radius: 8px;
-          background: none;
+          background: var(--island-fill); /* the list scrolls under it */
           color: inherit;
           cursor: pointer;
           touch-action: manipulation;

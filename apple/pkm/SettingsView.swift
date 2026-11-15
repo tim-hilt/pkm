@@ -19,7 +19,7 @@ struct SettingsView: View {
         Form {
             Section("Common") {
                 AppearancePicker().pickerStyle(.inline)
-                NavigationLink("Tags") { ManageTagsView().navigationTitle("Tags") }
+                NavigationLink("Tags") { ManageTagsView() }
                     .accessibilityIdentifier("manage-tags")
                 NavigationLink {
                     Form { CloudBackingSection() }.formStyle(.grouped).navigationTitle("Cloud Backing")

@@ -66,7 +66,7 @@ export class Navigation {
   settings: SettingsPage | undefined;
   /** The Item ID of the open Item in `selected`, if any. */
   item: string | undefined;
-  /** Called after `selected` or `item` changed. */
+  /** Called after `selected`, `settings` or `item` changed. */
   onChange: () => void = () => {};
   /** The Items of the entries `openItem` pushed since the list, so that going back leaves them all. */
   private pushed: string[] = [];
@@ -108,7 +108,7 @@ export class Navigation {
 
   /** Opens the Item `item` of the selected Context, as a new History entry, on top of the one open. */
   openItem(item: string): void {
-    if (item === this.item && this.settings === undefined) return;
+    if (item === this.item) return;
     if (this.item !== undefined && this.pushed.length === 0) this.fromLink = true;
     this.history.push(pathOf({ context: this.selected, item }));
     this.pushed.push(item);

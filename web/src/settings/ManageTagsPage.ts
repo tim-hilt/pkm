@@ -7,7 +7,7 @@ import type { TasksModel } from "../tasks/TasksModel";
 const defaultGrey = "#808080";
 
 /**
- * Settings' "Manage Tags" subpage: every Tag, alphabetically, in its Tag
+ * Settings' Tags page: every Tag, alphabetically, in its Tag
  * Color, each with a color input, a Default and a Delete button; "No Tags"
  * if there are none. `back` returns to Settings. Call `show` to list the Tags as they are.
  */
@@ -20,7 +20,7 @@ export class ManageTagsPage {
     private readonly tasks: TasksModel,
     back: () => void,
   ) {
-    const heading = make("h2", "", ["Manage Tags"]);
+    const heading = make("h2", "", ["Tags"]);
     this.element.append(button("tasks-back", "Back", back), heading, this.empty, this.list);
   }
 
