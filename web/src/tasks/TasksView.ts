@@ -12,10 +12,11 @@ const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" s
  * The Tasks Context: the Active list and the Backlog as Todoist-style rows: a
  * circle coloured by Priority, the Title, the Description faded on one line
  * and the Tags fainter still. The circle marks the Task Done, and a toast
- * offers to Revert a Close, in the edit view while that is shown. A Parent shows how many of its Subtasks are Done,
- * a Subtask its Parent's Title, before the Tags; rows are dragged to reorder. A row opens the edit view; its
- * menu (right click, long press) adds a Subtask, plans, moves or Rejects. A
- * port of the Swift `TasksView`, in native elements.
+ * offers to Revert a Close, in the edit view while that is shown. A Parent
+ * shows how many of its Subtasks are Done, a Subtask its Parent's Title,
+ * before the Tags; rows are dragged to reorder. A row opens the edit view; its
+ * menu (right click, long press) plans, moves or Rejects. A port of the Swift
+ * `TasksView`, in native elements.
  */
 export class TasksView {
   readonly element = make("main", "tasks");

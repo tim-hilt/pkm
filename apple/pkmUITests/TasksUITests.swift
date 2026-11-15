@@ -57,10 +57,14 @@ import XCTest
         let add = app.buttons["add-subtask"]
         for _ in 0..<4 where !add.isHittable { app.collectionViews.firstMatch.swipeUp() }
         add.tap()
-        let field = app.textFields["subtask-title"]
+        let field = app.descendants(matching: .any)["subtask-title"].firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.typeText("Call the clinic\n")
-        XCTAssertTrue(app.staticTexts["Call the clinic"].waitForExistence(timeout: 5))
+        // The field takes the focus as it appears, but its accessibility representation hides
+        // that from `typeText`, so the keyboard is tapped.
+        for key in ["C", "a", "l", "l"] { app.keys[key].tap() }
+        app.buttons["Return"].tap()
+        XCTAssertTrue(app.staticTexts["Call"].waitForExistence(timeout: 5))
+        XCTAssertTrue(field.exists, "the field stays for the next Subtask")
     }
 
     func testTagsArePickedInTheirOwnSheet() {

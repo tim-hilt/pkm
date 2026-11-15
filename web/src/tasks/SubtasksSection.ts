@@ -15,7 +15,9 @@ const chevronGlyph = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none
  * Enter adds the Subtask at the end and empties the field, which keeps the focus;
  * Enter on an empty field, or blur, closes it. A click opens a Subtask via
  * `open`. A row's circle marks it Done or Reverts that; its menu (right click,
- * long press) holds only Reject; a mouse drags it to reorder among its siblings. Starts unfolded; the fold is not saved; folding hides the button too.
+ * long press) holds only Reject; a mouse drags it to reorder among its
+ * siblings. Starts unfolded; the fold is not saved; folding hides the button
+ * too.
  * `refresh` redraws it from the model, as last saved.
  */
 export class SubtasksSection {

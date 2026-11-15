@@ -230,6 +230,7 @@ private struct NewTaskSheet: View {
     @State private var description = ""
     /// Changes per Task, so that the field starts over: empty, and focused.
     @State private var generation = 0
+
     var body: some View {
         NavigationStack {
             Form {
