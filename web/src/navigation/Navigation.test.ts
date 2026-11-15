@@ -265,4 +265,66 @@ describe("Navigation", () => {
     storage.setItem("lastContext", "calendar");
     expect(open("/", storage).navigation.selected).toBe("tasks");
   });
+
+  describe("Settings", () => {
+    it("opens the Settings page of a path, keeping the path and the last Context", () => {
+      const storage = new FakeStorage();
+      open("/books", storage);
+      for (const path of ["/settings", "/settings/tags", "/settings/cloud-backing"]) {
+        const { navigation, history } = open(path, storage);
+        expect(history.entries).toEqual([path]);
+        expect(navigation.settings).toBe(path === "/settings" ? "main" : path.slice(10));
+        expect(navigation.selected).toBe("books");
+        expect(navigation.item).toBeUndefined();
+      }
+      expect(storage.getItem("lastContext")).toBe("books");
+    });
+
+    it("replaces an unknown Settings page and a deeper path by Settings", () => {
+      expect(open("/settings/nowhere").history.path).toBe("/settings");
+      expect(open("/settings/tags/x").history.path).toBe("/settings");
+      expect(open("/settings/").history.path).toBe("/settings");
+      expect(open("/settingsx").navigation.settings).toBeUndefined();
+    });
+
+    it("pushes an entry per page and tells its listener", () => {
+      const { navigation, history } = open("/notes");
+      let changes = 0;
+      navigation.onChange = () => changes++;
+      navigation.openSettings();
+      navigation.openSettings("tags");
+      navigation.openSettings("tags");
+      expect(history.entries).toEqual(["/notes", "/settings", "/settings/tags"]);
+      expect(navigation.settings).toBe("tags");
+      expect(changes).toBe(2);
+    });
+
+    it("restores the pages on back and forward", () => {
+      const { navigation, history } = open("/notes");
+      navigation.openSettings();
+      navigation.openSettings("cloud-backing");
+      history.back();
+      expect(navigation.settings).toBe("main");
+      history.back();
+      expect(navigation.settings).toBeUndefined();
+      expect(navigation.selected).toBe("notes");
+      history.forward();
+      history.forward();
+      expect(navigation.settings).toBe("cloud-backing");
+    });
+
+    it("leaves Settings by selecting a Context, also the one shown before", () => {
+      const { navigation, history } = open("/notes");
+      navigation.openSettings();
+      navigation.select("notes");
+      expect(navigation.settings).toBeUndefined();
+      expect(history.path).toBe("/notes");
+    });
+
+    it("leaves an open Item for Settings", () => {
+      const { navigation } = open("/tasks/abc123abc123");
+      navigation.openSettings();
+      expect(navigation.item).toBeUndefined();
+    });
+  });
 });

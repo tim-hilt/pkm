@@ -42,7 +42,8 @@ const gearIcon = icon(
  * The web app's frame: the five Contexts as a sidebar with Settings pinned to
  * its bottom. At phone widths (a CSS media query, see index.html) the sidebar
  * is hidden until the button at the top left of the Contexts opens it full
- * screen; picking a Context or Settings closes it. Each Context has a pane to
+ * screen; picking a Context or Settings closes it. Settings is a page that
+ * takes the place of the Contexts' panes. Each Context has a pane to
  * fill; the panes of Contexts without functionality hold their placeholder.
  * While an Item fills the window (`setFocused`) the sidebar and its button are
  * hidden. The selected Context is the
@@ -52,11 +53,12 @@ const gearIcon = icon(
 export class Shell {
   readonly element = document.createElement("div");
   private readonly links = new Map<Context, HTMLAnchorElement>();
+  private readonly gear: HTMLButtonElement;
   private readonly panes = new Map<Context, HTMLElement>();
 
   constructor(
     private readonly navigation: Navigation,
-    settings: SettingsView,
+    private readonly settings: SettingsView,
   ) {
     this.element.className = "shell";
     // Only the phone layout shows the sidebar as a closable overlay; wide screens ignore this.
@@ -107,12 +109,13 @@ export class Shell {
     gear.innerHTML = `${gearIcon}<span>Settings</span>`;
     gear.addEventListener("click", () => {
       setOpen(false);
-      settings.show();
+      navigation.openSettings();
     });
+    this.gear = gear;
     bar.append(gear);
-    content.append(menu);
+    content.append(settings.element, menu);
 
-    this.element.append(bar, content, settings.element);
+    this.element.append(bar, content);
     this.update();
   }
 
@@ -121,15 +124,21 @@ export class Shell {
     return this.panes.get(context)!;
   }
 
-  /** Shows the selected Context. */
+  /** Shows Settings or the selected Context. */
   update(): void {
+    const inSettings = this.navigation.settings !== undefined;
     for (const context of contexts) {
-      const selected = context === this.navigation.selected;
+      const selected = !inSettings && context === this.navigation.selected;
       this.panes.get(context)!.hidden = !selected;
-      const link = this.links.get(context)!;
-      if (selected) link.setAttribute("aria-current", "page");
-      else link.removeAttribute("aria-current");
+      this.markCurrent(this.links.get(context)!, selected);
     }
+    this.markCurrent(this.gear, inSettings);
+    this.settings.update();
+  }
+
+  private markCurrent(link: HTMLElement, current: boolean): void {
+    if (current) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
   }
 
   /** Hides the sidebar and its button while an Item fills the window. */

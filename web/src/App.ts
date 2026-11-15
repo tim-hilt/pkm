@@ -61,7 +61,7 @@ export async function startApp(
 
   const navigation = new Navigation(browserHistory(window), localStorage);
   const tasks = new TasksModel(await TaskFiles.open(core, storage));
-  const shell = new Shell(navigation, new SettingsView(appearance, cloud, tasks));
+  const shell = new Shell(navigation, new SettingsView(navigation, appearance, cloud, tasks));
   root.replaceChildren(shell.element);
   tasks.onSaved = () => cloud.tasksSaved();
   cloud.onTasksChanged(() => void tasks.syncDidChange());

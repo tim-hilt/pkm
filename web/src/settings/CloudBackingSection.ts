@@ -6,7 +6,7 @@ import {
 } from "../cloud/CloudBacking";
 
 /**
- * The Cloud Backing section of the Settings: while Disconnected the WebDAV
+ * The Cloud Backing page of the Settings: while Disconnected the WebDAV
  * form (Server URL, Username, Password, Connect) with the failure of the last
  * try; while Connected the provider with its server, the status with the time
  * of the last Sync, the Reconnect form while access is lost, and Disconnect.

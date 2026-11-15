@@ -852,14 +852,57 @@
       .cloud-status.problem {
         color: #c92a2a;
       }
-      /* The Settings dialog. */
-      .settings-dialog fieldset {
-        margin: 0;
+      /* Settings: pages in the content area; below the phone layout's sidebar button. */
+      .settings-page {
+        position: absolute;
+        inset: 0;
+        overflow-y: auto;
+        box-sizing: border-box;
+        padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+          max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+      }
+      .settings-page > div {
+        max-width: 32rem;
+        margin: 0 auto;
+      }
+      .settings-page h2 {
+        margin: 0 0 16px;
+      }
+      .settings-page fieldset {
+        margin: 0 0 16px;
         padding: 0;
         border: 0;
       }
-      .settings-dialog fieldset + fieldset {
-        margin-top: 16px;
+      .settings-page input:not([type]),
+      .settings-page input[type="url"],
+      .settings-page input[type="text"],
+      .settings-page input[type="password"] {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 8px;
+        border: 1px solid var(--input-border);
+        border-radius: 6px;
+        background: var(--input-fill);
+        color: inherit;
+        font: inherit;
+      }
+      .settings-links {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .settings-subpage {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .settings-detail {
+        font-size: 0.9rem;
+        opacity: 0.7;
+      }
+      .settings-detail.problem {
+        color: #c92a2a;
+        opacity: 1;
       }
       .cloud-fields {
         display: flex;
@@ -906,13 +949,14 @@
         margin: 0;
         color: #c92a2a;
       }
-      .settings-dialog legend {
+      .settings-page legend {
         padding: 0;
         margin-bottom: 8px;
         font-weight: 600;
       }
       .settings-link,
       .manage-tags-button {
+        box-sizing: border-box;
         min-height: 44px;
         padding: 0 12px;
         border: 0;
@@ -923,12 +967,24 @@
         cursor: pointer;
       }
       .settings-link {
-        width: 100%;
-        text-align: left;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        text-decoration: none;
+      }
+      .settings-link::after {
+        content: "›";
+        order: 1;
       }
       .manage-tags-button:disabled {
         opacity: 0.4;
         cursor: default;
+      }
+      .manage-tags {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
       }
       .manage-tags h2 {
         margin: 12px 0;
@@ -1544,6 +1600,9 @@
           z-index: 10;
           width: auto;
           border-right: 0;
+        }
+        .settings-page {
+          padding-top: max(56px, calc(env(safe-area-inset-top) + 52px));
         }
         .shell.sidebar-open:not(.focused) .shell-bar {
           display: flex;
