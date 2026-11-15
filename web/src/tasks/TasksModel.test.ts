@@ -731,6 +731,33 @@ describe("Subtasks of a Task", () => {
     });
   });
 
+  describe("reordered", () => {
+    let parent: ListedTask;
+    const sub = (title: string) => model.subtasks(parent.id).find((t) => t.title === title)!;
+    const sectionTitles = () => model.subtasks(parent.id).map((t) => t.title);
+    beforeEach(() => {
+      model.add("Parent");
+      parent = first();
+      for (const title of ["A", "B", "C"]) model.addSubtask(title, parent);
+    });
+
+    it("moves a Subtask before a sibling, in the section and the list", () => {
+      expect(model.moveSubtask(sub("C"), sub("A"))).toBe(true);
+      expect(sectionTitles()).toEqual(["C", "A", "B"]);
+      expect(model.tasks.map((t) => t.title)).toEqual(["Parent", "C", "A", "B"]);
+    });
+
+    it("moves a Subtask to the end with no sibling given", () => {
+      model.moveSubtask(sub("A"), undefined);
+      expect(sectionTitles()).toEqual(["B", "C", "A"]);
+    });
+
+    it("refuses a move before a Task that is not a sibling", () => {
+      expect(model.moveSubtask(sub("A"), parent)).toBe(false);
+      expect(sectionTitles()).toEqual(["A", "B", "C"]);
+    });
+  });
+
   it("opens a Subtask over its Parent, and back returns", () => {
     model.add("Parent");
     const parent = first();

@@ -315,6 +315,14 @@ export class TasksModel {
   }
 
   /**
+   * Moves a Subtask before its sibling `before`, or, with none, after its last
+   * sibling. Its Parent stays. False if refused: `before` is no sibling.
+   */
+  moveSubtask(task: ListedTask, before: ListedTask | undefined): boolean {
+    return this.apply(() => this.files.store.moveSubtask(task.id, before?.id));
+  }
+
+  /**
    * Makes a Task the Subtask of `parent`, or top-level with none. A Parent in the other list
    * takes the Task there (see the store). False if refused, which `parentCandidates` never offers.
    */

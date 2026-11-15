@@ -51,7 +51,7 @@ export class TasksView {
     this.empty.setAttribute("role", "status");
     this.toast.setAttribute("role", "status");
     this.menu = new RowMenu(this.element);
-    this.drag = new RowDrag(model);
+    this.drag = new RowDrag((task, before) => model.moveBefore(task, before));
     const scroll = make("div", "tasks-scroll", [this.list, this.empty]);
     this.drag.attachEnd(scroll);
     this.element.append(
