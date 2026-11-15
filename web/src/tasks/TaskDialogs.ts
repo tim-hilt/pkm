@@ -179,7 +179,7 @@ const typingPause = 500;
  * Priority control Ignores a pending Priority Shortcut. Done closes it. While
  * the Title is empty the last saved one is kept, a hint says why, and the
  * dialog can't be left (Done is off, Esc ignored).
- * Closing saves what is pending, with a Tag typed but not added if it is valid.
+ * The Tags are one line of pills that opens a picker. Closing saves what is pending.
  * An Open Blocker's title opens it over this Task; Back (with a Task below) returns,
  * and is off while the Title is empty.
  */
@@ -190,7 +190,7 @@ export function editTaskDialog(
   places: Pick<TaskPlaces, "open" | "back">,
 ): HTMLDialogElement {
   let quickAdd = TaskQuickAdd.fromTitle(task.title);
-  const tags = new TagField(model, [...task.tags], () => save());
+  const tags = new TagField(model, [...task.tags], parent, () => save());
   const title = new QuickAddField(model, quickAdd, {
     taskTags: () => tags.chosen(),
     submit: () => commit(),
@@ -201,14 +201,14 @@ export function editTaskDialog(
   description.value = task.description;
   let priority = task.priority;
   let pause: ReturnType<typeof setTimeout> | undefined;
-  const save = (withTypedTag = false) => {
+  const save = () => {
     clearTimeout(pause);
     model.setBlockedBy(task, blockers.ids());
     model.edit(task, {
       title: title.title,
       description: description.value,
       priority,
-      tags: withTypedTag ? tags.all() : tags.chosen(),
+      tags: tags.chosen(),
     });
   };
   /** Applies the Shortcuts of the Title: they leave the field, the Priority control and the Tags show the result. With none pending it just saves. */
@@ -300,59 +300,31 @@ export function editTaskDialog(
   });
   dialog.addEventListener("close", () => {
     commit();
-    save(true);
+    save();
     quickAdd.free();
   });
   return dialog;
 }
 
 /**
- * The Tags of a Task: chips to remove, and an input that refuses forbidden
- * characters as they are typed (with a hint) and suggests the known Tags that
- * start with what is typed. Text that is no Tag yet (`work/`) is not added.
+ * The Tags of a Task: one line of pills in their Tag Colors, which opens the
+ * picker when pressed. The pick is saved when the picker's Done is pressed.
  */
 class TagField {
   readonly element = make("fieldset", "tasks-tags");
-  private readonly chips = make("ul", "tasks-chips");
-  private readonly input = textInput("");
-  private readonly hint = make("p", "tasks-hint", ["Tags use a–z, 0–9, - and / only."]);
-  private readonly suggestions = make("ul", "tasks-suggestions");
+  private readonly row = button("tasks-tags-row", "", () => this.pick());
 
   constructor(
     private readonly model: TasksModel,
     private readonly tags: string[],
+    private readonly parent: HTMLElement,
     private readonly changed: () => void,
   ) {
-    this.input.setAttribute("aria-label", "Add Tag");
-    this.input.placeholder = "Add Tag";
-    this.input.autocapitalize = "off";
-    this.input.autocomplete = "off";
-    this.input.spellcheck = false;
-    this.hint.hidden = true;
-    this.input.addEventListener("input", () => {
-      const allowed = TasksModel.allowedTagText(this.input.value);
-      this.hint.hidden = allowed === this.input.value;
-      this.input.value = allowed;
-      this.showSuggestions();
-    });
-    // Enter adds the Tag; the form is saved with the button.
-    this.input.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" || this.input.value === "") return;
-      event.preventDefault();
-      event.stopPropagation();
-      if (isValidTag(this.input.value)) this.add(this.input.value);
-    });
-    this.element.append(
-      make("legend", "", ["Tags"]),
-      this.chips,
-      this.input,
-      this.hint,
-      this.suggestions,
-    );
-    this.showChips();
+    this.element.append(make("legend", "", ["Tags"]), this.row);
+    this.show();
   }
 
-  /** The Tags added so far. */
+  /** The Tags chosen. */
   chosen(): string[] {
     return this.tags;
   }
@@ -360,49 +332,106 @@ class TagField {
   /** Shows exactly `tags`, e.g. after Quick Add added some. */
   set(tags: string[]): void {
     this.tags.splice(0, this.tags.length, ...tags);
-    this.showChips();
+    this.show();
   }
 
-  /** The Tags chosen, with the one typed but not yet added, if it is one. */
-  all(): string[] {
-    const typed = this.input.value;
-    return isValidTag(typed) && !this.tags.includes(typed) ? [...this.tags, typed] : this.tags;
+  private pick(): void {
+    pickTagsDialog(this.parent, this.model, this.tags, (picked) => {
+      this.set(picked);
+      this.changed();
+    });
   }
 
-  private add(tag: string): void {
-    if (!this.tags.includes(tag)) this.tags.push(tag);
-    this.input.value = "";
-    this.hint.hidden = true;
-    this.showChips();
-    this.showSuggestions();
-    this.changed();
-  }
-
-  private showChips(): void {
+  private show(): void {
     const colors = new Map(this.model.allTags.map((t) => [t.name, t.color]));
-    this.chips.replaceChildren(
-      ...this.tags.map((tag) => {
-        const remove = button("tasks-chip", "", () => {
-          this.tags.splice(this.tags.indexOf(tag), 1);
-          this.showChips();
-          this.changed();
-        });
-        remove.append(tagLabel(tag, colors.get(tag)), " ×");
-        remove.setAttribute("aria-label", `Remove ${tag}`);
-        return make("li", "", [remove]);
-      }),
+    this.row.setAttribute("aria-label", `Tags: ${this.tags.join(", ") || "none"}`);
+    this.row.replaceChildren(
+      ...(this.tags.length === 0
+        ? [make("span", "tasks-tags-empty", ["Add Tags"])]
+        : this.tags.map((tag) => {
+            const pill = tagLabel(tag, colors.get(tag));
+            pill.classList.add("tasks-pill");
+            return pill;
+          })),
     );
   }
+}
 
-  private showSuggestions(): void {
-    const typed = this.input.value;
-    const { matches, create } = this.model.suggestTags(typed, this.tags);
-    const rows = matches.map((tag) => button("tasks-suggestion", tag, () => this.add(tag)));
-    if (create) {
-      rows.push(button("tasks-suggestion", `Create Tag '${typed}'`, () => this.add(typed)));
+/**
+ * A modal list of every known Tag with a checkbox each, and a search input at
+ * the bottom that also offers to create a Tag. Done calls `done` with the Tags
+ * checked and closes; Cancel and Esc change nothing.
+ */
+function pickTagsDialog(
+  parent: HTMLElement,
+  model: TasksModel,
+  chosen: string[],
+  done: (tags: string[]) => void,
+): void {
+  const selected = [...chosen];
+  const known = model.allTags;
+  const colors = new Map(known.map((t) => [t.name, t.color]));
+  const created: string[] = [];
+  const dialog = make("dialog", "tasks-dialog tasks-picker");
+  const heading = make("h2", "", ["Tags"]);
+  dialog.setAttribute("aria-labelledby", (heading.id = `tasks-dialog-${nextId++}`));
+  const confirm = button("tasks-confirm", "Done", () => {
+    done(selected);
+    dialog.close();
+  });
+  const list = make("ul", "tasks-picker-list");
+  const hint = make("p", "tasks-hint", ["Tags use a–z, 0–9, - and / only."]);
+  hint.hidden = true;
+  const search = textInput("");
+  search.type = "search";
+  search.placeholder = search.ariaLabel = "Search or create";
+  search.autocapitalize = "off";
+  search.autocomplete = "off";
+  search.spellcheck = false;
+
+  const creatable = () =>
+    isValidTag(search.value) && !colors.has(search.value) && !created.includes(search.value);
+  const create = () => {
+    created.push(search.value);
+    selected.push(search.value);
+    search.value = "";
+    show();
+  };
+  const show = () => {
+    const names = [...known.map((t) => t.name), ...created].filter((n) => n.includes(search.value));
+    const rows = names.sort().map((tag) => {
+      const box = make("input", "");
+      box.type = "checkbox";
+      box.checked = selected.includes(tag);
+      box.addEventListener("change", () => {
+        if (box.checked) selected.push(tag);
+        else selected.splice(selected.indexOf(tag), 1);
+      });
+      return make("li", "", [make("label", "", [tagLabel(tag, colors.get(tag)), box])]);
+    });
+    if (creatable()) {
+      rows.unshift(
+        make("li", "", [button("tasks-suggestion", `Create Tag '${search.value}'`, create)]),
+      );
     }
-    this.suggestions.replaceChildren(...rows.map((row) => make("li", "", [row])));
-  }
+    list.replaceChildren(...rows);
+  };
+  search.addEventListener("input", () => {
+    const allowed = TasksModel.allowedTagText(search.value);
+    hint.hidden = allowed === search.value;
+    search.value = allowed;
+    show();
+  });
+  search.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    if (creatable()) create();
+  });
+  dialog.append(make("div", "tasks-picker-bar", [heading, confirm]), list, hint, search);
+  dialog.addEventListener("close", () => dialog.remove());
+  show();
+  parent.append(dialog);
+  dialog.showModal();
 }
 
 /**
