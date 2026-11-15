@@ -525,7 +525,7 @@ mod tests {
 
         #[test]
         fn an_element_without_an_index_keeps_its_place_in_its_side() {
-            // A new Element has no index until a merge gives it one.
+            // As an older version of the app or another tool wrote it.
             let new = element("new", 1, 1, "").replace(r#""index":"""#, r#""index":null"#);
             let local = elements_only(&[element("image", 1, 1, "a0"), new]);
             let remote = elements_only(&[element("image", 1, 1, "a0")]);

@@ -140,10 +140,8 @@ impl<'a> Copying<'a> {
             element.insert(key.into(), Value::Number(value));
         }
         element.insert("id".into(), Value::String(id.clone()));
-        // The index of an Element is its place among others. Like any new
-        // Element the copy has none until it is moved in z-order; until then
-        // its place in the file is its order, which excalidraw.com turns
-        // into an index when it opens the file (`syncInvalidIndices`).
+        // The index of an Element is its place among others: the Scene gives
+        // the copy one where it is put.
         element.insert("index".into(), Value::Null);
 
         self.renew_groups(element, entropy);

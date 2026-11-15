@@ -18,6 +18,7 @@ use std::fmt;
 use std::str::Utf8Error;
 
 use crate::geometry::{ImageStatus, TextAlign};
+use crate::index_sync;
 use crate::linear;
 use crate::restore;
 use pkm_base::base64;
@@ -559,7 +560,26 @@ impl Scene {
         self.insert_at(position, element)
     }
 
-    fn insert_at(&mut self, position: usize, element: Object) -> u32 {
+    /// Inserts `element` at `position`, with an index that fits its place
+    /// there unless it has one (as Excalidraw's `syncInvalidIndices`), so that
+    /// a merge sorting by index keeps it there.
+    fn insert_at(&mut self, position: usize, mut element: Object) -> u32 {
+        let key = {
+            let values = self.element_values();
+            fn index(value: &Value) -> Option<&str> {
+                value.get("index").and_then(Value::as_str)
+            }
+            let indices: Vec<Option<&str>> = values[..position]
+                .iter()
+                .map(index)
+                .chain([element.get("index").and_then(Value::as_str)])
+                .chain(values[position..].iter().map(index))
+                .collect();
+            index_sync::key_for(&indices, position)
+        };
+        if let Some(key) = key {
+            element.insert("index".into(), Value::String(key));
+        }
         let handle = self.handles.insert(position, id_of(&element));
         self.element_values_mut()
             .insert(position, Value::Object(element));

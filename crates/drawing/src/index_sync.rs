@@ -27,6 +27,31 @@ pub(crate) fn sync_moved(indices: &[Index], moved: &[bool]) -> Vec<(usize, Strin
     updates
 }
 
+/// A key for the Element at `position` that puts it between the nearest
+/// Elements below and above it that have a valid one (or just above the one
+/// below where those two are out of order); `None` if its own already does,
+/// or no key can.
+pub(crate) fn key_for(indices: &[Index], position: usize) -> Option<String> {
+    let valid = |index: &&Index| index.is_some_and(|key| keys::validate(key).is_ok());
+    let below = indices[..position]
+        .iter()
+        .rev()
+        .find(valid)
+        .copied()
+        .flatten();
+    let above = indices[position + 1..]
+        .iter()
+        .find(valid)
+        .copied()
+        .flatten();
+    if is_valid(indices[position], below, above) {
+        return None;
+    }
+    keys::key_between(below, above)
+        .or_else(|_| keys::key_between(below, None))
+        .ok()
+}
+
 /// Keys for the Elements without a valid index (new ones), between the
 /// nearest Elements below and above them that have one, or just above the one
 /// below where those two are out of order. Other keys are kept as they are.
@@ -266,6 +291,22 @@ mod tests {
         let updates = sync(&[None, None, None], &[2]);
 
         assert_eq!(updates, keys(&[(0, "a0"), (1, "a1"), (2, "a2")]));
+    }
+
+    #[test]
+    fn an_inserted_element_gets_a_key_between_its_neighbours() {
+        let indices = [Some("a0"), None, Some("a1")];
+        assert_eq!(key_for(&indices, 1).as_deref(), Some("a0V"));
+        assert_eq!(key_for(&[None], 0).as_deref(), Some("a0"));
+    }
+
+    #[test]
+    fn an_inserted_element_whose_key_fits_keeps_it() {
+        assert_eq!(key_for(&[Some("a0"), Some("a0G"), Some("a1")], 1), None);
+        assert_eq!(
+            key_for(&[Some("a0"), Some("a5"), Some("a1")], 1).as_deref(),
+            Some("a0V")
+        );
     }
 
     #[test]

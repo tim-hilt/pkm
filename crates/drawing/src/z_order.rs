@@ -544,6 +544,57 @@ mod tests {
     }
 
     #[test]
+    fn a_new_element_gets_an_index_above_the_top_one() {
+        let mut editor = three();
+        editor.set_tool(crate::Tool::Ellipse);
+        replay(
+            &mut editor,
+            "0.0 down 1 mouse 0 100
+             0.1 move 1 mouse 60 160
+             0.2 up 1 mouse 60 160",
+        );
+
+        assert_eq!(indices(&editor)[3].as_deref(), Some("a3"));
+    }
+
+    #[test]
+    fn the_first_element_of_an_empty_scene_gets_the_first_index() {
+        let mut editor = Editor::new();
+        editor.set_tool(crate::Tool::Rectangle);
+        replay(
+            &mut editor,
+            "0.0 down 1 mouse 0 0
+             0.1 move 1 mouse 60 60
+             0.2 up 1 mouse 60 60",
+        );
+
+        assert_eq!(indices(&editor), [Some("a0".into())]);
+    }
+
+    #[test]
+    fn a_copy_gets_an_index_between_its_neighbours() {
+        let mut editor = three();
+        select(&mut editor, 0.0, 0.0);
+
+        editor.duplicate();
+
+        assert_eq!(index_of(&editor, "a"), "a0");
+        assert_eq!(indices(&editor)[1].as_deref(), Some("a0V"));
+        assert_indices_ascend(&editor);
+    }
+
+    #[test]
+    fn pasted_elements_get_indices_above_the_others() {
+        let mut editor = three();
+        select(&mut editor, 0.0, 0.0);
+        let copied = editor.copy_selection().unwrap();
+
+        assert!(editor.paste(&copied));
+
+        assert_eq!(indices(&editor)[3].as_deref(), Some("a3"));
+    }
+
+    #[test]
     fn a_file_of_excalidraw_com_is_written_back_ordered_by_its_indices() {
         let mut editor = editor_with(&[
             &rect("a", 0.0, Some("a0"), ""),
