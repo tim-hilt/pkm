@@ -61,7 +61,7 @@ struct TasksView: View {
                         .onMove { model.move(from: $0, to: $1) }
                     }
                     .listStyle(.plain)
-                    .contentMargins(.bottom, 80, for: .scrollContent)  // scroll the last Task clear of the "+"
+                    .contentMargins(.bottom, 96, for: .scrollContent)  // scroll the last Task clear of the "+"
                 }
             }
             #if os(iOS)
@@ -185,7 +185,6 @@ private struct TaskRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)  // the whole row opens the Task, not just its text
-        .padding(.vertical, 4)
         .padding(.leading, CGFloat(task.depth) * 24)
     }
 }
