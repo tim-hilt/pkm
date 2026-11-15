@@ -20,6 +20,7 @@ struct TasksView: View {
                     List {
                         ForEach(model.tasks) { task in
                             TaskRow(task: task, onCircle: { model.toggleDone(task) })
+                                .listRowSeparator(task.id == model.tasks.first?.id ? .hidden : .automatic, edges: .top)
                                 .contentShape(Rectangle())
                                 .onTapGesture { model.startEditing(task) }
                                 .swipeActions(edge: .trailing) {
@@ -50,7 +51,6 @@ struct TasksView: View {
                         .onMove { model.move(from: $0, to: $1) }
                     }
                     .listStyle(.plain)
-                    .contentMargins(.bottom, 96, for: .scrollContent)  // scroll the last Task clear of the "+"
                 }
             }
             #if os(iOS)
@@ -68,12 +68,27 @@ struct TasksView: View {
                     .labelsHidden()
                     .accessibilityIdentifier("tasks-planning")
                 }
+                .sharedBackgroundVisibility(.hidden)  // no capsule round the picker, which has its own
+                #if os(iOS)
+                    ToolbarSpacer(.flexible, placement: .bottomBar)
+                    ToolbarItem(placement: .bottomBar) {
+                        Button("New Task", systemImage: "plus") { isAdding = true }
+                            .accessibilityIdentifier("add-task")
+                    }
+                #endif
             }
             .safeAreaInset(edge: .bottom) {
                 if let pendingClose = model.pendingClose { ClosedToast(closing: pendingClose) }
             }
             .animation(.default, value: model.pendingClose)
-            .addButton("New Task", identifier: "add-task") { isAdding = true }
+            #if os(macOS)
+                .toolbar {
+                    ToolbarItem {
+                        Button("New Task", systemImage: "plus") { isAdding = true }
+                        .accessibilityIdentifier("add-task")
+                    }
+                }
+            #endif
             .sheet(isPresented: $isAdding) { NewTaskSheet() }
             .sheet(item: $subtaskParent) { NewTaskSheet(parent: $0) }
             .sheet(isPresented: Binding(get: { !model.editing.isEmpty }, set: { if !$0 { model.closeEditing() } })) {
@@ -110,13 +125,7 @@ private struct ClosedToast: View {
         .padding(.horizontal)
         .frame(minHeight: AddButtonMetrics.size)
         .background(.regularMaterial, in: .rect(cornerRadius: 12))
-        #if os(iOS)  // left of the "+", level with it
-            .padding(.leading, AddButtonMetrics.margin)
-            .padding(.trailing, AddButtonMetrics.size + 2 * AddButtonMetrics.margin)
-            .padding(.bottom, AddButtonMetrics.margin)
-        #else
-            .padding(.horizontal)
-        #endif
+        .padding(.horizontal)
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 }
