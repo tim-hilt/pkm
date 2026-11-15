@@ -103,7 +103,7 @@ impl Cache {
 }
 
 /// One Closed Task per line, tab-separated, the Title last:
-/// `name mtime size id state parent order title`.
+/// `name mtime size id state parent position title`.
 fn persist(files: &dyn Files, file: &Path, entries: &HashMap<String, Entry>) -> io::Result<()> {
     let mut text = String::new();
     for (name, entry) in entries {
@@ -112,10 +112,10 @@ fn persist(files: &dyn Files, file: &Path, entries: &HashMap<String, Entry>) -> 
             let task = &node.task;
             let state = node.closing.map_or("", Closing::state);
             let parent = task.parent.as_deref().unwrap_or("");
-            let order = node.order;
+            let position = node.position;
             let (id, title) = (&task.id, &task.title);
             text.push_str(&format!(
-                "{name}\t{mtime}\t{size}\t{id}\t{state}\t{parent}\t{order}\t{title}\n"
+                "{name}\t{mtime}\t{size}\t{id}\t{state}\t{parent}\t{position}\t{title}\n"
             ));
         }
     }
@@ -135,14 +135,14 @@ fn restore_line(line: &str) -> Option<(String, Entry)> {
     let id = parts.next()?;
     let closing = Closing::parse(parts.next()?)?;
     let parent = Some(parts.next()?).filter(|p| !p.is_empty());
-    let order = parts.next()?.parse().ok()?;
+    let position = parts.next()?.parse().ok()?;
     let title = parts.next()?;
     let node = Node::closed(
         id.to_owned(),
         closing,
         title.to_owned(),
         parent.map(str::to_owned),
-        order,
+        position,
     );
     Some((
         name.to_owned(),

@@ -16,7 +16,7 @@ const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" s
  * circle coloured by Priority, the Title, the Description faded on one line
  * and the Tags fainter still. The circle marks the Task Done, and a toast
  * offers to Revert a Close. A Parent shows how many of its Subtasks are Done,
- * a Subtask its Parent's Title, before the Tags; rows are dragged to reorder and move. A row opens the edit view; its
+ * a Subtask its Parent's Title, before the Tags; rows are dragged to reorder. A row opens the edit view; its
  * menu (right click, long press) adds a Subtask, plans, moves or Rejects. A
  * port of the Swift `TasksView`, in native elements.
  */

@@ -357,18 +357,12 @@ impl TaskStore {
             .map_err(error)
     }
 
-    /// Moves a Task under `parent`, or to the top level of the `planning` list,
-    /// before its sibling `before` or last; see `pkm_tasks::Tasks::move_to`.
-    #[wasm_bindgen(js_name = moveTo)]
-    pub fn move_to(
-        &self,
-        id: &str,
-        parent: Option<String>,
-        planning: Planning,
-        before: Option<String>,
-    ) -> Result<(), JsError> {
+    /// Moves a Task before `before` in its list, or to the end of it; its
+    /// Parent stays. See `pkm_tasks::Tasks::move_before`.
+    #[wasm_bindgen(js_name = moveBefore)]
+    pub fn move_before(&self, id: &str, before: Option<String>) -> Result<(), JsError> {
         self.tasks
-            .move_to(id, parent.as_deref(), planning.into(), before.as_deref())
+            .move_before(id, before.as_deref())
             .map(drop)
             .map_err(error)
     }

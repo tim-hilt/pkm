@@ -298,22 +298,9 @@ export class TasksModel {
     this.apply(() => this.files.store.plan(task.id, planning));
   }
 
-  /**
-   * Moves a Task to be a sibling before `before`, or, with none, the last
-   * top-level Task. It takes its new top-level Task's list. Refused moves
-   * (under its own Subtask) change nothing.
-   */
+  /** Moves a Task before `before` in the list, or, with none, to its end. Its Parent stays. */
   moveBefore(task: ListedTask, before: ListedTask | undefined): void {
-    this.move(task, before?.parent, before?.id);
-  }
-
-  /** Moves a Task to be the last Subtask of `parent`. */
-  moveUnder(task: ListedTask, parent: ListedTask): void {
-    this.move(task, parent.id, undefined);
-  }
-
-  private move(task: ListedTask, parent: string | undefined, before: string | undefined): void {
-    this.apply(() => this.files.store.moveTo(task.id, parent, this.list, before));
+    this.apply(() => this.files.store.moveBefore(task.id, before?.id));
   }
 
   /**

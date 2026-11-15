@@ -448,22 +448,15 @@ describe("order and moving", () => {
     expect(titles()).toEqual(["b", "c", "a"]);
   });
 
-  it("moves a Task under another, and back to the top level", () => {
-    model.moveUnder(task("c"), task("a"));
+  it("keeps a Subtask's Parent when it moves above it", () => {
+    model.addSubtask("sub", task("a"));
+    model.moveBefore(task("sub"), task("a"));
     expect(model.tasks.map((t) => [t.title, t.parentTitle])).toEqual([
+      ["sub", "a"],
       ["a", undefined],
-      ["c", "a"],
       ["b", undefined],
+      ["c", undefined],
     ]);
-    model.moveBefore(task("c"), undefined);
-    expect(task("c").parent).toBeUndefined();
-  });
-
-  it("refuses moving a Task under its own Subtask, changing nothing", () => {
-    model.moveUnder(task("b"), task("a"));
-    model.moveUnder(task("a"), task("b"));
-    expect(titles()).toEqual(["a", "b", "c"]);
-    expect(task("a").parent).toBeUndefined();
   });
 
   it("keeps the order after reopening", async () => {

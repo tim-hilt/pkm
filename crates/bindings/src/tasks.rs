@@ -17,7 +17,6 @@ pub enum TasksError {
     EmptyTitle,
     InvalidTag,
     SubtaskNotPlannable,
-    MoveIntoOwnSubtree,
     BlockedByItself,
     BlockedByParent,
     BlockedBySubtask,
@@ -31,7 +30,6 @@ impl std::fmt::Display for TasksError {
             Self::EmptyTitle => Error::EmptyTitle.fmt(f),
             Self::InvalidTag => Error::InvalidTag.fmt(f),
             Self::SubtaskNotPlannable => Error::SubtaskNotPlannable.fmt(f),
-            Self::MoveIntoOwnSubtree => Error::MoveIntoOwnSubtree.fmt(f),
             Self::BlockedByItself => Error::BlockedByItself.fmt(f),
             Self::BlockedByParent => Error::BlockedByParent.fmt(f),
             Self::BlockedBySubtask => Error::BlockedBySubtask.fmt(f),
@@ -53,7 +51,6 @@ impl From<Error> for TasksError {
             Error::EmptyTitle => Self::EmptyTitle,
             Error::InvalidTag => Self::InvalidTag,
             Error::SubtaskNotPlannable => Self::SubtaskNotPlannable,
-            Error::MoveIntoOwnSubtree => Self::MoveIntoOwnSubtree,
             Error::BlockedByItself => Self::BlockedByItself,
             Error::BlockedByParent => Self::BlockedByParent,
             Error::BlockedBySubtask => Self::BlockedBySubtask,
@@ -314,19 +311,14 @@ impl TaskStore {
         Ok(self.listed(self.0.plan(&id, planning)?))
     }
 
-    /// Moves a Task under `parent`, or to the top level of the `planning` list,
-    /// before its sibling `before` or last; see `pkm_tasks::Tasks::move_to`.
-    pub fn move_to(
+    /// Moves a Task before `before` in its list, or to the end of it; its
+    /// Parent stays. See `pkm_tasks::Tasks::move_before`.
+    pub fn move_before(
         &self,
         id: String,
-        parent: Option<String>,
-        planning: Planning,
         before: Option<String>,
     ) -> Result<ListedTask, TasksError> {
-        let moved = self
-            .0
-            .move_to(&id, parent.as_deref(), planning, before.as_deref())?;
-        Ok(self.listed(moved))
+        Ok(self.listed(self.0.move_before(&id, before.as_deref())?))
     }
 
     /// Closes a Task as a pending change, committing the previous one first.

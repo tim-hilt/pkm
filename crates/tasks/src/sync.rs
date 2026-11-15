@@ -138,7 +138,7 @@ mod tests {
             }
         };
         format!(
-            "---\nid: aaaaaaaaaaaa\ntitle: {title}\npriority: {priority}\nstate: active\norder: 1\n{}{}updated: {updated}\n---\n",
+            "---\nid: aaaaaaaaaaaa\ntitle: {title}\npriority: {priority}\nstate: active\nposition: 1\n{}{}updated: {updated}\n---\n",
             list("tags", tags),
             list("blocked-by", blocked),
         )
@@ -245,10 +245,22 @@ mod tests {
     }
 
     #[test]
+    fn a_position_changed_on_one_device_is_taken_as_a_scalar() {
+        let base = task("Milk", 4, &[], &[], T0);
+        let moved = String::from_utf8(task("Milk", 4, &[], &[], T1))
+            .unwrap()
+            .replace("position: 1\n", "position: 1.5\n");
+        let renamed = task("Oat milk", 4, &[], &[], T2);
+        let file = merged(Some(&base), moved.as_bytes(), &renamed);
+        assert_eq!(file.scalar("position"), Some("1.5"));
+        assert_eq!(file.scalar("title"), Some("Oat milk"));
+    }
+
+    #[test]
     fn unknown_properties_survive() {
         let base = task("Milk", 4, &[], &[], T0);
         let mut local = String::from_utf8(task("Milk", 4, &[], &[], T1)).unwrap();
-        local = local.replace("order: 1\n", "order: 1\nx-extra: kept\n");
+        local = local.replace("position: 1\n", "position: 1\nx-extra: kept\n");
         let remote = task("Milk", 2, &[], &[], T2);
         let file = merged(Some(&base), local.as_bytes(), &remote);
         assert_eq!(file.scalar("x-extra"), Some("kept"));

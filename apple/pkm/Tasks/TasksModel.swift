@@ -180,22 +180,12 @@ final class TasksModel {
         reload()
     }
 
-    /// Moves the rows at `source` to land before the row at `destination` of `tasks`
-    /// (`onMove`'s meaning), as a sibling of that row; past the last row, to the end
-    /// of the top level. Refused moves, e.g. under the Task's own Subtask, change nothing.
+    /// Moves the row at `source` to land before the row at `destination` of `tasks`
+    /// (`onMove`'s meaning); past the last row, to the end of the list. The Parent stays.
     func move(from source: IndexSet, to destination: Int) {
         guard let index = source.first, index != destination else { return }
         let target = destination < tasks.count ? tasks[destination] : nil
-        move(tasks[index], under: target?.parent, before: target)
-    }
-
-    /// Moves a Task to be the last Subtask of `parent`.
-    func move(_ task: ListedTask, under parent: ListedTask) {
-        move(task, under: parent.id, before: nil)
-    }
-
-    private func move(_ task: ListedTask, under parent: String?, before: ListedTask?) {
-        _ = try? store.moveTo(id: task.id, parent: parent, planning: planning, before: before?.id)
+        _ = try? store.moveBefore(id: tasks[index].id, before: target?.id)
         reload()
     }
 

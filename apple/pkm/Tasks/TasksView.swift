@@ -21,14 +21,6 @@ struct TasksView: View {
                         ForEach(model.tasks) { task in
                             TaskRow(task: task, onCircle: { model.toggleDone(task) })
                                 .contentShape(Rectangle())
-                                .draggable(task.id)
-                                .dropDestination(for: String.self) { ids, _ in
-                                    guard let moved = model.tasks.first(where: { $0.id == ids.first }) else {
-                                        return false
-                                    }
-                                    model.move(moved, under: task)
-                                    return true
-                                }
                                 .onTapGesture { model.startEditing(task) }
                                 .swipeActions(edge: .trailing) {
                                     if !task.done {

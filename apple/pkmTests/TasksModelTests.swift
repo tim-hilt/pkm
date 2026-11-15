@@ -452,21 +452,14 @@ import Testing
         #expect(try openModel().tasks.map(\.title) == ["a", "b", "c"])
     }
 
-    @Test func aTaskIsDroppedUnderAnotherAndOutAgain() throws {
-        let model = try openModel()
-        for title in ["a", "b"] { model.add(title: title, planning: .active) }
-        model.move(model.tasks[1], under: model.tasks[0])
-        #expect(model.tasks.map(\.parent) == [nil, model.tasks[0].id])
-        model.move(from: [1], to: 2)
-        #expect(model.tasks.map(\.parent) == [nil, nil])
-    }
-
-    @Test func aTaskCannotBeDroppedUnderItsOwnSubtask() throws {
+    @Test func aSubtaskIsDraggedAboveItsParentAndKeepsIt() throws {
         let model = try openModel()
         model.add(title: "a", planning: .active)
         model.addSubtask(title: "b", under: model.tasks[0])
-        model.move(model.tasks[0], under: model.tasks[1])
-        #expect(model.tasks.map(\.parent) == [nil, model.tasks[0].id])
+        let parent = model.tasks[0].id
+        model.move(from: [1], to: 0)
+        #expect(model.tasks.map(\.title) == ["b", "a"])
+        #expect(model.tasks.map(\.parent) == [parent, nil])
     }
 
     @Test func aTaskIsBlockedWhileATaskItIsBlockedByIsOpen() throws {
