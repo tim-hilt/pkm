@@ -1394,11 +1394,10 @@
         flex-direction: column;
         gap: 8px;
       }
-      /* One line; spaces are kept so that a Shortcut's trailing space shows. */
+      /* Grows with a long Title, which wraps, so that all of it shows; spaces are kept so that a Shortcut's trailing space shows. */
       .tasks-quick-input {
-        overflow-x: auto;
-        white-space: pre;
-        scrollbar-width: none;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
       }
       .tasks-quick-input:empty::before {
         content: attr(data-placeholder);

@@ -74,8 +74,8 @@ function placeCaret(root: HTMLElement, offset: number): void {
 }
 
 /**
- * The Title field of a Task: Quick Add's text on one line, with its Shortcuts
- * highlighted, and the Tags to suggest below it while the cursor is in an `@`
+ * The Title field of a Task: Quick Add's text, wrapping onto more lines as it
+ * grows, with its Shortcuts highlighted, and the Tags to suggest below it while the cursor is in an `@`
  * word. It only draws and forwards what is typed, the cursor, Return, picks and
  * Ignores; every rule lives in the core's `TaskQuickAdd`, which the caller
  * owns and frees. It can start from a saved
