@@ -47,30 +47,43 @@ struct QuickAddField: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            editor
-            suggestionList
-        }
+        // The list floats below the editor, so that opening it shifts nothing.
+        editor
+            .overlay(alignment: .bottomLeading) {
+                suggestionList
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 8)
+                    .background(.regularMaterial, in: .rect(cornerRadius: 10))
+                    .shadow(radius: 6, y: 2)
+                    .padding(.horizontal, -8)
+                    .alignmentGuide(.bottom) { $0[.top] - 4 }
+                    .opacity(suggestions.isEmpty ? 0 : 1)
+            }
+            .zIndex(1)
     }
 
-    @ViewBuilder private var suggestionList: some View {
-        ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
-            Button {
-                pick(suggestion)
-            } label: {
-                Label {
-                    Text(suggestion.isNew ? "Create Tag '\(suggestion.tag)'" : suggestion.tag)
-                } icon: {
-                    Image(systemName: "tag")
+    private var suggestionList: some View {
+        VStack(spacing: 2) {
+            ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
+                Button {
+                    pick(suggestion)
+                } label: {
+                    Label {
+                        Text(suggestion.isNew ? "Create Tag '\(suggestion.tag)'" : suggestion.tag)
+                    } icon: {
+                        Image(systemName: "tag")
+                    }
+                    .foregroundStyle(model.tagEntry(suggestion.tag).style(default: .primary))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(
+                        index == selected ? Color.accentColor.opacity(0.2) : .clear, in: .rect(cornerRadius: 10)
+                    )
+                    .padding(.horizontal, -8)  // the highlight's margin, without moving the label
                 }
-                .foregroundStyle(model.tagEntry(suggestion.tag).style(default: .primary))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(index == selected ? Color.accentColor.opacity(0.2) : .clear, in: .rect(cornerRadius: 10))
-                .padding(.horizontal, -8)  // the highlight's margin, without moving the label
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
     }
 
