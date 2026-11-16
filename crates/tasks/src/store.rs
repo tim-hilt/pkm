@@ -260,7 +260,7 @@ impl Tasks {
         tags: &[String],
     ) -> Result<Task, Error> {
         let new = NewTask::checked(title, priority, tags)?;
-        let position = position_before(&list(&self.load()?, planning), None);
+        let position = end_position(&list(&self.load()?, planning));
         self.insert(&new, planning, None, position)
     }
 
@@ -286,8 +286,11 @@ impl Tasks {
         let last = subtree
             .last()
             .map_or(parent.task.id.as_str(), ItemId::as_str);
-        let position = position_below(&list(&nodes, planning), last);
-        self.insert(&new, planning, Some(&parent.task.id), position)
+        let list = list(&nodes, planning);
+        let at = index_below(&list, last);
+        let placement = place(&list, at);
+        self.shift(&placement.shifted)?;
+        self.insert(&new, planning, Some(&parent.task.id), placement.position)
     }
 
     /// Saves a new Task under a fresh Item ID and records its creation.
@@ -384,7 +387,7 @@ impl Tasks {
             return Ok(task.clone());
         }
         let list = list(&nodes, planning);
-        let end = position_before(&list, None);
+        let end = end_position(&list);
         // The Task, then its Open Subtasks in their relative order, one after
         // the other at the end of the list.
         let mut placed = None;
@@ -411,8 +414,8 @@ impl Tasks {
     /// Moves the Open Task `id` before the Task `before` in its list, or to
     /// the end of it if that is `None`; `before` is the Task itself: nothing
     /// changes. Its Parent stays, whoever it is. Only the moved Task is
-    /// rewritten. Where neighbours share a key there is no room between them:
-    /// the Task lands beside them, ordered by Item ID. Fails with `NotFound`
+    /// rewritten, plus, where neighbours share a key and so leave no room
+    /// between them, the Tasks that share it from the drop on (see `place`). Fails with `NotFound`
     /// for an unknown or Closed Task, or a `before` that isn't in its list.
     pub fn move_before(&self, id: &str, before: Option<&str>) -> Result<Task, Error> {
         let nodes = self.load()?;
@@ -428,13 +431,28 @@ impl Tasks {
         if before.is_some_and(|before| !list.iter().any(|n| n.task.id == before)) {
             return Err(io::ErrorKind::NotFound.into());
         }
-        let position = position_before(&list, before);
+        self.place_moved(id, place(&list, index_before(&list, before)))
+    }
+
+    /// Writes the `position` of the moved Task `id` and of the Tasks the
+    /// placement shifted, then returns the moved Task.
+    fn place_moved(&self, id: &str, placement: Placement) -> Result<Task, Error> {
+        self.shift(&placement.shifted)?;
+        let position = placement.position;
         Ok(self
             .rewrite(&ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?, |file| {
                 file.set_scalar(POSITION, position.to_string());
             })
             .map(|file| task_of(&file))?
             .ok_or(io::ErrorKind::InvalidData)?)
+    }
+
+    /// Rewrites the `position` of each of `tasks`.
+    fn shift(&self, tasks: &[(ItemId, f64)]) -> Result<(), Error> {
+        for (id, position) in tasks {
+            self.rewrite(id, |file| file.set_scalar(POSITION, position.to_string()))?;
+        }
+        Ok(())
     }
 
     /// Moves the Open Subtask `id` before its sibling `before`, or after its
@@ -459,9 +477,9 @@ impl Tasks {
         let siblings: Vec<&Node> = (list.iter().copied())
             .filter(|n| n.task.parent.as_deref() == Some(parent))
             .collect();
-        let position = match before {
+        let at = match before {
             Some(before) if siblings.iter().any(|n| n.task.id == before) => {
-                position_before(&list, Some(before))
+                index_before(&list, Some(before))
             }
             Some(_) => return Err(Error::NotASibling),
             None => {
@@ -470,15 +488,10 @@ impl Tasks {
                 };
                 let tail = open_subtree(&nodes, &last.task.id);
                 let end = tail.last().map_or(last.task.id.as_str(), ItemId::as_str);
-                position_below(&list, end)
+                index_below(&list, end)
             }
         };
-        Ok(self
-            .rewrite(&ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?, |file| {
-                file.set_scalar(POSITION, position.to_string());
-            })
-            .map(|file| task_of(&file))?
-            .ok_or(io::ErrorKind::InvalidData)?)
+        self.place_moved(id, place(&list, at))
     }
 
     /// Closes the Open Task `id` and its Open Subtasks as one pending change:
@@ -1129,25 +1142,62 @@ fn list(nodes: &Nodes, planning: Planning) -> Vec<&Node> {
     found
 }
 
-/// The `position` that puts a Task right before the Task `before` of `list`,
-/// or after the last one if that is `None`.
-fn position_before(list: &[&Node], before: Option<&str>) -> f64 {
-    let Some(at) = before.and_then(|b| list.iter().position(|n| n.task.id == b)) else {
-        return list.last().map_or(1.0, |n| n.position + 1.0);
-    };
-    match at.checked_sub(1) {
-        Some(prev) => f64::midpoint(list[prev].position, list[at].position),
-        None => list[at].position - 1.0,
-    }
+/// The `position` that puts a Task after the last Task of `list`.
+fn end_position(list: &[&Node]) -> f64 {
+    list.last().map_or(1.0, |n| n.position + 1.0)
 }
 
-/// The position that puts a Task right below the Task `above` of `list`.
-fn position_below(list: &[&Node], above: &str) -> f64 {
-    let at = list.iter().position(|n| n.task.id == above);
-    let low = at.map_or(0.0, |at| list[at].position);
-    match at.and_then(|at| list.get(at + 1)) {
-        Some(next) => f64::midpoint(low, next.position),
-        None => low + 1.0,
+/// Where in `list` a Task goes to land right before `before`, or at the end
+/// if that is `None` or not in `list`.
+fn index_before(list: &[&Node], before: Option<&str>) -> usize {
+    before
+        .and_then(|b| list.iter().position(|n| n.task.id == b))
+        .unwrap_or(list.len())
+}
+
+/// Where in `list` a Task goes to land right below the Task `above`.
+fn index_below(list: &[&Node], above: &str) -> usize {
+    list.iter()
+        .position(|n| n.task.id == above)
+        .map_or(0, |at| at + 1)
+}
+
+/// A new `position` for a Task, and the Tasks that had to move for it.
+struct Placement {
+    position: f64,
+    shifted: Vec<(ItemId, f64)>,
+}
+
+/// The `Placement` that puts a Task at index `at` of `list` (without it).
+/// Usually only the Task gets a key, between its neighbours'. Where they
+/// share one there is no key between them, so the Tasks of that run from
+/// `at` on move up, spread below the next key, ahead of which the Task goes.
+fn place(list: &[&Node], at: usize) -> Placement {
+    let alone = |position| Placement {
+        position,
+        shifted: Vec::new(),
+    };
+    let Some(next) = list.get(at) else {
+        return alone(end_position(list));
+    };
+    let Some(prev) = at.checked_sub(1).map(|prev| list[prev]) else {
+        return alone(next.position - 1.0);
+    };
+    if prev.position < next.position {
+        return alone(f64::midpoint(prev.position, next.position));
+    }
+    let run: Vec<&&Node> = list[at..]
+        .iter()
+        .take_while(|n| n.position == next.position)
+        .collect();
+    let low = prev.position;
+    let high = list.get(at + run.len()).map_or(low + 1.0, |n| n.position);
+    let step = (high - low) / (run.len() + 2) as f64;
+    Placement {
+        position: low + step,
+        shifted: (run.iter().enumerate())
+            .filter_map(|(n, t)| Some((ItemId::parse(&t.task.id)?, low + step * (n + 2) as f64)))
+            .collect(),
     }
 }
 
@@ -2325,6 +2375,75 @@ mod tests {
         assert_eq!(
             titles(&tasks, Planning::Active),
             ["aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc"]
+        );
+    }
+
+    #[test]
+    fn a_move_between_tasks_sharing_a_position_lands_where_dropped() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let [a, b, c, d] = [
+            "aaaaaaaaaaaa",
+            "bbbbbbbbbbbb",
+            "cccccccccccc",
+            "dddddddddddd",
+        ];
+        for id in [a, b, c, d] {
+            raw_positioned(&dir, id, 1.0);
+        }
+        raw_positioned(&dir, "eeeeeeeeeeee", 2.0);
+        tasks.move_before(d, Some(b)).unwrap();
+        assert_eq!(
+            titles(&tasks, Planning::Active),
+            [a, d, b, c, "eeeeeeeeeeee"]
+        );
+        // Down into the middle of the tie, as the jump back showed on iPhone.
+        tasks.move_before(a, Some(c)).unwrap();
+        assert_eq!(
+            titles(&dir.store(), Planning::Active),
+            [d, b, a, c, "eeeeeeeeeeee"]
+        );
+    }
+
+    #[test]
+    fn a_move_into_a_tie_rewrites_only_the_tasks_after_it() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let ids = [
+            "aaaaaaaaaaaa",
+            "bbbbbbbbbbbb",
+            "cccccccccccc",
+            "dddddddddddd",
+        ];
+        for id in ids {
+            raw_positioned(&dir, id, 1.0);
+        }
+        let untouched = file_of(&dir, &tasks.rows(Planning::Active).unwrap()[0].task);
+        tasks.move_before(ids[3], Some(ids[2])).unwrap();
+        assert_eq!(
+            file_of(&dir, &tasks.rows(Planning::Active).unwrap()[0].task),
+            untouched
+        );
+    }
+
+    #[test]
+    fn a_subtask_moved_to_the_end_lands_below_a_tie() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let (p, q) = ("aaaaaaaaaaaa", "bbbbbbbbbbbb");
+        raw_positioned(&dir, p, 1.0);
+        raw_positioned(&dir, q, 1.0);
+        raw_positioned(&dir, "cccccccccccc", 1.0);
+        let one = tasks.create_subtask(p, "one", 4, &[]).unwrap();
+        tasks.create_subtask(p, "two", 4, &[]).unwrap();
+        assert_eq!(
+            titles(&tasks, Planning::Active),
+            [p, "one", "two", q, "cccccccccccc"]
+        );
+        tasks.move_subtask(&one.id, None).unwrap();
+        assert_eq!(
+            titles(&dir.store(), Planning::Active),
+            [p, "two", "one", q, "cccccccccccc"]
         );
     }
 
