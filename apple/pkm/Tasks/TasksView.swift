@@ -132,7 +132,7 @@ private struct ClosedToast: View {
     }
 }
 
-/// A Tag's name in its Tag Color, Default being the tertiary grey.
+/// A Tag's name in its Tag Color, Default being the secondary grey.
 private func tagText(_ tag: TagEntry) -> Text {
     Text(tag.name).foregroundStyle(tag.style())
 }

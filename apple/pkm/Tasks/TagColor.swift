@@ -3,7 +3,7 @@ import SwiftUI
 extension TagEntry {
     /// The Tag Color as picked, used as it is in Light and Dark mode; `fallback`
     /// for Default, which adapts to Dark mode.
-    func style(default fallback: some ShapeStyle = .tertiary) -> AnyShapeStyle {
+    func style(default fallback: some ShapeStyle = .secondary) -> AnyShapeStyle {
         color.flatMap(Color.init(tagColor:)).map { AnyShapeStyle($0) } ?? AnyShapeStyle(fallback)
     }
 }
