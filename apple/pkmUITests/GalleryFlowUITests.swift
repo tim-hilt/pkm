@@ -128,4 +128,23 @@ import XCTest
         XCTAssertTrue(bar.buttons["main-menu"].exists, "the menu is in the bar")
         XCTAssertLessThan(bar.buttons["back-to-gallery"].frame.midX, bar.buttons["main-menu"].frame.midX)
     }
+
+    /// Export, from the main menu: a preview of the image, to save or copy.
+    func testExportShowsThePreviewToSaveOrCopy() {
+        openDrawings()
+        app.buttons["new-drawing"].tap()
+        drawARectangle()
+
+        app.navigationBars.firstMatch.buttons["main-menu"].tap()
+        let export = app.buttons["Export…"]
+        XCTAssertTrue(export.waitForExistence(timeout: 5))
+        export.tap()
+
+        XCTAssertTrue(app.staticTexts["Export Image"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.images["Preview"].exists)
+        XCTAssertTrue(app.buttons["Save PNG…"].exists)
+        let copy = app.buttons["Copy to Clipboard"]
+        copy.tap()
+        XCTAssertTrue(app.buttons["Copied"].waitForExistence(timeout: 5))
+    }
 }

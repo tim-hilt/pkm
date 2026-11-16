@@ -4,7 +4,7 @@ import { Appearance } from "./settings/Appearance";
 import { applyChromeColors } from "./drawings/chrome/ChromeColors";
 import { SettingsView } from "./settings/SettingsView";
 import { DrawingSettings } from "./drawings/chrome/DrawingSettings";
-import { DrawingExport, downloadInBrowser } from "./drawings/export/DrawingExport";
+import { copyInBrowser, DrawingExport, downloadInBrowser } from "./drawings/export/DrawingExport";
 import { exportPng } from "./drawings/export/PngExport";
 import type { Core } from "./core/Core";
 import { DrawingStore } from "./drawings/gallery/DrawingStore";
@@ -99,7 +99,8 @@ export async function startApp(
           appearance,
           export: new DrawingExport(drawing, {
             save: downloadInBrowser,
-            png: (scope, background) => exportPng(device, font, drawing.editor, scope, background),
+            copy: copyInBrowser,
+            png: (scope) => exportPng(device, font, drawing.editor, scope),
           }),
         });
         drawing.onMerged = shown.refresh;

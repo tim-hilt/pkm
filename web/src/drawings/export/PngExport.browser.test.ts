@@ -34,8 +34,8 @@ function twoRectangles(): Editor {
   return editor;
 }
 
-const render = (editor: Editor, scope: ExportScope, background: boolean) =>
-  renderExport(harness.device, harness.font, editor, scope, background);
+const render = (editor: Editor, scope: ExportScope) =>
+  renderExport(harness.device, harness.font, editor, scope);
 
 const alpha = (image: RenderedImage, x: number, y: number) =>
   image.rgba[(y * image.width + x) * bytesPerPixel + 3];
@@ -51,7 +51,7 @@ function hasInk(image: RenderedImage): boolean {
 
 describe("PNG export", () => {
   it("exports the Scene at twice its size with padding", async () => {
-    const image = (await render(twoRectangles(), ExportScope.Scene, true))!;
+    const image = (await render(twoRectangles(), ExportScope.Scene))!;
 
     // (300 + 2 * 10) x (50 + 2 * 10) at 2x
     expect([image.width, image.height]).toEqual([640, 140]);
@@ -61,10 +61,10 @@ describe("PNG export", () => {
   });
 
   it("is the same in Dark mode as in light, as Dark mode is display only", async () => {
-    const light = (await render(twoRectangles(), ExportScope.Scene, true))!;
+    const light = (await render(twoRectangles(), ExportScope.Scene))!;
     const editor = twoRectangles();
     editor.setDarkMode(true);
-    const dark = (await render(editor, ExportScope.Scene, true))!;
+    const dark = (await render(editor, ExportScope.Scene))!;
 
     expect([dark.width, dark.height]).toEqual([light.width, light.height]);
     expect(dark.rgba).toEqual(light.rgba);
@@ -77,17 +77,9 @@ describe("PNG export", () => {
         `{"type":"excalidraw","version":2,"elements":[{"id":"a","type":"rectangle","x":0,"y":0,"width":100.2,"height":50.3,"roundness":null}]}`,
       ),
     );
-    const image = (await render(editor, ExportScope.Scene, true))!;
+    const image = (await render(editor, ExportScope.Scene))!;
     // Math.round of 240.4 x 140.6
     expect([image.width, image.height]).toEqual([240, 141]);
-  });
-
-  it("leaves the paper transparent without a background", async () => {
-    const image = (await render(twoRectangles(), ExportScope.Scene, false))!;
-
-    expect(alpha(image, 2, 2)).toBe(0);
-    expect(alpha(image, image.width / 2, image.height / 2)).toBe(0); // between the rectangles
-    expect(hasInk(image)).toBe(true);
   });
 
   it("exports the Selection alone", async () => {
@@ -95,20 +87,20 @@ describe("PNG export", () => {
     drag(editor, [[300, 125]]);
     expect(editor.selection()).toEqual(["b"]);
 
-    const image = (await render(editor, ExportScope.Selection, true))!;
+    const image = (await render(editor, ExportScope.Selection))!;
     // (100 + 2 * 10) x (50 + 2 * 10) at 2x
     expect([image.width, image.height]).toEqual([240, 140]);
     expect(hasInk(image)).toBe(true);
 
-    expect(await render(twoRectangles(), ExportScope.Selection, true)).toBeUndefined();
+    expect(await render(twoRectangles(), ExportScope.Selection)).toBeUndefined();
   });
 
   it("makes the same export in Dark mode, on white paper", async () => {
     const editor = twoRectangles();
-    const light = (await render(editor, ExportScope.Scene, true))!;
+    const light = (await render(editor, ExportScope.Scene))!;
 
     editor.setDarkMode(true);
-    const dark = (await render(editor, ExportScope.Scene, true))!;
+    const dark = (await render(editor, ExportScope.Scene))!;
 
     expect([dark.width, dark.height]).toEqual([light.width, light.height]);
     expect(dark.rgba).toEqual(light.rgba);
@@ -121,27 +113,10 @@ describe("PNG export", () => {
       harness.font,
       twoRectangles(),
       ExportScope.Scene,
-      false,
     ))!;
 
     expect([...png.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
     const bitmap = await createImageBitmap(new Blob([png as Uint8Array<ArrayBuffer>]));
     expect(bitmap.width).toBe(640);
-  });
-
-  it("holds straight colour where the paper is transparent", async () => {
-    const editor = harness.core.makeEditor();
-    editor.load(
-      encoder.encode(
-        `{"type":"excalidraw","version":2,"elements":[{"id":"a","type":"rectangle","x":0,"y":0,"width":100,"height":50,"strokeColor":"#000000","backgroundColor":"#ff0000","fillStyle":"solid","opacity":50,"roughness":0,"roundness":null}]}`,
-      ),
-    );
-    const image = (await render(editor, ExportScope.Scene, false))!;
-    const middle = (image.height / 2) * image.width + image.width / 2;
-    const [red, green, blue, a] = image.rgba.subarray(middle * 4, middle * 4 + 4);
-    expect(a).toBeGreaterThan(110);
-    expect(a).toBeLessThan(145);
-    expect(red).toBeGreaterThan(240); // premultiplied it would be about half
-    expect([green, blue]).toEqual([0, 0]);
   });
 });

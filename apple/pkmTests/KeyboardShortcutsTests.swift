@@ -53,10 +53,10 @@ import Testing
                     .utf8))
         canvas.selectAll(nil)
         #expect(controller.hasSelection)
-        #expect(controller.hasElements, "Copy as PNG has something to export")
+        #expect(controller.hasElements, "Export has something to export")
         canvas.delete(nil)
         #expect(!controller.hasSelection)
-        #expect(!controller.hasElements, "Copy as PNG is disabled")
+        #expect(!controller.hasElements, "Export is disabled")
         #expect(controller.canUndo)
     }
 

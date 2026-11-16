@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 /// A Drawing in the Canvas with its controls, kept saved while it is open.
 struct DrawingView: View {
     let drawing: OpenDrawing
-    /// The Drawing as a `.excalidraw` file for the share sheet.
+    /// The Drawing as a `.excalidraw` file, for Save As.
     let export: ExportedDrawing
     let onBack: () -> Void
     @State private var controller = CanvasController()
@@ -19,7 +19,16 @@ struct DrawingView: View {
     @State private var actionRow = ActionRowModel()
     @State private var actionAnchors: [ActionRowItem: CGRect] = [:]
     @State private var actionRowTop: CGFloat = 0
+    @State private var isSavingAs = false
+    /// The image Export shows while it is open.
+    @State private var exported: ExportedImage?
     @Environment(\.scenePhase) private var scenePhase
+
+    private var file: DrawingFile {
+        DrawingFile(
+            saveAs: { isSavingAs = true },
+            export: { exported = ExportedImage(drawing.editor, name: drawing.name) })
+    }
 
     var body: some View {
         // On iPhone and iPad the system's navigation bar carries the Gallery
@@ -36,7 +45,7 @@ struct DrawingView: View {
                             .accessibilityIdentifier("back-to-gallery")
                         }
                         ToolbarItem(placement: .primaryAction) {
-                            MainMenu(drawing: drawing, export: export, controller: controller)
+                            MainMenu(file: file, controller: controller)
                         }
                     }
                 #endif
@@ -49,8 +58,13 @@ struct DrawingView: View {
                     .navigationBarTitleDisplayMode(.inline)
                 #endif
         }
+        .fileExporter(
+            isPresented: $isSavingAs, item: export, contentTypes: [.excalidraw],
+            defaultFilename: drawing.name
+        ) { _ in }
+        .sheet(item: $exported) { ExportSheet(exported: $0) }
+        .focusedSceneValue(\.drawingFile, file)
         #if os(macOS)
-            .focusedSceneValue(\.drawingExporter, DrawingExporter(drawing: drawing, export: export))
             .focusedSceneValue(\.backToGallery, onBack)
         #endif
     }
@@ -210,26 +224,17 @@ extension View {
 
 #if !os(macOS)
     /// Excalidraw's main menu in the navigation bar, as the system's own
-    /// menu button: exports the Drawing. On a Mac its items are in the menu
-    /// bar instead (`CanvasCommands`).
+    /// menu button: Save As and Export. On a Mac its items are in the menu
+    /// bar instead (`CanvasCommands`), which also has their shortcuts.
     private struct MainMenu: View {
-        let drawing: OpenDrawing
-        let export: ExportedDrawing
+        let file: DrawingFile
         let controller: CanvasController
 
         var body: some View {
             Menu {
-                ShareLink(item: export, preview: SharePreview(drawing.name)) {
-                    Label("Share", systemImage: "square.and.arrow.up")
-                }
-                .accessibilityIdentifier("export-drawing")
-                Menu {
-                    share("Export Scene as PNG", scope: .scene)
-                    share("Export Selection as PNG", scope: .selection)
-                        .disabled(!controller.hasSelection)
-                } label: {
-                    Label("Export PNG", systemImage: "photo")
-                }
+                Button("Save As…", systemImage: "square.and.arrow.down", action: file.saveAs)
+                Button("Export…", systemImage: "photo", action: file.export)
+                    .disabled(!controller.hasElements)
                 if offersPencilOnlyDrawing {
                     Section("Settings") {
                         Toggle(
@@ -242,11 +247,6 @@ extension View {
                 Label("Menu", systemImage: "ellipsis")
             }
             .accessibilityIdentifier("main-menu")
-        }
-
-        private func share(_ title: LocalizedStringKey, scope: ExportScope) -> some View {
-            let png = ExportedPNG(name: drawing.name, editor: drawing.editor, scope: scope)
-            return ShareLink(item: png, preview: SharePreview(drawing.name)) { Label(title, systemImage: "photo") }
         }
     }
 #endif

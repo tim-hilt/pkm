@@ -1,4 +1,4 @@
-import type { ExportScope } from "../../core/Core";
+import { ExportScope } from "../../core/Core";
 import type { OpenDrawing } from "../gallery/OpenDrawing";
 
 /** A file for the user to keep. */
@@ -8,17 +8,20 @@ export interface DownloadedFile {
   mimeType: string;
 }
 
-/** What `DrawingExport` needs from its surroundings: the browser's way to hand a file to the user, and the PNG of the Drawing. */
+/** What `DrawingExport` needs from its surroundings: the browser's download and clipboard, and the PNG of the Drawing. */
 export interface DrawingExportPorts {
   save(file: DownloadedFile): void;
+  /** Rejects if the browser refuses. */
+  copy(png: Uint8Array): Promise<void>;
   /** `undefined` if there is nothing to export. */
-  png(scope: ExportScope, background: boolean): Promise<Uint8Array | undefined>;
+  png(scope: ExportScope): Promise<Uint8Array | undefined>;
 }
 
 /**
- * What the main menu does with the open Drawing: downloads it as the
- * `.excalidraw` file exactly as stored, or as PNG; both named after the
- * Drawing. A port of the Swift `DrawingExporter`.
+ * What the main menu does with the open Drawing: Save as, the `.excalidraw`
+ * file exactly as stored, and Export, a PNG of the Selection (or of the Scene
+ * with nothing selected) to download or copy; files named after the Drawing.
+ * A port of the Swift `DrawingFile`.
  */
 export class DrawingExport {
   constructor(
@@ -27,7 +30,7 @@ export class DrawingExport {
   ) {}
 
   /** What the Drawing is saved as, with every change so far in it. */
-  async downloadDrawing(): Promise<void> {
+  async saveAs(): Promise<void> {
     this.ports.save({
       name: `${this.drawing.name}.excalidraw`,
       bytes: await this.drawing.file(),
@@ -35,10 +38,24 @@ export class DrawingExport {
     });
   }
 
-  /** Does nothing if there is nothing to export (an empty Scene, no Selection). */
-  async downloadPng(scope: ExportScope, background: boolean): Promise<void> {
-    const bytes = await this.ports.png(scope, background);
-    if (bytes) this.ports.save({ name: `${this.drawing.name}.png`, bytes, mimeType: "image/png" });
+  /** The PNG Export shows; `undefined` if there is nothing to export. */
+  image(): Promise<Uint8Array | undefined> {
+    const selected = this.drawing.editor.selection().length > 0;
+    return this.ports.png(selected ? ExportScope.Selection : ExportScope.Scene);
+  }
+
+  downloadPng(png: Uint8Array): void {
+    this.ports.save({ name: `${this.drawing.name}.png`, bytes: png, mimeType: "image/png" });
+  }
+
+  /** Whether the browser took it. */
+  async copyPng(png: Uint8Array): Promise<boolean> {
+    try {
+      await this.ports.copy(png);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -51,4 +68,10 @@ export function downloadInBrowser({ name, bytes, mimeType }: DownloadedFile): vo
   link.click();
   // The download has started by the time the task is over.
   setTimeout(() => URL.revokeObjectURL(url));
+}
+
+/** Puts `png` on the clipboard through the Async Clipboard API. */
+export function copyInBrowser(png: Uint8Array): Promise<void> {
+  const blob = new Blob([png as Uint8Array<ArrayBuffer>], { type: "image/png" });
+  return navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
 }

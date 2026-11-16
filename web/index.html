@@ -704,6 +704,17 @@
         opacity: 0.4;
         cursor: default;
       }
+      .main-menu-item:has(kbd) {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .main-menu-item kbd {
+        font: inherit;
+        font-size: 0.8rem;
+        opacity: 0.6;
+      }
       .main-menu-item[role="menuitemcheckbox"]::before {
         content: "";
         display: inline-block;
@@ -716,6 +727,77 @@
         padding: 8px 12px 2px;
         font-size: 0.75rem;
         opacity: 0.6;
+      }
+      /* Export: the preview of the image, and what to do with it. */
+      .export-dialog {
+        box-sizing: border-box;
+        width: min(640px, calc(100vw - 32px));
+        padding: 16px;
+        border: 0;
+        border-radius: 12px;
+        background: var(--island-fill);
+        color: var(--control-ink);
+        box-shadow: 0 4px 24px rgb(0 0 0 / 0.35);
+      }
+      .export-dialog[open] {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .export-dialog::backdrop {
+        background: rgb(0 0 0 / 0.4);
+      }
+      .export-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .export-header h2 {
+        margin: 0;
+        font-size: 1.2rem;
+      }
+      .export-close {
+        width: 44px;
+        height: 44px;
+        border: 0;
+        border-radius: 8px;
+        background: none;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+      }
+      .export-frame {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: min(360px, 50vh);
+        padding: 16px;
+        border: 1px solid var(--input-border);
+        border-radius: 8px;
+      }
+      .export-preview {
+        max-width: 100%;
+        max-height: 100%;
+        box-shadow: 0 1px 4px rgb(0 0 0 / 0.25);
+      }
+      .export-buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .export-buttons button {
+        min-height: 44px;
+        padding: 0 16px;
+        border: 0;
+        border-radius: 8px;
+        background: var(--control-fill);
+        color: var(--control-ink);
+        font: inherit;
+        cursor: pointer;
+      }
+      .export-buttons .primary {
+        background: var(--accent);
+        color: var(--accent-ink);
       }
       /* The Context menu, over the Canvas where it was opened. */
       .context-menu {

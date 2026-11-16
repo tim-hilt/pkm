@@ -1,5 +1,4 @@
 import Foundation
-import UniformTypeIdentifiers
 
 #if os(macOS)
     import AppKit
@@ -11,8 +10,7 @@ import UniformTypeIdentifiers
 /// Excalidraw's clipboard JSON (`excalidraw/clipboard`) as plain text, which
 /// the core writes and reads, so Elements move between this app and
 /// excalidraw.com. What is on the pasteboard but is not that (or an image,
-/// see `CanvasImageInput`) is not ours to paste. Copy as PNG puts the PNG
-/// export there.
+/// see `CanvasImageInput`) is not ours to paste.
 extension CanvasMetalView {
     /// The Selection as clipboard text, which `cutting` also deletes from the
     /// Scene; `nil` with nothing selected.
@@ -24,28 +22,6 @@ extension CanvasMetalView {
 
     /// Whether there is a Selection to copy or cut.
     var canCopy: Bool { editor?.selection().isEmpty == false }
-
-    /// What Copy as PNG puts on the pasteboard: the PNG export of the
-    /// Selection, or of the Scene with nothing selected, as Excalidraw's Copy
-    /// to clipboard as PNG; `nil` if there is nothing to export. With the
-    /// background, as every PNG export here (the web app's follows its export
-    /// setting, which the native app does not have).
-    var pngForPasteboard: Data? {
-        guard let editor else { return nil }
-        return PNGExport.pngData(editor, scope: canCopy ? .selection : .scene, background: true)
-    }
-
-    /// Copy as PNG (⇧⌥C, and the Context menu): leaves the pasteboard as it
-    /// was if there is nothing to export.
-    func copyAsPNG() {
-        guard let png = pngForPasteboard else { return }
-        #if os(macOS)
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setData(png, forType: .png)
-        #else
-            UIPasteboard.general.setData(png, forPasteboardType: UTType.png.identifier)
-        #endif
-    }
 
     /// Pastes `text` if it is Excalidraw clipboard JSON: around `point` (in
     /// the Canvas's coordinates; the mouse pointer on a Mac), else in the

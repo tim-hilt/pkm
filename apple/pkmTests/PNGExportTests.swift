@@ -4,7 +4,7 @@ import Testing
 @testable import pkm
 
 /// PNG export: the Scene or the Selection, drawn at 2x by the Metal renderer
-/// offscreen, with or without the paper behind it.
+/// offscreen on white paper, and what Export makes of it.
 @MainActor @Suite struct PNGExportTests {
     /// Two 100 x 50 rectangles at (100, 100) and (300, 100).
     private func twoRectangles() throws -> Editor {
@@ -29,7 +29,7 @@ import Testing
     }
 
     @Test func theSceneIsExportedAtTwiceItsSizeWithPadding() throws {
-        let image = try #require(PNGExport.render(try twoRectangles(), scope: .scene, background: true))
+        let image = try #require(PNGExport.render(try twoRectangles(), scope: .scene))
 
         #expect(image.width == 640 && image.height == 140, "(300 + 2 * 10) x (50 + 2 * 10) at 2x")
         #expect(hasInk(image))
@@ -42,20 +42,13 @@ import Testing
             #"{"type":"excalidraw","version":2,"elements":[{"id":"a","type":"rectangle","x":0,"y":0,"width":100.2,"height":50.3,"roundness":null}]}"#
         try editor.load(bytes: Data(drawing.utf8))
 
-        let image = try #require(PNGExport.render(editor, scope: .scene, background: true))
+        let image = try #require(PNGExport.render(editor, scope: .scene))
 
         #expect(image.width == 240 && image.height == 141, "Math.round of 240.4 x 140.6")
     }
 
-    @Test func withoutBackgroundThePaperIsTransparent() throws {
-        let image = try #require(PNGExport.render(try twoRectangles(), scope: .scene, background: false))
-
-        #expect(alpha(image, 2, 2) == 0)
-        #expect(alpha(image, image.width / 2, image.height / 2) == 0, "between the rectangles")
-        #expect(hasInk(image))
-    }
-
-    @Test func theSelectionIsExportedAlone() throws {
+    /// The rectangles with the second selected.
+    private func secondSelected() throws -> Editor {
         let editor = try twoRectangles()
         let modifiers = Modifiers(shift: false, ctrl: false, alt: false, meta: false)
         for (phase, time) in [(PointerPhase.down, 0.0), (.up, 0.05)] {
@@ -65,31 +58,50 @@ import Testing
                     modifiers: modifiers))
         }
         #expect(editor.selection() == ["b"])
+        return editor
+    }
 
-        let image = try #require(PNGExport.render(editor, scope: .selection, background: true))
+    @Test func theSelectionIsExportedAlone() throws {
+        let editor = try secondSelected()
+
+        let image = try #require(PNGExport.render(editor, scope: .selection))
         #expect(image.width == 240 && image.height == 140, "(100 + 2 * 10) x (50 + 2 * 10) at 2x")
         #expect(hasInk(image))
 
-        #expect(PNGExport.render(try twoRectangles(), scope: .selection, background: true) == nil, "nothing selected")
+        #expect(PNGExport.render(try twoRectangles(), scope: .selection) == nil, "nothing selected")
     }
 
     @Test func anExportMadeInDarkModeMatchesTheLightExport() throws {
         let editor = try twoRectangles()
-        let light = try #require(PNGExport.render(editor, scope: .scene, background: true))
+        let light = try #require(PNGExport.render(editor, scope: .scene))
 
         editor.setDarkMode(on: true)
-        let dark = try #require(PNGExport.render(editor, scope: .scene, background: true))
+        let dark = try #require(PNGExport.render(editor, scope: .scene))
 
         #expect(dark.width == light.width && dark.height == light.height)
         #expect(dark.bgra == light.bgra)
         #expect(dark.pixel(2, 2) == (255, 255, 255), "paper stays white")
     }
 
-    @Test func theExportIsAPNG() throws {
-        let data = try #require(PNGExport.pngData(try twoRectangles(), scope: .scene, background: false))
+    @Test func exportShowsTheSelectionAsPNGNamedAfterTheDrawing() throws {
+        let editor = try secondSelected()
 
-        let decoded = try #require(RenderedImage(pngData: data))
-        #expect(decoded.width == 640)
-        #expect(alpha(decoded, 2, 2) == 0)
+        let exported = try #require(ExportedImage(editor, name: "Plan"))
+
+        #expect(exported.image == PNGExport.render(editor, scope: .selection))
+        #expect(RenderedImage(pngData: exported.png) == exported.image)
+        #expect(exported.name == "Plan")
+    }
+
+    @Test func exportShowsTheSceneWithNothingSelected() throws {
+        let editor = try twoRectangles()
+
+        let exported = try #require(ExportedImage(editor, name: "Plan"))
+
+        #expect(exported.image == PNGExport.render(editor, scope: .scene))
+    }
+
+    @Test func exportHasNothingOnAnEmptyScene() {
+        #expect(ExportedImage(Editor.withExcalifont(), name: "Plan") == nil)
     }
 }

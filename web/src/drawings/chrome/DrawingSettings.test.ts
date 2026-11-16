@@ -20,16 +20,6 @@ const memory = (): SettingsStorage & { values: Map<string, string> } => {
 };
 
 describe("the settings of the main menu", () => {
-  it("puts a white background behind PNG exports until told not to, and remembers", () => {
-    const storage = memory();
-    expect(new DrawingSettings(storage).exportBackground).toBe(true);
-    const settings = new DrawingSettings(storage);
-    settings.exportBackground = false;
-    expect(new DrawingSettings(storage).exportBackground).toBe(false);
-    settings.exportBackground = true;
-    expect(new DrawingSettings(storage).exportBackground).toBe(true);
-  });
-
   it("leaves Pencil-only drawing to the core until chosen", () => {
     const editor = core.makeEditor();
     const settings = new DrawingSettings(memory());

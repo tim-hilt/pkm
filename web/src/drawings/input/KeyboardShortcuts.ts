@@ -72,10 +72,24 @@ export function shortcutOf(event: KeyLike, apple: boolean): KeyChord | undefined
   };
 }
 
-/**
- * Whether `chord` is Copy as PNG: ⇧⌥C, as on excalidraw.com. The client's own,
- * not the core's: like copy, it goes to the platform's clipboard.
- */
-export function isCopyPngShortcut({ key, modifiers }: KeyChord): boolean {
-  return key === "c" && modifiers.shift && modifiers.alt && !modifiers.meta && !modifiers.ctrl;
+/** The Drawing's file commands in the main menu: the client's own, not the core's. */
+export enum FileCommand {
+  SaveAs,
+  Export,
+}
+
+/** The file command `chord` is: ⌘S Save as, ⇧⌘E Export, as on excalidraw.com. */
+export function fileCommandOf({ key, modifiers }: KeyChord): FileCommand | undefined {
+  if (!modifiers.meta || modifiers.alt || modifiers.ctrl) return undefined;
+  if (key === "s" && !modifiers.shift) return FileCommand.SaveAs;
+  if (key === "e" && modifiers.shift) return FileCommand.Export;
+  return undefined;
+}
+
+/** How the main menu shows the shortcut of `command`: ⌘ on Apple platforms, Ctrl elsewhere. */
+export function fileShortcutLabel(command: FileCommand, apple: boolean): string {
+  const key = command === FileCommand.SaveAs ? "S" : "E";
+  const shift = command === FileCommand.Export;
+  if (apple) return `${shift ? "⇧" : ""}⌘${key}`;
+  return `Ctrl+${shift ? "Shift+" : ""}${key}`;
 }

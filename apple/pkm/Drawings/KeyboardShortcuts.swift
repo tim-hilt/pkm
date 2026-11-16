@@ -53,17 +53,18 @@ struct MenuShortcut {
 /// The Canvas's Commands in the app's menus, for the Drawing in front.
 struct CanvasCommands: Commands {
     @FocusedValue(CanvasController.self) private var controller
+    @FocusedValue(\.drawingFile) private var file
     #if os(macOS)
-        @FocusedValue(\.drawingExporter) private var exporter
         @FocusedValue(\.backToGallery) private var backToGallery
     #endif
 
     var body: some Commands {
-        // A Mac has no main menu button on the Canvas: its items are here.
-        #if os(macOS)
-            // The Canvas has no Gallery button on a Mac: ⌘W, which would
-            // close the app's only window, leaves the Drawing instead.
-            CommandGroup(replacing: .saveItem) {
+        // The main menu's items, with their shortcuts as on excalidraw.com.
+        // A Mac has no main menu button on the Canvas: they are only here.
+        CommandGroup(replacing: .saveItem) {
+            #if os(macOS)
+                // The Canvas has no Gallery button on a Mac: ⌘W, which would
+                // close the app's only window, leaves the Drawing instead.
                 if let backToGallery {
                     Button("Back to Gallery", action: backToGallery)
                         .keyboardShortcut("w")
@@ -71,22 +72,16 @@ struct CanvasCommands: Commands {
                     Button("Close") { NSApp.keyWindow?.performClose(nil) }
                         .keyboardShortcut("w")
                 }
-            }
-            CommandGroup(replacing: .importExport) {
-                Button("Export…") { exporter?.exportDrawing() }
-                    .disabled(exporter == nil)
-                Menu("Export PNG") {
-                    Button("Export Scene as PNG…") {
-                        exporter?.exportPNG(scope: .scene)
-                    }
-                    Button("Export Selection as PNG…") {
-                        exporter?.exportPNG(scope: .selection)
-                    }
-                    .disabled(controller?.hasSelection != true)
-                }
-                .disabled(exporter == nil)
-            }
-        #endif
+            #endif
+            Button("Save As…") { file?.saveAs() }
+                .keyboardShortcut("s")
+                .disabled(file == nil)
+        }
+        CommandGroup(replacing: .importExport) {
+            Button("Export…") { file?.export() }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+                .disabled(file == nil || controller?.hasElements != true)
+        }
         CommandGroup(replacing: .undoRedo) {
             items(for: [.undo, .redo])
         }
@@ -94,12 +89,6 @@ struct CanvasCommands: Commands {
         // `CanvasMetalView.selectAll` and `delete`), so that they are not
         // listed twice.
         CommandGroup(after: .pasteboard) {
-            // The client's own, not the core's: like Copy, it goes to the
-            // pasteboard. ⇧⌥C as on excalidraw.com.
-            Button("Copy as PNG") { controller?.canvas?.copyAsPNG() }
-                .keyboardShortcut("c", modifiers: [.shift, .option])
-                .disabled(controller?.hasElements != true || controller?.isEditingText == true)
-            Divider()
             items(for: [.duplicate])
         }
         CommandGroup(after: .toolbar) {

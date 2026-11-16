@@ -7,11 +7,9 @@ export interface SettingsStorage {
 }
 
 const pencilOnlyKey = "pencilOnlyDrawing";
-const exportBackgroundKey = "exportBackground";
 
 /**
- * The settings of the main menu, kept per Device: whether a PNG export has
- * the white paper behind it (on until turned off) and Pencil-only drawing.
+ * The setting of the main menu, kept per Device: Pencil-only drawing.
  * A port of the Swift `CanvasController`'s handling of the latter.
  *
  * The core turns Pencil-only drawing on by itself with the first pen input.
@@ -23,14 +21,6 @@ export class DrawingSettings {
   private restored: Editor | undefined;
 
   constructor(private readonly storage: SettingsStorage) {}
-
-  get exportBackground(): boolean {
-    return this.storage.getItem(exportBackgroundKey) !== "false";
-  }
-
-  set exportBackground(on: boolean) {
-    this.storage.setItem(exportBackgroundKey, String(on));
-  }
 
   /** Whether `editor` has Pencil-only drawing on, after restoring the stored choice into it (once per editor) and storing what the core decided. Call after every input. */
   pencilOnlyDrawing(editor: Editor): boolean {

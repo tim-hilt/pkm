@@ -24,7 +24,7 @@ import Testing
     @Test(arguments: names) func theFixtureExportsAsPNG(name: String) throws {
         let editor = Editor.withExcalifont()
         try editor.load(bytes: Data(contentsOf: Self.fixtures.appending(path: "\(name).excalidraw")))
-        let image = try #require(PNGExport.render(editor, scope: .scene, background: true))
+        let image = try #require(PNGExport.render(editor, scope: .scene))
 
         let size = try #require(Self.fixtureSizes.first { $0.0 == name })
         #expect((image.width, image.height) == (size.1, size.2), "excalidraw.com's size")

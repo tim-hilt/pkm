@@ -3,7 +3,14 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { type Core, type Editor, Tool, loadCore } from "../../core/Core";
 import { Excalifont } from "../text/Excalifont";
 import { drag } from "../testing/Gestures";
-import { isApplePlatform, isCopyPngShortcut, shortcutOf, type KeyLike } from "./KeyboardShortcuts";
+import {
+  FileCommand,
+  fileCommandOf,
+  fileShortcutLabel,
+  isApplePlatform,
+  shortcutOf,
+  type KeyLike,
+} from "./KeyboardShortcuts";
 
 const generated = new URL("../../../generated/", import.meta.url);
 const font = new Excalifont(
@@ -145,25 +152,42 @@ describe("pressing a key on the core", () => {
   });
 });
 
-describe("Copy as PNG", () => {
-  it("is ⇧⌥C, as on excalidraw.com, on every platform", () => {
-    // On a Mac ⌥⇧C types "Ç".
-    const mac = key("Ç", { code: "KeyC", altKey: true, shiftKey: true });
-    const other = key("C", { code: "KeyC", altKey: true, shiftKey: true });
-    expect(isCopyPngShortcut(shortcutOf(mac, true)!)).toBe(true);
-    expect(isCopyPngShortcut(shortcutOf(other, false)!)).toBe(true);
+describe("the Drawing's file shortcuts", () => {
+  it("are ⌘S for Save as and ⇧⌘E for Export, Ctrl off Apple platforms, as on excalidraw.com", () => {
+    expect(fileCommandOf(shortcutOf(key("s", { code: "KeyS", metaKey: true }), true)!)).toBe(
+      FileCommand.SaveAs,
+    );
+    expect(fileCommandOf(shortcutOf(key("s", { code: "KeyS", ctrlKey: true }), false)!)).toBe(
+      FileCommand.SaveAs,
+    );
+    const mac = key("E", { code: "KeyE", metaKey: true, shiftKey: true });
+    const other = key("E", { code: "KeyE", ctrlKey: true, shiftKey: true });
+    expect(fileCommandOf(shortcutOf(mac, true)!)).toBe(FileCommand.Export);
+    expect(fileCommandOf(shortcutOf(other, false)!)).toBe(FileCommand.Export);
   });
 
-  it("is not C with other modifiers", () => {
+  it("are not S and E with other modifiers", () => {
     for (const extra of [
       {},
-      { altKey: true },
       { shiftKey: true },
-      { altKey: true, shiftKey: true, metaKey: true },
+      { altKey: true, metaKey: true },
+      { ctrlKey: true, metaKey: true },
     ]) {
-      expect(isCopyPngShortcut(shortcutOf(key("c", { code: "KeyC", ...extra }), true)!)).toBe(
-        false,
+      expect(fileCommandOf(shortcutOf(key("s", { code: "KeyS", ...extra }), true)!)).toBe(
+        undefined,
       );
     }
+    for (const extra of [{}, { metaKey: true }, { metaKey: true, shiftKey: true, altKey: true }]) {
+      expect(fileCommandOf(shortcutOf(key("e", { code: "KeyE", ...extra }), true)!)).toBe(
+        undefined,
+      );
+    }
+  });
+
+  it("are shown as the platform writes them", () => {
+    expect(fileShortcutLabel(FileCommand.SaveAs, true)).toBe("⌘S");
+    expect(fileShortcutLabel(FileCommand.Export, true)).toBe("⇧⌘E");
+    expect(fileShortcutLabel(FileCommand.SaveAs, false)).toBe("Ctrl+S");
+    expect(fileShortcutLabel(FileCommand.Export, false)).toBe("Ctrl+Shift+E");
   });
 });

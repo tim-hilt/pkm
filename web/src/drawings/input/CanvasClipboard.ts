@@ -1,4 +1,4 @@
-import { type Editor, ExportScope } from "../../core/Core";
+import type { Editor } from "../../core/Core";
 
 /** One thing on the clipboard, offered in several types; the Async Clipboard API's `ClipboardItem`. */
 export interface ClipboardEntry {
@@ -9,7 +9,6 @@ export interface ClipboardEntry {
 /** What is used of the Async Clipboard API (`navigator.clipboard`). */
 export interface SystemClipboard {
   writeText(text: string): Promise<void>;
-  write(items: ClipboardItem[]): Promise<void>;
   read(): Promise<ClipboardEntry[]>;
 }
 
@@ -19,8 +18,6 @@ export interface ClipboardHost {
   images(sources: Uint8Array[], at?: { x: number; y: number }): void;
   /** The editor was changed by a cut or a paste of Elements. */
   changed(): void;
-  /** The PNG export of `scope`; `undefined` if there is nothing to export. */
-  png(scope: ExportScope): Promise<Uint8Array | undefined>;
 }
 
 /** What is used of a clipboard event's `clipboardData`. */
@@ -37,8 +34,7 @@ type Point = { x: number; y: number };
  * on the clipboard is Excalidraw's clipboard JSON (`excalidraw/clipboard`) as
  * plain text, which the core writes and reads, so Elements move between this
  * app, excalidraw.com and the native app. Images on the clipboard go to the
- * image insertion. What else is there is not ours to paste. Copy as PNG puts
- * the PNG export there.
+ * image insertion. What else is there is not ours to paste.
  *
  * Two routes, as on excalidraw.com: the keyboard and the browser's Edit menu
  * arrive as the page's copy, cut and paste events (`listen`), which need no
@@ -48,7 +44,7 @@ type Point = { x: number; y: number };
  */
 export class CanvasClipboard {
   constructor(
-    private readonly editor: Pick<Editor, "copySelection" | "cutSelection" | "paste" | "selection">,
+    private readonly editor: Pick<Editor, "copySelection" | "cutSelection" | "paste">,
     private readonly system: SystemClipboard,
     private readonly host: ClipboardHost,
   ) {}
@@ -100,25 +96,6 @@ export class CanvasClipboard {
     if (text === undefined) return;
     this.host.changed();
     await this.write(text);
-  }
-
-  /**
-   * Puts a PNG of the Selection, or of the Scene with nothing selected, on the
-   * clipboard, as Excalidraw's Copy to clipboard as PNG; nothing if there is
-   * nothing to export or the browser refuses.
-   */
-  async copyPng(): Promise<void> {
-    const scope = this.editor.selection().length > 0 ? ExportScope.Selection : ExportScope.Scene;
-    // Written at once, the PNG to follow: Safari writes only during the user's gesture.
-    const png = this.host.png(scope).then((bytes) => {
-      if (!bytes) throw new Error("Nothing to export");
-      return new Blob([bytes as Uint8Array<ArrayBuffer>], { type: "image/png" });
-    });
-    try {
-      await this.system.write([new ClipboardItem({ "image/png": png })]);
-    } catch {
-      // Nothing to export, or refused: the clipboard stays as it was.
-    }
   }
 
   /** Pastes Elements from the clipboard, else images, around `at` (in the Canvas's coordinates) or in the middle of the view. */

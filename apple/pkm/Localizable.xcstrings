@@ -562,6 +562,17 @@
         }
       }
     },
+    "Copied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copied"
+          }
+        }
+      }
+    },
     "Copy": {
       "extractionState": "manual",
       "localizations": {
@@ -569,6 +580,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Copy"
+          }
+        }
+      }
+    },
+    "Copy to Clipboard": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy to Clipboard"
           }
         }
       }
@@ -914,57 +936,13 @@
         }
       }
     },
-    "Export PNG": {
+    "Export Image": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Export PNG"
-          }
-        }
-      }
-    },
-    "Export Scene as PNG": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Export Scene as PNG"
-          }
-        }
-      }
-    },
-    "Export Scene as PNG…": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Export Scene as PNG…"
-          }
-        }
-      }
-    },
-    "Export Selection as PNG": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Export Selection as PNG"
-          }
-        }
-      }
-    },
-    "Export Selection as PNG…": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Export Selection as PNG…"
+            "value": "Export Image"
           }
         }
       }
@@ -1640,6 +1618,17 @@
         }
       }
     },
+    "Preview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preview"
+          }
+        }
+      }
+    },
     "Priority": {
       "extractionState": "manual",
       "localizations": {
@@ -1904,6 +1893,28 @@
         }
       }
     },
+    "Save As…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save As…"
+          }
+        }
+      }
+    },
+    "Save PNG…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save PNG…"
+          }
+        }
+      }
+    },
     "Search or create": {
       "extractionState": "manual",
       "localizations": {
@@ -1977,17 +1988,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Shades"
-          }
-        }
-      }
-    },
-    "Share": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Share"
           }
         }
       }

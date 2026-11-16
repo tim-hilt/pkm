@@ -1,12 +1,11 @@
-import { ExportScope } from "../../core/Core";
+import { FileCommand, fileShortcutLabel, isApplePlatform } from "../input/KeyboardShortcuts";
 
 /** What the main menu does and shows; `MainMenu.update` reads the state again after every event. */
 export interface MainMenuActions {
-  downloadDrawing(): void;
-  downloadPng(scope: ExportScope): void;
-  hasSelection(): boolean;
-  exportBackground(): boolean;
-  setExportBackground(on: boolean): void;
+  saveAs(): void;
+  exportImage(): void;
+  /** Whether there is something to export. */
+  canExport(): boolean;
   pencilOnlyDrawing(): boolean;
   setPencilOnlyDrawing(on: boolean): void;
 }
@@ -14,17 +13,16 @@ export interface MainMenuActions {
 const moreGlyph = `<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`;
 
 /**
- * Excalidraw's main menu, top right, a port of the Swift `MainMenu`: downloads
- * the Drawing as `.excalidraw`, exports PNG of the Scene or the Selection, and
- * the settings of PNG export (background) and Pen-only drawing. Native
- * elements with the menu roles, so that it is labelled and reachable by keyboard.
+ * Excalidraw's main menu, top right, a port of the Swift `MainMenu`: Save as
+ * (the `.excalidraw` file), Export (the image) with their shortcuts, and the
+ * Pen-only drawing setting. Native elements with the menu roles, so that it
+ * is labelled and reachable by keyboard.
  */
 export class MainMenu {
   readonly element = document.createElement("div");
   private readonly toggle = document.createElement("button");
   private readonly menu = document.createElement("div");
-  private readonly selectionItem: HTMLButtonElement;
-  private readonly background: HTMLButtonElement;
+  private readonly exportItem: HTMLButtonElement;
   private readonly penOnly: HTMLButtonElement;
   private stopWatching: (() => void) | undefined;
 
@@ -45,21 +43,21 @@ export class MainMenu {
     this.menu.setAttribute("aria-label", "Main menu");
     this.menu.addEventListener("keydown", (event) => this.key(event));
 
-    this.selectionItem = this.item("Export Selection as PNG", "menuitem", () =>
-      actions.downloadPng(ExportScope.Selection),
-    );
-    this.background = this.item("PNG background", "menuitemcheckbox", () =>
-      actions.setExportBackground(!actions.exportBackground()),
-    );
+    const apple = isApplePlatform(navigator.platform);
+    this.exportItem = this.item("Export…", "menuitem", () => actions.exportImage(), {
+      label: fileShortcutLabel(FileCommand.Export, apple),
+      aria: apple ? "Meta+Shift+E" : "Control+Shift+E",
+    });
     this.penOnly = this.item("Pen-only drawing", "menuitemcheckbox", () =>
       actions.setPencilOnlyDrawing(!actions.pencilOnlyDrawing()),
     );
     this.menu.append(
-      this.item("Download Drawing", "menuitem", () => actions.downloadDrawing()),
-      this.item("Export Scene as PNG", "menuitem", () => actions.downloadPng(ExportScope.Scene)),
-      this.selectionItem,
+      this.item("Save as…", "menuitem", () => actions.saveAs(), {
+        label: fileShortcutLabel(FileCommand.SaveAs, apple),
+        aria: apple ? "Meta+S" : "Control+S",
+      }),
+      this.exportItem,
       this.separator("Settings"),
-      this.background,
       this.penOnly,
     );
     this.element.append(this.toggle, this.menu);
@@ -68,8 +66,7 @@ export class MainMenu {
 
   /** Shows the state of the Selection and the settings as they are now. */
   update(): void {
-    this.selectionItem.disabled = !this.actions.hasSelection();
-    this.background.setAttribute("aria-checked", String(this.actions.exportBackground()));
+    this.exportItem.disabled = !this.actions.canExport();
     this.penOnly.setAttribute("aria-checked", String(this.actions.pencilOnlyDrawing()));
   }
 
@@ -77,12 +74,24 @@ export class MainMenu {
     this.hide();
   }
 
-  private item(label: string, role: string, run: () => void): HTMLButtonElement {
+  private item(
+    label: string,
+    role: string,
+    run: () => void,
+    shortcut?: { label: string; aria: string },
+  ): HTMLButtonElement {
     const element = document.createElement("button");
     element.type = "button";
     element.className = "main-menu-item";
     element.textContent = label;
     element.setAttribute("role", role);
+    if (shortcut) {
+      const keys = document.createElement("kbd");
+      keys.textContent = shortcut.label;
+      keys.setAttribute("aria-hidden", "true");
+      element.append(keys);
+      element.setAttribute("aria-keyshortcuts", shortcut.aria);
+    }
     if (role === "menuitemcheckbox") element.setAttribute("aria-checked", "false");
     element.addEventListener("click", () => {
       // A setting stays open to be seen changing; an action closes the menu.

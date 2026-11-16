@@ -18,15 +18,19 @@ async function open() {
   const store = new DrawingStore(new MemoryStorage(), core);
   const drawing = await OpenDrawing.open(await store.add(sample, "Sample plan"), store, core);
   const saved: DownloadedFile[] = [];
-  const png = vi.fn(async () => new Uint8Array([1, 2, 3]) as Uint8Array | undefined);
-  const exporter = new DrawingExport(drawing, { save: (file) => void saved.push(file), png });
-  return { drawing, store, saved, png, exporter };
+  const copied: Uint8Array[] = [];
+  const png = vi.fn(
+    async (scope: ExportScope) => new Uint8Array([scope]) as Uint8Array | undefined,
+  );
+  const copy = vi.fn(async (bytes: Uint8Array) => void copied.push(bytes));
+  const exporter = new DrawingExport(drawing, { save: (file) => void saved.push(file), png, copy });
+  return { drawing, store, saved, copied, png, copy, exporter };
 }
 
-describe("downloading the open Drawing", () => {
+describe("Save as", () => {
   it("is the stored .excalidraw file byte for byte, named after the Drawing", async () => {
     const { exporter, saved, store } = await open();
-    await exporter.downloadDrawing();
+    await exporter.saveAs();
     expect(saved).toHaveLength(1);
     expect(saved[0].name).toBe("Sample plan.excalidraw");
     expect(saved[0].bytes).toEqual(await store.open("Sample plan"));
@@ -41,27 +45,41 @@ describe("downloading the open Drawing", () => {
     ]);
     drawing.editorDidChange();
 
-    await exporter.downloadDrawing();
+    await exporter.saveAs();
 
     const editor = core.makeEditor();
     editor.load(saved[0].bytes);
     expect(editor.elementCount()).toBe(drawing.editor.elementCount());
     editor.free();
   });
+});
 
-  it("downloads a PNG named after the Drawing, as asked for", async () => {
-    const { exporter, saved, png } = await open();
-    await exporter.downloadPng(ExportScope.Selection, false);
-    expect(png).toHaveBeenCalledWith(ExportScope.Selection, false);
+describe("Export", () => {
+  it("is of the Scene with nothing selected", async () => {
+    const { exporter, drawing } = await open();
+    expect(drawing.editor.selection()).toEqual([]);
+    expect(await exporter.image()).toEqual(new Uint8Array([ExportScope.Scene]));
+  });
+
+  it("is of the Selection", async () => {
+    const { exporter, drawing } = await open();
+    drawing.editor.selectAll();
+    expect(await exporter.image()).toEqual(new Uint8Array([ExportScope.Selection]));
+  });
+
+  it("downloads the PNG named after the Drawing", async () => {
+    const { exporter, saved } = await open();
+    exporter.downloadPng(new Uint8Array([1, 2, 3]));
     expect(saved).toEqual([
       { name: "Sample plan.png", bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" },
     ]);
   });
 
-  it("downloads no PNG when there is nothing to export", async () => {
-    const { exporter, saved, png } = await open();
-    png.mockResolvedValue(undefined);
-    await exporter.downloadPng(ExportScope.Selection, true);
-    expect(saved).toEqual([]);
+  it("copies the PNG to the clipboard, and says whether it could", async () => {
+    const { exporter, copied, copy } = await open();
+    expect(await exporter.copyPng(new Uint8Array([1]))).toBe(true);
+    expect(copied).toEqual([new Uint8Array([1])]);
+    copy.mockRejectedValue(new DOMException("denied", "NotAllowedError"));
+    expect(await exporter.copyPng(new Uint8Array([2]))).toBe(false);
   });
 });

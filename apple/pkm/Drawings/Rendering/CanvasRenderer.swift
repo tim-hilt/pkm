@@ -82,9 +82,6 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
     /// Frames rendered so far. Stays constant while nothing changes, which is
     /// how "no continuous render loop" is verified.
     private(set) var framesRendered = 0
-    /// Whether frames start as paper; transparent otherwise, for exporting
-    /// images without background.
-    var drawsPaper = true
     /// The colour of the paper as `0xRRGGBBAA`: the Canvas colour the core
     /// reports (`Editor.canvasColor`); white by default.
     var paperColor: UInt32 = 0xffff_ffff {
@@ -382,8 +379,7 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         pass.colorAttachments[0].resolveTexture = target
         pass.colorAttachments[0].loadAction = .clear
         pass.colorAttachments[0].storeAction = .multisampleResolve
-        pass.colorAttachments[0].clearColor =
-            drawsPaper ? Self.clearColor(paperColor) : MTLClearColor()
+        pass.colorAttachments[0].clearColor = Self.clearColor(paperColor)
         pass.stencilAttachment.texture = stencil
         pass.stencilAttachment.loadAction = .clear
         pass.stencilAttachment.clearStencil = 0

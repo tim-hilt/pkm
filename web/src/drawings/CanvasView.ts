@@ -4,8 +4,8 @@ import { cssCursor } from "./rendering/CursorStyle";
 import { CanvasInput } from "./input/CanvasInput";
 import { ImageInput, pickImages } from "./images/ImageInput";
 import { CanvasClipboard } from "./input/CanvasClipboard";
-import { isCopyPngShortcut } from "./input/KeyboardShortcuts";
-import { exportPng } from "./export/PngExport";
+import { FileCommand, fileCommandOf } from "./input/KeyboardShortcuts";
+import { ExportDialog } from "./export/ExportDialog";
 import { insertImages } from "./images/ImageInsertion";
 import { ZoomControls } from "./chrome/ZoomControls";
 import { Toolbar } from "./chrome/Toolbar";
@@ -29,7 +29,7 @@ export interface CanvasHandlers {
   edited(): void;
   /** The user asked to go back to the Gallery. */
   back(): void;
-  /** What the main menu downloads. */
+  /** What the main menu's Save as and Export do. */
   export: DrawingExport;
   settings: DrawingSettings;
   /** Whether the Canvas and chrome are dark, and when that changes. */
@@ -100,7 +100,6 @@ export function showCanvas(
   const clipboard = new CanvasClipboard(editor, navigator.clipboard, {
     ...images,
     changed: () => didReachEditor(),
-    png: (scope) => exportPng(device, font, editor, scope, handlers.settings.exportBackground),
   });
   const insertFromPicker = () => void pickImages(images);
   const toolbar = new Toolbar(editor, () => didReachEditor(), insertFromPicker);
@@ -115,13 +114,11 @@ export function showCanvas(
   };
   properties.element.addEventListener("mousedown", keepTextViewFocus);
   phone.element.addEventListener("mousedown", keepTextViewFocus);
+  const exportDialog = new ExportDialog(handlers.export);
   const mainMenu = new MainMenu({
-    downloadDrawing: () => void handlers.export.downloadDrawing(),
-    downloadPng: (scope) =>
-      void handlers.export.downloadPng(scope, handlers.settings.exportBackground),
-    hasSelection: () => editor.selection().length > 0,
-    exportBackground: () => handlers.settings.exportBackground,
-    setExportBackground: (on) => (handlers.settings.exportBackground = on),
+    saveAs: () => void handlers.export.saveAs(),
+    exportImage: () => void exportDialog.open(),
+    canExport: () => editor.elementCount() > 0,
     pencilOnlyDrawing: () => handlers.settings.pencilOnlyDrawing(editor),
     setPencilOnlyDrawing: (on) => {
       handlers.settings.setPencilOnlyDrawing(editor, on);
@@ -212,10 +209,10 @@ export function showCanvas(
     magnify: send((e) => editor.magnify(e)),
     setPanKey: send((held) => editor.setPanKey(held)),
     shortcut: ({ key, modifiers }) => {
-      if (isCopyPngShortcut({ key, modifiers })) {
-        void clipboard.copyPng();
-        return true;
-      }
+      const file = fileCommandOf({ key, modifiers });
+      if (file === FileCommand.SaveAs) void handlers.export.saveAs();
+      else if (file === FileCommand.Export) void exportDialog.open();
+      if (file !== undefined) return true;
       const handled = editor.pressKey(key, modifiers);
       if (handled) didReachEditor();
       return handled;
@@ -274,6 +271,7 @@ export function showCanvas(
     mainMenu.element,
     bottomLeft,
     contextMenu.element,
+    exportDialog.element,
   );
   // The keyboard coming up or going shrinks or grows the visual viewport.
   const visual = window.visualViewport;
@@ -312,6 +310,7 @@ export function showCanvas(
     imageInput.dispose();
     stopClipboard();
     mainMenu.dispose();
+    exportDialog.element.close();
     contextMenu.hide();
     visual?.removeEventListener("resize", keyboardChanged);
     textView.hide();

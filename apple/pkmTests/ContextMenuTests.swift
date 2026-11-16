@@ -52,7 +52,7 @@ import Testing
 
             #expect(
                 titles(menu) == [
-                    "Cut", "Copy", "Paste", "Copy as PNG", "Duplicate", "Group", "Ungroup", "Arrange", "Delete",
+                    "Cut", "Copy", "Paste", "Duplicate", "Group", "Ungroup", "Arrange", "Delete",
                 ])
             let arrange = try #require(menu.children.first { $0.title == "Arrange" } as? UIMenu)
             #expect(titles(arrange) == ["Bring to Front", "Bring Forward", "Send Backward", "Send to Back"])
@@ -89,21 +89,8 @@ import Testing
             #expect(try action("Ungroup", in: menu).attributes.contains(.disabled))
         }
 
-        @Test func theCanvasMenuHasPasteCopyAsPNGAndSelectAll() throws {
-            let menu = try makeSetup().canvas.canvasMenu()
-
-            #expect(titles(menu) == ["Paste", "Copy as PNG", "Select All"])
-            #expect(try !action("Copy as PNG", in: menu).attributes.contains(.disabled))
-        }
-
-        @Test func copyAsPNGIsDisabledOnAnEmptyScene() throws {
-            let setup = try makeSetup()
-            setup.editor.perform(command: .selectAll)
-            setup.canvas.perform { $0.deleteSelection() }
-
-            let menu = setup.canvas.canvasMenu()
-
-            #expect(try action("Copy as PNG", in: menu).attributes.contains(.disabled))
+        @Test func theCanvasMenuHasPasteAndSelectAll() throws {
+            #expect(titles(try makeSetup().canvas.canvasMenu()) == ["Paste", "Select All"])
         }
 
         @Test func pressingEmptyCanvasGivesTheCanvasMenuAndKeepsTheSelection() throws {
@@ -112,7 +99,7 @@ import Testing
 
             let menu = try #require(press(setup, at: CGPoint(x: 600, y: 500)))
 
-            #expect(titles(menu) == ["Paste", "Copy as PNG", "Select All"])
+            #expect(titles(menu) == ["Paste", "Select All"])
             #expect(setup.editor.selection() == ["a"])
             try action("Select All", in: menu).performWithSender(nil, target: nil)
             #expect(Set(setup.editor.selection()) == ["a", "b"])

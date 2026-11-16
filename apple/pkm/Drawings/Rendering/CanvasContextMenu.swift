@@ -71,21 +71,11 @@
                 action: #selector(UIResponder.paste(_:)))
         }
 
-        /// Copy as PNG: of the Selection, or of the Scene with nothing
-        /// selected; disabled on an empty Scene.
-        private func copyAsPNGItem() -> UIAction {
-            UIAction(
-                title: String(localized: "Copy as PNG"), image: UIImage(systemName: "photo.on.rectangle"),
-                attributes: editor?.elementCount() == 0 ? .disabled : []
-            ) { [weak self] _ in self?.copyAsPNG() }
-        }
-
-        /// The menu of empty Canvas: Paste, Copy as PNG and Select All. The
+        /// The menu of empty Canvas: Paste and Select All. The
         /// Selection is left as it was.
         func canvasMenu() -> UIMenu {
             UIMenu(children: [
                 pasteItem(),
-                copyAsPNGItem(),
                 UIAction(
                     title: String(localized: "Select All"), image: UIImage(systemName: "checkmark.circle.badge.plus")
                 ) {
@@ -132,7 +122,6 @@
                 item("Cut", "scissors") { $0.cut(nil) },
                 item("Copy", "doc.on.doc") { $0.copy(nil) },
                 pasteItem(),
-                copyAsPNGItem(),
                 item("Duplicate", "plus.square.on.square") { $0.perform { $0.duplicate() } },
                 item("Group", "rectangle.3.group", disabled: !canGroup) { $0.perform { $0.group() } },
                 item("Ungroup", "rectangle.3.offgrid", disabled: !canUngroup) { $0.perform { $0.ungroup() } },

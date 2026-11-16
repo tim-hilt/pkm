@@ -733,10 +733,9 @@ final class CanvasController {
     /// of the next Element if nothing is selected. `nil` while the panel is
     /// hidden (`Editor.showsProperties`) and until there is an editor.
     private(set) var properties: Properties?
-    /// Whether something is selected: it enables the Edit and Export Selection
-    /// items exactly then.
+    /// Whether something is selected: it enables the Edit items exactly then.
     private(set) var hasSelection = false
-    /// Whether the Scene has Elements: Copy as PNG has something to export.
+    /// Whether the Scene has Elements: Export has something to export.
     private(set) var hasElements = false
     /// The zoom in whole percent, as the reset zoom button shows it. Whole
     /// percent, so that a pinch updates the chrome only when the number does.
