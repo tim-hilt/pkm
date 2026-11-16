@@ -1,3 +1,8 @@
-// Per-developer signing settings (e.g. DEVELOPMENT_TEAM for running on a
-// device) go into Local.xcconfig, which is not committed.
+// Per-developer signing settings go into Local.xcconfig, which is not
+// committed. Without them, macOS builds are signed ad-hoc and run without a
+// development team, but the Keychain asks for access after every rebuild.
+// To stop that, sign with your certificate:
+//   DEVELOPMENT_TEAM = <team ID>
+//   CODE_SIGN_IDENTITY[sdk=macosx*] = Apple Development
+CODE_SIGN_IDENTITY[sdk=macosx*] = -
 #include? "Local.xcconfig"

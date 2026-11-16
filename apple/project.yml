@@ -82,8 +82,6 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
         # Apple silicon only: smaller binary, no x86_64 slice.
         ARCHS: arm64
-        # Ad-hoc sign macOS builds so they run without a development team.
-        "CODE_SIGN_IDENTITY[sdk=macosx*]": "-"
       configs:
         Release:
           SWIFT_OPTIMIZATION_LEVEL: -Osize
@@ -108,7 +106,6 @@ targets:
         ARCHS: arm64
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: $(inherited)
-        "CODE_SIGN_IDENTITY[sdk=macosx*]": "-"
         TEST_TARGET_NAME: pkm
   pkmTests:
     type: bundle.unit-test
@@ -127,7 +124,6 @@ targets:
         ARCHS: arm64
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: $(inherited)
-        "CODE_SIGN_IDENTITY[sdk=macosx*]": "-"
         # The app's product name has a space, which the default test host
         # lacks; macOS app bundles keep the executable under Contents/MacOS.
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/pkm.app/pkm"
