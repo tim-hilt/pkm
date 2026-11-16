@@ -232,7 +232,7 @@ impl Parser {
         let start = self.at;
         while self
             .peek()
-            .is_some_and(|c| !c.is_whitespace() && !"@&|!()".contains(c))
+            .is_some_and(|c| !c.is_whitespace() && !SYNTAX.contains(c))
         {
             self.at += 1;
         }

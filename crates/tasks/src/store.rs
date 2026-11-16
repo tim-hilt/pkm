@@ -298,9 +298,8 @@ impl Tasks {
             .last()
             .map_or(parent.task.id.as_str(), ItemId::as_str);
         let list = list(&nodes, planning);
-        let at = index_below(&list, last);
-        let placement = place(&list, at);
-        self.shift(&placement.shifted)?;
+        let placement = place(&positions(&list), index_below(&list, last));
+        self.shift(&list, &placement.shifted)?;
         self.insert(&new, planning, Some(&parent.task.id), placement.position)
     }
 
@@ -426,8 +425,9 @@ impl Tasks {
     /// the end of it if that is `None`; `before` is the Task itself: nothing
     /// changes. Its Parent stays, whoever it is. Only the moved Task is
     /// rewritten, plus, where neighbours share a key and so leave no room
-    /// between them, the Tasks that share it from the drop on (see `place`). Fails with `NotFound`
-    /// for an unknown or Closed Task, or a `before` that isn't in its list.
+    /// between them, the Tasks that share it from the drop on (see `place`).
+    /// Fails with `NotFound` for an unknown or Closed Task, or a `before` that
+    /// isn't in its list.
     pub fn move_before(&self, id: &str, before: Option<&str>) -> Result<Task, Error> {
         let nodes = self.load()?;
         let moved = nodes
@@ -442,13 +442,14 @@ impl Tasks {
         if before.is_some_and(|before| !list.iter().any(|n| n.task.id == before)) {
             return Err(io::ErrorKind::NotFound.into());
         }
-        self.place_moved(id, place(&list, index_before(&list, before)))
+        self.place_moved(id, &list, index_before(&list, before))
     }
 
-    /// Writes the `position` of the moved Task `id` and of the Tasks the
-    /// placement shifted, then returns the moved Task.
-    fn place_moved(&self, id: &str, placement: Placement) -> Result<Task, Error> {
-        self.shift(&placement.shifted)?;
+    /// Puts the moved Task `id` at index `at` of `list` (without it): writes
+    /// its `position` and those of the Tasks `place` shifted, then returns it.
+    fn place_moved(&self, id: &str, list: &[&Node], at: usize) -> Result<Task, Error> {
+        let placement = place(&positions(list), at);
+        self.shift(list, &placement.shifted)?;
         let position = placement.position;
         Ok(self
             .rewrite(&ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?, |file| {
@@ -458,10 +459,12 @@ impl Tasks {
             .ok_or(io::ErrorKind::InvalidData)?)
     }
 
-    /// Rewrites the `position` of each of `tasks`.
-    fn shift(&self, tasks: &[(ItemId, f64)]) -> Result<(), Error> {
-        for (id, position) in tasks {
-            self.rewrite(id, |file| file.set_scalar(POSITION, position.to_string()))?;
+    /// Rewrites the `position` of each Task of `list` that `shifted` names by
+    /// its index.
+    fn shift(&self, list: &[&Node], shifted: &[(usize, f64)]) -> Result<(), Error> {
+        for &(at, position) in shifted {
+            let id = ItemId::parse(&list[at].task.id).ok_or(io::ErrorKind::InvalidData)?;
+            self.rewrite(&id, |file| file.set_scalar(POSITION, position.to_string()))?;
         }
         Ok(())
     }
@@ -502,7 +505,7 @@ impl Tasks {
                 index_below(&list, end)
             }
         };
-        self.place_moved(id, place(&list, at))
+        self.place_moved(id, &list, at)
     }
 
     /// Closes the Open Task `id` and its Open Subtasks as one pending change:
@@ -1155,7 +1158,16 @@ fn list(nodes: &Nodes, planning: Planning) -> Vec<&Node> {
 
 /// The `position` that puts a Task after the last Task of `list`.
 fn end_position(list: &[&Node]) -> f64 {
-    list.last().map_or(1.0, |n| n.position + 1.0)
+    end_key(&positions(list))
+}
+
+/// The key after the last of `keys`.
+fn end_key(keys: &[f64]) -> f64 {
+    keys.last().map_or(1.0, |k| k + 1.0)
+}
+
+fn positions(list: &[&Node]) -> Vec<f64> {
+    list.iter().map(|n| n.position).collect()
 }
 
 /// Where in `list` a Task goes to land right before `before`, or at the end
@@ -1173,41 +1185,40 @@ fn index_below(list: &[&Node], above: &str) -> usize {
         .map_or(0, |at| at + 1)
 }
 
-/// A new `position` for a Task, and the Tasks that had to move for it.
+/// A new fractional key for an entry, and the entries that had to move for
+/// it, each by its index with its new key.
 struct Placement {
     position: f64,
-    shifted: Vec<(ItemId, f64)>,
+    shifted: Vec<(usize, f64)>,
 }
 
-/// The `Placement` that puts a Task at index `at` of `list` (without it).
-/// Usually only the Task gets a key, between its neighbours'. Where they
-/// share one there is no key between them, so the Tasks of that run from
-/// `at` on move up, spread below the next key, ahead of which the Task goes.
-fn place(list: &[&Node], at: usize) -> Placement {
+/// The `Placement` that puts an entry at index `at` of the ascending `keys`
+/// of a list (without the entry): of Tasks in Active or the Backlog, of
+/// Filters, or of the Tasks in one Filter. Usually only the entry gets a key,
+/// between its neighbours'. Where they share one there is no key between
+/// them, so the entries of that run from `at` on move up, spread below the
+/// next key, ahead of which the entry goes.
+fn place(keys: &[f64], at: usize) -> Placement {
     let alone = |position| Placement {
         position,
         shifted: Vec::new(),
     };
-    let Some(next) = list.get(at) else {
-        return alone(end_position(list));
+    let Some(&next) = keys.get(at) else {
+        return alone(end_key(keys));
     };
-    let Some(prev) = at.checked_sub(1).map(|prev| list[prev]) else {
-        return alone(next.position - 1.0);
+    let Some(prev) = at.checked_sub(1).map(|prev| keys[prev]) else {
+        return alone(next - 1.0);
     };
-    if prev.position < next.position {
-        return alone(f64::midpoint(prev.position, next.position));
+    if prev < next {
+        return alone(f64::midpoint(prev, next));
     }
-    let run: Vec<&&Node> = list[at..]
-        .iter()
-        .take_while(|n| n.position == next.position)
-        .collect();
-    let low = prev.position;
-    let high = list.get(at + run.len()).map_or(low + 1.0, |n| n.position);
-    let step = (high - low) / (run.len() + 2) as f64;
+    let run = keys[at..].iter().take_while(|&&k| k == next).count();
+    let high = keys.get(at + run).map_or(prev + 1.0, |&k| k);
+    let step = (high - prev) / (run + 2) as f64;
     Placement {
-        position: low + step,
-        shifted: (run.iter().enumerate())
-            .filter_map(|(n, t)| Some((ItemId::parse(&t.task.id)?, low + step * (n + 2) as f64)))
+        position: prev + step,
+        shifted: (0..run)
+            .map(|n| (at + n, prev + step * (n + 2) as f64))
             .collect(),
     }
 }

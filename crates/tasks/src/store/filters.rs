@@ -1,7 +1,7 @@
 //! Filters (ADR-0024): `Filters/<id>.md` beside the Tasks folder, each a Title
 //! and a Query over the Active Tasks.
 
-use super::{Error, Node, Nodes, Row, Tasks, compare_positions, list, rows_of};
+use super::{Error, Node, Nodes, Row, Tasks, compare_positions, end_key, list, place, rows_of};
 use crate::Planning;
 use crate::query::{Query, QueryError};
 use pkm_base::clock::{iso8601, now_ms};
@@ -45,14 +45,12 @@ impl Tasks {
     /// `InvalidQuery` before saving anything.
     pub fn create_filter(&self, title: &str, query: &str) -> Result<Filter, Error> {
         let title = checked(title, query)?;
-        let position = self
-            .stored_filters()?
-            .last()
-            .map_or(1.0, |s| s.position + 1.0);
+        let positions: Vec<f64> = self.stored_filters()?.iter().map(|s| s.position).collect();
+        let position = end_key(&positions);
         let mut entropy = Entropy::from_system();
         loop {
             let id = ItemId::new(&mut entropy);
-            let path = self.filter_path(id.as_str());
+            let path = self.filter_path(&id);
             if self.files.exists(&path) {
                 continue;
             }
@@ -81,43 +79,38 @@ impl Tasks {
     }
 
     /// Moves the Filter `id` before the Filter `before` in the Filters list, or
-    /// to its end if that is `None`. Fails with `NotFound` for an unknown
-    /// Filter or a `before` that isn't in the list.
+    /// to its end if that is `None`; a drop where it already is changes
+    /// nothing. Usually only its file is written, as for Tasks (see `place`).
+    /// Fails with `NotFound` for an unknown Filter or a `before` that isn't in
+    /// the list.
     pub fn move_filter(&self, id: &str, before: Option<&str>) -> io::Result<()> {
         let mut order = self.stored_filters()?;
         let from = (order.iter().position(|s| s.filter.id == id)).ok_or(io::ErrorKind::NotFound)?;
         if before == Some(id) {
             return Ok(());
         }
-        let moved = order.remove(from);
+        order.remove(from);
         let to = match before {
             None => order.len(),
             Some(b) => {
                 (order.iter().position(|s| s.filter.id == b)).ok_or(io::ErrorKind::NotFound)?
             }
         };
-        let key = match (to.checked_sub(1).map(|p| order[p].position), order.get(to)) {
-            (_, None) if order.is_empty() => 1.0,
-            (Some(prev), None) => prev + 1.0,
-            (None, Some(next)) => next.position - 1.0,
-            (Some(prev), Some(next)) if prev < next.position => f64::midpoint(prev, next.position),
-            _ => {
-                // Neighbours share a key, so none fits between: number the list afresh.
-                order.insert(to, moved);
-                for (n, s) in order.iter().enumerate() {
-                    self.set_position(&s.filter.id, (n + 1) as f64)?;
-                }
-                return Ok(());
-            }
-        };
-        self.set_position(id, key)
+        if to == from {
+            return Ok(());
+        }
+        let positions: Vec<f64> = order.iter().map(|s| s.position).collect();
+        let placement = place(&positions, to);
+        for (at, position) in placement.shifted {
+            self.set_position(&order[at].filter.id, position)?;
+        }
+        self.set_position(id, placement.position)
     }
 
     /// Deletes the Filter `id`. No Task changes. Fails with `NotFound` if there
     /// is no such Filter.
     pub fn delete_filter(&self, id: &str) -> io::Result<()> {
-        self.stored_filter(id)?;
-        self.files.remove(&self.filter_path(id))
+        self.files.remove(&self.filter_path(&filter_id(id)?))
     }
 
     /// Every Filter in the Filters list's order, with how many Active Tasks it
@@ -151,12 +144,12 @@ impl Tasks {
     }
 
     /// Moves the Task `task` before the Task `before` in the Filter `id`, or
-    /// to the end of it if that is `None`; `before` is the Task itself:
-    /// nothing changes. Only the Filter's file is written; Active's order and
-    /// the Task files stay. Usually only the moved Task gets a place, between
-    /// its neighbours'. If a Task shown has none yet, or the neighbours leave
-    /// no room, every Task shown gets one, in one write. Fails with `NotFound`
-    /// for an unknown Filter, or a `task` or `before` the Filter doesn't show.
+    /// to the end of it if that is `None`; a drop where it already is changes
+    /// nothing. Only the Filter's file is written; Active's order and the Task
+    /// files stay. Usually only the moved Task gets a place, as for Tasks (see
+    /// `place`). If another Task shown has none yet, every Task shown gets
+    /// one, in one write. Fails with `NotFound` for an unknown Filter, or a
+    /// `task` or `before` the Filter doesn't show.
     pub fn move_in_filter(&self, id: &str, task: &str, before: Option<&str>) -> io::Result<()> {
         let filter = self.stored_filter(id)?;
         let nodes: Nodes = self.shown()?;
@@ -172,31 +165,27 @@ impl Tasks {
                 (shown.iter().position(|n| n.task.id == b)).ok_or(io::ErrorKind::NotFound)?
             }
         };
-        shown.insert(to, moved);
+        if to == from {
+            return Ok(());
+        }
         let mut places: HashMap<&str, f64> = (filter.places.iter())
             .map(|(id, p)| (id.as_str(), *p))
             .collect();
-        let place_of =
-            |at: Option<usize>| at.and_then(|at| places.get(shown.get(at)?.task.id.as_str()));
-        let neighbours = (place_of(to.checked_sub(1)), place_of(Some(to + 1)));
-        let all_placed = shown
-            .iter()
-            .all(|n| places.contains_key(n.task.id.as_str()));
-        let key = match neighbours {
-            _ if !all_placed => None,
-            (None, None) => Some(1.0),
-            (Some(prev), None) => Some(prev + 1.0),
-            (None, Some(next)) => Some(next - 1.0),
-            (Some(prev), Some(next)) if prev < next => Some(f64::midpoint(*prev, *next)),
-            _ => None,
-        };
-        match key {
-            Some(key) => drop(places.insert(task, key)),
-            None => {
-                places = (shown.iter().enumerate())
-                    .map(|(n, node)| (node.task.id.as_str(), (n + 1) as f64))
-                    .collect();
+        // In order, as placed Tasks show first by place.
+        let keys: Option<Vec<f64>> = (shown.iter())
+            .map(|n| places.get(n.task.id.as_str()).copied())
+            .collect();
+        if let Some(keys) = keys {
+            let placement = place(&keys, to);
+            for (at, key) in placement.shifted {
+                places.insert(shown[at].task.id.as_str(), key);
             }
+            places.insert(task, placement.position);
+        } else {
+            shown.insert(to, moved);
+            places = (shown.iter().enumerate())
+                .map(|(n, node)| (node.task.id.as_str(), (n + 1) as f64))
+                .collect();
         }
         let places: Vec<(String, f64)> = places
             .into_iter()
@@ -220,7 +209,7 @@ impl Tasks {
         beside.join(Self::FILTERS_FOLDER)
     }
 
-    fn filter_path(&self, id: &str) -> PathBuf {
+    fn filter_path(&self, id: &ItemId) -> PathBuf {
         self.filters_folder().join(format!("{id}.md"))
     }
 
@@ -235,14 +224,17 @@ impl Tasks {
     }
 
     /// Applies `change` to the file of the Filter `id`, drops the places of
-    /// Tasks it no longer shows (ADR-0024) and stamps it `updated`.
+    /// Tasks it no longer shows (ADR-0024) and stamps it `updated`; a change
+    /// that leaves the file as it was writes nothing, as for Tasks. Fails with
+    /// `NotFound` if there is no such Filter.
     fn rewrite_filter(&self, id: &str, change: impl FnOnce(&mut Document)) -> io::Result<()> {
-        self.stored_filter(id)?;
-        let path = self.filter_path(id);
+        let path = self.filter_path(&filter_id(id)?);
         let mut file =
             Document::parse(&self.files.read(&path)?).ok_or(io::ErrorKind::InvalidData)?;
+        let before = file.render();
         change(&mut file);
-        let nodes: Nodes = self.shown()?;
+        // Not `shown`: a Task pending Rejected keeps its place, to be Reverted.
+        let nodes = self.load()?;
         let shown: HashSet<&str> = matching(&nodes, file.scalar("query").unwrap_or_default())
             .into_iter()
             .map(|n| n.task.id.as_str())
@@ -250,6 +242,9 @@ impl Tasks {
         let mut places = places_of(&file);
         places.retain(|(task, _)| shown.contains(task.as_str()));
         set_places(&mut file, &places);
+        if file.render() == before {
+            return Ok(());
+        }
         file.set_scalar("updated", iso8601(now_ms()));
         self.files.write(&path, &file.render())
     }
@@ -269,6 +264,11 @@ impl Tasks {
         });
         Ok(found)
     }
+}
+
+/// `id` as a Filter's ID; `NotFound` for one no Filter can have.
+fn filter_id(id: &str) -> io::Result<ItemId> {
+    ItemId::parse(id).ok_or_else(|| io::ErrorKind::NotFound.into())
 }
 
 /// The Active Tasks `query` matches, in Active's order; none if it can't be read.
@@ -613,11 +613,16 @@ mod tests {
             files.write(Path::new(&path), &file.render()).unwrap();
         }
         let order = names(&tasks);
-        let last = tasks.filters().unwrap()[2].id.clone();
-        let middle = tasks.filters().unwrap()[1].id.clone();
-        tasks.move_filter(&last, Some(&middle)).unwrap();
+        let listed = tasks.filters().unwrap();
+        let before = files.read(Path::new(&format!("Filters/{}.md", listed[0].id)));
+        tasks
+            .move_filter(&listed[2].id, Some(&listed[1].id))
+            .unwrap();
         let moved = names(&tasks);
         assert_eq!(moved, [&order[0], &order[2], &order[1]].map(String::clone));
+        // The Filter before the drop keeps its file.
+        let after = files.read(Path::new(&format!("Filters/{}.md", listed[0].id)));
+        assert_eq!(after.unwrap(), before.unwrap());
     }
 
     #[test]
@@ -781,7 +786,28 @@ mod tests {
     }
 
     #[test]
-    fn places_that_share_a_key_are_renumbered_on_a_move() {
+    fn a_drop_where_the_task_already_is_writes_nothing() {
+        let (files, tasks, f, ids) = order_fixture();
+        let path = format!("Filters/{}.md", f.id);
+        let before = files.read(Path::new(&path)).unwrap();
+        tasks.move_in_filter(&f.id, &ids[1], Some(&ids[2])).unwrap();
+        tasks.move_in_filter(&f.id, &ids[3], None).unwrap();
+        assert_eq!(files.read(Path::new(&path)).unwrap(), before);
+    }
+
+    #[test]
+    fn a_task_pending_rejected_keeps_its_place_to_be_reverted() {
+        let (_, tasks, f, ids) = order_fixture();
+        tasks.move_in_filter(&f.id, &ids[3], Some(&ids[0])).unwrap();
+        tasks.close(&ids[3], crate::Closing::Rejected).unwrap();
+        assert_eq!(shown(&tasks, &f), ["a", "b", "c"]);
+        tasks.edit_filter(&f.id, "Renamed", "@work").unwrap();
+        tasks.revert();
+        assert_eq!(shown(&tasks, &f), ["d", "a", "b", "c"]);
+    }
+
+    #[test]
+    fn places_that_share_a_key_leave_room_on_a_move() {
         let (files, tasks, f, ids) = order_fixture();
         let path = format!("Filters/{}.md", f.id);
         let mut file = Document::parse(&files.read(Path::new(&path)).unwrap()).unwrap();

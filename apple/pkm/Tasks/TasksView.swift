@@ -113,7 +113,7 @@ private struct AddToolbar: ToolbarContent {
 }
 
 /// The Tasks of the list shown (`model.tasks`) as rows with their actions, and the toast of a
-/// pending Close. They drag into another order only in Active and the Backlog.
+/// pending Close. Dragging orders Active or the Backlog, or in a Filter only that Filter.
 private struct TaskListView: View {
     @Environment(TasksModel.self) private var model
     let emptyText: LocalizedStringKey
