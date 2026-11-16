@@ -1,8 +1,12 @@
 import SwiftUI
 
-/// The Filters list: each Filter with its Query, opening on tap; an empty list offers to create one.
+/// The Filters list: each Filter with its Query and how many Active Tasks it matches, opening on
+/// tap and ordered by dragging; swiping a row (a context menu on the Mac) edits or Deletes it,
+/// the latter after a confirmation. An empty list offers to create one.
 struct FiltersList: View {
     @Environment(TasksModel.self) private var model
+    @State private var editing: Filter?
+    @State private var deleting: Filter?
     let onNew: () -> Void
 
     var body: some View {
@@ -15,29 +19,79 @@ struct FiltersList: View {
                 Button("New Filter", action: onNew)
             }
         } else {
-            List(model.filters) { filter in
-                NavigationLink(value: filter.id) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(filter.title)
-                        Text(filter.query)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
+            List {
+                ForEach(model.filters) { filter in
+                    NavigationLink(value: filter.id) { FilterRow(filter: filter) }
+                        .swipeActions(edge: .trailing) {
+                            Button("Delete", systemImage: "trash", role: .destructive) { deleting = filter }
+                            Button("Edit", systemImage: "pencil") { editing = filter }.tint(.blue)
+                        }
+                        .contextMenu {
+                            Button("Edit", systemImage: "pencil") { editing = filter }
+                            Button("Delete", systemImage: "trash", role: .destructive) { deleting = filter }
+                        }
                 }
+                .onMove { model.moveFilters(from: $0, to: $1) }
             }
             .listStyle(.plain)
+            .sheet(item: $editing) { FilterSheet(editing: $0) }
+            .confirmationDialog(
+                "Delete “\(deleting?.title ?? "")”?",
+                isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                titleVisibility: .visible, presenting: deleting
+            ) { filter in
+                Button("Delete", role: .destructive) { model.deleteFilter(filter.id) }
+                Button("Cancel", role: .cancel) {}
+            }
         }
     }
 }
 
-/// Asks for a Title and a Query; the Filter is added at the end of the Filters list. A Query that
-/// can't be read shows why, inline, and can't be saved.
-struct NewFilterSheet: View {
+/// A Filter's Title, its Query (or why it can't be read), and the count of Active Tasks it matches.
+private struct FilterRow: View {
+    let filter: Filter
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(filter.title)
+                if let error = filter.error {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.subheadline)
+                        .foregroundStyle(.red)
+                        .lineLimit(1)
+                } else {
+                    Text(filter.query)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer()
+            if filter.error == nil {
+                Text(filter.matches, format: .number)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("\(filter.matches) Active Tasks")
+            }
+        }
+    }
+}
+
+/// Asks for a Title and a Query: adds the Filter at the end of the Filters list, or, given one,
+/// changes it. A Query that can't be read shows why, inline, and can't be saved.
+struct FilterSheet: View {
     @Environment(TasksModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var title = ""
-    @State private var query = ""
+    private let editing: Filter?
+    @State private var title: String
+    @State private var query: String
+
+    init(editing: Filter? = nil) {
+        self.editing = editing
+        _title = State(initialValue: editing?.title ?? "")
+        _query = State(initialValue: editing?.query ?? "")
+    }
 
     private var problem: QueryProblem? { TasksModel.queryProblem(query) }
     private var canSave: Bool {
@@ -66,14 +120,14 @@ struct NewFilterSheet: View {
                 }
             }
             .formStyle(.grouped)
-            .navigationTitle("New Filter")
+            .navigationTitle(editing == nil ? "New Filter" : "Edit Filter")
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add", action: save).disabled(!canSave)
+                    Button(editing == nil ? "Add" : "Save", action: save).disabled(!canSave)
                 }
             }
         }
@@ -84,7 +138,13 @@ struct NewFilterSheet: View {
     }
 
     private func save() {
-        guard canSave, model.addFilter(title: title, query: query) else { return }
-        dismiss()
+        guard canSave else { return }
+        let saved =
+            if let editing {
+                model.editFilter(editing.id, title: title, query: query)
+            } else {
+                model.addFilter(title: title, query: query)
+            }
+        if saved { dismiss() }
     }
 }

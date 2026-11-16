@@ -32,6 +32,9 @@ pub trait Files: Send + Sync + Debug {
 
     fn exists(&self, path: &Path) -> bool;
 
+    /// Deletes the file; `NotFound` if there is no such file.
+    fn remove(&self, path: &Path) -> io::Result<()>;
+
     /// The files directly in `folder`; none if there is no such folder.
     fn list(&self, folder: &Path) -> io::Result<Vec<Listed>>;
 }
@@ -68,6 +71,10 @@ impl Files for DiskFiles {
 
     fn exists(&self, path: &Path) -> bool {
         path.exists()
+    }
+
+    fn remove(&self, path: &Path) -> io::Result<()> {
+        fs::remove_file(path)
     }
 
     fn list(&self, folder: &Path) -> io::Result<Vec<Listed>> {
@@ -154,6 +161,15 @@ impl Files for MemoryFiles {
         self.memory().files.contains_key(path)
     }
 
+    /// Counts as a change: the path is named by `take_changes`, and then reads
+    /// as missing.
+    fn remove(&self, path: &Path) -> io::Result<()> {
+        let mut memory = self.memory();
+        memory.files.remove(path).ok_or(io::ErrorKind::NotFound)?;
+        memory.changed.insert(path.to_owned());
+        Ok(())
+    }
+
     fn list(&self, folder: &Path) -> io::Result<Vec<Listed>> {
         Ok(self
             .memory()
@@ -197,6 +213,20 @@ mod tests {
         let before = files.list(Path::new("Tasks")).unwrap()[0].stamp;
         files.write(path, "b").unwrap();
         assert_ne!(files.list(Path::new("Tasks")).unwrap()[0].stamp, before);
+    }
+
+    #[test]
+    fn a_removed_file_is_gone_and_reported_as_a_change() {
+        let files = MemoryFiles::default();
+        let path = Path::new("Filters/a.md");
+        files.load(path, "a".into());
+        files.remove(path).unwrap();
+        assert!(!files.exists(path));
+        assert_eq!(files.take_changes(), [path]);
+        assert_eq!(
+            files.remove(path).unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
     }
 
     #[test]

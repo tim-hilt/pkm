@@ -66,7 +66,7 @@ struct TasksView: View {
         }
         // On the stack, not on the content that swaps between empty and list when a Task is added.
         .sheet(isPresented: $isAdding) { NewTaskSheet() }
-        .sheet(isPresented: $isAddingFilter) { NewFilterSheet() }
+        .sheet(isPresented: $isAddingFilter) { FilterSheet() }
         .sheet(isPresented: Binding(get: { !model.editing.isEmpty }, set: { if !$0 { model.closeEditing() } })) {
             EditTaskSheet()
         }

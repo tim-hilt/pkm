@@ -285,6 +285,30 @@ final class TasksModel {
         return true
     }
 
+    /// Changes a Filter's Title and Query. False, changing nothing, if `addFilter` would refuse them.
+    @discardableResult
+    func editFilter(_ id: String, title: String, query: String) -> Bool {
+        guard (try? store.editFilter(id: id, title: title, query: query)) != nil else { return false }
+        reload()
+        return true
+    }
+
+    /// Deletes a Filter; no Task changes. Showing it, the Filters list shows instead.
+    func deleteFilter(_ id: String) {
+        try? store.deleteFilter(id: id)
+        if list == .filter(id) { list = .filters }
+        reload()
+    }
+
+    /// Moves the Filter at `source` to land before the one at `destination` of `filters`
+    /// (`onMove`'s meaning); past the last, to the end.
+    func moveFilters(from source: IndexSet, to destination: Int) {
+        guard let index = source.first, index != destination else { return }
+        let target = destination < filters.count ? filters[destination] : nil
+        try? store.moveFilter(id: filters[index].id, before: target?.id)
+        reload()
+    }
+
     /// What is wrong with the Query `text`, if anything.
     static func queryProblem(_ text: String) -> QueryProblem? { checkQuery(text: text) }
 

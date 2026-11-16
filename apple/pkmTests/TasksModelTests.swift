@@ -646,4 +646,48 @@ import Testing
         model.move(from: IndexSet(integer: 1), to: 0)
         #expect(model.tasks.map(\.title) == ["one", "two"])
     }
+
+    @Test func aFilterIsEditedKeepingItsPlaceAndRefusingWhatCreatingRefuses() throws {
+        let model = try openModel()
+        model.addFilter(title: "Work", query: "@work")
+        model.addFilter(title: "Home", query: "@home")
+        let id = model.filters[0].id
+
+        #expect(model.editFilter(id, title: "Office", query: "@office"))
+        #expect(model.filters.map(\.title) == ["Office", "Home"])
+        #expect(model.filters[0].query == "@office")
+        #expect(!model.editFilter(id, title: " ", query: "@office"))
+        #expect(!model.editFilter(id, title: "Office", query: "@office |"))
+        #expect(model.filters[0].query == "@office")
+    }
+
+    @Test func deletingAFilterLeavesTheTasksAndLeavesItsOpenList() throws {
+        let model = try openModel()
+        model.add(title: "Reply", tags: ["work"])
+        model.addFilter(title: "Work", query: "@work")
+        model.addFilter(title: "Home", query: "@home")
+        let id = model.filters[0].id
+        model.list = .filter(id)
+
+        model.deleteFilter(id)
+        #expect(model.filters.map(\.title) == ["Home"])
+        #expect(model.list == .filters)
+        model.list = .active
+        #expect(model.tasks.map(\.title) == ["Reply"])
+    }
+
+    @Test func filtersAreReorderedAndCountTheirActiveTasks() throws {
+        let model = try openModel()
+        model.add(title: "one", tags: ["a"])
+        model.add(title: "two", tags: ["a"])
+        model.addFilter(title: "A", query: "@a")
+        model.addFilter(title: "B", query: "@b")
+        model.addFilter(title: "C", query: "@c")
+        #expect(model.filters.map(\.matches) == [2, 0, 0])
+
+        model.moveFilters(from: IndexSet(integer: 2), to: 0)
+        #expect(model.filters.map(\.title) == ["C", "A", "B"])
+        model.moveFilters(from: IndexSet(integer: 0), to: 3)
+        #expect(model.filters.map(\.title) == ["A", "B", "C"])
+    }
 }

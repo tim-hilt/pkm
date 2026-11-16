@@ -99,6 +99,10 @@ pub struct Filter {
     /// As the user typed it.
     pub query: String,
     pub favorite: bool,
+    /// How many Active Tasks the Query matches.
+    pub matches: u32,
+    /// Why the stored Query can't be read; such a Filter matches nothing.
+    pub error: Option<String>,
 }
 
 /// What is wrong with a Query text, and where.
@@ -483,7 +487,27 @@ impl TaskStore {
         Ok(self.0.create_filter(&title, &query)?)
     }
 
-    /// Every Filter, in the Filters list's order.
+    /// Changes a Filter's Title and Query, refusing what `create_filter` does.
+    pub fn edit_filter(
+        &self,
+        id: String,
+        title: String,
+        query: String,
+    ) -> Result<Filter, TasksError> {
+        Ok(self.0.edit_filter(&id, &title, &query)?)
+    }
+
+    /// Moves a Filter before another, or to the end of the Filters list.
+    pub fn move_filter(&self, id: String, before: Option<String>) -> Result<(), TasksError> {
+        Ok(self.0.move_filter(&id, before.as_deref())?)
+    }
+
+    /// Deletes a Filter; no Task changes.
+    pub fn delete_filter(&self, id: String) -> Result<(), TasksError> {
+        Ok(self.0.delete_filter(&id)?)
+    }
+
+    /// Every Filter with its match count, in the Filters list's order.
     pub fn filters(&self) -> Result<Vec<Filter>, TasksError> {
         Ok(self.0.filters()?)
     }
@@ -598,13 +622,26 @@ mod tests {
             .create("u".into(), Planning::Active, 4, vec![])
             .unwrap();
         let filter = store.create_filter("Work".into(), "@work".into()).unwrap();
-        let tasks = store.filter_tasks(filter.id).unwrap();
+        let tasks = store.filter_tasks(filter.id.clone()).unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].title, "t");
         assert!(matches!(
             store.create_filter("Work".into(), "@work &".into()),
             Err(TasksError::InvalidQuery(_))
         ));
+        let other = store.create_filter("Other".into(), "@x".into()).unwrap();
+        let edited = store
+            .edit_filter(other.id.clone(), "Home".into(), "@work".into())
+            .unwrap();
+        assert_eq!(edited.matches, 1);
+        store.move_filter(other.id.clone(), None).unwrap();
+        store
+            .move_filter(other.id.clone(), Some(filter.id.clone()))
+            .unwrap();
+        assert_eq!(store.filters().unwrap()[0].title, "Home");
+        store.delete_filter(other.id).unwrap();
+        assert_eq!(store.filters().unwrap().len(), 1);
+        assert_eq!(store.tasks(Planning::Active).unwrap().len(), 2);
 
         let problem = check_query("@a & (".into()).unwrap();
         assert_eq!(
