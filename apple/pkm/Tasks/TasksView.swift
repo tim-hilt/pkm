@@ -240,6 +240,7 @@ private struct NewTaskSheet: View {
                     .id(generation)
                     .accessibilityIdentifier("task-title")
                 TextField("Description", text: $description, axis: .vertical)
+                    .multilineTextAlignment(.leading)
                     .lineLimit(3...8)
                     .accessibilityIdentifier("task-description")
             }
@@ -377,6 +378,7 @@ private struct EditTaskForm: View {
                     .foregroundStyle(.secondary)
             }
             TextField("Description", text: $description, axis: .vertical)
+                .multilineTextAlignment(.leading)
                 .lineLimit(3...8)
                 .focused($focus, equals: .description)
                 .accessibilityIdentifier("task-description")
