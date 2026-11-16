@@ -39,9 +39,11 @@ struct ColorPickerView: View {
                 .accessibilityAddTraits(isOpen ? .isSelected : [])
             }
             if isOpen {
-                FullColorPicker(kind: kind, selected: selected, onPick: onPick)
-                    .padding(10)
-                    .background(Chrome.pickerPanel, in: RoundedRectangle(cornerRadius: 8))
+                FullColorPicker(kind: kind, selected: selected, onPick: onPick) {
+                    withAnimation(.snappy(duration: 0.2)) { isOpen = false }
+                }
+                .padding(10)
+                .background(Chrome.pickerPanel, in: RoundedRectangle(cornerRadius: 8))
             }
         }
     }
@@ -55,6 +57,8 @@ struct FullColorPicker: View {
     /// The colour of the Selection; `nil` if its Elements do not share one.
     let selected: String?
     let onPick: (String) -> Void
+    /// Called after a swatch (not the hex field) was picked.
+    var onSwatchPick: () -> Void = {}
     @State private var hex = ""
     @State private var hexIsInvalid = false
     @FocusState private var hexIsFocused: Bool
@@ -66,7 +70,7 @@ struct FullColorPicker: View {
             ForEach(0..<3, id: \.self) { row in
                 HStack(spacing: 0) {
                     ForEach(grid[row * 5..<row * 5 + 5], id: \.self) {
-                        SwatchButton(color: $0, size: 26, selected: selected, onPick: onPick)
+                        SwatchButton(color: $0, size: 26, selected: selected, onPick: swatchPick)
                     }
                 }
             }
@@ -74,7 +78,7 @@ struct FullColorPicker: View {
             if let shades = ColorPalette.shades(of: selected) {
                 HStack(spacing: 0) {
                     ForEach(shades, id: \.self) {
-                        SwatchButton(color: $0, size: 26, selected: selected, onPick: onPick)
+                        SwatchButton(color: $0, size: 26, selected: selected, onPick: swatchPick)
                     }
                 }
             } else {
@@ -88,6 +92,11 @@ struct FullColorPicker: View {
             hex = Self.hexDigits(of: color)
             hexIsInvalid = false
         }
+    }
+
+    private func swatchPick(_ color: String) {
+        onPick(color)
+        onSwatchPick()
     }
 
     private var hexField: some View {

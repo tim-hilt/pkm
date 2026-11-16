@@ -29,6 +29,8 @@ export class ColorPicker {
   /** The colour the shades row was made for; `null` before it is made. */
   private shadesOf: string | undefined | null = null;
   private shown = false;
+  /** Whether picking a swatch of the full picker closes it again. */
+  private collapses = false;
 
   constructor(
     kind: ColorKind,
@@ -48,14 +50,7 @@ export class ColorPicker {
     this.more.className = "color-more";
     this.more.setAttribute("aria-label", `More colours, ${title}`);
     this.more.setAttribute("aria-expanded", "false");
-    this.more.addEventListener("click", () => {
-      this.shown = !this.shown;
-      this.full.hidden = !this.shown;
-      this.more.setAttribute("aria-expanded", String(this.shown));
-      this.more.classList.toggle("open", this.shown);
-      // The shades and the hex code are filled in only while shown.
-      this.update(this.selected);
-    });
+    this.more.addEventListener("click", () => this.show(!this.shown));
     row.append(divider, this.more);
 
     this.full.className = "color-full";
@@ -89,6 +84,7 @@ export class ColorPicker {
     this.invalid.hidden = true;
     this.full.append(field, this.invalid);
     this.element.append(row, this.full);
+    this.collapses = !fullAtOnce;
     if (fullAtOnce) {
       row.hidden = true;
       this.shown = true;
@@ -121,6 +117,15 @@ export class ColorPicker {
     }
   }
 
+  private show(shown: boolean): void {
+    this.shown = shown;
+    this.full.hidden = !shown;
+    this.more.setAttribute("aria-expanded", String(shown));
+    this.more.classList.toggle("open", shown);
+    // The shades and the hex code are filled in only while shown.
+    this.update(this.selected);
+  }
+
   private commitHex(): void {
     if (this.hex.value === hexDigits(this.selected)) {
       this.invalid.hidden = true;
@@ -137,7 +142,10 @@ export class ColorPicker {
     button.className = "swatch";
     button.style.setProperty("--size", `${size}px`);
     button.setAttribute("aria-label", colorName(color));
-    button.addEventListener("click", () => this.pick(color));
+    button.addEventListener("click", () => {
+      this.pick(color);
+      if (this.collapses && this.full.contains(button)) this.show(false);
+    });
     this.paint(button, color, this.isDark());
     this.mark(button, color, this.selected);
     if (remember) this.swatches.push({ button, color });
