@@ -157,7 +157,7 @@ private struct TaskListView: View {
                                 }
                             }
                     }
-                    .onMove(perform: model.list.planning == nil ? nil : { model.move(from: $0, to: $1) })
+                    .onMove { model.move(from: $0, to: $1) }
                 }
                 .listStyle(.plain)
             }

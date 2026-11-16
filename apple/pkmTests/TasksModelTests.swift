@@ -657,15 +657,38 @@ import Testing
         #expect(model.tasks.map(\.title) == ["Unrelated", "Reply"])
     }
 
-    @Test func aTaskInAFilterIsNotMovedFromThere() throws {
+    @Test func aTaskIsDraggedInAFilterWithoutChangingActiveOrOtherFilters() throws {
         let model = try openModel()
-        model.add(title: "one", tags: ["work"])
-        model.add(title: "two", tags: ["work"])
+        for title in ["one", "two", "three"] { model.add(title: title, tags: ["work"]) }
         model.addFilter(title: "Work", query: "@work")
+        model.addFilter(title: "Other", query: "@work")
         model.list = .filter(model.filters[0].id)
 
-        model.move(from: IndexSet(integer: 1), to: 0)
-        #expect(model.tasks.map(\.title) == ["one", "two"])
+        model.move(from: IndexSet(integer: 2), to: 0)
+        #expect(model.tasks.map(\.title) == ["three", "one", "two"])
+        model.list = .filter(model.filters[1].id)
+        #expect(model.tasks.map(\.title) == ["one", "two", "three"])
+        model.list = .active
+        #expect(model.tasks.map(\.title) == ["one", "two", "three"])
+    }
+
+    @Test func aTaskThatLeavesAFilterAndComesBackStartsAtTheEnd() throws {
+        let model = try openModel()
+        for title in ["one", "two", "three"] { model.add(title: title, tags: ["work"]) }
+        model.addFilter(title: "Work", query: "@work")
+        let filter = TasksList.filter(model.filters[0].id)
+        model.list = filter
+        model.move(from: IndexSet(integer: 2), to: 0)
+        let moved = model.tasks[0]
+
+        model.list = .active
+        model.edit(moved, title: moved.title, description: moved.description, priority: moved.priority, tags: [])
+        // Any write of the Filter's file drops the places of Tasks it no longer shows.
+        model.editFilter(model.filters[0].id, title: "Work", query: "@work")
+        let away = model.tasks.first { $0.id == moved.id }!
+        model.edit(away, title: away.title, description: away.description, priority: away.priority, tags: ["work"])
+        model.list = filter
+        #expect(model.tasks.map(\.title) == ["one", "two", "three"])
     }
 
     @Test func aFilterIsEditedKeepingItsPlaceAndRefusingWhatCreatingRefuses() throws {

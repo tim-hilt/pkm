@@ -5,9 +5,10 @@ use super::{Error, Node, Nodes, Row, Tasks, compare_positions, list, rows_of};
 use crate::Planning;
 use crate::query::{Query, QueryError};
 use pkm_base::clock::{iso8601, now_ms};
-use pkm_base::front_matter::Document;
+use pkm_base::front_matter::{Document, Value};
 use pkm_base::item_id::ItemId;
 use pkm_base::random::Entropy;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::PathBuf;
 
@@ -30,6 +31,8 @@ pub struct Filter {
 struct Stored {
     filter: Filter,
     position: f64,
+    /// The Filter's own order: a place per Task ID, see `in_filter_order`.
+    places: Vec<(String, f64)>,
 }
 
 impl Tasks {
@@ -135,21 +138,71 @@ impl Tasks {
             .ok_or_else(|| io::ErrorKind::NotFound.into())
     }
 
-    /// The Active Tasks the Filter `id` matches, as `rows` lists Active: in its
-    /// order, each matched on its own Tags, Blocked ones and Subtasks included,
-    /// never the Backlog. A Query that can't be read matches nothing. Fails
-    /// with `NotFound` if there is no such Filter.
+    /// The Active Tasks the Filter `id` matches, as `rows` lists Active: each
+    /// matched on its own Tags, Blocked ones and Subtasks included, never the
+    /// Backlog. The Tasks with a place come first in the Filter's order, then
+    /// the others in Active's. A Query that can't be read matches nothing.
+    /// Fails with `NotFound` if there is no such Filter.
     pub fn filter_rows(&self, id: &str) -> io::Result<Vec<Row>> {
-        let filter = self.stored_filter(id)?.filter;
+        let filter = self.stored_filter(id)?;
         let nodes: Nodes = self.shown()?;
-        let Ok(query) = Query::parse(&filter.query) else {
-            return Ok(Vec::new());
-        };
-        let found = list(&nodes, Planning::Active)
-            .into_iter()
-            .filter(|n| query.matches(&n.task.tags))
-            .collect();
+        let found = in_filter_order(matching(&nodes, &filter.filter.query), &filter.places);
         Ok(rows_of(&nodes, found))
+    }
+
+    /// Moves the Task `task` before the Task `before` in the Filter `id`, or
+    /// to the end of it if that is `None`; `before` is the Task itself:
+    /// nothing changes. Only the Filter's file is written; Active's order and
+    /// the Task files stay. Usually only the moved Task gets a place, between
+    /// its neighbours'. If a Task shown has none yet, or the neighbours leave
+    /// no room, every Task shown gets one, in one write. Fails with `NotFound`
+    /// for an unknown Filter, or a `task` or `before` the Filter doesn't show.
+    pub fn move_in_filter(&self, id: &str, task: &str, before: Option<&str>) -> io::Result<()> {
+        let filter = self.stored_filter(id)?;
+        let nodes: Nodes = self.shown()?;
+        let mut shown = in_filter_order(matching(&nodes, &filter.filter.query), &filter.places);
+        let from = (shown.iter().position(|n| n.task.id == task)).ok_or(io::ErrorKind::NotFound)?;
+        if before == Some(task) {
+            return Ok(());
+        }
+        let moved = shown.remove(from);
+        let to = match before {
+            None => shown.len(),
+            Some(b) => {
+                (shown.iter().position(|n| n.task.id == b)).ok_or(io::ErrorKind::NotFound)?
+            }
+        };
+        shown.insert(to, moved);
+        let mut places: HashMap<&str, f64> = (filter.places.iter())
+            .map(|(id, p)| (id.as_str(), *p))
+            .collect();
+        let place_of =
+            |at: Option<usize>| at.and_then(|at| places.get(shown.get(at)?.task.id.as_str()));
+        let neighbours = (place_of(to.checked_sub(1)), place_of(Some(to + 1)));
+        let all_placed = shown
+            .iter()
+            .all(|n| places.contains_key(n.task.id.as_str()));
+        let key = match neighbours {
+            _ if !all_placed => None,
+            (None, None) => Some(1.0),
+            (Some(prev), None) => Some(prev + 1.0),
+            (None, Some(next)) => Some(next - 1.0),
+            (Some(prev), Some(next)) if prev < next => Some(f64::midpoint(*prev, *next)),
+            _ => None,
+        };
+        match key {
+            Some(key) => drop(places.insert(task, key)),
+            None => {
+                places = (shown.iter().enumerate())
+                    .map(|(n, node)| (node.task.id.as_str(), (n + 1) as f64))
+                    .collect();
+            }
+        }
+        let places: Vec<(String, f64)> = places
+            .into_iter()
+            .map(|(id, p)| (id.to_owned(), p))
+            .collect();
+        self.rewrite_filter(id, |file| set_places(file, &places))
     }
 
     /// Checks a Query text without saving: the Tags it names that aren't
@@ -181,13 +234,22 @@ impl Tasks {
         self.rewrite_filter(id, |file| file.set_scalar("position", position.to_string()))
     }
 
-    /// Applies `change` to the file of the Filter `id` and stamps it `updated`.
+    /// Applies `change` to the file of the Filter `id`, drops the places of
+    /// Tasks it no longer shows (ADR-0024) and stamps it `updated`.
     fn rewrite_filter(&self, id: &str, change: impl FnOnce(&mut Document)) -> io::Result<()> {
         self.stored_filter(id)?;
         let path = self.filter_path(id);
         let mut file =
             Document::parse(&self.files.read(&path)?).ok_or(io::ErrorKind::InvalidData)?;
         change(&mut file);
+        let nodes: Nodes = self.shown()?;
+        let shown: HashSet<&str> = matching(&nodes, file.scalar("query").unwrap_or_default())
+            .into_iter()
+            .map(|n| n.task.id.as_str())
+            .collect();
+        let mut places = places_of(&file);
+        places.retain(|(task, _)| shown.contains(task.as_str()));
+        set_places(&mut file, &places);
         file.set_scalar("updated", iso8601(now_ms()));
         self.files.write(&path, &file.render())
     }
@@ -206,6 +268,49 @@ impl Tasks {
             compare_positions(a.position, b.position).then_with(|| a.filter.id.cmp(&b.filter.id))
         });
         Ok(found)
+    }
+}
+
+/// The Active Tasks `query` matches, in Active's order; none if it can't be read.
+fn matching<'a>(nodes: &'a Nodes, query: &str) -> Vec<&'a Node> {
+    let Ok(query) = Query::parse(query) else {
+        return Vec::new();
+    };
+    (list(nodes, Planning::Active).into_iter())
+        .filter(|n| query.matches(&n.task.tags))
+        .collect()
+}
+
+/// `found` (in Active's order) as a Filter shows it: the Tasks with a place
+/// first, by place (equal places keep Active's order), then the rest.
+fn in_filter_order<'a>(found: Vec<&'a Node>, places: &[(String, f64)]) -> Vec<&'a Node> {
+    let places: HashMap<&str, f64> = places.iter().map(|(id, p)| (id.as_str(), *p)).collect();
+    let (mut placed, unplaced): (Vec<&Node>, Vec<&Node>) =
+        (found.into_iter()).partition(|n| places.contains_key(n.task.id.as_str()));
+    placed
+        .sort_by(|a, b| compare_positions(places[a.task.id.as_str()], places[b.task.id.as_str()]));
+    placed.extend(unplaced);
+    placed
+}
+
+/// The `<task-id> <position>` entries of `places`; unreadable ones are skipped.
+fn places_of(file: &Document) -> Vec<(String, f64)> {
+    (file.list("places").unwrap_or_default().iter())
+        .filter_map(|entry| {
+            let (task, position) = entry.split_once(' ')?;
+            Some((task.to_owned(), position.parse().ok()?))
+        })
+        .collect()
+}
+
+/// Writes `places`, in Task ID order so equal orders give equal files; none, no key.
+fn set_places(file: &mut Document, places: &[(String, f64)]) {
+    let mut entries: Vec<String> = places.iter().map(|(id, p)| format!("{id} {p}")).collect();
+    entries.sort();
+    if entries.is_empty() {
+        file.remove("places");
+    } else {
+        file.set("places", Value::List(entries));
     }
 }
 
@@ -246,6 +351,7 @@ fn stored_of(file: &Document) -> Option<Stored> {
             .scalar("position")
             .and_then(|p| p.parse().ok())
             .unwrap_or(0.0),
+        places: places_of(file),
     })
 }
 
@@ -561,5 +667,129 @@ mod tests {
         assert_eq!(listed.matches, 0);
         let fixed = tasks.edit_filter(&filter.id, "Work", "@work").unwrap();
         assert_eq!((fixed.error, fixed.matches), (None, 1));
+    }
+
+    fn order_fixture() -> (Arc<MemoryFiles>, Tasks, Filter, Vec<String>) {
+        let (files, tasks) = open();
+        let ids = ["a", "b", "c", "d"]
+            .map(|t| add(&tasks, t, Planning::Active, &["work"]))
+            .to_vec();
+        let filter = tasks.create_filter("Work", "@work").unwrap();
+        (files, tasks, filter, ids)
+    }
+
+    fn shown(tasks: &Tasks, filter: &Filter) -> Vec<String> {
+        titles(tasks.filter_rows(&filter.id).unwrap())
+    }
+
+    #[test]
+    fn a_task_moves_before_another_in_a_filter_or_to_the_end() {
+        let (_, tasks, f, ids) = order_fixture();
+        tasks.move_in_filter(&f.id, &ids[3], Some(&ids[1])).unwrap();
+        assert_eq!(shown(&tasks, &f), ["a", "d", "b", "c"]);
+        tasks.move_in_filter(&f.id, &ids[3], Some(&ids[0])).unwrap();
+        assert_eq!(shown(&tasks, &f), ["d", "a", "b", "c"]);
+        tasks.move_in_filter(&f.id, &ids[3], None).unwrap();
+        assert_eq!(shown(&tasks, &f), ["a", "b", "c", "d"]);
+        tasks.move_in_filter(&f.id, &ids[0], Some(&ids[2])).unwrap();
+        assert_eq!(shown(&tasks, &f), ["b", "a", "c", "d"]);
+        tasks.move_in_filter(&f.id, &ids[0], Some(&ids[0])).unwrap();
+        assert_eq!(shown(&tasks, &f), ["b", "a", "c", "d"]);
+    }
+
+    #[test]
+    fn moving_an_unknown_task_or_before_one_not_shown_is_not_found() {
+        let (_, tasks, f, ids) = order_fixture();
+        let other = add(&tasks, "e", Planning::Active, &["home"]);
+        for (task, before) in [
+            ("aaaaaaaaaaaa", None),
+            (other.as_str(), None),
+            (ids[0].as_str(), Some(other.as_str())),
+        ] {
+            let e = tasks.move_in_filter(&f.id, task, before).unwrap_err();
+            assert_eq!(e.kind(), io::ErrorKind::NotFound);
+        }
+        let e = tasks
+            .move_in_filter("aaaaaaaaaaaa", &ids[0], None)
+            .unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn the_first_move_places_every_task_shown_in_one_write() {
+        let (files, tasks, f, ids) = order_fixture();
+        let path = format!("Filters/{}.md", f.id);
+        assert_eq!(
+            places_of(&Document::parse(&files.read(Path::new(&path)).unwrap()).unwrap()),
+            []
+        );
+        tasks.move_in_filter(&f.id, &ids[3], Some(&ids[0])).unwrap();
+        let file = Document::parse(&files.read(Path::new(&path)).unwrap()).unwrap();
+        let mut placed: Vec<String> = places_of(&file).into_iter().map(|(id, _)| id).collect();
+        placed.sort();
+        let mut all = ids.clone();
+        all.sort();
+        assert_eq!(placed, all);
+    }
+
+    #[test]
+    fn later_moves_write_the_filter_file_only_and_leave_actives_order() {
+        let (files, tasks, f, ids) = order_fixture();
+        tasks.move_in_filter(&f.id, &ids[3], Some(&ids[0])).unwrap();
+        let tasks_before: Vec<String> = ids
+            .iter()
+            .map(|id| files.read(Path::new(&format!("Tasks/{id}.md"))).unwrap())
+            .collect();
+        let other = tasks.create_filter("Other", "@work").unwrap();
+        tasks.move_in_filter(&f.id, &ids[1], None).unwrap();
+        assert_eq!(shown(&tasks, &f), ["d", "a", "c", "b"]);
+        assert_eq!(shown(&tasks, &other), ["a", "b", "c", "d"]);
+        assert_eq!(
+            titles(tasks.rows(Planning::Active).unwrap()),
+            ["a", "b", "c", "d"]
+        );
+        let tasks_after: Vec<String> = ids
+            .iter()
+            .map(|id| files.read(Path::new(&format!("Tasks/{id}.md"))).unwrap())
+            .collect();
+        assert_eq!(tasks_before, tasks_after);
+    }
+
+    #[test]
+    fn tasks_without_a_place_follow_the_placed_ones_in_actives_order() {
+        let (_, tasks, f, ids) = order_fixture();
+        tasks.move_in_filter(&f.id, &ids[2], Some(&ids[0])).unwrap();
+        add(&tasks, "e", Planning::Active, &["work"]);
+        add(&tasks, "f", Planning::Active, &["work"]);
+        assert_eq!(shown(&tasks, &f), ["c", "a", "b", "d", "e", "f"]);
+    }
+
+    #[test]
+    fn places_of_tasks_no_longer_shown_are_dropped_so_a_returning_task_starts_at_the_end() {
+        let (files, tasks, f, ids) = order_fixture();
+        tasks.move_in_filter(&f.id, &ids[3], Some(&ids[0])).unwrap();
+        assert_eq!(shown(&tasks, &f), ["d", "a", "b", "c"]);
+        tasks.remove_tag(&ids[3], "work").unwrap();
+        // Any write of the Filter's file drops the place.
+        tasks.edit_filter(&f.id, "Work", "@work").unwrap();
+        let text = files
+            .read(Path::new(&format!("Filters/{}.md", f.id)))
+            .unwrap();
+        assert!(!text.contains(&ids[3]));
+        tasks.add_tag(&ids[3], "work").unwrap();
+        assert_eq!(shown(&tasks, &f), ["a", "b", "c", "d"]);
+    }
+
+    #[test]
+    fn places_that_share_a_key_are_renumbered_on_a_move() {
+        let (files, tasks, f, ids) = order_fixture();
+        let path = format!("Filters/{}.md", f.id);
+        let mut file = Document::parse(&files.read(Path::new(&path)).unwrap()).unwrap();
+        let tied: Vec<String> = ids.iter().map(|id| format!("{id} 1")).collect();
+        file.set("places", Value::List(tied));
+        files.write(Path::new(&path), &file.render()).unwrap();
+        assert_eq!(shown(&tasks, &f), ["a", "b", "c", "d"]);
+        tasks.move_in_filter(&f.id, &ids[3], Some(&ids[2])).unwrap();
+        assert_eq!(shown(&tasks, &f), ["a", "b", "d", "c"]);
     }
 }

@@ -218,12 +218,19 @@ final class TasksModel {
     }
 
     /// Moves the row at `source` to land before the row at `destination` of `tasks`
-    /// (`onMove`'s meaning); past the last row, to the end of the list. The Parent stays.
-    /// Only in Active and the Backlog.
+    /// (`onMove`'s meaning); past the last row, to the end of the list. The Parent stays. In a Filter
+    /// only the Filter's own order changes.
     func move(from source: IndexSet, to destination: Int) {
-        guard list.planning != nil, let index = source.first, index != destination else { return }
+        guard let index = source.first, index != destination else { return }
         let target = destination < tasks.count ? tasks[destination] : nil
-        _ = try? store.moveBefore(id: tasks[index].id, before: target?.id)
+        switch list {
+        case .active, .backlog:
+            _ = try? store.moveBefore(id: tasks[index].id, before: target?.id)
+        case .filter(let id):
+            try? store.moveInFilter(id: id, task: tasks[index].id, before: target?.id)
+        case .filters:
+            return
+        }
         reload()
     }
 

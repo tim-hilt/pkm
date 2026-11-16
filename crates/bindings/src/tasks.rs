@@ -526,6 +526,16 @@ impl TaskStore {
         Ok(self.listed_rows(self.0.filter_rows(&id)?))
     }
 
+    /// Moves a Task before another in a Filter's own order, or to its end.
+    pub fn move_in_filter(
+        &self,
+        id: String,
+        task: String,
+        before: Option<String>,
+    ) -> Result<(), TasksError> {
+        Ok(self.0.move_in_filter(&id, &task, before.as_deref())?)
+    }
+
     /// Checks a Query text without saving: what is wrong with it, or which of
     /// its Tags don't exist.
     pub fn check_query(&self, text: String) -> QueryCheck {
@@ -669,9 +679,22 @@ mod tests {
             .move_filter(other.id.clone(), Some(filter.id.clone()))
             .unwrap();
         assert_eq!(store.filters().unwrap()[0].title, "Home");
+        let first = store
+            .create("a".into(), Planning::Active, 4, vec!["work".into()])
+            .unwrap();
+        store
+            .create("b".into(), Planning::Active, 4, vec!["work".into()])
+            .unwrap();
+        store
+            .move_in_filter(filter.id.clone(), first.id.clone(), None)
+            .unwrap();
+        let order: Vec<String> = (store.filter_tasks(filter.id.clone()).unwrap().into_iter())
+            .map(|t| t.title)
+            .collect();
+        assert_eq!(order.last().map(String::as_str), Some("a"));
         store.delete_filter(other.id).unwrap();
         assert_eq!(store.filters().unwrap().len(), 1);
-        assert_eq!(store.tasks(Planning::Active).unwrap().len(), 2);
+        assert_eq!(store.tasks(Planning::Active).unwrap().len(), 4);
 
         let problem = store.check_query("@a & (".into()).problem.unwrap();
         assert_eq!(
