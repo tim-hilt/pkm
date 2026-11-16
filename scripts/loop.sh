@@ -3,8 +3,8 @@
 #
 # Implements the ready-for-agent tasks in <project-directory>/issues/ one pi session
 # each, in file order and after their blockers, then reviews them all against
-# <project-directory>/spec.md after every $review_every implemented tasks and once more
-# before exit if tasks remain unreviewed.
+# <project-directory>/spec.md after every $review_every implemented tasks (unless only one task is left, which
+# joins that review) and once more before exit if tasks remain unreviewed.
 
 set -uo pipefail
 
@@ -63,6 +63,16 @@ review() {
   unreviewed=0
 }
 
+# Number of ready-for-agent tasks not yet run.
+remaining_tasks() {
+  local count=0 task_file
+  for task_file in ${tasks[@]+"${tasks[@]}"}; do
+    has_status "$task_file" 'ready-for-agent' || continue
+    [[ $attempted == *" $task_file "* ]] || count=$((count + 1))
+  done
+  echo "$count"
+}
+
 implemented=0
 attempted=" " # tasks already run: one whose Status the agent did not update runs only once
 
@@ -86,7 +96,8 @@ while ((progress)); do
     implemented=$((implemented + 1))
     unreviewed=$((unreviewed + 1))
     progress=1
-    if ((unreviewed >= review_every)); then review; fi
+    # A single task left joins this batch's review instead of getting its own.
+    if ((unreviewed >= review_every && $(remaining_tasks) != 1)); then review; fi
   done
 done
 
