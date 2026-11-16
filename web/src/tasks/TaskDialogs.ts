@@ -331,8 +331,8 @@ class TagField {
 
 /**
  * A modal list of every known Tag with a checkbox each, and a search input at
- * the bottom that also offers to create a Tag. Done calls `done` with the Tags
- * checked and closes; Cancel and Esc change nothing.
+ * the bottom that takes the focus on opening and also offers to create a Tag.
+ * Done calls `done` with the Tags checked and closes; Cancel and Esc change nothing.
  */
 function pickTagsDialog(
   parent: HTMLElement,
@@ -360,6 +360,8 @@ function pickTagsDialog(
   search.autocapitalize = "off";
   search.autocomplete = "off";
   search.spellcheck = false;
+  // showModal focuses it, which opens the keyboard on touch devices.
+  search.autofocus = true;
 
   const creatable = () =>
     isValidTag(search.value) && !colors.has(search.value) && !created.includes(search.value);

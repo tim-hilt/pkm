@@ -75,6 +75,10 @@ import XCTest
         for _ in 0..<4 where !row.isHittable { app.collectionViews.firstMatch.swipeUp() }
         row.tap()
         XCTAssertTrue(app.navigationBars["Tags"].waitForExistence(timeout: 5))
+        // Search takes the focus right away, so typing filters without a tap first.
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        for key in ["h", "o"] { app.keys[key].tap() }
+        XCTAssertEqual(app.searchFields.firstMatch.value as? String, "ho")
         app.buttons["home"].firstMatch.tap()
         app.navigationBars["Tags"].buttons["Done"].tap()
 

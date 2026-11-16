@@ -33,8 +33,9 @@ struct TagsRow: View {
     }
 }
 
-/// Every known Tag with a checkbox on the right, and search at the bottom, which also
-/// offers to create a Tag. Done hands back the checked Tags; leaving otherwise changes nothing.
+/// Every known Tag with a checkbox on the right, and search at the bottom, which takes the
+/// focus on opening and also offers to create a Tag. Done hands back the checked Tags;
+/// leaving otherwise changes nothing.
 struct TagPicker: View {
     @Environment(TasksModel.self) private var model
     let done: ([String]) -> Void
@@ -43,6 +44,8 @@ struct TagPicker: View {
     @State private var created: [String] = []
     @State private var query = ""
     @State private var refusedText = false
+    /// Search is focused as the picker opens, so typing searches right away.
+    @FocusState private var isSearching: Bool
 
     init(selected: [String], done: @escaping ([String]) -> Void) {
         _selected = State(initialValue: selected)
@@ -102,6 +105,10 @@ struct TagPicker: View {
                 .navigationBarTitleDisplayMode(.inline)
             #endif
             .searchable(text: $query, prompt: "Search or create")
+            .searchFocused($isSearching)
+            // Keeps Done reachable while searching.
+            .searchPresentationToolbarBehavior(.avoidHidingContent)
+            .onAppear { isSearching = true }
             #if os(iOS)
                 .textInputAutocapitalization(.never)
             #endif
