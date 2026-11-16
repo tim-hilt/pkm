@@ -127,6 +127,10 @@ struct TagPicker: View {
                 #endif
             }
         }
+        #if os(macOS)
+            // A Mac sheet sizes to its content, and a List has no height of its own.
+            .frame(minWidth: 320, idealWidth: 360, minHeight: 400, idealHeight: 520)
+        #endif
         .presentationDetents([.large])
     }
 }
