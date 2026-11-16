@@ -7,7 +7,7 @@ enum AddButtonMetrics {
 }
 
 extension View {
-    /// A Gallery's "+" action: a toolbar button on the Mac; on iOS a floating
+    /// A Gallery's "+" action, also on the "n" key: a toolbar button on the Mac; on iOS a floating
     /// button in the lower right, within thumb's reach, like other native iOS apps.
     func addButton(_ title: LocalizedStringKey, identifier: String, action: @escaping () -> Void) -> some View {
         #if os(iOS)
@@ -20,6 +20,7 @@ extension View {
                         .background(Color.accentColor, in: Circle())
                         .shadow(radius: 4, y: 2)
                 }
+                .keyboardShortcut("n", modifiers: [])
                 .padding(AddButtonMetrics.margin)
                 .accessibilityLabel(title)
                 .accessibilityIdentifier(identifier)
@@ -28,6 +29,7 @@ extension View {
             toolbar {
                 ToolbarItem {
                     Button(title, systemImage: "plus", action: action)
+                        .keyboardShortcut("n", modifiers: [])
                         .accessibilityIdentifier(identifier)
                 }
             }

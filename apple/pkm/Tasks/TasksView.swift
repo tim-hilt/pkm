@@ -71,6 +71,7 @@ struct TasksView: View {
                     ToolbarSpacer(.flexible, placement: .bottomBar)
                     ToolbarItem(placement: .bottomBar) {
                         Button("New Task", systemImage: "plus") { isAdding = true }
+                            .keyboardShortcut("n", modifiers: [])
                             .accessibilityIdentifier("add-task")
                     }
                 #endif
@@ -86,6 +87,7 @@ struct TasksView: View {
                 .toolbar {
                     ToolbarItem {
                         Button("New Task", systemImage: "plus") { isAdding = true }
+                        .keyboardShortcut("n", modifiers: [])
                         .accessibilityIdentifier("add-task")
                     }
                 }
