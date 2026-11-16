@@ -13,6 +13,9 @@
 use pkm_base::tag;
 use std::fmt;
 
+/// Characters of a Query that aren't part of a Tag.
+const SYNTAX: &str = "@&|!() ";
+
 /// Parentheses nest no deeper than this, so that no text can exhaust the stack.
 const MAX_DEPTH: usize = 64;
 
@@ -60,13 +63,56 @@ impl Query {
         }
     }
 
+    /// The Tags the Query names, each once, in order of appearance.
+    pub fn tags(&self) -> Vec<String> {
+        let mut named = Vec::new();
+        self.0.collect_tags(&mut named);
+        named
+    }
+
     /// Whether a Task carrying exactly `tags` matches.
     pub fn matches(&self, tags: &[String]) -> bool {
         self.0.matches(tags)
     }
 }
 
+/// `text` as it may be typed: uppercase letters made lowercase, and everything
+/// refused that is neither a Tag character nor an operator, parenthesis or
+/// space. What is left may still not be a Query.
+pub fn typed(text: &str) -> String {
+    let mut kept = String::new();
+    for c in text.chars().flat_map(char::to_lowercase) {
+        if SYNTAX.contains(c) {
+            kept.push(c);
+        } else {
+            kept.push_str(&tag::strip_forbidden(c.encode_utf8(&mut [0; 4])));
+        }
+    }
+    kept
+}
+
+/// The Tag being typed at the end of `text`: what follows its last `@`, if
+/// that `@` isn't followed by a space or operator. Empty right after the `@`.
+pub fn unfinished_tag(text: &str) -> Option<&str> {
+    let word = text.rsplit_once('@')?.1;
+    (!word.contains(|c: char| SYNTAX.contains(c))).then_some(word)
+}
+
 impl Expr {
+    fn collect_tags(&self, named: &mut Vec<String>) {
+        match self {
+            Self::Tag(tag) => {
+                if !named.contains(tag) {
+                    named.push(tag.clone());
+                }
+            }
+            Self::Not(inner) => inner.collect_tags(named),
+            Self::And(parts) | Self::Or(parts) => {
+                parts.iter().for_each(|p| p.collect_tags(named));
+            }
+        }
+    }
+
     fn matches(&self, tags: &[String]) -> bool {
         match self {
             Self::Tag(tag) => tags.contains(tag),
@@ -213,6 +259,31 @@ mod tests {
     fn error(text: &str) -> (usize, String) {
         let e = Query::parse(text).unwrap_err();
         (e.position, e.message)
+    }
+
+    #[test]
+    fn a_query_lists_the_tags_it_names_once() {
+        let query = Query::parse("@work & !(@home | @work) | @a/b").unwrap();
+        assert_eq!(query.tags(), ["work", "home", "a/b"]);
+    }
+
+    #[test]
+    fn typing_lowercases_and_refuses_what_a_tag_cannot_hold() {
+        assert_eq!(
+            typed("@Work & !(@Home_1 | @a/b-2)"),
+            "@work & !(@home1 | @a/b-2)"
+        );
+        assert_eq!(typed("@a ä\n#"), "@a ");
+    }
+
+    #[test]
+    fn the_unfinished_tag_is_the_word_after_the_last_at() {
+        assert_eq!(unfinished_tag("@wo"), Some("wo"));
+        assert_eq!(unfinished_tag("@a & !@"), Some(""));
+        assert_eq!(unfinished_tag("@a &"), None);
+        assert_eq!(unfinished_tag("@a "), None);
+        assert_eq!(unfinished_tag("(@a)"), None);
+        assert_eq!(unfinished_tag(""), None);
     }
 
     #[test]

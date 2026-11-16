@@ -582,6 +582,27 @@ import Testing
 
     // MARK: Filters
 
+    @Test func aQueryOffersKnownTagsAfterAtAndMarksUnknownOnes() throws {
+        let model = try openModel()
+        model.add(title: "t", tags: ["work", "network", "home"])
+        #expect(model.suggestQueryTags("@a & !@w") == ["work", "network"])
+        #expect(model.suggestQueryTags("@work ").isEmpty)
+        #expect(TasksModel.completingQuery("@a & !@w", with: "work") == "@a & !@work")
+        let check = model.checkQuery("@work | !@nope")
+        #expect(check.problem == nil)
+        #expect(check.unknown == ["nope"])
+        #expect(TasksModel.allowedQueryText("@Work & !@Ho_me") == "@work & !@home")
+    }
+
+    @Test func aFilterKeepsNamingATagAfterItIsDeleted() throws {
+        let model = try openModel()
+        model.add(title: "t", tags: ["x"])
+        model.addFilter(title: "F", query: "!@x")
+        model.deleteTag("x")
+        #expect(model.filters[0].query == "!@x")
+        #expect(model.checkQuery("!@x").unknown == ["x"])
+    }
+
     @Test func aFilterIsCreatedAtTheEndOfTheListAndShowsTheActiveTasksItsQueryMatches() throws {
         let model = try openModel()
         model.add(title: "Reply", tags: ["work"])
@@ -607,8 +628,8 @@ import Testing
         #expect(!model.addFilter(title: "  ", query: "@work"))
         #expect(!model.addFilter(title: "Work", query: "@work &"))
         #expect(model.filters.isEmpty)
-        #expect(TasksModel.queryProblem("@work &")?.position == 7)
-        #expect(TasksModel.queryProblem("@work") == nil)
+        #expect(model.checkQuery("@work &").problem?.position == 7)
+        #expect(model.checkQuery("@work").problem == nil)
     }
 
     @Test func aTaskLeavesAFilterAsSoonAsItNoLongerMatches() throws {

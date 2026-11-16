@@ -6,8 +6,8 @@ use std::sync::Mutex;
 
 use pkm_base::tags::{Entry as TagEntry, Suggestions as TagSuggestions, Tags};
 use pkm_tasks::{
-    Blocker, Closing, Error, Filter, Planning, Query, QuickAdd, QuickShortcut, Row,
-    ShortcutMeaning, TagQuery, Task, Tasks,
+    Blocker, Closing, Error, Filter, Planning, QuickAdd, QuickShortcut, Row, ShortcutMeaning,
+    TagQuery, Task, Tasks,
 };
 
 /// Why a Task wasn't saved or the Tasks couldn't be read.
@@ -111,6 +111,15 @@ pub struct QueryProblem {
     /// In characters from the start of the text.
     pub position: u32,
     pub message: String,
+}
+
+/// What checking a Query text found.
+#[derive(uniffi::Record)]
+pub struct QueryCheck {
+    /// Why it can't be read, if it can't.
+    pub problem: Option<QueryProblem>,
+    /// Tags it names that don't exist: allowed, but worth marking.
+    pub unknown: Vec<String>,
 }
 
 /// A Tag that exists, with its Tag Color.
@@ -517,6 +526,24 @@ impl TaskStore {
         Ok(self.listed_rows(self.0.filter_rows(&id)?))
     }
 
+    /// Checks a Query text without saving: what is wrong with it, or which of
+    /// its Tags don't exist.
+    pub fn check_query(&self, text: String) -> QueryCheck {
+        match self.0.check_query(&text) {
+            Ok(unknown) => QueryCheck {
+                problem: None,
+                unknown,
+            },
+            Err(e) => QueryCheck {
+                problem: Some(QueryProblem {
+                    position: u32::try_from(e.position).unwrap_or(u32::MAX),
+                    message: e.message,
+                }),
+                unknown: Vec::new(),
+            },
+        }
+    }
+
     /// The direct Subtasks of an Open Task, in either list: Open or pending
     /// Done, in their manual order.
     pub fn subtasks(&self, parent: String) -> Result<Vec<ListedTask>, TasksError> {
@@ -524,15 +551,18 @@ impl TaskStore {
     }
 }
 
-/// What is wrong with the Query `text`; none if it is fine. Drives the inline
-/// error while typing.
+/// `text` as a Query may be typed: lowercase, without what neither a Tag nor
+/// the Query syntax can hold.
 #[uniffi::export]
-pub fn check_query(text: String) -> Option<QueryProblem> {
-    let e = Query::parse(&text).err()?;
-    Some(QueryProblem {
-        position: u32::try_from(e.position).unwrap_or(u32::MAX),
-        message: e.message,
-    })
+pub fn typed_query(text: String) -> String {
+    pkm_tasks::typed_query(&text)
+}
+
+/// The Tag being typed at the end of a Query `text`, to suggest Tags for; none
+/// if it doesn't end in one.
+#[uniffi::export]
+pub fn unfinished_query_tag(text: String) -> Option<String> {
+    pkm_tasks::unfinished_tag(&text).map(str::to_owned)
 }
 
 /// `text` without the characters a Tag can never contain, to refuse them as
@@ -643,12 +673,14 @@ mod tests {
         assert_eq!(store.filters().unwrap().len(), 1);
         assert_eq!(store.tasks(Planning::Active).unwrap().len(), 2);
 
-        let problem = check_query("@a & (".into()).unwrap();
+        let problem = store.check_query("@a & (".into()).problem.unwrap();
         assert_eq!(
             (problem.position, problem.message.as_str()),
             (6, "Expected @tag, ! or (")
         );
-        assert!(check_query("@a | !@b".into()).is_none());
+        let checked = store.check_query("@work | !@b".into());
+        assert!(checked.problem.is_none());
+        assert_eq!(checked.unknown, ["b"]);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

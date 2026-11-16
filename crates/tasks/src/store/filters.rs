@@ -3,7 +3,7 @@
 
 use super::{Error, Node, Nodes, Row, Tasks, compare_positions, list, rows_of};
 use crate::Planning;
-use crate::query::Query;
+use crate::query::{Query, QueryError};
 use pkm_base::clock::{iso8601, now_ms};
 use pkm_base::front_matter::Document;
 use pkm_base::item_id::ItemId;
@@ -150,6 +150,16 @@ impl Tasks {
             .filter(|n| query.matches(&n.task.tags))
             .collect();
         Ok(rows_of(&nodes, found))
+    }
+
+    /// Checks a Query text without saving: the Tags it names that aren't
+    /// known (marked as such, and no reason to refuse it), or why it can't be
+    /// read.
+    pub fn check_query(&self, text: &str) -> Result<Vec<String>, QueryError> {
+        let known = self.read_tags();
+        let mut named = Query::parse(text)?.tags();
+        named.retain(|t| !known.contains(t));
+        Ok(named)
     }
 
     fn filters_folder(&self) -> PathBuf {
@@ -310,6 +320,34 @@ mod tests {
         };
         assert_eq!(e.position, 4);
         assert!(files.list(Path::new("Filters")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn checking_a_query_names_its_unknown_tags_or_its_error_and_saves_nothing() {
+        let (files, tasks) = open();
+        add(&tasks, "t", Planning::Active, &["work"]);
+        assert_eq!(
+            tasks.check_query("@work & !@nope | @x"),
+            Ok(vec!["nope".into(), "x".into()])
+        );
+        assert_eq!(tasks.check_query("@work"), Ok(vec![]));
+        assert_eq!(tasks.check_query("@work &").unwrap_err().position, 7);
+        assert!(files.list(Path::new("Filters")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn deleting_a_tag_leaves_every_filters_query_as_it_is() {
+        let (_, tasks) = open();
+        add(&tasks, "t", Planning::Active, &["x"]);
+        tasks.create_filter("F", "!@x & @y").unwrap();
+        tasks.remove_tag_everywhere("x").unwrap();
+        tasks.forget_tag("x").unwrap();
+        let filter = &tasks.filters().unwrap()[0];
+        assert_eq!(filter.query, "!@x & @y");
+        assert_eq!(
+            tasks.check_query(&filter.query),
+            Ok(vec!["x".into(), "y".into()])
+        );
     }
 
     #[test]

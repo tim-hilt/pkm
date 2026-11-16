@@ -93,9 +93,9 @@ struct FilterSheet: View {
         _query = State(initialValue: editing?.query ?? "")
     }
 
-    private var problem: QueryProblem? { TasksModel.queryProblem(query) }
+    private var check: QueryCheck { model.checkQuery(query) }
     private var canSave: Bool {
-        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && problem == nil
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && check.problem == nil
     }
 
     var body: some View {
@@ -109,14 +109,22 @@ struct FilterSheet: View {
                         #if os(iOS)
                             .textInputAutocapitalization(.never)
                         #endif
+                        .onChange(of: query) {
+                            let typed = TasksModel.allowedQueryText(query)
+                            if typed != query { query = typed }
+                        }
                         .onSubmit(save)
                         .accessibilityIdentifier("filter-query")
-                } footer: {
-                    if let problem, !query.isEmpty {
-                        Text(problem.message)
-                            .foregroundStyle(.red)
-                            .accessibilityIdentifier("filter-query-error")
+                    ForEach(model.suggestQueryTags(query), id: \.self) { tag in
+                        Button {
+                            query = TasksModel.completingQuery(query, with: tag)
+                        } label: {
+                            Label(tag, systemImage: "tag")
+                                .foregroundStyle(model.tagEntry(tag).style(default: .primary))
+                        }
                     }
+                } footer: {
+                    queryNotes
                 }
             }
             .formStyle(.grouped)
@@ -135,6 +143,20 @@ struct FilterSheet: View {
             .frame(minWidth: 360)
         #endif
         .presentationDetents([.medium, .large])
+    }
+
+    /// Why the Query can't be saved, or which of its Tags don't exist (which doesn't stop saving).
+    @ViewBuilder private var queryNotes: some View {
+        let check = check
+        if let problem = check.problem, !query.isEmpty {
+            Text(problem.message)
+                .foregroundStyle(.red)
+                .accessibilityIdentifier("filter-query-error")
+        } else if !check.unknown.isEmpty {
+            Text("Unknown: " + check.unknown.map { "@\($0)" }.joined(separator: ", "))
+                .foregroundStyle(.orange)
+                .accessibilityIdentifier("filter-query-unknown")
+        }
     }
 
     private func save() {

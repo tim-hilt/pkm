@@ -309,8 +309,24 @@ final class TasksModel {
         reload()
     }
 
-    /// What is wrong with the Query `text`, if anything.
-    static func queryProblem(_ text: String) -> QueryProblem? { checkQuery(text: text) }
+    /// What is wrong with the Query `text`, or which Tags it names that don't exist; saves nothing.
+    func checkQuery(_ text: String) -> QueryCheck { store.checkQuery(text: text) }
+
+    /// `text` as a Query may be typed: lowercase, without characters neither a Tag nor the Query hold.
+    static func allowedQueryText(_ text: String) -> String { typedQuery(text: text) }
+
+    /// The known Tags to suggest for the Tag being typed at the end of the Query `text`, as Quick Add
+    /// suggests them; none if it doesn't end in one.
+    func suggestQueryTags(_ text: String) -> [String] {
+        guard let word = unfinishedQueryTag(text: text) else { return [] }
+        return suggestTags(word, leaveOut: []).matches
+    }
+
+    /// The Query `text` with the Tag being typed at its end completed to `tag`.
+    static func completingQuery(_ text: String, with tag: String) -> String {
+        let word = unfinishedQueryTag(text: text) ?? ""
+        return String(text.dropLast(word.count)) + tag
+    }
 
     /// Gives a Tag the Tag Color `color` (`#rrggbb`), or Default for nil; the lists show it at once.
     func setTagColor(_ tag: String, to color: String?) {
