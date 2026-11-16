@@ -166,11 +166,11 @@ extension AppNavigationTests {
 
         links.follow(URL(string: "pkm://tasks/\(id)")!)
         #expect(links.navigation.selected == .tasks)
-        #expect(tasks.planning == .backlog)
+        #expect(tasks.list == .backlog)
         #expect(tasks.editing == [id])
 
         links.follow(URL(string: "pkm://tasks/unknown")!)
-        #expect(tasks.planning == .active)
+        #expect(tasks.list == .active)
         #expect(tasks.editing.isEmpty)
     }
 
@@ -191,7 +191,7 @@ extension AppNavigationTests {
         tasks.commit()
 
         links.follow(URL(string: "pkm://tasks/\(sub.id)")!)
-        #expect(tasks.planning == .active)
+        #expect(tasks.list == .active)
         #expect(tasks.editing.isEmpty)
     }
 }

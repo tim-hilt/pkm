@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: DEVICE=mac|ipad|iphone|web [SCREEN=canvas|settings|books|reader|tasks|task] [OUT=path] scripts/screenshot.sh
+# Usage: DEVICE=mac|ipad|iphone|web [SCREEN=canvas|settings|books|reader|tasks|task|filters|filter] [OUT=path] scripts/screenshot.sh
 # Builds the app, launches it with the sample Drawing already open
 # (-UITestingOpenSampleDrawing), or with Settings open (SCREEN=settings,
 # -UITestingOpenSettings), or with the Books Gallery over sample Books
@@ -7,7 +7,9 @@
 # the Reader (SCREEN=reader, -UITestingOpenReader), or with the Tasks list over
 # sample Tasks (SCREEN=tasks, -UITestingOpenTasks), or with the sheet of the
 # first one, which has a Subtask, open over them (SCREEN=task,
-# -UITestingOpenTaskSheet) and saves a screenshot to $OUT
+# -UITestingOpenTaskSheet), or with the Filters list (SCREEN=filters,
+# -UITestingOpenFilters) or one Filter's Tasks (SCREEN=filter,
+# -UITestingOpenFilter) over sample Tasks, and saves a screenshot to $OUT
 # (default /tmp/wt-$DEVICE.png). DEVICE=web captures the web app (see
 # screenshot-web.sh). On Mac only the app's window is captured.
 set -euo pipefail
@@ -25,7 +27,9 @@ books) LAUNCH_ARG=-UITestingOpenBooks WINDOW_NAME= ;;
 reader) LAUNCH_ARG=-UITestingOpenReader WINDOW_NAME= ;;
 tasks) LAUNCH_ARG=-UITestingOpenTasks WINDOW_NAME= ;;
 task) LAUNCH_ARG=-UITestingOpenTaskSheet WINDOW_NAME= ;;
-*) echo "SCREEN must be canvas, settings, books, reader, tasks or task" >&2; exit 2 ;;
+filters) LAUNCH_ARG=-UITestingOpenFilters WINDOW_NAME= ;;
+filter) LAUNCH_ARG=-UITestingOpenFilter WINDOW_NAME= ;;
+*) echo "SCREEN must be canvas, settings, books, reader, tasks, task, filters or filter" >&2; exit 2 ;;
 esac
 OUT=${OUT:-/tmp/wt-$DEVICE.png}
 DERIVED=build

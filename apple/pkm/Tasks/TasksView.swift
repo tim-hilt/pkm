@@ -1,112 +1,174 @@
 import SwiftUI
 
-/// The Tasks Context: the Active list and the Backlog, as Todoist-style rows.
+/// The Tasks Context: the Active list, the Backlog and the Filters, as Todoist-style rows. A Filter
+/// opens on top of the Filters list.
 struct TasksView: View {
     @Environment(TasksModel.self) private var model
     @State private var isAdding = false
+    @State private var isAddingFilter = false
+
+    /// The Filter open on top of the Filters list; going back leaves it.
+    private var openFilter: Binding<[String]> {
+        Binding(
+            get: { if case .filter(let id) = model.list { [id] } else { [] } },
+            set: { path in
+                if let id = path.last {
+                    model.list = .filter(id)
+                } else if case .filter = model.list {
+                    model.list = .filters
+                }
+            }
+        )
+    }
 
     var body: some View {
         @Bindable var model = model
-        NavigationStack {
+        NavigationStack(path: openFilter) {
             Group {
-                if model.tasks.isEmpty {
-                    ContentUnavailableView {
-                        AppContext.tasks.label
-                    } description: {
-                        Text(model.planning == .active ? "Nothing active." : "The Backlog is empty.")
-                    }
-                } else {
-                    List {
-                        ForEach(model.tasks) { task in
-                            TaskRow(task: task, onCircle: { model.toggleDone(task) })
-                                .listRowSeparator(task.id == model.tasks.first?.id ? .hidden : .automatic, edges: .top)
-                                .contentShape(Rectangle())
-                                .onTapGesture { model.startEditing(task) }
-                                .swipeActions(edge: .trailing) {
-                                    if !task.done {
-                                        Button("Reject", role: .destructive) { model.close(task, as: .rejected) }
-                                    }
-                                }
-                                .contextMenu {
-                                    if !task.done {  // a pending Done is Reverted at its circle
-                                        if task.parent == nil {  // a Subtask follows its top-level Task
-                                            if task.planning == .backlog {
-                                                Button("Make Active", systemImage: "arrow.up.circle") {
-                                                    model.plan(task, as: .active)
-                                                }
-                                            } else {
-                                                Button("Move to Backlog", systemImage: "tray") {
-                                                    model.plan(task, as: .backlog)
-                                                }
-                                            }
-                                        }
-                                        Button("Reject", systemImage: "xmark.circle", role: .destructive) {
-                                            model.close(task, as: .rejected)
-                                        }
-                                    }
-                                }
-                        }
-                        .onMove { model.move(from: $0, to: $1) }
-                    }
-                    .listStyle(.plain)
+                switch model.list {
+                case .active, .backlog:
+                    TaskListView(emptyText: model.list == .active ? "Nothing active." : "The Backlog is empty.")
+                case .filters, .filter:
+                    FiltersList { isAddingFilter = true }
                 }
             }
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)  // slim top bar: the sidebar button, no title
             #endif
             .toolbar {
-                // On iPhone and iPad the List switch sits in the bottom bar, in thumb reach; the "+"
+                // On iPhone and iPad the bar sits in the bottom bar, in thumb reach; the "+"
                 // and the toast sit above it, in its safe area. The Mac keeps it in its toolbar.
-                ToolbarItem(placement: planningPlacement) {
-                    Picker("List", selection: $model.planning) {
-                        Text("Active").tag(Planning.active)
-                        Text("Backlog").tag(Planning.backlog)
+                ToolbarItem(placement: barPlacement) {
+                    Picker("List", selection: barEntry) {
+                        Text("Active").tag(TasksList.active)
+                        Text("Backlog").tag(TasksList.backlog)
+                        Text("Filters").tag(TasksList.filters)
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
                     .accessibilityIdentifier("tasks-planning")
                 }
                 .sharedBackgroundVisibility(.hidden)  // no capsule round the picker, which has its own
-                #if os(iOS)
-                    ToolbarSpacer(.flexible, placement: .bottomBar)
-                    ToolbarItem(placement: .bottomBar) {
-                        Button("New Task", systemImage: "plus") { isAdding = true }
-                            .keyboardShortcut("n", modifiers: [])
-                            .accessibilityIdentifier("add-task")
-                    }
-                #endif
-            }
-            .safeAreaInset(edge: .bottom) {
-                // While the edit sheet is open, its own toast shows instead.
-                if let pendingClose = model.pendingClose, model.editing.isEmpty {
-                    ClosedToast(closing: pendingClose)
+                if model.list.planning == nil {
+                    AddToolbar(title: "New Filter", identifier: "add-filter") { isAddingFilter = true }
+                } else {
+                    AddToolbar(title: "New Task", identifier: "add-task") { isAdding = true }
                 }
             }
-            .animation(.default, value: model.pendingClose)
-            #if os(macOS)
-                .toolbar {
-                    ToolbarItem {
-                        Button("New Task", systemImage: "plus") { isAdding = true }
-                        .keyboardShortcut("n", modifiers: [])
-                        .accessibilityIdentifier("add-task")
-                    }
-                }
-            #endif
+            .navigationDestination(for: String.self) { id in
+                TaskListView(emptyText: "No Active Tasks match.")
+                    .navigationTitle(model.filters.first { $0.id == id }?.title ?? "")
+                    #if os(iOS)
+                        .navigationBarTitleDisplayMode(.inline)
+                    #endif
+                    .toolbar { AddToolbar(title: "New Task", identifier: "add-task") { isAdding = true } }
+            }
         }
         // On the stack, not on the content that swaps between empty and list when a Task is added.
         .sheet(isPresented: $isAdding) { NewTaskSheet() }
+        .sheet(isPresented: $isAddingFilter) { NewFilterSheet() }
         .sheet(isPresented: Binding(get: { !model.editing.isEmpty }, set: { if !$0 { model.closeEditing() } })) {
             EditTaskSheet()
         }
     }
 
-    /// Where the List switch sits: the bottom bar on iPhone and iPad, the toolbar's middle on the Mac.
-    private var planningPlacement: ToolbarItemPlacement {
+    /// The bar's entry that shows the list: a Filter is under Filters.
+    private var barEntry: Binding<TasksList> {
+        Binding(
+            get: { model.list.planning == nil ? .filters : model.list },
+            set: { model.list = $0 }
+        )
+    }
+
+    /// Where the bar sits: the bottom bar on iPhone and iPad, the toolbar's middle on the Mac.
+    private var barPlacement: ToolbarItemPlacement {
         #if os(iOS)
             .bottomBar
         #else
             .principal
         #endif
+    }
+}
+
+/// The "+" of a list: at the end of the bottom bar on iPhone and iPad, in the toolbar on the Mac.
+private struct AddToolbar: ToolbarContent {
+    let title: LocalizedStringKey
+    let identifier: String
+    let action: () -> Void
+
+    var body: some ToolbarContent {
+        #if os(iOS)
+            ToolbarSpacer(.flexible, placement: .bottomBar)
+            ToolbarItem(placement: .bottomBar) { button }
+        #else
+            ToolbarItem { button }
+        #endif
+    }
+
+    private var button: some View {
+        Button(title, systemImage: "plus", action: action)
+            .keyboardShortcut("n", modifiers: [])
+            .accessibilityIdentifier(identifier)
+    }
+}
+
+/// The Tasks of the list shown (`model.tasks`) as rows with their actions, and the toast of a
+/// pending Close. They drag into another order only in Active and the Backlog.
+private struct TaskListView: View {
+    @Environment(TasksModel.self) private var model
+    let emptyText: LocalizedStringKey
+
+    var body: some View {
+        Group {
+            if model.tasks.isEmpty {
+                ContentUnavailableView {
+                    AppContext.tasks.label
+                } description: {
+                    Text(emptyText)
+                }
+            } else {
+                List {
+                    ForEach(model.tasks) { task in
+                        TaskRow(task: task, onCircle: { model.toggleDone(task) })
+                            .listRowSeparator(task.id == model.tasks.first?.id ? .hidden : .automatic, edges: .top)
+                            .contentShape(Rectangle())
+                            .onTapGesture { model.startEditing(task) }
+                            .swipeActions(edge: .trailing) {
+                                if !task.done {
+                                    Button("Reject", role: .destructive) { model.close(task, as: .rejected) }
+                                }
+                            }
+                            .contextMenu {
+                                if !task.done {  // a pending Done is Reverted at its circle
+                                    if task.parent == nil {  // a Subtask follows its top-level Task
+                                        if task.planning == .backlog {
+                                            Button("Make Active", systemImage: "arrow.up.circle") {
+                                                model.plan(task, as: .active)
+                                            }
+                                        } else {
+                                            Button("Move to Backlog", systemImage: "tray") {
+                                                model.plan(task, as: .backlog)
+                                            }
+                                        }
+                                    }
+                                    Button("Reject", systemImage: "xmark.circle", role: .destructive) {
+                                        model.close(task, as: .rejected)
+                                    }
+                                }
+                            }
+                    }
+                    .onMove(perform: model.list.planning == nil ? nil : { model.move(from: $0, to: $1) })
+                }
+                .listStyle(.plain)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            // While the edit sheet is open, its own toast shows instead.
+            if let pendingClose = model.pendingClose, model.editing.isEmpty {
+                ClosedToast(closing: pendingClose)
+            }
+        }
+        .animation(.default, value: model.pendingClose)
     }
 }
 

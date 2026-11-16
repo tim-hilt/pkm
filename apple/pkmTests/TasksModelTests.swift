@@ -134,7 +134,7 @@ import Testing
         model.add(title: "Later", planning: .backlog)
         model.plan(model.tasks[0], as: .active)
         #expect(model.tasks.isEmpty)
-        model.planning = .active
+        model.list = .active
         #expect(model.tasks.map(\.title) == ["Later"])
         model.plan(model.tasks[0], as: .backlog)
         #expect(model.tasks.isEmpty)
@@ -186,9 +186,9 @@ import Testing
     @Test func addingToTheBacklogShowsTheBacklog() throws {
         let model = try openModel()
         model.add(title: "Later", planning: .backlog)
-        #expect(model.planning == .backlog)
+        #expect(model.list == .backlog)
         #expect(model.tasks.map(\.title) == ["Later"])
-        model.planning = .active
+        model.list = .active
         #expect(model.tasks.isEmpty)
     }
 
@@ -229,14 +229,14 @@ import Testing
     @Test func aSubtaskOpensOnTopOfItsParentAndMixesWithBlockers() throws {
         let model = try openModel()
         model.add(title: "p", planning: .backlog)
-        model.planning = .backlog
+        model.list = .backlog
         let p = model.tasks[0]
         model.addSubtask(title: "s", under: p)
         let s = model.subtasks(of: p.id)[0]
         model.startEditing(p)
         #expect(model.open(id: s.id))
         #expect(model.editing == [p.id, s.id])
-        #expect(model.planning == .backlog)
+        #expect(model.list == .backlog)
         model.back()
         #expect(model.editing == [p.id])
     }
@@ -256,14 +256,14 @@ import Testing
     @Test func subtasksAreTheDirectOpenOnesInListOrderEvenFromTheOtherList() throws {
         let model = try openModel()
         model.add(title: "p", planning: .backlog)
-        model.planning = .backlog
+        model.list = .backlog
         let p = model.tasks[0]
         model.addSubtask(title: "rejected", under: p)
         model.addSubtask(title: "deep", under: model.subtasks(of: p.id)[0])
         model.addSubtask(title: "kept", under: p)
         model.close(model.subtasks(of: p.id)[0], as: .rejected)
         model.commit()
-        model.planning = .active
+        model.list = .active
         #expect(model.subtasks(of: p.id).map(\.title) == ["kept"])
         #expect(model.subtasks(of: p.id).first?.parentTitle == "p")
         #expect(model.subtasks(of: "unknown").isEmpty)
@@ -294,14 +294,14 @@ import Testing
         let model = try openModel()
         model.add(title: "far", planning: .backlog)
         model.add(title: "a", planning: .active)
-        model.planning = .backlog
+        model.list = .backlog
         let farTask = model.tasks[0]
-        model.planning = .active
+        model.list = .active
         model.setBlockedBy(model.tasks[0], to: [farTask.id])
         model.startEditing(model.tasks[0])
         #expect(model.open(id: model.tasks[0].blockedBy[0].id))
         #expect(model.editing.last == farTask.id)
-        #expect(model.planning == .active)
+        #expect(model.list == .active)
     }
 
     @Test func aClosedBlockerAndAnEmptyTitleRefuseOpening() throws {
@@ -342,9 +342,9 @@ import Testing
         let model = try openModel()
         model.add(title: "far", planning: .backlog)
         model.add(title: "a", planning: .active)
-        model.planning = .backlog
+        model.list = .backlog
         let far = model.tasks[0]
-        model.planning = .active
+        model.list = .active
         model.setBlockedBy(model.tasks[0], to: [far.id])
         model.edit(far, title: "far2", description: "", priority: 4, tags: [])
         #expect(model.task(id: far.id)?.title == "far2")
@@ -573,10 +573,77 @@ import Testing
         let model = try openModel()
         for title in ["a", "b"] { model.add(title: title, planning: .active) }
         model.add(title: "later", planning: .backlog)
-        model.planning = .active
+        model.list = .active
         model.addSubtask(title: "sub", under: model.tasks[0])
         model.setBlockedBy(model.tasks[0], to: [model.tasks[2].id])
         #expect(model.blockerCandidates(for: model.tasks[0]).map(\.title) == ["later"])
         #expect(model.blockerCandidates(for: model.tasks[2]).map(\.title) == ["sub", "later"])
+    }
+
+    // MARK: Filters
+
+    @Test func aFilterIsCreatedAtTheEndOfTheListAndShowsTheActiveTasksItsQueryMatches() throws {
+        let model = try openModel()
+        model.add(title: "Reply", tags: ["work"])
+        model.add(title: "Review", tags: ["work", "in-review"])
+        model.add(title: "Milk", tags: ["home"])
+        model.add(title: "Plan", planning: .backlog, tags: ["work"])
+        #expect(model.filters.isEmpty)
+
+        #expect(model.addFilter(title: "Work", query: "@work & !@in-review"))
+        #expect(model.addFilter(title: "Home", query: "@home"))
+        #expect(model.filters.map(\.title) == ["Work", "Home"])
+
+        model.list = .filter(model.filters[0].id)
+        #expect(model.tasks.map(\.title) == ["Reply"])
+        model.list = .filter(model.filters[1].id)
+        #expect(model.tasks.map(\.title) == ["Milk"])
+        model.list = .filters
+        #expect(model.tasks.isEmpty)
+    }
+
+    @Test func aFilterWithoutTitleOrWithAnUnreadableQueryIsRefused() throws {
+        let model = try openModel()
+        #expect(!model.addFilter(title: "  ", query: "@work"))
+        #expect(!model.addFilter(title: "Work", query: "@work &"))
+        #expect(model.filters.isEmpty)
+        #expect(TasksModel.queryProblem("@work &")?.position == 7)
+        #expect(TasksModel.queryProblem("@work") == nil)
+    }
+
+    @Test func aTaskLeavesAFilterAsSoonAsItNoLongerMatches() throws {
+        let model = try openModel()
+        model.add(title: "Reply", tags: ["work"])
+        model.addFilter(title: "Work", query: "@work")
+        model.list = .filter(model.filters[0].id)
+        #expect(model.tasks.map(\.title) == ["Reply"])
+
+        model.plan(model.tasks[0], as: .backlog)
+        #expect(model.tasks.isEmpty)
+    }
+
+    @Test func addingFromAFilterStaysInItAndAddsToActive() throws {
+        let model = try openModel()
+        model.addFilter(title: "Work", query: "@work")
+        let filter = TasksList.filter(model.filters[0].id)
+        model.list = filter
+
+        model.add(title: "Unrelated")
+        model.add(title: "Reply", tags: ["work"])
+        #expect(model.list == filter)
+        #expect(model.tasks.map(\.title) == ["Reply"])
+        model.list = .active
+        #expect(model.tasks.map(\.title) == ["Unrelated", "Reply"])
+    }
+
+    @Test func aTaskInAFilterIsNotMovedFromThere() throws {
+        let model = try openModel()
+        model.add(title: "one", tags: ["work"])
+        model.add(title: "two", tags: ["work"])
+        model.addFilter(title: "Work", query: "@work")
+        model.list = .filter(model.filters[0].id)
+
+        model.move(from: IndexSet(integer: 1), to: 0)
+        #expect(model.tasks.map(\.title) == ["one", "two"])
     }
 }

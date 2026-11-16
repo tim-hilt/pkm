@@ -9,8 +9,9 @@ extension TasksModel {
 
     /// The Tasks for this launch: the Tasks folder. For UI tests and screenshots
     /// (`-UITesting…`) it is empty and temporary, with sample Tasks when
-    /// launched with `-UITestingOpenTasks`, and the sheet of "Buy milk" open with
-    /// `-UITestingOpenTaskSheet`.
+    /// launched with `-UITestingOpenTasks`, the sheet of "Buy milk" open with
+    /// `-UITestingOpenTaskSheet`, and also a Filter, with the Filters list shown with
+    /// `-UITestingOpenFilters` and the Filter itself with `-UITestingOpenFilter`.
     @MainActor
     static func forLaunch() -> TasksModel {
         let arguments = ProcessInfo.processInfo.arguments
@@ -19,7 +20,9 @@ extension TasksModel {
         }
         let store = openOrTemporary(temporaryFolder())
         let opensSheet = arguments.contains("-UITestingOpenTaskSheet")
-        if opensSheet || arguments.contains("-UITestingOpenTasks") {
+        let opensFilters = arguments.contains("-UITestingOpenFilters")
+        let opensFilter = arguments.contains("-UITestingOpenFilter")
+        if opensSheet || opensFilters || opensFilter || arguments.contains("-UITestingOpenTasks") {
             let samples = [
                 (
                     "Buy milk", "Two litres of oat milk, and a loaf of bread if the bakery is still open.", UInt8(1),
@@ -39,8 +42,14 @@ extension TasksModel {
                 }
             }
             _ = try? store.create(title: "Learn Rust", planning: .backlog, priority: 4, tags: [])
+            if opensFilters || opensFilter {
+                _ = try? store.createFilter(title: "Home and health", query: "@home | @health")
+                _ = try? store.createFilter(title: "Shopping", query: "@shopping")
+            }
         }
         let model = TasksModel(store: store)
+        if opensFilters { model.list = .filters }
+        if opensFilter, let filter = model.filters.first { model.list = .filter(filter.id) }
         if opensSheet, let task = model.tasks.first { model.startEditing(task) }
         return model
     }

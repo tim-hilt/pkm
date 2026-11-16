@@ -1,6 +1,29 @@
 import Foundation
 import Observation
 
+/// What the Tasks Context shows: a list of Tasks, or the list of Filters.
+enum TasksList: Hashable {
+    case active
+    case backlog
+    /// The Filters list.
+    case filters
+    /// The Active Tasks a Filter (by ID) matches.
+    case filter(String)
+
+    init(_ planning: Planning) {
+        self = planning == .active ? .active : .backlog
+    }
+
+    /// The list of Tasks it is, if it is Active or the Backlog, which Tasks move in and are added to.
+    var planning: Planning? {
+        switch self {
+        case .active: .active
+        case .backlog: .backlog
+        case .filters, .filter: nil
+        }
+    }
+}
+
 /// The Tasks Context's state: the list being shown, from the core's store.
 @MainActor @Observable
 final class TasksModel {
@@ -8,8 +31,8 @@ final class TasksModel {
     private let revertWindow: Duration
     private var commitTimer: Task<Void, Never>?
 
-    /// The list shown: Active or the Backlog.
-    var planning: Planning = .active {
+    /// The list shown.
+    var list: TasksList = .active {
         didSet { reload() }
     }
     /// The Tasks of the open sheet's stack, by id, first opened first: a Blocker
@@ -19,8 +42,11 @@ final class TasksModel {
     /// Whether the sheet can't be left or popped: the Task on top was last
     /// saved with an empty Title, which keeps the stack as it is until it has one.
     private(set) var isLeavingBlocked = false
-    /// The Tasks planned as `planning`, in their order, each followed by its Subtasks.
+    /// The Tasks of the list shown, in their order, each followed by its Subtasks; none while the
+    /// Filters list is shown.
     private(set) var tasks: [ListedTask] = []
+    /// Every Filter, in the Filters list's order.
+    private(set) var filters: [Filter] = []
     /// Every known Tag with its Tag Color, alphabetically, whether or not a Task carries it.
     private(set) var allTags: [TagEntry] = []
 
@@ -34,7 +60,7 @@ final class TasksModel {
         let list = [Planning.active, .backlog].first {
             ((try? store.tasks(planning: $0)) ?? []).contains(where: isTask)
         }
-        planning = list ?? .active
+        self.list = list.map(TasksList.init) ?? .active
         if let task = tasks.first(where: isTask) { startEditing(task) }
     }
 
@@ -71,8 +97,10 @@ final class TasksModel {
     /// The Task `id` as last saved, from either list.
     func task(id: String) -> ListedTask? {
         if let task = tasks.first(where: { $0.id == id }) { return task }
-        let other: Planning = planning == .active ? .backlog : .active
-        return ((try? store.tasks(planning: other)) ?? []).first { $0.id == id }
+        for planning in [Planning.active, .backlog] {
+            if let task = ((try? store.tasks(planning: planning)) ?? []).first(where: { $0.id == id }) { return task }
+        }
+        return nil
     }
 
     /// The direct Subtasks of the Open Task `id`, in list order: Open, or Done and still
@@ -92,8 +120,8 @@ final class TasksModel {
         reload()
     }
 
-    /// Adds a Task, with a Description, Priority and Tags if given, and shows the list it landed in.
-    /// False, adding nothing, if the Title is empty or a Tag invalid.
+    /// Adds a Task, with a Description, Priority and Tags if given, and shows the list it landed in,
+    /// unless a Filter is shown, which stays. False, adding nothing, if the Title is empty or a Tag invalid.
     @discardableResult
     func add(
         title: String, description: String = "", planning: Planning = .active, priority: UInt8 = 4, tags: [String] = []
@@ -102,7 +130,7 @@ final class TasksModel {
             return false
         }
         describe(task, description)
-        if self.planning == planning { reload() } else { self.planning = planning }
+        if list.planning != nil, list != TasksList(planning) { list = TasksList(planning) } else { reload() }
         return true
     }
 
@@ -191,8 +219,9 @@ final class TasksModel {
 
     /// Moves the row at `source` to land before the row at `destination` of `tasks`
     /// (`onMove`'s meaning); past the last row, to the end of the list. The Parent stays.
+    /// Only in Active and the Backlog.
     func move(from source: IndexSet, to destination: Int) {
-        guard let index = source.first, index != destination else { return }
+        guard list.planning != nil, let index = source.first, index != destination else { return }
         let target = destination < tasks.count ? tasks[destination] : nil
         _ = try? store.moveBefore(id: tasks[index].id, before: target?.id)
         reload()
@@ -247,6 +276,18 @@ final class TasksModel {
         reload()
     }
 
+    /// Creates a Filter at the end of the Filters list. False, creating nothing, if the Title is
+    /// empty or the Query can't be read (see `queryProblem`).
+    @discardableResult
+    func addFilter(title: String, query: String) -> Bool {
+        guard (try? store.createFilter(title: title, query: query)) != nil else { return false }
+        reload()
+        return true
+    }
+
+    /// What is wrong with the Query `text`, if anything.
+    static func queryProblem(_ text: String) -> QueryProblem? { checkQuery(text: text) }
+
     /// Gives a Tag the Tag Color `color` (`#rrggbb`), or Default for nil; the lists show it at once.
     func setTagColor(_ tag: String, to color: String?) {
         try? store.setTagColor(tag: tag, color: color)
@@ -282,9 +323,18 @@ final class TasksModel {
     }
 
     private func reload() {
-        tasks = (try? store.tasks(planning: planning)) ?? []
+        switch list {
+        case .active, .backlog:
+            tasks = (try? store.tasks(planning: list.planning ?? .active)) ?? []
+        case .filters:
+            tasks = []
+        case .filter(let id):
+            tasks = (try? store.filterTasks(id: id)) ?? []
+        }
+        filters = (try? store.filters()) ?? []
         allTags = store.tags()
     }
 }
 
 extension ListedTask: Identifiable {}
+extension Filter: Identifiable {}

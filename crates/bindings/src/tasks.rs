@@ -6,8 +6,8 @@ use std::sync::Mutex;
 
 use pkm_base::tags::{Entry as TagEntry, Suggestions as TagSuggestions, Tags};
 use pkm_tasks::{
-    Blocker, Closing, Error, Planning, QuickAdd, QuickShortcut, Row, ShortcutMeaning, TagQuery,
-    Task, Tasks,
+    Blocker, Closing, Error, Filter, Planning, Query, QuickAdd, QuickShortcut, Row,
+    ShortcutMeaning, TagQuery, Task, Tasks,
 };
 
 /// Why a Task wasn't saved or the Tasks couldn't be read.
@@ -22,6 +22,8 @@ pub enum TasksError {
     BlockedBySubtask,
     BlockedByLoop,
     NotASibling,
+    EmptyFilterTitle,
+    InvalidQuery(String),
     Failed(String),
 }
 
@@ -36,6 +38,8 @@ impl std::fmt::Display for TasksError {
             Self::BlockedBySubtask => Error::BlockedBySubtask.fmt(f),
             Self::BlockedByLoop => Error::BlockedByLoop.fmt(f),
             Self::NotASibling => Error::NotASibling.fmt(f),
+            Self::EmptyFilterTitle => Error::EmptyFilterTitle.fmt(f),
+            Self::InvalidQuery(message) => f.write_str(message),
             Self::Failed(message) => f.write_str(message),
         }
     }
@@ -58,6 +62,8 @@ impl From<Error> for TasksError {
             Error::BlockedBySubtask => Self::BlockedBySubtask,
             Error::BlockedByLoop => Self::BlockedByLoop,
             Error::NotASibling => Self::NotASibling,
+            Error::EmptyFilterTitle => Self::EmptyFilterTitle,
+            Error::InvalidQuery(e) => Self::InvalidQuery(e.to_string()),
             Error::Io(e) => e.into(),
         }
     }
@@ -83,6 +89,24 @@ pub struct Blocker {
     pub id: String,
     pub title: String,
     pub closed: bool,
+}
+
+/// A Filter: a Title and a Query, see `pkm_tasks::Filter`.
+#[uniffi::remote(Record)]
+pub struct Filter {
+    pub id: String,
+    pub title: String,
+    /// As the user typed it.
+    pub query: String,
+    pub favorite: bool,
+}
+
+/// What is wrong with a Query text, and where.
+#[derive(uniffi::Record)]
+pub struct QueryProblem {
+    /// In characters from the start of the text.
+    pub position: u32,
+    pub message: String,
 }
 
 /// A Tag that exists, with its Tag Color.
@@ -453,11 +477,38 @@ impl TaskStore {
         Ok(self.listed_rows(self.0.rows(planning)?))
     }
 
+    /// Creates a Filter at the end of the Filters list, refusing an empty
+    /// Title or a Query that can't be read.
+    pub fn create_filter(&self, title: String, query: String) -> Result<Filter, TasksError> {
+        Ok(self.0.create_filter(&title, &query)?)
+    }
+
+    /// Every Filter, in the Filters list's order.
+    pub fn filters(&self) -> Result<Vec<Filter>, TasksError> {
+        Ok(self.0.filters()?)
+    }
+
+    /// The Active Tasks a Filter matches, as `tasks` lists Active.
+    pub fn filter_tasks(&self, id: String) -> Result<Vec<ListedTask>, TasksError> {
+        Ok(self.listed_rows(self.0.filter_rows(&id)?))
+    }
+
     /// The direct Subtasks of an Open Task, in either list: Open or pending
     /// Done, in their manual order.
     pub fn subtasks(&self, parent: String) -> Result<Vec<ListedTask>, TasksError> {
         Ok(self.listed_rows(self.0.subtasks(&parent)?))
     }
+}
+
+/// What is wrong with the Query `text`; none if it is fine. Drives the inline
+/// error while typing.
+#[uniffi::export]
+pub fn check_query(text: String) -> Option<QueryProblem> {
+    let e = Query::parse(&text).err()?;
+    Some(QueryProblem {
+        position: u32::try_from(e.position).unwrap_or(u32::MAX),
+        message: e.message,
+    })
 }
 
 /// `text` without the characters a Tag can never contain, to refuse them as
@@ -532,6 +583,35 @@ mod tests {
         assert_eq!(colors(&listed[0]), [("home", None)]);
         let names: Vec<_> = store.tags().into_iter().map(|t| t.name).collect();
         assert_eq!(names, ["home"]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_filter_lists_its_tasks_as_listed_tasks_and_a_query_is_checked() {
+        let dir = std::env::temp_dir().join(format!("pkm-bindings-filter-{}", std::process::id()));
+        let path = |name: &str| dir.join(name).to_string_lossy().into_owned();
+        let store = TaskStore::open(path("Tasks"), path("Device")).unwrap();
+        store
+            .create("t".into(), Planning::Active, 4, vec!["work".into()])
+            .unwrap();
+        store
+            .create("u".into(), Planning::Active, 4, vec![])
+            .unwrap();
+        let filter = store.create_filter("Work".into(), "@work".into()).unwrap();
+        let tasks = store.filter_tasks(filter.id).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].title, "t");
+        assert!(matches!(
+            store.create_filter("Work".into(), "@work &".into()),
+            Err(TasksError::InvalidQuery(_))
+        ));
+
+        let problem = check_query("@a & (".into()).unwrap();
+        assert_eq!(
+            (problem.position, problem.message.as_str()),
+            (6, "Expected @tag, ! or (")
+        );
+        assert!(check_query("@a | !@b".into()).is_none());
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

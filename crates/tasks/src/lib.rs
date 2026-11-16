@@ -8,10 +8,12 @@
 mod cache;
 mod files;
 mod history;
+mod query;
 mod quick_add;
 mod store;
 pub mod sync;
 
 pub use files::{DiskFiles, Files, Listed, MemoryFiles, Stamp};
+pub use query::{Query, QueryError};
 pub use quick_add::{QuickAdd, QuickShortcut, ShortcutMeaning, TagQuery};
-pub use store::{Blocker, Closing, Error, Planning, Row, Task, Tasks};
+pub use store::{Blocker, Closing, Error, Filter, Planning, Row, Task, Tasks};

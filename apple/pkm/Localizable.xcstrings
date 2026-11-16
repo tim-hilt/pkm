@@ -1002,6 +1002,17 @@
         }
       }
     },
+    "Filters": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filters"
+          }
+        }
+      }
+    },
     "Find": {
       "extractionState": "manual",
       "localizations": {
@@ -1453,6 +1464,17 @@
         }
       }
     },
+    "New Filter": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Filter"
+          }
+        }
+      }
+    },
     "New Task": {
       "extractionState": "manual",
       "localizations": {
@@ -1464,6 +1486,17 @@
         }
       }
     },
+    "No Active Tasks match.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Active Tasks match."
+          }
+        }
+      }
+    },
     "No Drawings": {
       "extractionState": "manual",
       "localizations": {
@@ -1471,6 +1504,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "No Drawings"
+          }
+        }
+      }
+    },
+    "No Filters yet.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Filters yet."
           }
         }
       }
@@ -1647,6 +1691,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Properties"
+          }
+        }
+      }
+    },
+    "Query": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Query"
           }
         }
       }

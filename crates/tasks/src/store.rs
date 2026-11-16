@@ -1,8 +1,13 @@
 //! The Tasks store: a folder of `<id>.md` files.
 
+mod filters;
+
+pub use filters::Filter;
+
 use crate::cache::Cache;
 use crate::files::{DiskFiles, Files};
 use crate::history::{Event, History};
+use crate::query::QueryError;
 use pkm_base::clock::{iso8601, now_ms};
 use pkm_base::front_matter::{Document, Value};
 use pkm_base::item_id::ItemId;
@@ -149,6 +154,10 @@ pub enum Error {
     BlockedBySubtask,
     /// The Blocked by would make Tasks wait on each other.
     BlockedByLoop,
+    /// A Filter needs a Title.
+    EmptyFilterTitle,
+    /// The Query of a Filter can't be read.
+    InvalidQuery(QueryError),
     /// A Subtask only moves among its siblings: the Task to move isn't a
     /// Subtask, or the Task to move before isn't its sibling.
     NotASibling,
@@ -182,6 +191,8 @@ impl std::fmt::Display for Error {
             Self::BlockedBySubtask => f.write_str("A Task can't be Blocked by its Subtask."),
             Self::BlockedByLoop => f.write_str("Tasks can't be Blocked by each other in a loop."),
             Self::NotASibling => f.write_str("A Subtask moves only among its siblings."),
+            Self::EmptyFilterTitle => f.write_str("A Filter needs a Title."),
+            Self::InvalidQuery(e) => e.fmt(f),
             Self::Io(e) => e.fmt(f),
         }
     }
@@ -1257,10 +1268,12 @@ fn derive_positions(nodes: &mut Nodes) -> Vec<(ItemId, f64)> {
 }
 
 fn by_position(a: &Node, b: &Node) -> Ordering {
-    a.position
-        .partial_cmp(&b.position)
-        .unwrap_or(Ordering::Equal)
-        .then_with(|| a.task.id.cmp(&b.task.id))
+    compare_positions(a.position, b.position).then_with(|| a.task.id.cmp(&b.task.id))
+}
+
+/// Fractional keys in order; one that is no number ties.
+fn compare_positions(a: f64, b: f64) -> Ordering {
+    a.partial_cmp(&b).unwrap_or(Ordering::Equal)
 }
 
 /// What a Parent's marker shows, by Parent ID: its direct Subtasks that are
