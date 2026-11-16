@@ -56,6 +56,24 @@ _Avoid_: Complete, check off, resolve, cancel, drop, delete
 Taking back a Close in the moment after it, as if it never happened.
 _Avoid_: Undo, Reopen, restore
 
+### Filters
+
+**Filter**:
+A Title and a Query, showing the Active Tasks the Query matches, in an order of its own. Not an Item.
+_Avoid_: View, smart list, saved search, perspective
+
+**Query**:
+The expression a Filter matches Tasks by, on their own Tags, e.g. `@work & !@in-review`.
+_Avoid_: Filter (that is the saved whole), rule, search
+
+**Favorite**:
+A Filter shown beside Active and Backlog, to be reached in one step.
+_Avoid_: Pin, star, shortcut (that is Quick Add's)
+
+**Delete a Filter**:
+Ending a Filter on every Device; no Task changes.
+_Avoid_: Remove, close
+
 ### Structure
 
 **Subtask**:
