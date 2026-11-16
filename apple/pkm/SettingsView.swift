@@ -1,7 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The Settings, grouped: Common (Appearance, Tags, Cloud Backing), then a row
+/// The Settings, grouped: Appearance, Common (Tags, Cloud Backing), then a row
 /// per Context with settings of its own (today only Books). A window on the Mac
 /// (⌘,), the sidebar's Settings destination on iPhone and iPad.
 struct SettingsView: View {
@@ -17,8 +17,10 @@ struct SettingsView: View {
 
     private var form: some View {
         Form {
+            Section("Appearance") {
+                AppearancePicker().pickerStyle(.segmented).labelsHidden()
+            }
             Section("Common") {
-                AppearancePicker().pickerStyle(.inline)
                 NavigationLink("Tags") { ManageTagsView() }
                     .accessibilityIdentifier("manage-tags")
                 NavigationLink {
