@@ -19,3 +19,27 @@ export function button(className: string, label: string, onClick: () => void): H
   element.addEventListener("click", onClick);
   return element;
 }
+
+/**
+ * Calls `action` when "n" is pressed with `root` shown, no dialog open and
+ * no text being typed. Returns what stops listening.
+ */
+export function onNewKey(root: HTMLElement, action: () => void): () => void {
+  const listener = (event: KeyboardEvent) => {
+    if (event.key !== "n" || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey)
+      return;
+    if (event.defaultPrevented || event.isComposing || event.repeat) return;
+    if (!root.isConnected || root.closest("[hidden]") || document.querySelector("dialog[open]"))
+      return;
+    const target = event.target;
+    if (
+      target instanceof HTMLElement &&
+      target.closest("input, textarea, select, [contenteditable]")
+    )
+      return;
+    event.preventDefault();
+    action();
+  };
+  document.addEventListener("keydown", listener);
+  return () => document.removeEventListener("keydown", listener);
+}

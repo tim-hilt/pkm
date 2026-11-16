@@ -3,7 +3,7 @@ import type { Gallery } from "./Gallery";
 import { type CloudBacking, statusText } from "../../cloud/CloudBacking";
 import { HoldDetector } from "../input/HoldDetector";
 import { menuCorner } from "./CardMenu";
-import { button, make } from "../../Dom";
+import { button, make, onNewKey } from "../../Dom";
 
 let nextDialog = 0;
 
@@ -227,6 +227,7 @@ export class GalleryView {
 
   private readonly syncWarning = make("span", "gallery-sync-warning");
   private stopSyncListening: (() => void) | undefined;
+  private readonly stopNewKey: () => void;
 
   /** `isDark` tells which appearance the thumbnails are made for; `cloud` tells whether Sync is blocked, shown as a warning icon. */
   constructor(
@@ -234,7 +235,9 @@ export class GalleryView {
     private readonly isDark: () => boolean = () => false,
     private readonly cloud?: Pick<CloudBacking, "syncReport" | "hasProblem" | "onSyncChange">,
   ) {
-    const create = button("gallery-new", "", () => void gallery.createDrawing());
+    const createDrawing = () => void gallery.createDrawing();
+    const create = button("gallery-new", "", createDrawing);
+    this.stopNewKey = onNewKey(this.element, createDrawing);
     create.innerHTML = plusGlyph;
     create.setAttribute("aria-label", "New Drawing");
     create.title = "New Drawing";
@@ -305,6 +308,7 @@ export class GalleryView {
   }
 
   dispose(): void {
+    this.stopNewKey();
     this.stopSyncListening?.();
     this.observer.disconnect();
     for (const card of this.cards.values()) card.dispose();

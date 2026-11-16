@@ -1,5 +1,5 @@
 import { Closing, Planning } from "../core/Core";
-import { button, make } from "../Dom";
+import { button, make, onNewKey } from "../Dom";
 import { RowDrag } from "./RowDrag";
 import { RowMenu, type RowMenuItem } from "./RowMenu";
 import { taskLine } from "./TaskRow";
@@ -43,7 +43,9 @@ export class TasksView {
       this.switchButtons.set(planning, choose);
       this.switch.append(choose);
     }
-    const create = button("tasks-new", "", () => newTaskDialog(model, this.element));
+    const newTask = () => newTaskDialog(model, this.element);
+    const create = button("tasks-new", "", newTask);
+    onNewKey(this.element, newTask);
     create.innerHTML = plusGlyph;
     create.setAttribute("aria-label", "New Task");
     create.title = "New Task";
