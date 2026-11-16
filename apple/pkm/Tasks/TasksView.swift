@@ -92,10 +92,11 @@ struct TasksView: View {
                     }
                 }
             #endif
-            .sheet(isPresented: $isAdding) { NewTaskSheet() }
-            .sheet(isPresented: Binding(get: { !model.editing.isEmpty }, set: { if !$0 { model.closeEditing() } })) {
-                EditTaskSheet()
-            }
+        }
+        // On the stack, not on the content that swaps between empty and list when a Task is added.
+        .sheet(isPresented: $isAdding) { NewTaskSheet() }
+        .sheet(isPresented: Binding(get: { !model.editing.isEmpty }, set: { if !$0 { model.closeEditing() } })) {
+            EditTaskSheet()
         }
     }
 
@@ -230,14 +231,13 @@ private struct NewTaskSheet: View {
     /// Quick Add's Title, kept up to date by the field.
     @State private var title = ""
     @State private var description = ""
-    /// Changes per Task, so that the field starts over: empty, and focused.
-    @State private var generation = 0
+    /// Changes per Task, so that the field redraws empty; it keeps its focus, and so the keyboard.
+    @State private var revision = 0
 
     var body: some View {
         NavigationStack {
             Form {
-                QuickAddField(quickAdd: quickAdd, title: $title, onSubmit: add)
-                    .id(generation)
+                QuickAddField(quickAdd: quickAdd, title: $title, revision: revision, onSubmit: add)
                     .accessibilityIdentifier("task-title")
                 TextField("Description", text: $description, axis: .vertical)
                     .multilineTextAlignment(.leading)
@@ -269,7 +269,7 @@ private struct NewTaskSheet: View {
         quickAdd = TaskQuickAdd()
         title = ""
         description = ""
-        generation += 1
+        revision += 1
     }
 }
 
