@@ -20,28 +20,34 @@ struct TasksView: View {
             }
         }
         #if os(iOS)
+            // The bar shares the row of the "+" below, in thumb reach; the toast sits above it.
+            .safeAreaInset(edge: .bottom) {
+                TasksBar()
+                .padding(.leading, AddButtonMetrics.margin)
+                .padding(.trailing, AddButtonMetrics.size + 2 * AddButtonMetrics.margin)
+                .frame(height: AddButtonMetrics.size)
+                .padding(.vertical, AddButtonMetrics.margin)
+            }
+        #endif
+        .addButton(
+            model.barEntry == .filters ? "New Filter" : "New Task",
+            identifier: model.barEntry == .filters ? "add-filter" : "add-task"
+        ) {
+            if model.barEntry == .filters { isAddingFilter = true } else { isAdding = true }
+        }
+        #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)  // slim top bar: the sidebar button, no title
         #endif
-        .toolbar {
-            // On iPhone and iPad the bar sits in the bottom bar, in thumb reach; the "+"
-            // and the toast sit above it, in its safe area. The Mac keeps it in its toolbar.
-            ToolbarItem(placement: barPlacement) {
-                TasksBar()
-            }
-            .sharedBackgroundVisibility(.hidden)  // no capsule round the bar, which has its own
-            if model.barEntry == .filters {
-                AddToolbar(title: "New Filter", identifier: "add-filter") { isAddingFilter = true }
-            } else {
-                AddToolbar(title: "New Task", identifier: "add-task") { isAdding = true }
-            }
-        }
+        #if os(macOS)
+            .toolbar { ToolbarItem(placement: .principal) { TasksBar() } }
+        #endif
         .navigationDestination(for: String.self) { id in
             TaskListView(emptyText: "No Active Tasks match.")
+                .addButton("New Task", identifier: "add-task") { isAdding = true }
                 .navigationTitle(model.filters.first { $0.id == id }?.title ?? "")
                 #if os(iOS)
                     .navigationBarTitleDisplayMode(.inline)
                 #endif
-                .toolbar { AddToolbar(title: "New Task", identifier: "add-task") { isAdding = true } }
         }
         // Outside the switch, not on the content that swaps between empty and list when a Task is added.
         .sheet(isPresented: $isAdding) { NewTaskSheet() }
@@ -49,37 +55,6 @@ struct TasksView: View {
         .sheet(isPresented: Binding(get: { !model.editing.isEmpty }, set: { if !$0 { model.closeEditing() } })) {
             EditTaskSheet()
         }
-    }
-
-    /// Where the bar sits: the bottom bar on iPhone and iPad, the toolbar's middle on the Mac.
-    private var barPlacement: ToolbarItemPlacement {
-        #if os(iOS)
-            .bottomBar
-        #else
-            .principal
-        #endif
-    }
-}
-
-/// The "+" of a list: at the end of the bottom bar on iPhone and iPad, in the toolbar on the Mac.
-private struct AddToolbar: ToolbarContent {
-    let title: LocalizedStringKey
-    let identifier: String
-    let action: () -> Void
-
-    var body: some ToolbarContent {
-        #if os(iOS)
-            ToolbarSpacer(.flexible, placement: .bottomBar)
-            ToolbarItem(placement: .bottomBar) { button }
-        #else
-            ToolbarItem { button }
-        #endif
-    }
-
-    private var button: some View {
-        Button(title, systemImage: "plus", action: action)
-            .keyboardShortcut("n", modifiers: [])
-            .accessibilityIdentifier(identifier)
     }
 }
 

@@ -3,7 +3,7 @@ import SwiftUI
 /// The floating "+" button's geometry on iOS, for views that sit beside it.
 enum AddButtonMetrics {
     static let size: CGFloat = 56
-    static let margin: CGFloat = 20
+    static let margin: CGFloat = 12
 }
 
 extension View {

@@ -64,8 +64,15 @@ struct BooksView: View {
         .environment(scroll)
         .searchable(text: $searchText)
         .searchFocused($isSearchFocused)
+        #if os(iOS)
+            .searchToolbarBehavior(.minimize)
+        #endif
         .toolbar {
             ToolbarItem { SortMenu(sort: Bindable(library).sort) }
+            #if os(iOS)
+                // At the top, so that the bottom stays free for the "+", where the other Galleries have it.
+                DefaultToolbarItem(kind: .search, placement: .topBarTrailing)
+            #endif
         }
         .onKeyPress(phases: [.down, .repeat]) { press in
             guard let arrow = GridHighlight.Arrow(press.key) else { return .ignored }
