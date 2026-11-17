@@ -23,71 +23,69 @@ struct GalleryView: View {
     private let columns = [GridItem(.adaptive(minimum: 160, maximum: 260), spacing: 16, alignment: .top)]
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                LazyVGrid(columns: columns, spacing: 16) {
-                    ForEach(gallery.drawings) { drawing in
-                        Button {
-                            gallery.openDrawing(itemID: drawing.id)
-                        } label: {
-                            Card(drawing: drawing, thumbnails: gallery.thumbnails)
-                        }
-                        .buttonStyle(.plain)
-                        .buttonPointer()
-                        .accessibilityIdentifier("drawing-\(drawing.name)")
-                        // VoiceOver reaches the context menu's actions from the card itself.
-                        .accessibilityActions { actions(for: drawing) }
-                        .contextMenu { actions(for: drawing) }
-                        // On the card, so that the dialog's popover points at it.
-                        .confirmationDialog("Delete", isPresented: isDeleting(drawing)) {
-                            Button("Delete", role: .destructive) { gallery.deleteDrawing(named: drawing.name) }
-                                .accessibilityIdentifier("delete-confirm")
-                        }
+        ScrollView {
+            LazyVGrid(columns: columns, spacing: 16) {
+                ForEach(gallery.drawings) { drawing in
+                    Button {
+                        gallery.openDrawing(itemID: drawing.id)
+                    } label: {
+                        Card(drawing: drawing, thumbnails: gallery.thumbnails)
                     }
-                }
-                .padding()
-            }
-            .toolbar {
-                ToolbarItem(placement: .status) {
-                    if let text = gallery.syncText {
-                        Text(text).font(.footnote).foregroundStyle(.secondary)
-                            .accessibilityIdentifier("sync-progress")
-                    }
-                }
-                ToolbarItem {
-                    if gallery.showsSyncWarning {
-                        Button("Cloud Backing needs attention", systemImage: "exclamationmark.triangle.fill") {
-                            #if os(iOS)
-                                navigation.isShowingSettings = true
-                            #else
-                                openSettings()
-                            #endif
-                        }
-                        .foregroundStyle(.orange)
-                        .accessibilityIdentifier("sync-warning")
+                    .buttonStyle(.plain)
+                    .buttonPointer()
+                    .accessibilityIdentifier("drawing-\(drawing.name)")
+                    // VoiceOver reaches the context menu's actions from the card itself.
+                    .accessibilityActions { actions(for: drawing) }
+                    .contextMenu { actions(for: drawing) }
+                    // On the card, so that the dialog's popover points at it.
+                    .confirmationDialog("Delete", isPresented: isDeleting(drawing)) {
+                        Button("Delete", role: .destructive) { gallery.deleteDrawing(named: drawing.name) }
+                            .accessibilityIdentifier("delete-confirm")
                     }
                 }
             }
-            .addButton("New Drawing", identifier: "new-drawing") { gallery.createDrawing() }
-            .overlay {
-                if gallery.drawings.isEmpty {
-                    ContentUnavailableView(
-                        "No Drawings", systemImage: "scribble", description: Text("Tap + to start sketching."))
+            .padding()
+        }
+        .toolbar {
+            ToolbarItem(placement: .status) {
+                if let text = gallery.syncText {
+                    Text(text).font(.footnote).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("sync-progress")
                 }
             }
-            .alert(
-                gallery.failure ?? "",
-                isPresented: Binding(get: { gallery.failure != nil }, set: { if !$0 { gallery.dismissFailure() } })
-            ) {}
-            .alert("Rename Drawing", isPresented: isRenaming) {
-                TextField("Name", text: $newName)
-                    .accessibilityIdentifier("rename-field")
-                Button("Rename") {
-                    if let drawing = renaming { gallery.renameDrawing(named: drawing.name, to: newName) }
+            ToolbarItem {
+                if gallery.showsSyncWarning {
+                    Button("Cloud Backing needs attention", systemImage: "exclamationmark.triangle.fill") {
+                        #if os(iOS)
+                            navigation.isShowingSettings = true
+                        #else
+                            openSettings()
+                        #endif
+                    }
+                    .foregroundStyle(.orange)
+                    .accessibilityIdentifier("sync-warning")
                 }
-                .accessibilityIdentifier("rename-confirm")
-                Button("Cancel", role: .cancel) {}
             }
+        }
+        .addButton("New Drawing", identifier: "new-drawing") { gallery.createDrawing() }
+        .overlay {
+            if gallery.drawings.isEmpty {
+                ContentUnavailableView(
+                    "No Drawings", systemImage: "scribble", description: Text("Tap + to start sketching."))
+            }
+        }
+        .alert(
+            gallery.failure ?? "",
+            isPresented: Binding(get: { gallery.failure != nil }, set: { if !$0 { gallery.dismissFailure() } })
+        ) {}
+        .alert("Rename Drawing", isPresented: isRenaming) {
+            TextField("Name", text: $newName)
+                .accessibilityIdentifier("rename-field")
+            Button("Rename") {
+                if let drawing = renaming { gallery.renameDrawing(named: drawing.name, to: newName) }
+            }
+            .accessibilityIdentifier("rename-confirm")
+            Button("Cancel", role: .cancel) {}
         }
         // Files and Finder change the folder while the app is away or the
         // Gallery is not shown; while it is shown, the list follows them.

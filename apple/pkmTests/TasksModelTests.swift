@@ -620,6 +620,20 @@ import Testing
         #expect(model.barEntry == .backlog)
     }
 
+    @Test func aFilterOpenOnTopOfTheFiltersListIsTheNavigationPathAndGoingBackLeavesIt() throws {
+        let model = try openModel()
+        model.addFilter(title: "A", query: "@a")
+        let id = model.filters[0].id
+        #expect(model.openFilterPath.isEmpty)
+        model.openFilterPath = [id]
+        #expect(model.list == .filter(id))
+        model.openFilterPath = []
+        #expect(model.list == .filters)
+        model.setFavorite(id, to: true)
+        model.list = .filter(id)
+        #expect(model.openFilterPath.isEmpty, "a Favorite is shown by the bar, not pushed")
+    }
+
     @Test func eachDeviceOpensTheLastListAndActiveIfItsFilterIsGone() throws {
         let defaults = UserDefaults.isolated()
         let store = try TaskStore.open(

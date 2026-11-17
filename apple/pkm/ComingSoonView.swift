@@ -5,12 +5,10 @@ struct ComingSoonView: View {
     let context: AppContext
 
     var body: some View {
-        NavigationStack {
-            ContentUnavailableView {
-                context.label
-            } description: {
-                Text("Coming soon")
-            }
+        ContentUnavailableView {
+            context.label
+        } description: {
+            Text("Coming soon")
         }
     }
 }

@@ -153,6 +153,19 @@ final class TasksModel {
         bar.contains(list) ? list : .filters
     }
 
+    /// The Filter open on top of the Filters list, as the navigation path; going back leaves
+    /// it. A Favorite is no part of it.
+    var openFilterPath: [String] {
+        get { if case .filter(let id) = list, barEntry == .filters { [id] } else { [] } }
+        set {
+            if let id = newValue.last {
+                list = .filter(id)
+            } else if case .filter = list {
+                list = .filters
+            }
+        }
+    }
+
     /// A Close is saved once its toast has been shown for `revertWindow`. `defaults` holds the last
     /// list, which opens again unless it is a Filter that is gone, then Active; `nil` remembers nothing.
     init(store: TaskStore, revertWindow: Duration = .seconds(5), defaults: UserDefaults? = nil) {

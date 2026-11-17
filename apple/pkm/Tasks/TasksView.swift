@@ -7,59 +7,43 @@ struct TasksView: View {
     @State private var isAdding = false
     @State private var isAddingFilter = false
 
-    /// The Filter open on top of the Filters list; going back leaves it. A Favorite is no part of it.
-    private var openFilter: Binding<[String]> {
-        Binding(
-            get: { if case .filter(let id) = model.list, model.barEntry == .filters { [id] } else { [] } },
-            set: { path in
-                if let id = path.last {
-                    model.list = .filter(id)
-                } else if case .filter = model.list {
-                    model.list = .filters
-                }
-            }
-        )
-    }
-
     var body: some View {
-        @Bindable var model = model
-        NavigationStack(path: openFilter) {
-            Group {
-                switch model.barEntry {
-                case .active, .backlog:
-                    TaskListView(emptyText: model.list == .active ? "Nothing active." : "The Backlog is empty.")
-                case .filter:
-                    TaskListView(emptyText: "No Active Tasks match.")
-                case .filters:
-                    FiltersList { isAddingFilter = true }
-                }
-            }
-            #if os(iOS)
-                .navigationBarTitleDisplayMode(.inline)  // slim top bar: the sidebar button, no title
-            #endif
-            .toolbar {
-                // On iPhone and iPad the bar sits in the bottom bar, in thumb reach; the "+"
-                // and the toast sit above it, in its safe area. The Mac keeps it in its toolbar.
-                ToolbarItem(placement: barPlacement) {
-                    TasksBar()
-                }
-                .sharedBackgroundVisibility(.hidden)  // no capsule round the bar, which has its own
-                if model.barEntry == .filters {
-                    AddToolbar(title: "New Filter", identifier: "add-filter") { isAddingFilter = true }
-                } else {
-                    AddToolbar(title: "New Task", identifier: "add-task") { isAdding = true }
-                }
-            }
-            .navigationDestination(for: String.self) { id in
+        // In `ContentView`'s stack, whose path is `model.openFilterPath`.
+        Group {
+            switch model.barEntry {
+            case .active, .backlog:
+                TaskListView(emptyText: model.list == .active ? "Nothing active." : "The Backlog is empty.")
+            case .filter:
                 TaskListView(emptyText: "No Active Tasks match.")
-                    .navigationTitle(model.filters.first { $0.id == id }?.title ?? "")
-                    #if os(iOS)
-                        .navigationBarTitleDisplayMode(.inline)
-                    #endif
-                    .toolbar { AddToolbar(title: "New Task", identifier: "add-task") { isAdding = true } }
+            case .filters:
+                FiltersList { isAddingFilter = true }
             }
         }
-        // On the stack, not on the content that swaps between empty and list when a Task is added.
+        #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)  // slim top bar: the sidebar button, no title
+        #endif
+        .toolbar {
+            // On iPhone and iPad the bar sits in the bottom bar, in thumb reach; the "+"
+            // and the toast sit above it, in its safe area. The Mac keeps it in its toolbar.
+            ToolbarItem(placement: barPlacement) {
+                TasksBar()
+            }
+            .sharedBackgroundVisibility(.hidden)  // no capsule round the bar, which has its own
+            if model.barEntry == .filters {
+                AddToolbar(title: "New Filter", identifier: "add-filter") { isAddingFilter = true }
+            } else {
+                AddToolbar(title: "New Task", identifier: "add-task") { isAdding = true }
+            }
+        }
+        .navigationDestination(for: String.self) { id in
+            TaskListView(emptyText: "No Active Tasks match.")
+                .navigationTitle(model.filters.first { $0.id == id }?.title ?? "")
+                #if os(iOS)
+                    .navigationBarTitleDisplayMode(.inline)
+                #endif
+                .toolbar { AddToolbar(title: "New Task", identifier: "add-task") { isAdding = true } }
+        }
+        // Outside the switch, not on the content that swaps between empty and list when a Task is added.
         .sheet(isPresented: $isAdding) { NewTaskSheet() }
         .sheet(isPresented: $isAddingFilter) { FilterSheet() }
         .sheet(isPresented: Binding(get: { !model.editing.isEmpty }, set: { if !$0 { model.closeEditing() } })) {

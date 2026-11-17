@@ -32,7 +32,9 @@ struct ContentView: View {
                 NavigationSplitView(preferredCompactColumn: $column) {
                     sidebar
                 } detail: {
-                    detail
+                    // One stack for every destination: on an iPhone, a detail whose own
+                    // stack replaced the last one's never appeared (no `task`, `onAppear`).
+                    NavigationStack(path: path) { detail }
                 }
             }
         }
@@ -91,6 +93,12 @@ extension ContentView {
                 .accessibilityIdentifier("settings")
             }
         #endif
+    }
+
+    /// What is pushed in the detail: only Tasks pushes by path, the others by link.
+    private var path: Binding<[String]> {
+        guard navigation.destination == .context(.tasks) else { return .constant([]) }
+        return Binding(get: { tasks.openFilterPath }, set: { tasks.openFilterPath = $0 })
     }
 
     @ViewBuilder private var detail: some View {

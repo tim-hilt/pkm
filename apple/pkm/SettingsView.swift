@@ -11,7 +11,8 @@ struct SettingsView: View {
         #if os(macOS)
             NavigationStack { form }.frame(width: 460, height: 460)
         #else
-            NavigationStack { form.navigationTitle("Settings").navigationBarTitleDisplayMode(.inline) }
+            // In `ContentView`'s stack.
+            form.navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
         #endif
     }
 

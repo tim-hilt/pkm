@@ -68,6 +68,56 @@ import XCTest
         XCTAssertTrue(app.buttons["back-to-gallery"].waitForExistence(timeout: 10))
     }
 
+    /// On an iPhone, the Gallery shown in place of another Context once missed its
+    /// appearing, which left the cards without thumbnails.
+    func testThumbnailsShowAfterComingFromAnotherContext() {
+        openDrawings()
+        app.buttons["new-drawing"].tap()
+        drawARectangle()
+        app.buttons["back-to-gallery"].tap()
+        openSidebarRow("Tasks")
+        XCTAssertTrue(app.buttons["add-task"].waitForExistence(timeout: 10))
+
+        openDrawings()
+
+        let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'drawing-Untitled '")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 10))
+        let deadline = Date.now.addingTimeInterval(5)
+        while !showsAThumbnail(card), Date.now < deadline { usleep(200_000) }
+        XCTAssertTrue(showsAThumbnail(card), "the card shows the rectangle, not the empty frame")
+    }
+
+    /// Whether the top of the card, inside the thumbnail's frame, has more than one shade:
+    /// the empty frame is a single fill.
+    private func showsAThumbnail(_ card: XCUIElement) -> Bool {
+        #if os(macOS)
+            let image = card.screenshot().image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        #else
+            let image = card.screenshot().image.cgImage
+        #endif
+        guard let image else { return false }
+        let width = image.width
+        let height = image.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn = pixels.withUnsafeMutableBytes { buffer in
+            CGContext(
+                data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+            .map { $0.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height)) } != nil
+        }
+        guard drawn else { return false }
+        var shades: (min: Int, max: Int) = (255, 0)
+        for y in height / 10..<height / 2 {
+            for x in width / 10..<width * 9 / 10 {
+                let i = (y * width + x) * 4
+                let shade = (Int(pixels[i]) + Int(pixels[i + 1]) + Int(pixels[i + 2])) / 3
+                shades = (min(shades.min, shade), max(shades.max, shade))
+            }
+        }
+        return shades.max - shades.min > 60
+    }
+
     /// The confirmation is a lone Delete button next to the card, like Photos'.
     func testDeletingAsksWithALoneDeleteButtonAtTheCard() {
         openDrawings()

@@ -30,44 +30,42 @@ struct BooksView: View {
     private var visibleBooks: [Book] { library.visibleBooks(matching: searchText) }
 
     var body: some View {
-        NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView { grid }
-                    .onDrop(of: ImportableTypes.all, isTargeted: $isDropTargeted, perform: drop)
-                    .overlay {
-                        if isDropTargeted { Rectangle().strokeBorder(.tint, lineWidth: 4).allowsHitTesting(false) }
-                    }
-                    .onGeometryChange(for: Int.self) {
-                        GalleryLayout.columnCount(forWidth: $0.size.width)
-                    } action: {
-                        columnCount = $0
-                    }
-                    .focusable()
-                    .focused($isGridFocused)
-                    .focusEffectDisabled()
-                    .onAppear { isGridFocused = true }
-                    .onChange(of: highlighted) { _, id in
-                        if let id { proxy.scrollTo(id) }
-                    }
-            }
-            .addButton("Import…", identifier: "import") { isImporting = true }
-            .overlay {
-                if library.books.isEmpty {
-                    ContentUnavailableView(
-                        "No Books", systemImage: "books.vertical",
-                        description: Text("Tap + to import PDFs and EPUBs.")
-                    )
-                    // Drops pass through to the grid.
-                    .allowsHitTesting(false)
+        ScrollViewReader { proxy in
+            ScrollView { grid }
+                .onDrop(of: ImportableTypes.all, isTargeted: $isDropTargeted, perform: drop)
+                .overlay {
+                    if isDropTargeted { Rectangle().strokeBorder(.tint, lineWidth: 4).allowsHitTesting(false) }
                 }
+                .onGeometryChange(for: Int.self) {
+                    GalleryLayout.columnCount(forWidth: $0.size.width)
+                } action: {
+                    columnCount = $0
+                }
+                .focusable()
+                .focused($isGridFocused)
+                .focusEffectDisabled()
+                .onAppear { isGridFocused = true }
+                .onChange(of: highlighted) { _, id in
+                    if let id { proxy.scrollTo(id) }
+                }
+        }
+        .addButton("Import…", identifier: "import") { isImporting = true }
+        .overlay {
+            if library.books.isEmpty {
+                ContentUnavailableView(
+                    "No Books", systemImage: "books.vertical",
+                    description: Text("Tap + to import PDFs and EPUBs.")
+                )
+                // Drops pass through to the grid.
+                .allowsHitTesting(false)
             }
-            .onScrollPhaseChange { _, phase in scroll.scrollingChanged(isScrolling: phase != .idle) }
-            .environment(scroll)
-            .searchable(text: $searchText)
-            .searchFocused($isSearchFocused)
-            .toolbar {
-                ToolbarItem { SortMenu(sort: Bindable(library).sort) }
-            }
+        }
+        .onScrollPhaseChange { _, phase in scroll.scrollingChanged(isScrolling: phase != .idle) }
+        .environment(scroll)
+        .searchable(text: $searchText)
+        .searchFocused($isSearchFocused)
+        .toolbar {
+            ToolbarItem { SortMenu(sort: Bindable(library).sort) }
         }
         .onKeyPress(phases: [.down, .repeat]) { press in
             guard let arrow = GridHighlight.Arrow(press.key) else { return .ignored }
