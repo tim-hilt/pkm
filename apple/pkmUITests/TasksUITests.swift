@@ -42,11 +42,11 @@ import XCTest
     }
 
     func testTheListSwitchSwitchesTheLists() throws {
-        let planning = app.segmentedControls["tasks-planning"]
-        planning.buttons["Backlog"].tap()
+        // A row of buttons in the bottom bar on iPhone and iPad.
+        app.buttons["Backlog"].tap()
         XCTAssertTrue(app.staticTexts["Learn Rust"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Book the dentist"].exists)
-        planning.buttons["Active"].tap()
+        app.buttons["Active"].tap()
         XCTAssertTrue(app.staticTexts["Book the dentist"].waitForExistence(timeout: 5))
     }
 
