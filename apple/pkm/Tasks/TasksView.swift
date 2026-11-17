@@ -271,6 +271,19 @@ extension ListedTask {
     }
 }
 
+/// A Task's Description. Unlabeled: macOS Forms show a label beside the field and align its text
+/// trailing, whatever `multilineTextAlignment` says.
+private struct DescriptionField: View {
+    @Binding var text: String
+
+    var body: some View {
+        TextField(text: $text, prompt: Text("Description"), axis: .vertical) { Text("Description") }
+            .labelsHidden()
+            .lineLimit(3...8)
+            .accessibilityIdentifier("task-description")
+    }
+}
+
 /// Asks for a Title and a Description; the Task is added Active. The sheet stays open after each
 /// Add, cleared and focused for the next Task; Cancel or swiping down ends it.
 private struct NewTaskSheet: View {
@@ -288,10 +301,7 @@ private struct NewTaskSheet: View {
             Form {
                 QuickAddField(quickAdd: quickAdd, title: $title, revision: revision, onSubmit: add)
                     .accessibilityIdentifier("task-title")
-                TextField("Description", text: $description, axis: .vertical)
-                    .multilineTextAlignment(.leading)
-                    .lineLimit(3...8)
-                    .accessibilityIdentifier("task-description")
+                DescriptionField(text: $description)
             }
             .formStyle(.grouped)
             .navigationTitle("New Task")
@@ -426,11 +436,8 @@ private struct EditTaskForm: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            TextField("Description", text: $description, axis: .vertical)
-                .multilineTextAlignment(.leading)
-                .lineLimit(3...8)
+            DescriptionField(text: $description)
                 .focused($focus, equals: .description)
-                .accessibilityIdentifier("task-description")
             Picker("Priority", selection: $priority) {
                 ForEach(UInt8(1)...4, id: \.self) { Text(verbatim: "P\($0)").tag($0) }
             }
