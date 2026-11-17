@@ -4,6 +4,7 @@
 use crate::files::Files;
 use pkm_base::clock::iso8601;
 use pkm_base::item_id::ItemId;
+use std::collections::HashMap;
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -53,6 +54,28 @@ impl History {
             .join(format!("{}-{}.log", self.device, &time[..7]));
         self.files
             .append(&file, &format!("{time} {} {id}\n", event.name()))
+    }
+
+    /// When each Task was created, by Item ID, from every Device's files; the
+    /// earliest line wins.
+    pub(crate) fn created_times(&self) -> HashMap<String, String> {
+        let mut times: HashMap<String, String> = HashMap::new();
+        let listed = self.files.list(&self.folder).unwrap_or_default();
+        for text in (listed.iter()).filter_map(|l| self.files.read(&self.folder.join(&l.name)).ok())
+        {
+            for line in text.lines() {
+                let mut parts = line.split(' ');
+                if let (Some(time), Some("created"), Some(id)) =
+                    (parts.next(), parts.next(), parts.next())
+                {
+                    let earlier = times.get(id).is_none_or(|t| time < t.as_str());
+                    if earlier {
+                        times.insert(id.to_owned(), time.to_owned());
+                    }
+                }
+            }
+        }
+        times
     }
 }
 

@@ -27,6 +27,7 @@ const DEFAULT_PRIORITY: u8 = 4;
 const TAGS: &str = "tags";
 const BLOCKED_BY: &str = "blocked-by";
 const POSITION: &str = "position";
+const CREATED: &str = "created";
 
 /// Where an Open Task is planned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -317,10 +318,12 @@ impl Tasks {
             }
             set_list(&mut file, TAGS, new.tags.clone());
             file.set_scalar(POSITION, position.to_string());
-            file.set_scalar("updated", iso8601(now_ms()));
+            let now = now_ms();
+            file.set_scalar(CREATED, iso8601(now));
+            file.set_scalar("updated", iso8601(now));
             match self.write(&id, &file, Overwrite::No) {
                 Ok(()) => {
-                    self.history.record(Event::Created, &id, now_ms())?;
+                    self.history.record(Event::Created, &id, now)?;
                     return Ok(task_of(&file).ok_or(io::ErrorKind::InvalidData)?);
                 }
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
@@ -782,17 +785,53 @@ impl Tasks {
         self.remember_tags(read_tags.into_inner())?;
         repair(&mut nodes);
         for (id, position) in derive_positions(&mut nodes) {
-            // Not a change of the user's: `updated` stays, so that Devices
-            // migrating at once write the same bytes.
-            let (mut file, _) = self.read_open(&id).map_err(|e| match e {
-                Error::Io(e) => e,
-                other => io::Error::other(other.to_string()),
+            self.migrate(&id, |file| {
+                file.set_scalar(POSITION, position.to_string());
+                file.remove("order");
             })?;
-            file.set_scalar(POSITION, position.to_string());
-            file.remove("order");
-            self.write(&id, &file, Overwrite::Yes)?;
         }
+        self.backfill_created(&mut nodes)?;
         Ok(nodes)
+    }
+
+    /// Gives every Open Task without `created` one: the time of its History
+    /// `created` line, else its file's modification time.
+    fn backfill_created(&self, nodes: &mut Nodes) -> io::Result<()> {
+        let missing: Vec<ItemId> = (nodes.values())
+            .filter(|n| !n.is_closed() && n.created.is_none())
+            .filter_map(|n| ItemId::parse(&n.task.id))
+            .collect();
+        if missing.is_empty() {
+            return Ok(());
+        }
+        let logged = self.history.created_times();
+        let listed = self.files.list(&self.root)?;
+        for id in missing {
+            let modified = || {
+                let name = format!("{id}.md");
+                let (nanos, _) = listed.iter().find(|l| l.name == name)?.stamp;
+                Some(iso8601((nanos / 1_000_000) as f64))
+            };
+            let Some(created) = logged.get(id.as_str()).cloned().or_else(modified) else {
+                continue;
+            };
+            self.migrate(&id, |file| file.set_scalar(CREATED, created.clone()))?;
+            if let Some(node) = nodes.get_mut(id.as_str()) {
+                node.created = Some(created);
+            }
+        }
+        Ok(())
+    }
+
+    /// Rewrites the Open Task `id` as a migration does: `updated` stays, so
+    /// that Devices migrating at once write the same bytes.
+    fn migrate(&self, id: &ItemId, change: impl FnOnce(&mut Document)) -> io::Result<()> {
+        let (mut file, _) = self.read_open(id).map_err(|e| match e {
+            Error::Io(e) => e,
+            other => io::Error::other(other.to_string()),
+        })?;
+        change(&mut file);
+        self.write(id, &file, Overwrite::Yes)
     }
 
     fn path(&self, id: &ItemId) -> PathBuf {
@@ -871,6 +910,9 @@ pub(crate) struct Node {
     pub(crate) closing: Option<Closing>,
     /// The place in its Active or Backlog list; see `derive_positions`.
     pub(crate) position: f64,
+    /// When it was created (ISO 8601 UTC); `None` for a Closed Task, and for
+    /// an Open one only until `backfill_created`.
+    pub(crate) created: Option<String>,
     /// For an Open Task whose file has no `position` yet (it dates from before
     /// that key): its legacy `order`.
     unplaced: Option<f64>,
@@ -908,6 +950,7 @@ impl Node {
             task,
             closing: Some(closing),
             position,
+            created: None,
             unplaced: None,
             blocked_by: Vec::new(),
         }
@@ -969,6 +1012,7 @@ fn node_of(file: &Document) -> Option<Node> {
         task,
         closing,
         position: position_or_zero,
+        created: file.scalar(CREATED).map(str::to_owned),
         unplaced: position.is_none().then(|| legacy_order.unwrap_or(0.0)),
         blocked_by: blockers_of(file),
     })
@@ -2588,7 +2632,7 @@ mod tests {
     /// A raw Task file with a `position` and no `order`.
     fn raw_positioned(dir: &Scratch, id: &str, position: f64) {
         let text = format!(
-            "---\nid: {id}\ntitle: {id}\npriority: 4\nstate: active\nposition: {position}\nupdated: 2000-01-01T00:00:00Z\n---\n"
+            "---\nid: {id}\ntitle: {id}\npriority: 4\nstate: active\nposition: {position}\ncreated: 2000-01-01T00:00:00Z\nupdated: 2000-01-01T00:00:00Z\n---\n"
         );
         fs::create_dir_all(&dir.0).unwrap();
         fs::write(dir.0.join(format!("{id}.md")), text).unwrap();
@@ -2634,6 +2678,69 @@ mod tests {
         // Once: opening again rewrites nothing and lists the same.
         assert_eq!(rows(&dir.store()), expected);
         assert_eq!(files_in(&dir), migrated);
+    }
+
+    fn created_of(dir: &Scratch, id: &str) -> Option<String> {
+        let text = fs::read_to_string(dir.0.join(format!("{id}.md"))).unwrap();
+        Document::parse(&text)?.scalar("created").map(str::to_owned)
+    }
+
+    #[test]
+    fn a_new_task_gets_created_once_and_edits_never_change_it() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let task = tasks.create("a", Planning::Active, 4, &[]).unwrap();
+        let created = created_of(&dir, &task.id).unwrap();
+        assert!(created.len() == 20 && created.ends_with('Z'), "{created}");
+        tasks.edit(&task.id, "b", "", 1, &[]).unwrap();
+        tasks.add_tag(&task.id, "x").unwrap();
+        tasks.plan(&task.id, Planning::Backlog).unwrap();
+        assert_eq!(created_of(&dir, &task.id), Some(created));
+    }
+
+    #[test]
+    fn a_task_without_created_gets_it_from_its_history_line_and_keeps_updated() {
+        let dir = Scratch::new();
+        raw(&dir, "aaaaaaaaaaaa", "active", None, 1);
+        raw(&dir, "bbbbbbbbbbbb", "active", None, 2);
+        let history = dir.0.join(".history");
+        fs::create_dir_all(&history).unwrap();
+        fs::write(
+            history.join("eeeeeeeeeeee-2023-11.log"),
+            "2023-11-14T22:13:20Z created aaaaaaaaaaaa\n2023-11-15T00:00:00Z made-active aaaaaaaaaaaa\n",
+        )
+        .unwrap();
+        dir.store().rows(Planning::Active).unwrap();
+        assert_eq!(
+            created_of(&dir, "aaaaaaaaaaaa").as_deref(),
+            Some("2023-11-14T22:13:20Z")
+        );
+        assert!(
+            files_in(&dir)[0]
+                .1
+                .contains("updated: 2000-01-01T00:00:00Z")
+        );
+    }
+
+    #[test]
+    fn a_task_without_created_or_history_gets_it_from_the_modification_time() {
+        let dir = Scratch::new();
+        raw(&dir, "aaaaaaaaaaaa", "active", None, 1);
+        let modified: std::time::SystemTime = fs::metadata(dir.0.join("aaaaaaaaaaaa.md"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        let ms = modified
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as f64;
+        dir.store().rows(Planning::Active).unwrap();
+        assert_eq!(created_of(&dir, "aaaaaaaaaaaa"), Some(iso8601(ms)));
+        assert!(
+            files_in(&dir)[0]
+                .1
+                .contains("updated: 2000-01-01T00:00:00Z")
+        );
     }
 
     #[test]

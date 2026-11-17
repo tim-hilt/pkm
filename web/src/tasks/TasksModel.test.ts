@@ -870,6 +870,13 @@ describe("Filters", () => {
   const filterTitles = () => model.filters.map((f) => f.title);
   const filter = (title: string) => model.filters.find((f) => f.title === title)!;
 
+  // Tasks created in one second tie on `created`: the clock moves a second per read.
+  beforeEach(() => {
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => (now += 1000));
+  });
+  afterEach(() => vi.restoreAllMocks());
+
   it("starts with none, and shows the Filters list once chosen", () => {
     expect(model.filters).toEqual([]);
     model.list = { kind: "filters" };

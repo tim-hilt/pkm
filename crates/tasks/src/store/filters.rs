@@ -140,7 +140,7 @@ impl Tasks {
     /// The Active Tasks the Filter `id` matches, as `rows` lists Active: each
     /// matched on its own Tags, Blocked ones and Subtasks included, never the
     /// Backlog. The Tasks with a place come first in the Filter's order, then
-    /// the others in Active's. A Query that can't be read matches nothing.
+    /// the others by `created`. A Query that can't be read matches nothing.
     /// Fails with `NotFound` if there is no such Filter.
     pub fn filter_rows(&self, id: &str) -> io::Result<Vec<Row>> {
         let filter = self.stored_filter(id)?;
@@ -295,13 +295,19 @@ fn matching<'a>(nodes: &'a Nodes, query: &str) -> Vec<&'a Node> {
 }
 
 /// `found` (in Active's order) as a Filter shows it: the Tasks with a place
-/// first, by place (equal places keep Active's order), then the rest.
+/// first, by place (equal places keep Active's order), then the rest by
+/// `created`, then Item ID.
 fn in_filter_order<'a>(found: Vec<&'a Node>, places: &[(String, f64)]) -> Vec<&'a Node> {
     let places: HashMap<&str, f64> = places.iter().map(|(id, p)| (id.as_str(), *p)).collect();
-    let (mut placed, unplaced): (Vec<&Node>, Vec<&Node>) =
+    let (mut placed, mut unplaced): (Vec<&Node>, Vec<&Node>) =
         (found.into_iter()).partition(|n| places.contains_key(n.task.id.as_str()));
     placed
         .sort_by(|a, b| compare_positions(places[a.task.id.as_str()], places[b.task.id.as_str()]));
+    unplaced.sort_by(|a, b| {
+        a.created
+            .cmp(&b.created)
+            .then_with(|| a.task.id.cmp(&b.task.id))
+    });
     placed.extend(unplaced);
     placed
 }
@@ -393,7 +399,16 @@ mod tests {
 
     fn add(tasks: &Tasks, title: &str, planning: Planning, tags: &[&str]) -> String {
         let tags: Vec<String> = tags.iter().map(|t| (*t).to_owned()).collect();
-        tasks.create(title, planning, 4, &tags).unwrap().id
+        let id = tasks.create(title, planning, 4, &tags).unwrap().id;
+        // Created within one second, Tasks would tie on `created`: one second apart.
+        static ADDED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = ADDED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let created = iso8601(1_700_000_000_000.0 + n as f64 * 1000.0);
+        let item = ItemId::parse(&id).unwrap();
+        tasks
+            .migrate(&item, |file| file.set_scalar("created", created))
+            .unwrap();
+        id
     }
 
     fn titles(rows: Vec<Row>) -> Vec<String> {
@@ -547,10 +562,10 @@ mod tests {
             rows.iter()
                 .map(|r| r.task.title.as_str())
                 .collect::<Vec<_>>(),
-            ["parent", "sub", "blocked"]
+            ["parent", "blocked", "sub"]
         );
-        assert_eq!(rows[1].parent_title.as_deref(), Some("parent"));
-        assert!(rows[2].task.blocked);
+        assert_eq!(rows[2].parent_title.as_deref(), Some("parent"));
+        assert!(rows[1].task.blocked);
     }
 
     #[test]
@@ -830,12 +845,43 @@ mod tests {
     }
 
     #[test]
-    fn tasks_without_a_place_follow_the_placed_ones_in_actives_order() {
+    fn tasks_without_a_place_follow_the_placed_ones_in_the_order_created() {
         let (_, tasks, f, ids) = order_fixture();
         tasks.move_in_filter(&f.id, &ids[2], Some(&ids[0])).unwrap();
         add(&tasks, "e", Planning::Active, &["work"]);
         add(&tasks, "f", Planning::Active, &["work"]);
         assert_eq!(shown(&tasks, &f), ["c", "a", "b", "d", "e", "f"]);
+    }
+
+    #[test]
+    fn unplaced_tasks_follow_the_placed_ones_by_created_then_item_id() {
+        let (files, tasks) = open();
+        let f = tasks.create_filter("F", "*").unwrap();
+        // Positions run against `created`, which must win; `x` and `y` tie.
+        for (id, position, created) in [
+            ("aaaaaaaaaaaa", 1, "2024-03-01T00:00:00Z"),
+            ("bbbbbbbbbbbb", 2, "2024-01-01T00:00:00Z"),
+            ("yyyyyyyyyyyy", 3, "2024-02-01T00:00:00Z"),
+            ("xxxxxxxxxxxx", 4, "2024-02-01T00:00:00Z"),
+        ] {
+            files.load(
+                Path::new(&format!("Tasks/{id}.md")),
+                format!("---\nid: {id}\ntitle: {id}\npriority: 4\nstate: active\nposition: {position}\ncreated: {created}\nupdated: 2024-04-01T00:00:00Z\n---\n"),
+            );
+        }
+        assert_eq!(
+            shown(&tasks, &f),
+            [
+                "bbbbbbbbbbbb",
+                "xxxxxxxxxxxx",
+                "yyyyyyyyyyyy",
+                "aaaaaaaaaaaa"
+            ]
+        );
+        tasks
+            .move_in_filter(&f.id, "aaaaaaaaaaaa", Some("bbbbbbbbbbbb"))
+            .unwrap();
+        assert_eq!(shown(&tasks, &f)[0], "aaaaaaaaaaaa");
     }
 
     #[test]
