@@ -6,7 +6,8 @@
 //! takes that side, `tags` and `blocked-by` merge as sets, and one changed on
 //! both sides takes the side with the newer `updated`. Without a base,
 //! differing properties take the newer side's. Bytes that are no Task are no
-//! Item: `merge` and `same_item` say none.
+//! Item: `merge` and `same_item` say none. Filters merge by the same rules
+//! (see `filters`).
 
 pub mod filters;
 
@@ -127,7 +128,7 @@ struct Sides<'a> {
     loser: Option<&'a Value>,
 }
 
-impl<'a> Sides<'a> {
+impl Sides<'_> {
     fn merged(&self, kind: &Kind, key: &str) -> Option<Value> {
         if key == UPDATED {
             return self.winner.cloned(); // the newer one

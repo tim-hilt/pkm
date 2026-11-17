@@ -356,7 +356,6 @@ final class TasksModel {
     /// Deletes a Filter; no Task changes. Showing it, the Filters list shows instead.
     func deleteFilter(_ id: String) {
         try? store.deleteFilter(id: id)
-        if list == .filter(id) { list = .filters }
         reload()
     }
 
@@ -422,7 +421,14 @@ final class TasksModel {
         self.task(id: task.id) ?? task
     }
 
+    /// Reads the list shown and the Filters again; a Filter that is gone (Deleted here or by Sync)
+    /// shows the Filters list instead.
     private func reload() {
+        filters = (try? store.filters()) ?? []
+        if let id = list.filterID, !filters.contains(where: { $0.id == id }) {
+            list = .filters  // reloads
+            return
+        }
         switch list {
         case .active, .backlog:
             tasks = (try? store.tasks(planning: list.planning ?? .active)) ?? []
@@ -431,7 +437,6 @@ final class TasksModel {
         case .filter(let id):
             tasks = (try? store.filterTasks(id: id)) ?? []
         }
-        filters = (try? store.filters()) ?? []
         allTags = store.tags()
     }
 }

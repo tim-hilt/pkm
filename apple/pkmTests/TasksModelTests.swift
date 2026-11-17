@@ -632,9 +632,21 @@ import Testing
             first.list = list
             #expect(TasksModel(store: store, defaults: defaults).list == list)
         }
-        first.deleteFilter(id)
-        first.list = .filter(id)
+        // Deleted on another Device, while this one was closed.
+        TasksModel(store: store).deleteFilter(id)
         #expect(TasksModel(store: store, defaults: defaults).list == .active)
+    }
+
+    @Test func aFilterShownThatSyncDeletesShowsTheFiltersList() throws {
+        let model = try openModel()
+        model.addFilter(title: "A", query: "@a")
+        let id = model.filters[0].id
+        model.setFavorite(id, to: true)
+        model.list = .filter(id)
+        try openModel().deleteFilter(id)
+        model.syncDidChange()
+        #expect(model.list == .filters)
+        #expect(model.bar == [.active, .backlog, .filters])
     }
 
     @Test func aFilterKeepsNamingATagAfterItIsDeleted() throws {

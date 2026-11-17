@@ -27,6 +27,8 @@ export class TasksView {
   private readonly switch = make("div", "tasks-switch");
   /** The bar as last built, to build it again only when its entries changed. */
   private barKey = "";
+  /** The bar's entry last checked. */
+  private checkedKey = "";
   private switchButtons: { list: TasksList; choose: HTMLButtonElement }[] = [];
   private readonly filterHeader = make("div", "tasks-filter-header");
   private readonly list = make("ul", "tasks-list");
@@ -90,6 +92,10 @@ export class TasksView {
     const { model } = this;
     const entries = model.bar;
     const key = JSON.stringify(entries);
+    const current = JSON.stringify(model.barEntry);
+    // Scrolled only when it changed, not on every update.
+    const scroll = key !== this.barKey || current !== this.checkedKey;
+    this.checkedKey = current;
     if (key !== this.barKey) {
       this.barKey = key;
       this.switchButtons = entries.map(({ title, list }) => {
@@ -99,12 +105,11 @@ export class TasksView {
       });
       this.switch.replaceChildren(...this.switchButtons.map(({ choose }) => choose));
     }
-    const current = JSON.stringify(model.barEntry);
     for (const { list, choose } of this.switchButtons) {
       const checked = JSON.stringify(list) === current;
       choose.setAttribute("aria-checked", String(checked));
       // The bar scrolls sideways when the entries don't fit.
-      if (checked) choose.scrollIntoView({ inline: "center", block: "nearest" });
+      if (checked && scroll) choose.scrollIntoView({ inline: "center", block: "nearest" });
     }
   }
 
@@ -122,12 +127,14 @@ export class TasksView {
     this.create.setAttribute("aria-label", label);
     this.create.title = label;
     this.list.setAttribute("aria-label", filters ? "Filters" : "Tasks");
-    this.filterHeader.hidden = list.kind !== "filter";
+    // A Favorite is reached from the bar, any other Filter from the Filters list, which it leads back to.
+    const opened = model.barEntry.kind === "filters" ? model.filter : undefined;
+    this.filterHeader.hidden = opened === undefined;
     this.filterHeader.replaceChildren(
-      ...(model.filter
+      ...(opened
         ? [
             button("tasks-back", "Filters", () => (model.list = { kind: "filters" })),
-            make("h2", "tasks-filter-title", [model.filter.title]),
+            make("h2", "tasks-filter-title", [opened.title]),
           ]
         : []),
     );

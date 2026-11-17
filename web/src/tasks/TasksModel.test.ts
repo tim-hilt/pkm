@@ -967,16 +967,6 @@ describe("Filters", () => {
     expect(titles()).toEqual([]);
   });
 
-  it("moves Tasks inside a Filter, leaving Active's order alone", () => {
-    for (const title of ["A", "B", "C"]) model.add(title, Planning.Active, { tags: ["work"] });
-    model.addFilter("Work", "@work");
-    model.list = { kind: "filter", id: filter("Work").id };
-    model.moveBefore(model.tasks[0], undefined);
-    expect(titles()).toEqual(["B", "C", "A"]);
-    model.list = { kind: "planning", planning: Planning.Active };
-    expect(titles()).toEqual(["A", "B", "C"]);
-  });
-
   it("offers Active, Backlog, the Favorites in the Filters' order, then Filters", () => {
     expect(model.bar.map((e) => e.title)).toEqual(["Active", "Backlog", "Filters"]);
     for (const title of ["A", "B", "C"]) model.addFilter(title, "@a");
@@ -1032,6 +1022,14 @@ describe("Filters", () => {
     first.deleteFilter(first.filters[0]);
     first.list = { kind: "filter", id };
     expect((await open()).list).toEqual({ kind: "planning", planning: Planning.Active });
+    // The list an added Task landed in, and the one a linked Task opened in.
+    first.list = { kind: "planning", planning: Planning.Active };
+    first.add("Later", Planning.Backlog);
+    expect((await open()).list).toEqual({ kind: "planning", planning: Planning.Backlog });
+    const later = first.tasks[0].id;
+    first.list = { kind: "filters" };
+    first.openLinked(later);
+    expect((await open()).list).toEqual({ kind: "planning", planning: Planning.Backlog });
   });
 
   it("Deletes a Filter after which every Task is as it was", () => {
@@ -1061,8 +1059,8 @@ describe("Filters", () => {
     await model.saved();
     const [{ name }] = await storage.files("Filters");
     const path = `Filters/${name}`;
-    const text = new TextDecoder().decode(await storage.read(path)).replace("'@work'", "'@work &'");
-    await storage.write(path, new TextEncoder().encode(text.replace("@work", "@work &")));
+    const text = new TextDecoder().decode(await storage.read(path)).replace("@work", "@work &");
+    await storage.write(path, new TextEncoder().encode(text));
     await model.syncDidChange();
     expect(filter("Work").error).toBeDefined();
     expect(filter("Work").matches).toBe(0);

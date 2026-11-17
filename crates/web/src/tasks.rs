@@ -354,7 +354,8 @@ impl TaskStore {
         Ok(Self { files, tasks })
     }
 
-    /// The paths written since the last call; `file` holds what to save.
+    /// The paths written or removed since the last call; `file` holds what to
+    /// save, none for a removed one.
     #[wasm_bindgen(js_name = takeChanges)]
     pub fn take_changes(&self) -> Vec<String> {
         let changes = self.files.take_changes();

@@ -216,10 +216,15 @@ export class TasksModel {
   }
 
   set list(list: TasksList) {
-    this.shownList = list;
-    this.device?.setItem(lastListKey, storedList(list));
+    this.show(list);
     this.reload();
     this.onChange();
+  }
+
+  /** Makes `list` the one shown, which this Device opens on again; read it with `reload`. */
+  private show(list: TasksList): void {
+    this.shownList = list;
+    this.device?.setItem(lastListKey, storedList(list));
   }
 
   /** The Active list or the Backlog if one is shown; Active while Filters are, which show Active Tasks. */
@@ -284,7 +289,7 @@ export class TasksModel {
             task: this.read({ kind: "planning", planning }).find(isTask),
           }))
           .find(({ task }) => task);
-        this.shownList = { kind: "planning", planning: found?.planning ?? Planning.Active };
+        this.show({ kind: "planning", planning: found?.planning ?? Planning.Active });
         if (found?.task) this.stack = [id];
       }
     }
@@ -357,7 +362,7 @@ export class TasksModel {
     const { description, priority = 4, tags = [] } = extras;
     const create = () => store.create(title, planning, priority, tags);
     if (!this.change(() => this.describe(create(), title, priority, description))) return false;
-    if (this.shownList.kind === "planning") this.shownList = { kind: "planning", planning };
+    if (this.shownList.kind === "planning") this.show({ kind: "planning", planning });
     this.reload();
     this.onChange();
     return true;
