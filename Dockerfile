@@ -46,4 +46,5 @@ FROM lipanski/docker-static-website:latest
 EXPOSE 80
 COPY web/httpd.conf /home/static/httpd.conf
 COPY --from=web /src/web/dist /home/static
-CMD ["/busybox-httpd", "-f", "-v", "-p", "80"]
+# -c: without it httpd reads the file only as a fallback and ignores E404.
+CMD ["/busybox-httpd", "-f", "-v", "-p", "80", "-c", "httpd.conf"]
