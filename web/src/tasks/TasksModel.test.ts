@@ -904,6 +904,24 @@ describe("Filters", () => {
     expect(filter("Work").matches).toBe(3);
   });
 
+  it("gives a Task created in a Filter the Tags its Query requires", () => {
+    model.addFilter("Work", "@work & !@review");
+    model.addFilter("Either", "@a | @b");
+    model.list = { kind: "filter", id: filter("Work").id };
+    expect(model.add("A", Planning.Active, { tags: ["x", "work"] })).toBe(true);
+    expect([...model.tasks[0].tags].sort()).toEqual(["work", "x"]);
+    model.list = { kind: "filter", id: filter("Either").id };
+    model.add("B");
+    model.addFilter("All", "*");
+    model.list = { kind: "filter", id: filter("All").id };
+    model.add("C");
+    expect(model.tasks.map((t) => [t.title, t.tags.length])).toEqual([
+      ["A", 2],
+      ["B", 0],
+      ["C", 0],
+    ]);
+  });
+
   it("edits the Title and Query, with the refusals of create", () => {
     model.addFilter("Work", "@work");
     const { id } = filter("Work");
@@ -941,10 +959,10 @@ describe("Filters", () => {
     model.list = list;
     model.add("Plain");
     expect(model.list).toEqual(list);
-    expect(titles()).toEqual(["A"]);
+    expect(titles()).toEqual(["A", "Plain"]);
     model.plan(first(), Planning.Backlog);
-    expect(titles()).toEqual([]);
-    expect(filter("Work").matches).toBe(0);
+    expect(titles()).toEqual(["Plain"]);
+    expect(filter("Work").matches).toBe(1);
   });
 
   it("orders Tasks within a Filter only", () => {

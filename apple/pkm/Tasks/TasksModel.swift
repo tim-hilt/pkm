@@ -181,11 +181,13 @@ final class TasksModel {
     }
 
     /// Adds a Task, with a Description, Priority and Tags if given, and shows the list it landed in,
-    /// unless a Filter is shown, which stays. False, adding nothing, if the Title is empty or a Tag invalid.
+    /// unless a Filter is shown, which stays and gives the Task the Tags its Query requires. False, adding nothing, if the Title is empty or a Tag invalid.
     @discardableResult
     func add(
         title: String, description: String = "", planning: Planning = .active, priority: UInt8 = 4, tags: [String] = []
     ) -> Bool {
+        let required = list.filterID.flatMap { try? store.filterRequiredTags(id: $0) } ?? []
+        let tags = tags + required.filter { !tags.contains($0) }
         guard let task = try? store.create(title: title, planning: planning, priority: priority, tags: tags) else {
             return false
         }

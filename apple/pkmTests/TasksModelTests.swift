@@ -606,6 +606,22 @@ import Testing
         #expect(TasksModel.allowedQueryText("@Work & !@Ho_me") == "@work & !@home")
     }
 
+    @Test func aTaskAddedInAFilterGetsTheTagsItsQueryRequires() throws {
+        let model = try openModel()
+        model.addFilter(title: "Work", query: "@work & !@review")
+        model.addFilter(title: "Either", query: "@a | @b")
+        model.addFilter(title: "All", query: "*")
+        let ids = model.filters.map(\.id)
+        model.list = .filter(ids[0])
+        #expect(model.add(title: "A", tags: ["x", "work"]))
+        #expect(model.tasks.map { $0.tags.map(\.name).sorted() } == [["work", "x"]])
+        model.list = .filter(ids[1])
+        model.add(title: "B")
+        model.list = .filter(ids[2])
+        model.add(title: "C")
+        #expect(model.tasks.map { [$0.title: $0.tags.count] } == [["A": 2], ["B": 0], ["C": 0]])
+    }
+
     @Test func aQueryTakesWildcardsSuggestingNothingForThemAndMarkingThoseThatFitNoTag() throws {
         let model = try openModel()
         model.add(title: "t", tags: ["work-backlog"])
@@ -740,12 +756,11 @@ import Testing
         let filter = TasksList.filter(model.filters[0].id)
         model.list = filter
 
-        model.add(title: "Unrelated")
-        model.add(title: "Reply", tags: ["work"])
+        model.add(title: "Reply")
         #expect(model.list == filter)
         #expect(model.tasks.map(\.title) == ["Reply"])
         model.list = .active
-        #expect(model.tasks.map(\.title) == ["Unrelated", "Reply"])
+        #expect(model.tasks.map(\.title) == ["Reply"])
     }
 
     @Test func aTaskIsDraggedInAFilterWithoutChangingActiveOrOtherFilters() throws {

@@ -149,6 +149,14 @@ impl Tasks {
         Ok(rows_of(&nodes, found))
     }
 
+    /// The Tags a Task created in the Filter `id` starts with, so that it stays
+    /// in the Filter (see `Query::required_tags`); none if the Query can't be
+    /// read. Fails with `NotFound` if there is no such Filter.
+    pub fn filter_required_tags(&self, id: &str) -> io::Result<Vec<String>> {
+        let filter = self.stored_filter(id)?;
+        Ok(Query::parse(&filter.filter.query).map_or_else(|_| Vec::new(), |q| q.required_tags()))
+    }
+
     /// Moves the Task `task` before the Task `before` in the Filter `id`, or
     /// to the end of it if that is `None`; a drop where it already is changes
     /// nothing. Only the Filter's file is written; Active's order and the Task
@@ -543,6 +551,31 @@ mod tests {
         );
         assert_eq!(rows[1].parent_title.as_deref(), Some("parent"));
         assert!(rows[2].task.blocked);
+    }
+
+    #[test]
+    fn a_filter_gives_the_tags_its_query_requires() {
+        let (_, tasks) = open();
+        let id = |query| tasks.create_filter("F", query).unwrap().id;
+        let work = id("@work & !@review");
+        assert_eq!(tasks.filter_required_tags(&work).unwrap(), ["work"]);
+        for query in ["@a | @b", "@*x", "*"] {
+            assert!(tasks.filter_required_tags(&id(query)).unwrap().is_empty());
+        }
+        let missing = tasks.filter_required_tags("aaaaaaaaaaaa").unwrap_err();
+        assert_eq!(missing.kind(), io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn a_star_filter_shows_tasks_with_and_without_tags() {
+        let (_, tasks) = open();
+        add(&tasks, "Plain", Planning::Active, &[]);
+        add(&tasks, "Tagged", Planning::Active, &["a"]);
+        let filter = tasks.create_filter("All", "*").unwrap();
+        assert_eq!(
+            titles(tasks.filter_rows(&filter.id).unwrap()),
+            ["Plain", "Tagged"]
+        );
     }
 
     #[test]

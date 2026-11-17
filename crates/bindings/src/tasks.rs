@@ -527,6 +527,11 @@ impl TaskStore {
         Ok(self.listed_rows(self.0.filter_rows(&id)?))
     }
 
+    /// The Tags a Task created in a Filter starts with, so that it stays there.
+    pub fn filter_required_tags(&self, id: String) -> Result<Vec<String>, TasksError> {
+        Ok(self.0.filter_required_tags(&id)?)
+    }
+
     /// Moves a Task before another in a Filter's own order, or to its end.
     pub fn move_in_filter(
         &self,

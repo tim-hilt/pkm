@@ -356,10 +356,14 @@ export class TasksModel {
     this.onChange();
   }
 
-  /** Adds a Task and shows the list it landed in, unless a Filter is shown, which stays. False, adding nothing, if the Title is empty or a Tag invalid. */
+  /** Adds a Task and shows the list it landed in, unless a Filter is shown, which stays and gives the Task the Tags its Query requires. False, adding nothing, if the Title is empty or a Tag invalid. */
   add(title: string, planning = Planning.Active, extras: NewTask = {}): boolean {
     const { store } = this.files;
-    const { description, priority = 4, tags = [] } = extras;
+    const { description, priority = 4 } = extras;
+    const given = extras.tags ?? [];
+    const required =
+      this.shownList.kind === "filter" ? store.filterRequiredTags(this.shownList.id) : [];
+    const tags = [...given, ...required.filter((t) => !given.includes(t))];
     const create = () => store.create(title, planning, priority, tags);
     if (!this.change(() => this.describe(create(), title, priority, description))) return false;
     if (this.shownList.kind === "planning") this.show({ kind: "planning", planning });

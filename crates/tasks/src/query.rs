@@ -4,12 +4,13 @@
 //! or   := and ('|' and)*
 //! and  := not ('&' not)*
 //! not  := '!' not | atom
-//! atom := '@' tag | '(' or ')'
+//! atom := '*' | '@' tag | '(' or ')'
 //! ```
 //!
 //! Whitespace between terms is ignored. A Tag matches exactly: `@work` does
 //! not match `work/acme`. A Wildcard `*` in it stands for any characters or
-//! none, `/` included: `@work*` does. The atom rule is the one place new
+//! none, `/` included: `@work*` does. A bare `*` matches every Task, Tagged
+//! or not. The atom rule is the one place new
 //! terms would go.
 
 use pkm_base::tag;
@@ -41,6 +42,8 @@ impl std::error::Error for QueryError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Expr {
+    /// `*`: every Task.
+    Any,
     Tag(String),
     Not(Box<Expr>),
     And(Vec<Expr>),
@@ -74,6 +77,15 @@ impl Query {
         self.0.collect_tags(&mut named);
         named.retain(|t| !known.iter().any(|k| fits(t, k)));
         named
+    }
+
+    /// The Tags a Task needs to match, which a Task created in a Filter gets:
+    /// the plain `@tag` terms, Wildcards excluded, when the Query is one `&`
+    /// chain (parenthesized chains included), else none.
+    pub fn required_tags(&self) -> Vec<String> {
+        let mut required = Vec::new();
+        self.0.collect_required(&mut required);
+        required
     }
 
     /// Whether a Task carrying exactly `tags` matches.
@@ -126,8 +138,20 @@ fn fits(named: &str, tag: &str) -> bool {
 }
 
 impl Expr {
+    /// Adds each plain Tag of an `&` chain to `required`; nothing for an `|`.
+    fn collect_required(&self, required: &mut Vec<String>) {
+        match self {
+            Self::Tag(tag) if !tag.contains(WILDCARD) && !required.contains(tag) => {
+                required.push(tag.clone());
+            }
+            Self::And(parts) => parts.iter().for_each(|p| p.collect_required(required)),
+            _ => {}
+        }
+    }
+
     fn collect_tags(&self, named: &mut Vec<String>) {
         match self {
+            Self::Any => {}
             Self::Tag(tag) => {
                 if !named.contains(tag) {
                     named.push(tag.clone());
@@ -142,6 +166,7 @@ impl Expr {
 
     fn matches(&self, tags: &[String]) -> bool {
         match self {
+            Self::Any => true,
             Self::Tag(named) => tags.iter().any(|t| fits(named, t)),
             Self::Not(inner) => !inner.matches(tags),
             Self::And(parts) => parts.iter().all(|p| p.matches(tags)),
@@ -233,6 +258,10 @@ impl Parser {
     fn atom(&mut self, depth: usize) -> Result<Expr, QueryError> {
         self.skip_space();
         match self.peek() {
+            Some('*') => {
+                self.at += 1;
+                Ok(Expr::Any)
+            }
             Some('@') => self.tag(),
             Some('(') => {
                 let open = self.at;
@@ -327,6 +356,37 @@ mod tests {
         assert!(!matches("@*", &[]));
         assert!(matches("!@*", &[]));
         assert!(matches("@* & !@b*", &["a"]));
+    }
+
+    #[test]
+    fn a_bare_star_matches_every_task_and_combines() {
+        assert!(matches("*", &[]));
+        assert!(matches("*", &["a"]));
+        assert!(matches("* & !@a", &["b"]));
+        assert!(!matches("* & !@a", &["a"]));
+        assert!(matches("@a | *", &[]));
+        assert!(!matches("!*", &["a"]));
+        assert!(Query::parse("*").unwrap().unmatched(&[]).is_empty());
+    }
+
+    fn required(query: &str) -> Vec<String> {
+        Query::parse(query).unwrap().required_tags()
+    }
+
+    #[test]
+    fn required_tags_are_the_plain_tags_of_an_and_chain() {
+        assert_eq!(required("@work & !@review"), ["work"]);
+        assert_eq!(required("@a & (@b & @a) & @c/d"), ["a", "b", "c/d"]);
+        assert_eq!(required("@a"), ["a"]);
+        assert_eq!(required("@a & (@b | @c)"), ["a"]);
+        assert_eq!(required("@a & @b*"), ["a"]);
+    }
+
+    #[test]
+    fn a_query_that_is_no_and_chain_requires_nothing() {
+        for text in ["@a | @b", "@*x", "*", "!@a", "(@a | @b) | @c"] {
+            assert!(required(text).is_empty(), "{text:?}");
+        }
     }
 
     #[test]

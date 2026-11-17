@@ -583,6 +583,12 @@ impl TaskStore {
         Ok(found.into_iter().map(Into::into).collect())
     }
 
+    /// The Tags a Task created in a Filter starts with, so that it stays there.
+    #[wasm_bindgen(js_name = filterRequiredTags)]
+    pub fn filter_required_tags(&self, id: &str) -> Result<Vec<String>, JsError> {
+        self.tasks.filter_required_tags(id).map_err(error)
+    }
+
     /// The Active Tasks a Filter matches, as `tasks` lists Active.
     #[wasm_bindgen(js_name = filterTasks)]
     pub fn filter_tasks(&self, id: &str) -> Result<Vec<ListedTask>, JsError> {
