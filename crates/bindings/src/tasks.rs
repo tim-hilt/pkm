@@ -1,7 +1,6 @@
 //! The Tasks surface of the UniFFI library (ADR-0007): the Tasks store. The
 //! logic lives in `pkm-tasks`.
 
-use std::path::Path;
 use std::sync::Mutex;
 
 use pkm_base::tags::{Entry as TagEntry, Suggestions as TagSuggestions, Tags};
@@ -333,14 +332,9 @@ impl TaskStore {
 #[uniffi::export]
 impl TaskStore {
     /// Opens the Tasks in the folder `root`, creating it if needed.
-    /// `device_folder` is local to the Device and never Synced: it keeps the
-    /// Device ID, which names this Device's History files, and the cache of
-    /// Closed Tasks.
     #[uniffi::constructor]
-    pub fn open(root: String, device_folder: String) -> Result<Self, TasksError> {
-        let device = pkm_base::device::id(device_folder.as_ref())?;
-        let cache = Path::new(&device_folder).join("tasks-cache");
-        Ok(Self(Tasks::open(root, device, cache)?))
+    pub fn open(root: String) -> Result<Self, TasksError> {
+        Ok(Self(Tasks::open(root)?))
     }
 
     /// Makes a Task Active or moves it to the Backlog, at the end of that list.
@@ -469,7 +463,7 @@ impl TaskStore {
 
     /// Deletes a Tag: Removes it from every Item, Open or Closed, then forgets
     /// it and its Tag Color. Removing first means an interrupted Delete can
-    /// just be repeated. The History is untouched.
+    /// just be repeated.
     pub fn delete_tag(&self, tag: String) -> Result<(), TasksError> {
         self.0.remove_tag_everywhere(&tag)?;
         Ok(self.0.forget_tag(&tag)?)
@@ -608,7 +602,7 @@ mod tests {
     fn listed_tasks_carry_their_tags_in_their_tag_colors() {
         let dir = std::env::temp_dir().join(format!("pkm-bindings-{}", std::process::id()));
         let path = |name: &str| dir.join(name).to_string_lossy().into_owned();
-        let store = TaskStore::open(path("Tasks"), path("Device")).unwrap();
+        let store = TaskStore::open(path("Tasks")).unwrap();
         let task = store
             .create("t".into(), Planning::Active, 4, vec![])
             .unwrap();
@@ -637,7 +631,7 @@ mod tests {
     fn deleting_a_tag_removes_it_from_every_task_and_forgets_it() {
         let dir = std::env::temp_dir().join(format!("pkm-bindings-del-{}", std::process::id()));
         let path = |name: &str| dir.join(name).to_string_lossy().into_owned();
-        let store = TaskStore::open(path("Tasks"), path("Device")).unwrap();
+        let store = TaskStore::open(path("Tasks")).unwrap();
         let task = store
             .create("t".into(), Planning::Active, 4, vec![])
             .unwrap();
@@ -660,7 +654,7 @@ mod tests {
     fn a_filter_lists_its_tasks_as_listed_tasks_and_a_query_is_checked() {
         let dir = std::env::temp_dir().join(format!("pkm-bindings-filter-{}", std::process::id()));
         let path = |name: &str| dir.join(name).to_string_lossy().into_owned();
-        let store = TaskStore::open(path("Tasks"), path("Device")).unwrap();
+        let store = TaskStore::open(path("Tasks")).unwrap();
         store
             .create("t".into(), Planning::Active, 4, vec!["work".into()])
             .unwrap();

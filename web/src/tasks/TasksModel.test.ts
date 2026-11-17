@@ -15,7 +15,7 @@ let storage: MemoryStorage;
 let model: TasksModel;
 beforeEach(async () => {
   storage = new MemoryStorage();
-  model = new TasksModel(await TaskFiles.open(core, storage));
+  model = new TasksModel(await TaskFiles.open(storage));
 });
 
 const titles = () => model.tasks.map((task) => task.title);
@@ -278,7 +278,7 @@ describe("the Tasks list", () => {
       tags: ["home"],
     });
     await model.saved();
-    const reopened = new TasksModel(await TaskFiles.open(core, storage));
+    const reopened = new TasksModel(await TaskFiles.open(storage));
     expect(reopened.tasks[0]).toMatchObject({
       title: "Buy milk",
       priority: 2,
@@ -298,7 +298,7 @@ describe("Done, Reject and Revert", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  const reopened = async () => new TasksModel(await TaskFiles.open(core, storage));
+  const reopened = async () => new TasksModel(await TaskFiles.open(storage));
 
   it("keeps a Done Task in place, marked, with a toast", () => {
     model.add("a");
@@ -460,7 +460,7 @@ describe("order and moving", () => {
     model.moveBefore(task("c"), task("a"));
     await model.saved();
     expect(
-      (await TaskFiles.open(core, storage)).store.tasks(Planning.Active).map((t) => t.title),
+      (await TaskFiles.open(storage)).store.tasks(Planning.Active).map((t) => t.title),
     ).toEqual(["c", "a", "b"]);
   });
 });
@@ -753,7 +753,7 @@ describe("Sync", () => {
   it("shows the Tasks Sync wrote, and none it deleted", async () => {
     model.add("Mine");
     await model.saved();
-    const other = await TaskFiles.open(core, new MemoryStorage());
+    const other = await TaskFiles.open(new MemoryStorage());
     other.store.create("Theirs", Planning.Active, 4, []);
     const [path] = other.store.takeChanges().filter((p) => p.endsWith(".md"));
     await storage.write(path, new TextEncoder().encode(other.store.file(path)));
@@ -861,7 +861,7 @@ describe("Tags", () => {
   it("keeps a Tag Color after a reload from the saved files", async () => {
     model.setTagColor("work", "#d0021b");
     await model.saved();
-    const reopened = new TasksModel(await TaskFiles.open(core, storage));
+    const reopened = new TasksModel(await TaskFiles.open(storage));
     expect(reopened.allTags.find((t) => t.name === "work")?.color).toBe("#d0021b");
   });
 });
@@ -1025,7 +1025,7 @@ describe("Filters", () => {
     model.addFilter("A", "@a");
     model.setFavorite(filter("A"), true);
     await model.saved();
-    const reopened = new TasksModel(await TaskFiles.open(core, storage));
+    const reopened = new TasksModel(await TaskFiles.open(storage));
     expect(reopened.filters[0].favorite).toBe(true);
   });
 
@@ -1035,7 +1035,7 @@ describe("Filters", () => {
       getItem: (key: string) => values.get(key) ?? null,
       setItem: (key: string, value: string) => void values.set(key, value),
     };
-    const open = async () => new TasksModel(await TaskFiles.open(core, storage), 5000, device);
+    const open = async () => new TasksModel(await TaskFiles.open(storage), 5000, device);
     const first = await open();
     expect(first.list).toEqual({ kind: "planning", planning: Planning.Active });
     first.addFilter("A", "@a");
@@ -1079,7 +1079,7 @@ describe("Filters", () => {
     model.deleteFilter(filter("Home"));
     await model.saved();
     expect((await storage.files("Filters")).map((f) => f.name)).toHaveLength(1);
-    const reopened = new TasksModel(await TaskFiles.open(core, storage));
+    const reopened = new TasksModel(await TaskFiles.open(storage));
     expect(reopened.filters.map((f) => f.title)).toEqual(["Work"]);
   });
 

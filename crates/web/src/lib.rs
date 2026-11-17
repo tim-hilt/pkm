@@ -1299,7 +1299,7 @@ impl WebDavProtocol {
             .map_err(|_| JsError::new("notHttps"))
     }
 
-    /// The requests for the folder of Tasks (and their History). Throws
+    /// The requests for the folder of Tasks. Throws
     /// `notHttps` for a URL that is not https.
     #[wasm_bindgen(js_name = newForTasks)]
     pub fn new_for_tasks(
@@ -1378,7 +1378,7 @@ impl WebDavProtocol {
 use pkm_cloud::step::{LocalFile, Marks, Synced};
 use pkm_cloud::{
     Blob, BookStates, Books, Drawings, Filters, Next, Request, Response, Schedule, Status,
-    StepOutcome, SyncStep, TagsFile, TaskHistory, Tasks, Timing,
+    StepOutcome, SyncStep, TagsFile, Tasks, Timing,
 };
 use std::time::Duration;
 
@@ -1557,12 +1557,6 @@ impl SyncRun {
     #[wasm_bindgen(js_name = newForTasks)]
     pub fn new_for_tasks(now_ms: f64) -> SyncRun {
         SyncRun::with_merge(now_ms, Arc::new(Tasks))
-    }
-
-    /// A step over the Tasks' History files: transferred, never merged.
-    #[wasm_bindgen(js_name = newForTaskHistory)]
-    pub fn new_for_task_history(now_ms: f64) -> SyncRun {
-        SyncRun::with_merge(now_ms, Arc::new(TaskHistory))
     }
 
     /// A step over the Tags file, merged per Tag (ADR-0023).

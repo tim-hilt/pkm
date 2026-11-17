@@ -1,19 +1,17 @@
-import { type Core, TaskStore } from "../core/Core";
+import { TaskStore } from "../core/Core";
 import type { FileStorage } from "../storage/FileStorage";
 
-/** Where this Device's ID is kept: on the Device only, never in a Synced folder. */
-const deviceFile = "Device/device-id";
+/** What old versions kept beside the Tasks. */
+const historyFolder = "Tasks/.history";
 
 const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 
 /**
  * The Tasks, kept in the Origin Private File System. The core's store works on
  * files in memory; this opens it from what is saved and saves what it
- * changed: the Task files, and this Device's History files
- * (`Tasks/.history/<device>-<yyyy-mm>.log`), which the store appends to and so
- * needs to start from, the Tags (`Tags/tags.json`) and the Filters
- * (`Filters/<id>.md`); a file the store removed is removed. Other Devices'
- * History files are never read.
+ * changed: the Task files, the Tags (`Tags/tags.json`) and the Filters
+ * (`Filters/<id>.md`); a file the store removed is removed. The History folder
+ * old versions kept (`Tasks/.history`) is Deleted on open.
  */
 export class TaskFiles {
   /** The writes in progress: each save waits for the one before. */
@@ -21,13 +19,14 @@ export class TaskFiles {
 
   private constructor(
     private current: TaskStore,
-    private readonly device: string,
     private readonly storage: FileStorage,
   ) {}
 
-  static async open(core: Pick<Core, "claimItemIds">, storage: FileStorage): Promise<TaskFiles> {
-    const device = await deviceId(core, storage);
-    return new TaskFiles(await load(device, storage), device, storage);
+  static async open(storage: FileStorage): Promise<TaskFiles> {
+    for (const { name } of await storage.files(historyFolder)) {
+      await storage.remove(`${historyFolder}/${name}`);
+    }
+    return new TaskFiles(await load(storage), storage);
   }
 
   /** The store; a new one after `reload`. */
@@ -44,7 +43,7 @@ export class TaskFiles {
     for (;;) {
       const saved = this.saveAll();
       await saved;
-      const reloaded = await load(this.device, this.storage);
+      const reloaded = await load(this.storage);
       // What the store changed while the files were read may be missing from them.
       if (this.saveAll() === saved) {
         this.current.free();
@@ -81,8 +80,8 @@ export class TaskFiles {
   }
 }
 
-/** A store opened on the Task files, this Device's History files, the Tags and the Filters. */
-async function load(device: string, storage: FileStorage): Promise<TaskStore> {
+/** A store opened on the Task files, the Tags and the Filters. */
+async function load(storage: FileStorage): Promise<TaskStore> {
   const folder = TaskStore.folder();
   const paths: string[] = [];
   const texts: string[] = [];
@@ -95,18 +94,7 @@ async function load(device: string, storage: FileStorage): Promise<TaskStore> {
     }
   };
   await take(folder, (name) => name.endsWith(".md"));
-  await take(`${folder}/.history`, (name) => name.startsWith(`${device}-`));
   await take("Tags", (name) => name === "tags.json");
   await take(TaskStore.filtersFolder(), (name) => name.endsWith(".md"));
-  return new TaskStore(device, paths, texts);
-}
-
-/** Made on first use, and again if the file holds no Item ID, as on Apple (`pkm_base::device`). */
-async function deviceId(core: Pick<Core, "claimItemIds">, storage: FileStorage): Promise<string> {
-  const bytes = await storage.read(deviceFile);
-  const saved = bytes ? decode(bytes).trim() : "";
-  const [made] = core.claimItemIds([saved]);
-  if (made === "") return saved;
-  await storage.write(deviceFile, new TextEncoder().encode(made));
-  return made;
+  return new TaskStore(paths, texts);
 }

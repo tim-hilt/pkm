@@ -14,7 +14,7 @@ use pkm_base::random::Entropy;
 use pkm_cloud::{
     BookStates, Books, ConnectError, DirStorage, Drawings, Filters, GoogleDriveStorage, Observer,
     OneDriveStorage, Progress, Status, Storage, SyncFolder, SyncLoop, SyncState, TagsFile,
-    TaskHistory, Tasks as TaskFiles, Timing, WebDavStorage,
+    Tasks as TaskFiles, Timing, WebDavStorage,
 };
 use pkm_drawing::scene::{FillPattern, LineStyle};
 use pkm_drawing::{
@@ -259,8 +259,8 @@ pub trait SyncObserver: Send + Sync {
     /// Gallery should list again. Also on the Sync loop's thread.
     fn books_changed(&self, names: Vec<String>);
 
-    /// Sync wrote or deleted these Task files or History files (names
-    /// without `.md` or `.log`; a rename is the old name and the new one).
+    /// Sync wrote or deleted these Task files (names
+    /// without `.md`; a rename is the old name and the new one).
     /// The Tasks list should read again. Also on the Sync loop's thread.
     fn tasks_changed(&self, names: Vec<String>);
 
@@ -563,8 +563,8 @@ impl ContextStorages {
 
 impl CloudSync {
     /// Syncs the Context folders: Drawings, both halves of Books (the Files
-    /// and their hidden state) and of Tasks (the Task files and their hidden
-    /// History), the Tags file in `Tags/` and the Filters in `Filters/` beside the Tasks folder, each
+    /// and their hidden state), the Task files, the Tags file in `Tags/` and the Filters in
+    /// `Filters/` beside the Tasks folder, each
     /// with its state in a folder of its own in `state_directory` and its
     /// cloud folder.
     fn start_contexts(
@@ -581,8 +581,6 @@ impl CloudSync {
             .map_err(|_| SyncStartError::StateUnavailable)?;
         let tasks_state = SyncState::open(state_root.join(TaskFiles::FOLDER))
             .map_err(|_| SyncStartError::StateUnavailable)?;
-        let history_state = SyncState::open(state_root.join("TasksHistory"))
-            .map_err(|_| SyncStartError::StateUnavailable)?;
         let tags_state = SyncState::open(state_root.join(TagsFile::FOLDER))
             .map_err(|_| SyncStartError::StateUnavailable)?;
         let filters_state = SyncState::open(state_root.join(Filters::FOLDER))
@@ -591,12 +589,7 @@ impl CloudSync {
         let tasks = Path::new(&directories.tasks);
         let beside = tasks.parent().unwrap_or(tasks);
         let (tags, filters) = (beside.join(TagsFile::FOLDER), beside.join(Filters::FOLDER));
-        let hidden = [
-            books.join(".state"),
-            tasks.join(".history"),
-            tags.clone(),
-            filters.clone(),
-        ];
+        let hidden = [books.join(".state"), tags.clone(), filters.clone()];
         for hidden in hidden {
             std::fs::create_dir_all(hidden).map_err(|_| SyncStartError::StateUnavailable)?;
         }
@@ -626,15 +619,8 @@ impl CloudSync {
                 name: TaskFiles::FOLDER.into(),
                 dir: tasks.to_path_buf(),
                 state: tasks_state,
-                storage: Arc::clone(&storages.tasks),
-                merge: Arc::new(TaskFiles),
-            },
-            SyncFolder {
-                name: TaskFiles::FOLDER.into(),
-                dir: tasks.join(".history"),
-                state: history_state,
                 storage: storages.tasks,
-                merge: Arc::new(TaskHistory),
+                merge: Arc::new(TaskFiles),
             },
             SyncFolder {
                 name: TagsFile::FOLDER.into(),

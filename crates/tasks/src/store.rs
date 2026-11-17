@@ -5,9 +5,7 @@ mod filters;
 pub use filters::Filter;
 pub(crate) use filters::is_filter;
 
-use crate::cache::Cache;
 use crate::files::{DiskFiles, Files};
-use crate::history::{Event, History};
 use crate::query::QueryError;
 use pkm_base::clock::{iso8601, now_ms};
 use pkm_base::front_matter::{Document, Value};
@@ -15,7 +13,6 @@ use pkm_base::item_id::ItemId;
 use pkm_base::random::Entropy;
 use pkm_base::tag;
 use pkm_base::tags::{Suggestions, Tags};
-use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
@@ -44,14 +41,6 @@ impl Planning {
             Self::Backlog => "backlog",
         }
     }
-
-    /// What the History records for a Task that joins this list.
-    fn event(self) -> Event {
-        match self {
-            Self::Active => Event::MadeActive,
-            Self::Backlog => Event::MovedToBacklog,
-        }
-    }
 }
 
 /// How a Task is Closed.
@@ -61,22 +50,7 @@ pub enum Closing {
     Rejected,
 }
 
-impl Closing {
-    pub(crate) fn state(self) -> &'static str {
-        match self {
-            Self::Done => "done",
-            Self::Rejected => "rejected",
-        }
-    }
-
-    pub(crate) fn parse(state: &str) -> Option<Self> {
-        match state {
-            "done" => Some(Self::Done),
-            "rejected" => Some(Self::Rejected),
-            _ => None,
-        }
-    }
-}
+impl Closing {}
 
 /// A Close not yet saved, which `revert` can still take back.
 #[derive(Debug, Clone)]
@@ -200,9 +174,6 @@ impl std::error::Error for Error {}
 pub struct Tasks {
     files: Arc<dyn Files>,
     root: PathBuf,
-    history: History,
-    /// What the files last said, so a launch reads only those that changed.
-    cache: Mutex<Cache>,
     /// The one Close that can still be reverted.
     pending: Mutex<Option<Pending>>,
     /// Held while the Tags file is read and written back.
@@ -215,41 +186,22 @@ impl Tasks {
     /// The folder's name, in the app's storage and in the cloud.
     pub const FOLDER: &'static str = "Tasks";
 
-    /// Opens the Tasks in `root`, creating the folder if needed. `device` is
-    /// this Device's ID, which names its History files in `root/.history`.
-    /// `cache` is a file local to the Device and never Synced (ADR-0021): it
-    /// remembers the Closed Tasks between launches. Missing or unreadable, it
-    /// is rebuilt from the Task files.
-    pub fn open(
-        root: impl Into<PathBuf>,
-        device: ItemId,
-        cache: impl Into<PathBuf>,
-    ) -> io::Result<Self> {
+    /// Opens the Tasks in `root`, creating the folder if needed. The History
+    /// folder old versions kept in `root/.history` is Deleted (ADR-0026); one
+    /// that can't be is tried again at the next launch.
+    pub fn open(root: impl Into<PathBuf>) -> io::Result<Self> {
         let root = root.into();
         fs::create_dir_all(&root)?;
-        Ok(Self::open_in(
-            Arc::new(DiskFiles),
-            root,
-            device,
-            Some(cache.into()),
-        ))
+        drop(fs::remove_dir_all(root.join(".history")));
+        Ok(Self::open_in(Arc::new(DiskFiles), root))
     }
 
     /// The Tasks in `root` on any `files`, which must hold the folder `root`
-    /// (an empty one is none). Without a `cache` file, nothing is remembered
-    /// between launches.
-    pub fn open_in(
-        files: Arc<dyn Files>,
-        root: impl Into<PathBuf>,
-        device: ItemId,
-        cache: Option<PathBuf>,
-    ) -> Self {
-        let root = root.into();
+    /// (an empty one is none).
+    pub fn open_in(files: Arc<dyn Files>, root: impl Into<PathBuf>) -> Self {
         Self {
-            history: History::new(files.clone(), root.join(".history"), device),
-            cache: Mutex::new(Cache::new(files.clone(), cache)),
             files,
-            root,
+            root: root.into(),
             pending: Mutex::new(None),
             tags_lock: Mutex::new(()),
             last_created: AtomicU64::new(0),
@@ -257,7 +209,7 @@ impl Tasks {
     }
 
     /// Creates a Task at the end of its list, with `priority` (clamped to 1 to
-    /// 4) and `tags`, in one write with one `created` History entry; Tags that
+    /// 4) and `tags`, in one write; Tags that
     /// are new join the Tags file. The Title is trimmed and kept to one line
     /// (line breaks become spaces). Fails with `EmptyTitle`, or `InvalidTag`
     /// for any invalid Tag, before saving anything.
@@ -312,7 +264,7 @@ impl Tasks {
         last as f64 * 1000.0
     }
 
-    /// Saves a new Task under a fresh Item ID and records its creation.
+    /// Saves a new Task under a fresh Item ID.
     fn insert(
         &self,
         new: &NewTask,
@@ -337,10 +289,7 @@ impl Tasks {
             file.set_scalar(CREATED, iso8601(now));
             file.set_scalar("updated", iso8601(now));
             match self.write(&id, &file, Overwrite::No) {
-                Ok(()) => {
-                    self.history.record(Event::Created, &id, now)?;
-                    return Ok(task_of(&file).ok_or(io::ErrorKind::InvalidData)?);
-                }
+                Ok(()) => return Ok(task_of(&file).ok_or(io::ErrorKind::InvalidData)?),
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
                 Err(e) => return Err(e.into()),
             }
@@ -391,7 +340,7 @@ impl Tasks {
     }
 
     /// Plans the Open top-level Task `id` as `planning`, at the end of that
-    /// list, with its Open Subtasks, and records it in the History for each. A
+    /// list, with its Open Subtasks. A
     /// Task already planned so stays untouched. Fails with `NotFound` if there
     /// is no such Task and `SubtaskNotPlannable` for a Subtask.
     pub fn plan(&self, id: &str, planning: Planning) -> Result<Task, Error> {
@@ -421,7 +370,6 @@ impl Tasks {
                     file.remove("parent"); // a Parent Sync left missing or Closed
                 }
             })?;
-            self.history.record(planning.event(), &item, now_ms())?;
             if n == 0 {
                 placed = Some(file);
             }
@@ -784,20 +732,21 @@ impl Tasks {
     }
 
     /// Every Task in the folder, repaired. Only `<id>.md` is the Task `id`: a
-    /// copy under another name (`<id> 1.md`) would shadow it. Reads only the
-    /// files that changed since the cache last saw them.
+    /// copy under another name (`<id> 1.md`) would shadow it.
     fn load(&self) -> io::Result<Nodes> {
-        let read_tags = RefCell::new(BTreeSet::new());
-        let mut nodes = self
-            .cache
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .nodes(&self.root, |path| {
-                let (node, tags) = read_node(self.files.as_ref(), path)?;
-                read_tags.borrow_mut().extend(tags);
-                Some(node)
-            })?;
-        self.remember_tags(read_tags.into_inner())?;
+        let mut read_tags = BTreeSet::new();
+        let mut nodes = Nodes::new();
+        for listed in self.files.list(&self.root)? {
+            if !listed.name.ends_with(".md") {
+                continue;
+            }
+            if let Some((node, tags)) = read_node(self.files.as_ref(), &self.root.join(listed.name))
+            {
+                read_tags.extend(tags);
+                nodes.insert(node.task.id.clone(), node);
+            }
+        }
+        self.remember_tags(read_tags)?;
         repair(&mut nodes);
         for (id, position) in derive_positions(&mut nodes) {
             self.migrate(&id, |file| {
@@ -809,8 +758,8 @@ impl Tasks {
         Ok(nodes)
     }
 
-    /// Gives every Open Task without `created` one: the time of its History
-    /// `created` line, else its file's modification time.
+    /// Gives every Open Task without `created` one: its file's modification
+    /// time.
     fn backfill_created(&self, nodes: &mut Nodes) -> io::Result<()> {
         let missing: Vec<ItemId> = (nodes.values())
             .filter(|n| !n.is_closed() && n.created.is_none())
@@ -819,7 +768,6 @@ impl Tasks {
         if missing.is_empty() {
             return Ok(());
         }
-        let logged = self.history.created_times();
         let listed = self.files.list(&self.root)?;
         for id in missing {
             let modified = || {
@@ -827,7 +775,7 @@ impl Tasks {
                 let (nanos, _) = listed.iter().find(|l| l.name == name)?.stamp;
                 Some(iso8601((nanos / 1_000_000) as f64))
             };
-            let Some(created) = logged.get(id.as_str()).cloned().or_else(modified) else {
+            let Some(created) = modified() else {
                 continue;
             };
             self.migrate(&id, |file| file.set_scalar(CREATED, created.clone()))?;
@@ -860,10 +808,6 @@ impl Tasks {
         if overwrite == Overwrite::No && self.files.exists(&path) {
             return Err(io::ErrorKind::AlreadyExists.into());
         }
-        self.cache
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .forget(&format!("{id}.md"));
         self.files.write(&path, &file.render())?;
         self.remember_tags(tags_of(file))
     }
@@ -940,8 +884,8 @@ impl Node {
         self.closing.is_some()
     }
 
-    /// A Closed Task as the cache keeps it: what Open Tasks and lists need of
-    /// it (how it was Closed, its place, Title and Parent), nothing more.
+    /// A Closed Task of an old version, kept as what Open Tasks and lists need
+    /// of it (how it was Closed, its place, Title and Parent), nothing more.
     pub(crate) fn closed(
         id: String,
         closing: Closing,
@@ -1423,21 +1367,11 @@ mod tests {
         }
 
         fn store(&self) -> Tasks {
-            Tasks::open(
-                &self.0,
-                ItemId::parse("dddddddddddd").unwrap(),
-                self.cache(),
-            )
-            .unwrap()
+            Tasks::open(&self.0).unwrap()
         }
 
         fn tags_file(&self) -> PathBuf {
             self.0.parent().unwrap().join(Tags::FILE)
-        }
-
-        /// Beside the Tasks folder, as a Device keeps it.
-        fn cache(&self) -> PathBuf {
-            self.0.parent().unwrap().join("cache")
         }
     }
 
@@ -1514,7 +1448,6 @@ mod tests {
             text.contains("priority: 1") && text.contains("tags:"),
             "{text}"
         );
-        assert_eq!(history(&dir).len(), 1);
     }
 
     #[test]
@@ -1542,7 +1475,6 @@ mod tests {
             Err(Error::EmptyTitle)
         ));
         assert!(titles(&tasks, Planning::Active).is_empty());
-        assert!(!dir.0.join(".history").exists());
         assert!(tasks.tags().list().is_empty());
     }
 
@@ -1575,7 +1507,6 @@ mod tests {
             .create_subtask(&parent.id, "s", 2, &tag_names(&["home"]))
             .unwrap();
         assert_eq!((sub.priority, sub.tags), (2, tag_names(&["home"])));
-        assert_eq!(history(&dir).len(), 2);
         assert!(tasks.tags().contains("home"));
     }
 
@@ -1915,7 +1846,7 @@ mod tests {
     }
 
     #[test]
-    fn removing_a_tag_everywhere_reaches_closed_tasks_and_leaves_the_history() {
+    fn removing_a_tag_everywhere_reaches_closed_tasks() {
         let dir = Scratch::new();
         let tasks = dir.store();
         let open = tagged(&tasks, &["home", "work"]);
@@ -1938,7 +1869,6 @@ mod tests {
             stamp(task);
         }
         let other_text = fs::read_to_string(path(&other)).unwrap();
-        let history_before = history(&dir);
 
         tasks.remove_tag_everywhere("work").unwrap();
 
@@ -1952,7 +1882,6 @@ mod tests {
             ["home"]
         );
         assert_eq!(fs::read_to_string(path(&other)).unwrap(), other_text);
-        assert_eq!(history(&dir), history_before);
     }
 
     #[test]
@@ -1969,75 +1898,6 @@ mod tests {
         assert_eq!(tasks.tags().color("work"), None);
     }
 
-    fn history(dir: &Scratch) -> Vec<String> {
-        let mut lines = Vec::new();
-        for entry in fs::read_dir(dir.0.join(".history")).unwrap() {
-            let path = entry.unwrap().path();
-            let name = path.file_name().unwrap().to_str().unwrap().to_owned();
-            assert!(
-                name.starts_with("dddddddddddd-") && name.ends_with(".log"),
-                "{name}"
-            );
-            lines.extend(fs::read_to_string(path).unwrap().lines().map(String::from));
-        }
-        lines
-    }
-
-    #[test]
-    fn a_backlog_task_can_be_made_active_and_moved_back() {
-        let dir = Scratch::new();
-        let tasks = dir.store();
-        tasks.create("first", Planning::Active, 4, &[]).unwrap();
-        let later = tasks.create("later", Planning::Backlog, 4, &[]).unwrap();
-        let moved = tasks.plan(&later.id, Planning::Active).unwrap();
-        assert_eq!(moved.planning, Planning::Active);
-        assert_eq!(titles(&tasks, Planning::Active), ["first", "later"]);
-        assert!(titles(&tasks, Planning::Backlog).is_empty());
-        tasks.plan(&later.id, Planning::Backlog).unwrap();
-        assert_eq!(titles(&tasks, Planning::Backlog), ["later"]);
-    }
-
-    #[test]
-    fn planning_an_unknown_task_fails() {
-        let dir = Scratch::new();
-        assert!(dir.store().plan("aaaaaaaaaaaa", Planning::Active).is_err());
-    }
-
-    #[test]
-    fn planning_keeps_the_other_properties() {
-        let dir = Scratch::new();
-        let tasks = dir.store();
-        let task = tasks.create("t", Planning::Backlog, 4, &[]).unwrap();
-        tasks.add_tag(&task.id, "home").unwrap();
-        let moved = tasks.plan(&task.id, Planning::Active).unwrap();
-        assert_eq!(moved.tags, ["home"]);
-    }
-
-    #[test]
-    fn creating_and_planning_are_recorded_by_id_and_time_only() {
-        let dir = Scratch::new();
-        let tasks = dir.store();
-        let task = tasks
-            .create("Secret title", Planning::Backlog, 4, &[])
-            .unwrap();
-        tasks.add_tag(&task.id, "private").unwrap();
-        tasks.plan(&task.id, Planning::Active).unwrap();
-        tasks.plan(&task.id, Planning::Active).unwrap(); // no change, no line
-        tasks.plan(&task.id, Planning::Backlog).unwrap();
-        let lines = history(&dir);
-        let events: Vec<_> = lines
-            .iter()
-            .map(|l| {
-                let parts: Vec<_> = l.split(' ').collect();
-                assert_eq!(parts.len(), 3, "{l}");
-                assert!(parts[0].ends_with('Z'));
-                assert_eq!(parts[2], task.id);
-                parts[1]
-            })
-            .collect();
-        assert_eq!(events, ["created", "made-active", "moved-to-backlog"]);
-    }
-
     fn closing_fixture(dir: &Scratch) -> (Tasks, Task) {
         let tasks = dir.store();
         tasks.create("other", Planning::Active, 4, &[]).unwrap();
@@ -2047,6 +1907,18 @@ mod tests {
 
     fn file_of(dir: &Scratch, task: &Task) -> String {
         fs::read_to_string(dir.0.join(format!("{}.md", task.id))).unwrap()
+    }
+
+    #[test]
+    fn opening_deletes_the_history_old_versions_kept() {
+        let dir = Scratch::new();
+        let history = dir.0.join(".history");
+        fs::create_dir_all(&history).unwrap();
+        fs::write(history.join("dddddddddddd-2023-11.log"), "x\n").unwrap();
+        let tasks = dir.store();
+        tasks.create("a", Planning::Active, 4, &[]).unwrap();
+        assert!(!history.exists());
+        assert_eq!(files_in(&dir).len(), 1);
     }
 
     #[test]
@@ -2071,16 +1943,16 @@ mod tests {
     }
 
     #[test]
-    fn reverting_leaves_every_file_and_the_history_as_they_were() {
+    fn reverting_leaves_every_file_as_it_was() {
         let dir = Scratch::new();
         let (tasks, task) = closing_fixture(&dir);
-        let (before, lines) = (file_of(&dir, &task), history(&dir));
+        let before = file_of(&dir, &task);
         tasks.close(&task.id, Closing::Done).unwrap();
         tasks.revert();
         tasks.commit().unwrap();
         assert_eq!(list_of(&tasks, Planning::Active).len(), 2);
         assert!(list_of(&tasks, Planning::Active).iter().all(|t| !t.done));
-        assert_eq!((file_of(&dir, &task), history(&dir)), (before, lines));
+        assert_eq!(file_of(&dir, &task), before);
     }
 
     #[test]
@@ -2227,30 +2099,16 @@ mod tests {
     }
 
     #[test]
-    fn planning_a_task_rewrites_its_open_subtasks_and_records_each() {
+    fn planning_a_task_rewrites_its_open_subtasks() {
         let dir = Scratch::new();
         let tasks = dir.store();
         let parent = tasks.create("p", Planning::Backlog, 4, &[]).unwrap();
         let child = subtask(&tasks, &parent, "c");
         let grandchild = subtask(&tasks, &child, "g");
         raw(&dir, "cccccccccccc", "done", Some(&parent.id), 9);
-        let before = history(&dir).len();
         tasks.plan(&parent.id, Planning::Active).unwrap();
         assert!(file_of(&dir, &child).contains("state: active"));
         assert!(file_of(&dir, &grandchild).contains("state: active"));
-        let lines = history(&dir);
-        let made_active: Vec<_> = lines[before..]
-            .iter()
-            .map(|l| l.rsplit(' ').collect::<Vec<_>>())
-            .collect();
-        assert_eq!(made_active.len(), 3);
-        for id in [&parent.id, &child.id, &grandchild.id] {
-            assert!(
-                made_active
-                    .iter()
-                    .any(|l| l[0] == id && l[1] == "made-active")
-            );
-        }
         assert_eq!(
             fs::read_to_string(dir.0.join("cccccccccccc.md"))
                 .unwrap()
@@ -2286,12 +2144,12 @@ mod tests {
         let parent = tasks.create("p", Planning::Active, 4, &[]).unwrap();
         let child = subtask(&tasks, &parent, "c");
         let grandchild = subtask(&tasks, &child, "g");
-        let before = (file_of(&dir, &child), history(&dir));
+        let before = file_of(&dir, &child);
         tasks.close(&parent.id, Closing::Done).unwrap();
         assert!(list_of(&tasks, Planning::Active).iter().all(|t| t.done));
         tasks.revert();
         tasks.commit().unwrap();
-        assert_eq!((file_of(&dir, &child), history(&dir)), before);
+        assert_eq!(file_of(&dir, &child), before);
 
         tasks.close(&parent.id, Closing::Rejected).unwrap();
         assert!(list_of(&tasks, Planning::Active).is_empty());
@@ -2419,12 +2277,9 @@ mod tests {
     fn a_move_within_a_list_rewrites_only_the_moved_task() {
         let dir = Scratch::new();
         let (tasks, [a, b, c]) = move_fixture(&dir);
-        let before = (file_of(&dir, &a), file_of(&dir, &b), history(&dir));
+        let before = (file_of(&dir, &a), file_of(&dir, &b));
         tasks.move_before(&c.id, Some(&b.id)).unwrap();
-        assert_eq!(
-            (file_of(&dir, &a), file_of(&dir, &b), history(&dir)),
-            before
-        );
+        assert_eq!((file_of(&dir, &a), file_of(&dir, &b)), before);
     }
 
     #[test]
@@ -2714,31 +2569,7 @@ mod tests {
     }
 
     #[test]
-    fn a_task_without_created_gets_it_from_its_history_line_and_keeps_updated() {
-        let dir = Scratch::new();
-        raw(&dir, "aaaaaaaaaaaa", "active", None, 1);
-        raw(&dir, "bbbbbbbbbbbb", "active", None, 2);
-        let history = dir.0.join(".history");
-        fs::create_dir_all(&history).unwrap();
-        fs::write(
-            history.join("eeeeeeeeeeee-2023-11.log"),
-            "2023-11-14T22:13:20Z created aaaaaaaaaaaa\n2023-11-15T00:00:00Z made-active aaaaaaaaaaaa\n",
-        )
-        .unwrap();
-        dir.store().rows(Planning::Active).unwrap();
-        assert_eq!(
-            created_of(&dir, "aaaaaaaaaaaa").as_deref(),
-            Some("2023-11-14T22:13:20Z")
-        );
-        assert!(
-            files_in(&dir)[0]
-                .1
-                .contains("updated: 2000-01-01T00:00:00Z")
-        );
-    }
-
-    #[test]
-    fn a_task_without_created_or_history_gets_it_from_the_modification_time() {
+    fn a_task_without_created_gets_it_from_the_modification_time() {
         let dir = Scratch::new();
         raw(&dir, "aaaaaaaaaaaa", "active", None, 1);
         let modified: std::time::SystemTime = fs::metadata(dir.0.join("aaaaaaaaaaaa.md"))
@@ -3048,74 +2879,6 @@ mod tests {
         ));
     }
 
-    /// Makes every Task file unreadable, so a listing that still works read
-    /// none of them. The modification date stays.
-    #[cfg(unix)]
-    fn lock_files(dir: &Scratch) {
-        for item in fs::read_dir(&dir.0).unwrap() {
-            let path = item.unwrap().path();
-            if path.extension().is_some_and(|e| e == "md") {
-                lock_file(&path);
-            }
-        }
-    }
-
-    #[cfg(unix)]
-    fn lock_file(path: &Path) {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o000)).unwrap();
-    }
-
-    fn cache_fixture(dir: &Scratch) -> (Tasks, Task) {
-        let tasks = dir.store();
-        let parent = tasks.create("parent", Planning::Active, 4, &[]).unwrap();
-        let gone = subtask(&tasks, &parent, "gone");
-        subtask(&tasks, &parent, "open");
-        // Closing Deletes now; a file Closed by an older version stays.
-        let path = dir.0.join(format!("{}.md", gone.id));
-        let legacy = fs::read_to_string(&path).unwrap();
-        fs::write(&path, legacy.replace("state: active", "state: done")).unwrap();
-        (tasks, gone)
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn listing_an_unchanged_folder_reads_no_task_file() {
-        let dir = Scratch::new();
-        let (tasks, _) = cache_fixture(&dir);
-        let before = list_of(&tasks, Planning::Active);
-        lock_files(&dir);
-        assert_eq!(list_of(&tasks, Planning::Active), before);
-    }
-
-    #[test]
-    fn the_cache_keeps_the_position_of_a_closed_task() {
-        let dir = Scratch::new();
-        let (tasks, gone) = cache_fixture(&dir);
-        list_of(&tasks, Planning::Active);
-        let position = Document::parse(&file_of(&dir, &gone))
-            .unwrap()
-            .scalar("position")
-            .unwrap()
-            .to_owned();
-        let cached = fs::read_to_string(dir.cache()).unwrap();
-        assert!(
-            cached.contains(&format!("\t{position}\tgone\n")),
-            "{cached}"
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn closed_tasks_are_remembered_across_launches() {
-        let dir = Scratch::new();
-        let (tasks, gone) = cache_fixture(&dir);
-        list_of(&tasks, Planning::Active);
-        lock_file(&dir.0.join(format!("{}.md", gone.id)));
-        let rows = dir.store().rows(Planning::Active).unwrap();
-        assert_eq!(rows[0].open_subtasks, 1, "{}", gone.id);
-    }
-
     #[test]
     fn a_file_changed_added_or_removed_outside_the_app_shows_up() {
         let dir = Scratch::new();
@@ -3154,48 +2917,6 @@ mod tests {
             .replace("state: active", "state: rejected");
         fs::write(&path, text).unwrap();
         assert!(titles(&tasks, Planning::Active).is_empty());
-    }
-
-    #[test]
-    fn a_garbled_cache_is_rebuilt_from_the_files() {
-        let dir = Scratch::new();
-        let (tasks, _) = cache_fixture(&dir);
-        list_of(&tasks, Planning::Active);
-        fs::write(dir.cache(), "nonsense\n\t\t\n").unwrap();
-        assert_eq!(list_of(&dir.store(), Planning::Active).len(), 2);
-    }
-
-    #[test]
-    fn the_cache_is_kept_outside_the_synced_folder() {
-        let dir = Scratch::new();
-        let (tasks, _) = cache_fixture(&dir);
-        list_of(&tasks, Planning::Active);
-        assert!(dir.cache().exists());
-        let names: Vec<_> = fs::read_dir(&dir.0)
-            .unwrap()
-            .map(|e| e.unwrap().file_name().into_string().unwrap())
-            .collect();
-        assert!(
-            names.iter().all(|n| n.ends_with(".md") || n == ".history"),
-            "{names:?}"
-        );
-    }
-
-    #[test]
-    fn the_cache_file_is_rewritten_only_when_a_closed_task_changes() {
-        let dir = Scratch::new();
-        let (tasks, gone) = cache_fixture(&dir);
-        let parent = list_of(&tasks, Planning::Active).remove(0);
-        fs::remove_file(dir.cache()).unwrap();
-        tasks.edit(&parent.id, "renamed", "", 1, &[]).unwrap();
-        tasks.create("new", Planning::Active, 4, &[]).unwrap();
-        list_of(&tasks, Planning::Active);
-        assert!(!dir.cache().exists());
-        let path = dir.0.join(format!("{}.md", gone.id));
-        let text = fs::read_to_string(&path).unwrap();
-        fs::write(&path, text.replace("title: gone", "title: changed")).unwrap();
-        list_of(&tasks, Planning::Active);
-        assert!(dir.cache().exists());
     }
 
     #[test]
@@ -3292,22 +3013,10 @@ mod tests {
         assert_eq!(rows[0].open_subtasks, 0);
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn the_counts_read_no_task_file() {
-        let dir = Scratch::new();
-        let (tasks, _) = cache_fixture(&dir);
-        let before = tasks.rows(Planning::Active).unwrap();
-        lock_files(&dir);
-        assert_eq!(tasks.rows(Planning::Active).unwrap(), before);
-        assert_eq!(before[0].open_subtasks, 1);
-    }
-
     #[test]
     fn tasks_live_on_any_files() {
         let files = Arc::new(crate::files::MemoryFiles::default());
-        let device = ItemId::parse("dddddddddddd").unwrap();
-        let tasks = Tasks::open_in(files.clone(), "Tasks", device, None);
+        let tasks = Tasks::open_in(files.clone(), "Tasks");
         let task = tasks.create("Buy milk", Planning::Backlog, 4, &[]).unwrap();
         tasks.add_tag(&task.id, "home").unwrap();
         tasks.plan(&task.id, Planning::Active).unwrap();
@@ -3318,7 +3027,7 @@ mod tests {
             ("Buy milk", vec!["home".to_owned()])
         );
         let changed = files.take_changes();
-        assert_eq!(changed.len(), 3, "{changed:?}"); // the Task, the History and the Tags
+        assert_eq!(changed.len(), 2, "{changed:?}"); // the Task and the Tags
         assert!(changed.contains(&PathBuf::from("Tags/tags.json")));
         assert!(changed.contains(&PathBuf::from(format!("Tasks/{}.md", task.id))));
     }

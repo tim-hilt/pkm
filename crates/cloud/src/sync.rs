@@ -625,9 +625,8 @@ mod tests {
 
         use crate::{
             Blob, BookStates, Books as BookFiles, DirStorage, Drawings, Filters, Folder, Merge,
-            Progress, Storage, SyncState, TagsFile, TaskHistory, Tasks, sync_folders, sync_step,
+            Progress, Storage, SyncState, TagsFile, Tasks, sync_folders, sync_step,
         };
-        use pkm_base::item_id::ItemId;
         use pkm_base::json;
         use pkm_books::library::Library;
 
@@ -748,7 +747,7 @@ mod tests {
             notes: Notes,
             /// The Books Context: Book Files, with their state hidden in `.state`.
             books: Scratch,
-            /// The Tasks Context: Task files, with their History hidden in `.history`.
+            /// The Tasks Context: Task files.
             tasks: Scratch,
         }
 
@@ -757,7 +756,6 @@ mod tests {
                 let books = Scratch::new("books");
                 fs::create_dir_all(books.0.join(".state")).unwrap();
                 let tasks = Scratch::new("tasks");
-                fs::create_dir_all(tasks.0.join(".history")).unwrap();
                 Device {
                     tasks,
                     drawings: Scratch::new("drawings"),
@@ -843,33 +841,15 @@ mod tests {
                 fs::remove_file(self.tasks.0.join(file)).unwrap();
             }
 
-            fn write_history(&self, file: &str, bytes: &[u8]) {
-                fs::write(self.tasks.0.join(".history").join(file), bytes).unwrap();
-            }
-
-            fn read_history(&self, file: &str) -> Option<Vec<u8>> {
-                fs::read(self.tasks.0.join(".history").join(file)).ok()
-            }
-
-            /// One Sync step over the Tasks Context: the Task files and their
-            /// History, each with its own history. Returns the names it changed here.
+            /// One Sync step over the Tasks Context. Returns the names it changed here.
             fn sync_tasks(&self, cloud: &Cloud) -> Vec<String> {
                 let tasks_state = SyncState::open(self.state.0.join("Tasks")).unwrap();
-                let history_state = SyncState::open(self.state.0.join("TasksHistory")).unwrap();
-                let folders = [
-                    Folder {
-                        dir: &self.tasks.0,
-                        state: &tasks_state,
-                        storage: &cloud.storage,
-                        merge: Arc::new(Tasks),
-                    },
-                    Folder {
-                        dir: &self.tasks.0.join(".history"),
-                        state: &history_state,
-                        storage: &cloud.storage,
-                        merge: Arc::new(TaskHistory),
-                    },
-                ];
+                let folders = [Folder {
+                    dir: &self.tasks.0,
+                    state: &tasks_state,
+                    storage: &cloud.storage,
+                    merge: Arc::new(Tasks),
+                }];
                 let outcomes = sync_folders(&folders, &AtomicBool::new(false), &|_| {});
                 let mut changed = Vec::new();
                 for outcome in outcomes {
@@ -2768,28 +2748,17 @@ mod tests {
         }
 
         #[test]
-        fn a_task_and_its_history_reach_the_other_device() {
+        fn a_task_reaches_the_other_device() {
             let cloud = Cloud::new();
             let (phone, tablet) = (Device::new(), Device::new());
             let file = task("Milk", 4, &[], "2024-01-01T00:00:00Z");
             phone.write_task("aaaaaaaaaaaa.md", &file);
-            phone.write_history(
-                "phone-2024-01.log",
-                b"2024-01-01T00:00:00Z created aaaaaaaaaaaa\n",
-            );
 
             phone.sync_tasks(&cloud);
             let changed = tablet.sync_tasks(&cloud);
 
-            assert_eq!(changed, ["aaaaaaaaaaaa", "phone-2024-01"]);
+            assert_eq!(changed, ["aaaaaaaaaaaa"]);
             assert_eq!(tablet.read_task("aaaaaaaaaaaa.md").unwrap(), file);
-            assert_eq!(
-                tablet.read_history("phone-2024-01.log").unwrap(),
-                b"2024-01-01T00:00:00Z created aaaaaaaaaaaa\n"
-            );
-            // The History never lands among the Task files, nor Tasks among History.
-            assert!(tablet.read_task("phone-2024-01.log").is_none());
-            assert!(tablet.read_history("aaaaaaaaaaaa.md").is_none());
         }
 
         #[test]
@@ -2868,29 +2837,6 @@ mod tests {
         }
 
         #[test]
-        fn history_files_are_transferred_as_they_are_never_merged() {
-            let cloud = Cloud::new();
-            let (phone, tablet) = (Device::new(), Device::new());
-            phone.write_history("phone-2024-01.log", b"one\n");
-            tablet.write_history("tablet-2024-01.log", b"two\n");
-            phone.sync_tasks(&cloud);
-            tablet.sync_tasks(&cloud);
-
-            phone.write_history("phone-2024-01.log", b"one\nmore\n");
-            phone.sync_tasks(&cloud);
-            tablet.sync_tasks(&cloud);
-            phone.sync_tasks(&cloud);
-
-            for device in [&phone, &tablet] {
-                assert_eq!(
-                    device.read_history("phone-2024-01.log").unwrap(),
-                    b"one\nmore\n"
-                );
-                assert_eq!(device.read_history("tablet-2024-01.log").unwrap(), b"two\n");
-            }
-        }
-
-        #[test]
         fn tasks_sync_alongside_drawings_and_books() {
             let (drawings, books, tasks) = (Cloud::new(), Cloud::new(), Cloud::new());
             let (phone, tablet) = (Device::new(), Device::new());
@@ -2914,22 +2860,18 @@ mod tests {
         /// A Device with a Tasks store, its Tags beside it as on a real Device.
         struct TaggingDevice {
             root: Scratch,
-            id: &'static str,
         }
 
         impl TaggingDevice {
-            fn new(id: &'static str) -> Self {
+            fn new() -> Self {
                 Self {
                     root: Scratch::new("tagging"),
-                    id,
                 }
             }
 
             /// The store, opened fresh as at a launch.
             fn store(&self) -> pkm_tasks::Tasks {
-                let device = ItemId::parse(self.id).unwrap();
-                pkm_tasks::Tasks::open(self.root.0.join("Tasks"), device, self.root.0.join("cache"))
-                    .unwrap()
+                pkm_tasks::Tasks::open(self.root.0.join("Tasks")).unwrap()
             }
 
             /// One Sync step of the Tags and of the Task files, each with its cloud.
@@ -3007,10 +2949,7 @@ mod tests {
         #[test]
         fn tags_and_their_colors_sync_and_merge_between_devices() {
             let (tags, tasks) = (Cloud::new(), Cloud::new());
-            let (phone, tablet) = (
-                TaggingDevice::new("aaaaaaaaaaaa"),
-                TaggingDevice::new("bbbbbbbbbbbb"),
-            );
+            let (phone, tablet) = (TaggingDevice::new(), TaggingDevice::new());
             let store = phone.store();
             let milk = store
                 .create("Milk", pkm_tasks::Planning::Active, 4, &[])
@@ -3045,10 +2984,7 @@ mod tests {
         #[test]
         fn a_tag_put_on_a_task_while_another_device_deleted_it_comes_back_grey_on_that_task_only() {
             let (tags, tasks) = (Cloud::new(), Cloud::new());
-            let (phone, tablet) = (
-                TaggingDevice::new("aaaaaaaaaaaa"),
-                TaggingDevice::new("bbbbbbbbbbbb"),
-            );
+            let (phone, tablet) = (TaggingDevice::new(), TaggingDevice::new());
             let store = phone.store();
             let planning = pkm_tasks::Planning::Active;
             let (milk, eggs) = (
@@ -3085,10 +3021,7 @@ mod tests {
         #[test]
         fn filters_sync_and_merge_between_devices_and_a_delete_wins() {
             let filters = Cloud::new();
-            let (phone, tablet) = (
-                TaggingDevice::new("aaaaaaaaaaaa"),
-                TaggingDevice::new("bbbbbbbbbbbb"),
-            );
+            let (phone, tablet) = (TaggingDevice::new(), TaggingDevice::new());
             let store = phone.store();
             let work = store.create_filter("Work", "@work").unwrap();
             let home = store.create_filter("Home", "@home").unwrap();

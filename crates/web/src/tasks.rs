@@ -337,17 +337,15 @@ impl TaskStore {
     }
 
     /// Opens the Tasks from the saved files: `paths[i]` held `texts[i]`, in
-    /// storage paths (`Tasks/<id>.md`, `Filters/<id>.md`). `device` is this Device's ID.
+    /// storage paths (`Tasks/<id>.md`, `Filters/<id>.md`).
     #[wasm_bindgen(constructor)]
-    pub fn new(device: &str, paths: Vec<String>, texts: Vec<String>) -> Result<TaskStore, JsError> {
-        let device =
-            pkm_base::item_id::ItemId::parse(device).ok_or_else(|| error("bad Device ID"))?;
+    pub fn new(paths: Vec<String>, texts: Vec<String>) -> TaskStore {
         let files = Arc::new(MemoryFiles::default());
         for (path, text) in paths.into_iter().zip(texts) {
             files.load(Path::new(&path), text);
         }
-        let tasks = Tasks::open_in(files.clone(), Tasks::FOLDER, device, None);
-        Ok(Self { files, tasks })
+        let tasks = Tasks::open_in(files.clone(), Tasks::FOLDER);
+        Self { files, tasks }
     }
 
     /// The paths written or removed since the last call; `file` holds what to

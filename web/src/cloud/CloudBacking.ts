@@ -102,9 +102,7 @@ export class CloudBacking {
   private readonly booksState: SyncState;
   private readonly bookStateStates: SyncState;
   private readonly tasks: FileFolder;
-  private readonly taskHistory: FileFolder;
   private readonly tasksState: SyncState;
-  private readonly taskHistoryState: SyncState;
   private readonly tags: FileFolder;
   private readonly tagsState: SyncState;
   private readonly filters: FileFolder;
@@ -137,9 +135,7 @@ export class CloudBacking {
     this.booksState = new SyncState(storage, "Books");
     this.bookStateStates = new SyncState(storage, "BooksState");
     this.tasks = new FileFolder(storage, "Tasks");
-    this.taskHistory = new FileFolder(storage, "Tasks/.history");
     this.tasksState = new SyncState(storage, "Tasks");
-    this.taskHistoryState = new SyncState(storage, "TasksHistory");
     this.tags = new FileFolder(storage, "Tags");
     this.tagsState = new SyncState(storage, "Tags");
     this.filters = new FileFolder(storage, "Filters");
@@ -404,8 +400,7 @@ export class CloudBacking {
     const now = Date.now();
     // One step per folder, in order, all against the same server: Drawings,
     // the Book Files, then their state, which the core's Books merge merges,
-    // the Task files and their History, which is only transferred and
-    // which the Tasks don't read, and the Tags file and the Filters, which the Tasks do.
+    // the Task files, the Tags file and the Filters.
     const plans = [
       {
         run: this.core.syncRun(now),
@@ -438,14 +433,6 @@ export class CloudBacking {
         state: this.tasksState,
         incoming: this.tasksIncoming,
         reports: "tasks" as const,
-      },
-      {
-        run: this.core.syncRunForTaskHistory(now),
-        protocol: tasksProtocol,
-        files: this.taskHistory,
-        state: this.taskHistoryState,
-        incoming: this.tasksIncoming,
-        reports: undefined,
       },
       {
         run: this.core.syncRunForTags(now),

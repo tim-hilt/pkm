@@ -4,8 +4,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 use std::time::UNIX_EPOCH;
@@ -26,9 +26,6 @@ pub trait Files: Send + Sync + Debug {
 
     /// Replaces the file, making its folders. It is never seen half written.
     fn write(&self, path: &Path, text: &str) -> io::Result<()>;
-
-    /// Adds `text` to the end of the file, creating it and its folders.
-    fn append(&self, path: &Path, text: &str) -> io::Result<()>;
 
     fn exists(&self, path: &Path) -> bool;
 
@@ -59,14 +56,6 @@ impl Files for DiskFiles {
         fs::write(&scratch, text)
             .and_then(|()| fs::rename(&scratch, path))
             .inspect_err(|_| drop(fs::remove_file(&scratch)))
-    }
-
-    fn append(&self, path: &Path, text: &str) -> io::Result<()> {
-        if let Some(folder) = path.parent() {
-            fs::create_dir_all(folder)?;
-        }
-        let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-        file.write_all(text.as_bytes())
     }
 
     fn exists(&self, path: &Path) -> bool {
@@ -151,12 +140,6 @@ impl Files for MemoryFiles {
         Ok(())
     }
 
-    fn append(&self, path: &Path, text: &str) -> io::Result<()> {
-        let mut whole = self.read(path).unwrap_or_default();
-        whole.push_str(text);
-        self.write(path, &whole)
-    }
-
     fn exists(&self, path: &Path) -> bool {
         self.memory().files.contains_key(path)
     }
@@ -194,7 +177,7 @@ mod tests {
     fn memory_lists_the_files_directly_in_a_folder() {
         let files = MemoryFiles::default();
         files.write(Path::new("Tasks/a.md"), "a").unwrap();
-        files.write(Path::new("Tasks/.history/x.log"), "x").unwrap();
+        files.write(Path::new("Tasks/sub/x.md"), "x").unwrap();
         let names: Vec<_> = files
             .list(Path::new("Tasks"))
             .unwrap()
@@ -234,7 +217,7 @@ mod tests {
         let files = MemoryFiles::default();
         files.load(Path::new("Tasks/old.md"), "old".into());
         files.write(Path::new("Tasks/a.md"), "a").unwrap();
-        files.append(Path::new("Tasks/a.md"), "!").unwrap();
+        files.write(Path::new("Tasks/a.md"), "a!").unwrap();
         files.write(Path::new("Tasks/b.md"), "b").unwrap();
         assert_eq!(
             files.take_changes(),

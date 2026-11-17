@@ -258,8 +258,6 @@ export interface Core {
   syncRunForBookStates(nowMs: number): SyncRun;
   /** A Sync step over the Task files, merged field by field. Free it when done. */
   syncRunForTasks(nowMs: number): SyncRun;
-  /** A Sync step over the Tasks' History files, which are transferred but never merged. Free it when done. */
-  syncRunForTaskHistory(nowMs: number): SyncRun;
   /** A Sync step over the Tags file, merged per Tag. Free it when done. */
   syncRunForTags(nowMs: number): SyncRun;
   /** A Sync step over the Filter files, merged field by field and their order per Task. Free it when done. */
@@ -302,7 +300,6 @@ export async function loadCore(
     syncRunForBooks: (nowMs) => SyncRun.newForBooks(nowMs),
     syncRunForBookStates: (nowMs) => SyncRun.newForBookStates(nowMs),
     syncRunForTasks: (nowMs) => SyncRun.newForTasks(nowMs),
-    syncRunForTaskHistory: (nowMs) => SyncRun.newForTaskHistory(nowMs),
     syncRunForTags: (nowMs) => SyncRun.newForTags(nowMs),
     syncRunForFilters: (nowMs) => SyncRun.newForFilters(nowMs),
     syncSchedule: (now) => new SyncSchedule(now),

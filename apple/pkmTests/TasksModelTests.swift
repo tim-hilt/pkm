@@ -11,7 +11,7 @@ import Testing
     func openModel() throws -> TasksModel {
         TasksModel(
             store: try TaskStore.open(
-                root: root.appending(path: "Tasks").path, deviceFolder: root.appending(path: "Device").path))
+                root: root.appending(path: "Tasks").path))
     }
 
     @Test func aTaskIsAddedWithTheTitleAndPriorityOfQuickAdd() throws {
@@ -174,7 +174,7 @@ import Testing
     @Test func aCloseIsCommittedWhenItsToastGoesAway() async throws {
         let model = TasksModel(
             store: try TaskStore.open(
-                root: root.appending(path: "Tasks").path, deviceFolder: root.appending(path: "Device").path),
+                root: root.appending(path: "Tasks").path),
             revertWindow: .milliseconds(20))
         model.add(title: "Gone", planning: .active)
         model.close(model.tasks[0], as: .rejected)
@@ -675,7 +675,7 @@ import Testing
     @Test func eachDeviceOpensTheLastListAndActiveIfItsFilterIsGone() throws {
         let defaults = UserDefaults.isolated()
         let store = try TaskStore.open(
-            root: root.appending(path: "Tasks").path, deviceFolder: root.appending(path: "Device").path)
+            root: root.appending(path: "Tasks").path)
         let first = TasksModel(store: store, defaults: defaults)
         #expect(first.list == .active)
         first.addFilter(title: "A", query: "@a")

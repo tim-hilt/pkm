@@ -123,7 +123,7 @@ extension AppNavigationTests {
             defaults: UserDefaults(suiteName: root.lastPathComponent)!)
         let tasks = TasksModel(
             store: try TaskStore.open(
-                root: root.appending(path: "Tasks").path, deviceFolder: root.appending(path: "Device").path))
+                root: root.appending(path: "Tasks").path))
         let links = AppLinks(
             navigation: AppNavigation(remembering: device()), gallery: gallery, library: library, tasks: tasks)
         return (links, gallery, library, tasks)

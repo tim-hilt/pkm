@@ -206,30 +206,6 @@ impl Merge for Tasks {
     }
 }
 
-/// The Tasks' History files: `.history/<device>-<yyyy-mm>.log` in the Tasks
-/// folder (ADR-0022). Each Device writes only its own, so they are
-/// transferred as they are and never merged. Like the Books' state files they
-/// sit at the root of `pkm/Tasks` in the cloud, with their own Sync history.
-pub struct TaskHistory;
-
-impl Merge for TaskHistory {
-    fn extension(&self) -> &str {
-        ".log"
-    }
-
-    fn merge(&self, base: Option<&[u8]>, local: &[u8], remote: &[u8]) -> Option<Vec<u8>> {
-        transfer(base, local, remote)
-    }
-
-    fn is_item(&self, _bytes: &[u8]) -> bool {
-        true
-    }
-
-    fn same_item(&self, a: &[u8], b: &[u8]) -> Option<bool> {
-        Some(a == b)
-    }
-}
-
 /// The Tags file: `Tags/tags.json` beside the Context folders, merged per Tag
 /// (ADR-0023). One file, so any two Tags files are one Item; a file that
 /// isn't one is left where it is.

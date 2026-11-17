@@ -388,12 +388,7 @@ mod tests {
 
     fn open() -> (Arc<MemoryFiles>, Tasks) {
         let files = Arc::new(MemoryFiles::default());
-        let tasks = Tasks::open_in(
-            files.clone(),
-            "Tasks",
-            ItemId::parse("dddddddddddd").unwrap(),
-            None,
-        );
+        let tasks = Tasks::open_in(files.clone(), "Tasks");
         (files, tasks)
     }
 
