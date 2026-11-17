@@ -19,7 +19,7 @@ const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" s
  * before the Tags; rows are dragged to reorder. A row opens the edit view; its
  * menu (right click, long press) plans, moves or Rejects. The Filters entry of
  * the bar lists the Favorites, each a Filter, and the Filters, with how many Tasks each matches; opening one shows
- * its Tasks as Active's rows, under a way back. A port of the Swift
+ * its Tasks as Active's rows, under its Title. A port of the Swift
  * `TasksView`, in native elements.
  */
 export class TasksView {
@@ -127,16 +127,11 @@ export class TasksView {
     this.create.setAttribute("aria-label", label);
     this.create.title = label;
     this.list.setAttribute("aria-label", filters ? "Filters" : "Tasks");
-    // A Favorite is reached from the bar, any other Filter from the Filters list, which it leads back to.
+    // A Favorite is reached from the bar, any other Filter from the Filters list (the bar's Filters entry leads back).
     const opened = model.barEntry.kind === "filters" ? model.filter : undefined;
     this.filterHeader.hidden = opened === undefined;
     this.filterHeader.replaceChildren(
-      ...(opened
-        ? [
-            button("tasks-back", "Filters", () => (model.list = { kind: "filters" })),
-            make("h2", "tasks-filter-title", [opened.title]),
-          ]
-        : []),
+      ...(opened ? [make("h2", "tasks-filter-title", [opened.title])] : []),
     );
     const rows = filters ? this.filterList() : model.tasks.map((task) => this.row(task));
     this.list.replaceChildren(...rows);
