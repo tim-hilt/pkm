@@ -47,19 +47,12 @@ struct QuickAddField: View {
     }
 
     var body: some View {
-        // The list floats below the editor, so that opening it shifts nothing.
-        editor
-            .overlay(alignment: .bottomLeading) {
-                suggestionList
-                    .padding(.vertical, 4)
-                    .padding(.horizontal, 8)
-                    .background(.regularMaterial, in: .rect(cornerRadius: 10))
-                    .shadow(radius: 6, y: 2)
-                    .padding(.horizontal, -8)
-                    .alignmentGuide(.bottom) { $0[.top] - 4 }
-                    .opacity(suggestions.isEmpty ? 0 : 1)
-            }
-            .zIndex(1)
+        // The list grows the row instead of floating: a Form clips a row's overlay (iOS) and draws
+        // the next row over it (macOS).
+        VStack(alignment: .leading, spacing: 8) {
+            editor
+            if !suggestions.isEmpty { suggestionList }
+        }
     }
 
     private var suggestionList: some View {
