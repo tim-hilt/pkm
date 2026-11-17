@@ -1,7 +1,7 @@
 //! Filters (ADR-0024): `Filters/<id>.md` beside the Tasks folder, each a Title
-//! and a Query over the Active Tasks.
+//! and a Query over the Open Tasks.
 
-use super::{Error, Node, Nodes, Row, Tasks, compare_positions, end_key, list, place, rows_of};
+use super::{Error, Node, Nodes, Row, Tasks, compare_positions, end_key, place, rows_of};
 use crate::Planning;
 use crate::query::{Query, QueryError};
 use pkm_base::clock::{iso8601, now_ms};
@@ -20,7 +20,7 @@ pub struct Filter {
     /// As the user typed it.
     pub query: String,
     pub favorite: bool,
-    /// How many Active Tasks the Query matches.
+    /// How many Open Tasks the Query matches.
     pub matches: u32,
     /// Why the stored Query can't be read (a hand edit, a newer Device); such a
     /// Filter matches nothing until it is edited.
@@ -28,11 +28,11 @@ pub struct Filter {
 }
 
 /// A Filter with its place in the Filters list.
-struct Stored {
-    filter: Filter,
-    position: f64,
+pub(super) struct Stored {
+    pub(super) filter: Filter,
+    pub(super) position: f64,
     /// The Filter's own order: a place per Task ID, see `in_filter_order`.
-    places: Vec<(String, f64)>,
+    pub(super) places: Vec<(String, f64)>,
 }
 
 impl Tasks {
@@ -119,15 +119,15 @@ impl Tasks {
         self.files.remove(&self.filter_path(&filter_id(id)?))
     }
 
-    /// Every Filter in the Filters list's order, with how many Active Tasks it
+    /// Every Filter in the Filters list's order, with how many Open Tasks it
     /// matches.
     pub fn filters(&self) -> io::Result<Vec<Filter>> {
         let stored = self.stored_filters()?;
         let nodes: Nodes = self.shown()?;
-        let active = list(&nodes, Planning::Active);
+        let open: Vec<&Node> = nodes.values().collect();
         Ok(stored
             .into_iter()
-            .map(|s| described(s.filter, &active))
+            .map(|s| described(s.filter, &open))
             .collect())
     }
 
@@ -137,15 +137,15 @@ impl Tasks {
             .ok_or_else(|| io::ErrorKind::NotFound.into())
     }
 
-    /// The Active Tasks the Filter `id` matches, as `rows` lists Active: each
-    /// matched on its own Tags, Blocked ones and Subtasks included, never the
-    /// Backlog. The Tasks with a place come first in the Filter's order, then
-    /// the others by `created`. A Query that can't be read matches nothing.
-    /// Fails with `NotFound` if there is no such Filter.
+    /// The Open Tasks the Filter `id` matches: each matched on its own Tags,
+    /// Blocked ones, Subtasks and Backlog Tasks included. The Tasks with a
+    /// place come first in the Filter's order, then the others by `created`. A
+    /// Query that can't be read matches nothing. Fails with `NotFound` if
+    /// there is no such Filter.
     pub fn filter_rows(&self, id: &str) -> io::Result<Vec<Row>> {
         let filter = self.stored_filter(id)?;
         let nodes: Nodes = self.shown()?;
-        let found = in_filter_order(matching(&nodes, &filter.filter.query), &filter.places);
+        let found = shown_in(&nodes, &filter.filter.query, &filter.places);
         Ok(rows_of(&nodes, found))
     }
 
@@ -159,15 +159,68 @@ impl Tasks {
 
     /// Moves the Task `task` before the Task `before` in the Filter `id`, or
     /// to the end of it if that is `None`; a drop where it already is changes
-    /// nothing. Only the Filter's file is written; Active's order and the Task
-    /// files stay. Usually only the moved Task gets a place, as for Tasks (see
-    /// `place`). If another Task shown has none yet, every Task shown gets
-    /// one, in one write. Fails with `NotFound` for an unknown Filter, or a
-    /// `task` or `before` the Filter doesn't show.
+    /// nothing. Only the Filter's file is written; the Task files stay.
+    /// Usually only the moved Task gets a place, as for Tasks (see `place`).
+    /// If another Task shown has none yet, every Task shown gets one, in one
+    /// write. Fails with `NotFound` for an unknown Filter, or a `task` or
+    /// `before` the Filter doesn't show.
     pub fn move_in_filter(&self, id: &str, task: &str, before: Option<&str>) -> io::Result<()> {
         let filter = self.stored_filter(id)?;
         let nodes: Nodes = self.shown()?;
-        let mut shown = in_filter_order(matching(&nodes, &filter.filter.query), &filter.places);
+        self.reorder(&filter, &filter.filter.query, &nodes, task, before)
+    }
+
+    /// The Open Tasks planned as `planning`, in the order its Favorite keeps:
+    /// by its places, then by `created`. Without the Favorite, by `created`.
+    pub(super) fn planned<'a>(
+        &self,
+        nodes: &'a Nodes,
+        planning: Planning,
+    ) -> io::Result<Vec<&'a Node>> {
+        let favorite = planning.favorite();
+        let places = (self.stored_filters()?.into_iter())
+            .find(|s| s.filter.id == favorite.id)
+            .map(|s| s.places)
+            .unwrap_or_default();
+        Ok(shown_in(nodes, favorite.query, &places))
+    }
+
+    /// Every Open Task in the order of the app's lists: Active, then Backlog.
+    pub(super) fn in_app_order<'a>(&self, nodes: &'a Nodes) -> io::Result<Vec<&'a Node>> {
+        let mut order = self.planned(nodes, Planning::Active)?;
+        order.extend(self.planned(nodes, Planning::Backlog)?);
+        Ok(order)
+    }
+
+    /// `reorder` in the app's list `planning`, kept in its Favorite; where the
+    /// user Deleted that, the order stays as it is.
+    pub(super) fn move_in_list(
+        &self,
+        planning: Planning,
+        nodes: &Nodes,
+        task: &str,
+        before: Option<&str>,
+    ) -> io::Result<()> {
+        let favorite = planning.favorite();
+        let Some(filter) =
+            (self.stored_filters()?.into_iter()).find(|s| s.filter.id == favorite.id)
+        else {
+            return Ok(());
+        };
+        self.reorder(&filter, favorite.query, nodes, task, before)
+    }
+
+    /// Puts `task` before `before` (or last) among the Tasks `query` matches,
+    /// in the places of `filter`, and saves them there.
+    fn reorder(
+        &self,
+        filter: &Stored,
+        query: &str,
+        nodes: &Nodes,
+        task: &str,
+        before: Option<&str>,
+    ) -> io::Result<()> {
+        let mut shown = shown_in(nodes, query, &filter.places);
         let from = (shown.iter().position(|n| n.task.id == task)).ok_or(io::ErrorKind::NotFound)?;
         if before == Some(task) {
             return Ok(());
@@ -205,7 +258,7 @@ impl Tasks {
             .into_iter()
             .map(|(id, p)| (id.to_owned(), p))
             .collect();
-        self.rewrite_filter(id, |file| set_places(file, &places))
+        self.rewrite_filter(&filter.filter.id, |file| set_places(file, &places))
     }
 
     /// Checks a Query text without saving: the Tags it names, Wildcards
@@ -222,7 +275,7 @@ impl Tasks {
         beside.join(Self::FILTERS_FOLDER)
     }
 
-    fn filter_path(&self, id: &ItemId) -> PathBuf {
+    pub(super) fn filter_path(&self, id: &ItemId) -> PathBuf {
         self.filters_folder().join(format!("{id}.md"))
     }
 
@@ -248,8 +301,9 @@ impl Tasks {
         change(&mut file);
         // Not `shown`: a Task pending Rejected keeps its place, to be Reverted.
         let nodes = self.load()?;
-        let shown: HashSet<&str> = matching(&nodes, file.scalar("query").unwrap_or_default())
-            .into_iter()
+        let shown: HashSet<&str> = nodes
+            .values()
+            .filter(|n| matches(file.scalar("query").unwrap_or_default(), n))
             .map(|n| n.task.id.as_str())
             .collect();
         let mut places = places_of(&file);
@@ -264,7 +318,7 @@ impl Tasks {
 
     /// The readable Filter files, in the Filters list's order. Only `<id>.md`
     /// is the Filter `id`.
-    fn stored_filters(&self) -> io::Result<Vec<Stored>> {
+    pub(super) fn stored_filters(&self) -> io::Result<Vec<Stored>> {
         let mut found: Vec<Stored> = (self.files.list(&self.filters_folder())?.iter())
             .filter_map(|f| {
                 let text = self.files.read(&self.filters_folder().join(&f.name)).ok()?;
@@ -284,20 +338,36 @@ fn filter_id(id: &str) -> io::Result<ItemId> {
     ItemId::parse(id).ok_or_else(|| io::ErrorKind::NotFound.into())
 }
 
-/// The Active Tasks `query` matches, in Active's order; none if it can't be read.
-fn matching<'a>(nodes: &'a Nodes, query: &str) -> Vec<&'a Node> {
+/// The Open Tasks `query` matches, in the order of `found`; none if it can't
+/// be read.
+pub(super) fn matching<'a>(found: Vec<&'a Node>, query: &str) -> Vec<&'a Node> {
     let Ok(query) = Query::parse(query) else {
         return Vec::new();
     };
-    (list(nodes, Planning::Active).into_iter())
+    (found.into_iter())
         .filter(|n| query.matches(&n.task.tags))
         .collect()
 }
 
-/// `found` (in Active's order) as a Filter shows it: the Tasks with a place
-/// first, by place (equal places keep Active's order), then the rest by
-/// `created`, then Item ID.
-fn in_filter_order<'a>(found: Vec<&'a Node>, places: &[(String, f64)]) -> Vec<&'a Node> {
+fn matches(query: &str, node: &Node) -> bool {
+    Query::parse(query).is_ok_and(|q| q.matches(&node.task.tags))
+}
+
+/// The Open Tasks `query` matches in the Filter's order, which `places` give
+/// (see `in_filter_order`).
+pub(super) fn shown_in<'a>(
+    nodes: &'a Nodes,
+    query: &str,
+    places: &[(String, f64)],
+) -> Vec<&'a Node> {
+    let mut open: Vec<&Node> = nodes.values().collect();
+    open.sort_by(|a, b| (a.created.cmp(&b.created)).then_with(|| a.task.id.cmp(&b.task.id)));
+    in_filter_order(matching(open, query), places)
+}
+
+/// `found` as a Filter shows it: the Tasks with a place first, by place (equal
+/// places keep the order of `found`), then the rest by `created`, then Item ID.
+pub(super) fn in_filter_order<'a>(found: Vec<&'a Node>, places: &[(String, f64)]) -> Vec<&'a Node> {
     let places: HashMap<&str, f64> = places.iter().map(|(id, p)| (id.as_str(), *p)).collect();
     let (mut placed, mut unplaced): (Vec<&Node>, Vec<&Node>) =
         (found.into_iter()).partition(|n| places.contains_key(n.task.id.as_str()));
@@ -323,7 +393,7 @@ fn places_of(file: &Document) -> Vec<(String, f64)> {
 }
 
 /// Writes `places`, in Task ID order so equal orders give equal files; none, no key.
-fn set_places(file: &mut Document, places: &[(String, f64)]) {
+pub(super) fn set_places(file: &mut Document, places: &[(String, f64)]) {
     let mut entries: Vec<String> = places.iter().map(|(id, p)| format!("{id} {p}")).collect();
     entries.sort();
     if entries.is_empty() {
@@ -343,11 +413,11 @@ fn checked(title: &str, query: &str) -> Result<String, Error> {
     Ok(title)
 }
 
-/// `filter` with its match count and Query error, over the `active` Tasks.
-fn described(mut filter: Filter, active: &[&Node]) -> Filter {
+/// `filter` with its match count and Query error, over the `open` Tasks.
+fn described(mut filter: Filter, open: &[&Node]) -> Filter {
     match Query::parse(&filter.query) {
         Ok(query) => {
-            let matching = active.iter().filter(|n| query.matches(&n.task.tags));
+            let matching = open.iter().filter(|n| query.matches(&n.task.tags));
             filter.matches = u32::try_from(matching.count()).unwrap_or(u32::MAX);
         }
         Err(e) => filter.error = Some(e.to_string()),
@@ -381,6 +451,7 @@ fn stored_of(file: &Document) -> Option<Stored> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::migration;
     use super::*;
     use crate::{Files, MemoryFiles};
     use std::path::Path;
@@ -388,6 +459,9 @@ mod tests {
 
     fn open() -> (Arc<MemoryFiles>, Tasks) {
         let files = Arc::new(MemoryFiles::default());
+        files
+            .write(&migration::marker(Path::new("Tasks")), "")
+            .unwrap();
         let tasks = Tasks::open_in(files.clone(), "Tasks");
         (files, tasks)
     }
@@ -519,7 +593,7 @@ mod tests {
     }
 
     #[test]
-    fn a_filter_shows_the_active_tasks_its_query_matches_in_actives_order() {
+    fn a_filter_shows_the_open_tasks_its_query_matches_the_backlog_included() {
         let (_, tasks) = open();
         add(&tasks, "one", Planning::Active, &["work"]);
         add(&tasks, "skipped", Planning::Active, &["home"]);
@@ -534,7 +608,7 @@ mod tests {
         let filter = tasks.create_filter("Work", "@work & !@in-review").unwrap();
         assert_eq!(
             titles(tasks.filter_rows(&filter.id).unwrap()),
-            ["one", "two"]
+            ["one", "two", "later"]
         );
     }
 
@@ -548,9 +622,10 @@ mod tests {
         tasks
             .create_subtask(&parent, "sub", 4, &["work".to_owned()])
             .unwrap();
-        tasks
+        let untagged = tasks
             .create_subtask(&parent, "untagged sub", 4, &[])
             .unwrap();
+        tasks.remove_tag(&untagged.id, "work").unwrap();
         let filter = tasks.create_filter("Work", "@work").unwrap();
         let rows = tasks.filter_rows(&filter.id).unwrap();
         assert_eq!(
@@ -598,6 +673,9 @@ mod tests {
         assert!(tasks.filter_rows(&filter.id).unwrap().is_empty());
         tasks.add_tag(&id, "work").unwrap();
         tasks.plan(&id, Planning::Backlog).unwrap();
+        assert_eq!(titles(tasks.filter_rows(&filter.id).unwrap()), ["t"]);
+        tasks.add_tag(&id, "x").unwrap();
+        tasks.remove_tag(&id, "work").unwrap();
         assert!(tasks.filter_rows(&filter.id).unwrap().is_empty());
     }
 
@@ -725,7 +803,7 @@ mod tests {
     }
 
     #[test]
-    fn a_filter_counts_the_active_tasks_it_matches() {
+    fn a_filter_counts_the_open_tasks_it_matches() {
         let (_, tasks) = open();
         add(&tasks, "one", Planning::Active, &["work"]);
         add(&tasks, "two", Planning::Active, &["work"]);
@@ -733,7 +811,7 @@ mod tests {
         tasks.create_filter("Work", "@work").unwrap();
         tasks.create_filter("None", "@nothing").unwrap();
         let counts: Vec<u32> = tasks.filters().unwrap().iter().map(|f| f.matches).collect();
-        assert_eq!(counts, [2, 0]);
+        assert_eq!(counts, [3, 0]);
     }
 
     #[test]

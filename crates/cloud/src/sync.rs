@@ -3028,7 +3028,16 @@ mod tests {
             let gone = store.create_filter("Gone", "@gone").unwrap();
             phone.sync_filters(&filters);
             tablet.sync_filters(&filters);
-            assert_eq!(tablet.filter_titles(), ["Work", "Home", "Gone"]);
+            // The Favorites both Devices created are one set.
+            let favorites = ["All Tasks", "Active", "Backlog"];
+            let with = |titles: &[&str]| -> Vec<String> {
+                favorites
+                    .iter()
+                    .chain(titles)
+                    .map(|t| (*t).to_owned())
+                    .collect()
+            };
+            assert_eq!(tablet.filter_titles(), with(&["Work", "Home", "Gone"]));
 
             // Different fields of one Filter, a Delete of another one.
             store.edit_filter(&work.id, "Job", "@work").unwrap();
@@ -3047,10 +3056,10 @@ mod tests {
             }
 
             for device in [&phone, &tablet] {
-                assert_eq!(device.filter_titles(), ["Job", "Home"]);
+                assert_eq!(device.filter_titles(), with(&["Job", "Home"]));
                 let listed = device.store().filters().unwrap();
-                assert!(listed[0].favorite);
-                assert_eq!(listed[1].query, "@home & !@wait");
+                assert!(listed[3].favorite);
+                assert_eq!(listed[4].query, "@home & !@wait");
             }
         }
     }

@@ -9,8 +9,9 @@ const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 /**
  * The Tasks, kept in the Origin Private File System. The core's store works on
  * files in memory; this opens it from what is saved and saves what it
- * changed: the Task files, the Tags (`Tags/tags.json`) and the Filters
- * (`Filters/<id>.md`); a file the store removed is removed. The History folder
+ * changed: the Task files, the file that says the lists were migrated, the
+ * Tags (`Tags/tags.json`) and the Filters (`Filters/<id>.md`); a file the store
+ * removed is removed. The History folder
  * old versions kept (`Tasks/.history`) is Deleted on open.
  */
 export class TaskFiles {
@@ -80,7 +81,7 @@ export class TaskFiles {
   }
 }
 
-/** A store opened on the Task files, the Tags and the Filters. */
+/** A store opened on the Task files, the Tags and the Filters; it migrates what an old version left. */
 async function load(storage: FileStorage): Promise<TaskStore> {
   const folder = TaskStore.folder();
   const paths: string[] = [];
@@ -93,7 +94,7 @@ async function load(storage: FileStorage): Promise<TaskStore> {
       texts.push(decode(bytes));
     }
   };
-  await take(folder, (name) => name.endsWith(".md"));
+  await take(folder, (name) => name.endsWith(".md") || name === TaskStore.migratedFile());
   await take("Tags", (name) => name === "tags.json");
   await take(TaskStore.filtersFolder(), (name) => name.endsWith(".md"));
   return new TaskStore(paths, texts);

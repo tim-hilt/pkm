@@ -1,11 +1,12 @@
 //! The Tasks store: a folder of `<id>.md` files.
 
 mod filters;
+mod migration;
 
 pub use filters::Filter;
 pub(crate) use filters::is_filter;
 
-use crate::files::{DiskFiles, Files};
+use crate::files::{DiskFiles, Files, Stamp};
 use crate::query::QueryError;
 use pkm_base::clock::{iso8601, now_ms};
 use pkm_base::front_matter::{Document, Value};
@@ -24,7 +25,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 const DEFAULT_PRIORITY: u8 = 4;
 const TAGS: &str = "tags";
 const BLOCKED_BY: &str = "blocked-by";
-const POSITION: &str = "position";
+const BACKLOG: &str = "backlog";
 const CREATED: &str = "created";
 
 /// Where an Open Task is planned.
@@ -35,10 +36,20 @@ pub enum Planning {
 }
 
 impl Planning {
-    fn state(self) -> &'static str {
+    /// The Favorite the app's list of this planning is kept in, for its order.
+    fn favorite(self) -> &'static migration::Favorite {
         match self {
-            Self::Active => "active",
-            Self::Backlog => "backlog",
+            Self::Active => &migration::ACTIVE,
+            Self::Backlog => &migration::BACKLOG_LIST,
+        }
+    }
+
+    /// Backlog is the Tag `backlog`; every other Task is Active.
+    fn of(tags: &[String]) -> Self {
+        if tags.iter().any(|t| t == BACKLOG) {
+            Self::Backlog
+        } else {
+            Self::Active
         }
     }
 }
@@ -49,8 +60,6 @@ pub enum Closing {
     Done,
     Rejected,
 }
-
-impl Closing {}
 
 /// A Close not yet saved, which `revert` can still take back.
 #[derive(Debug, Clone)]
@@ -186,6 +195,11 @@ impl Tasks {
     /// The folder's name, in the app's storage and in the cloud.
     pub const FOLDER: &'static str = "Tasks";
 
+    /// The hidden file in the Tasks folder that says this Device migrated the
+    /// lists (see `migration`). Sync leaves it on the Device, but a client that
+    /// loads the folder itself must load it too.
+    pub const MIGRATED: &'static str = ".lists-migrated";
+
     /// Opens the Tasks in `root`, creating the folder if needed. The History
     /// folder old versions kept in `root/.history` is Deleted (ADR-0026); one
     /// that can't be is tried again at the next launch.
@@ -199,20 +213,23 @@ impl Tasks {
     /// The Tasks in `root` on any `files`, which must hold the folder `root`
     /// (an empty one is none).
     pub fn open_in(files: Arc<dyn Files>, root: impl Into<PathBuf>) -> Self {
-        Self {
+        let tasks = Self {
             files,
             root: root.into(),
             pending: Mutex::new(None),
             tags_lock: Mutex::new(()),
             last_created: AtomicU64::new(0),
-        }
+        };
+        // One that fails is tried again at the next open (see `migration`).
+        drop(tasks.migrate_lists());
+        tasks
     }
 
     /// Creates a Task at the end of its list, with `priority` (clamped to 1 to
-    /// 4) and `tags`, in one write; Tags that
-    /// are new join the Tags file. The Title is trimmed and kept to one line
-    /// (line breaks become spaces). Fails with `EmptyTitle`, or `InvalidTag`
-    /// for any invalid Tag, before saving anything.
+    /// 4) and `tags` (plus `backlog` if it is planned in the Backlog), in one
+    /// write; Tags that are new join the Tags file. The Title is trimmed and
+    /// kept to one line (line breaks become spaces). Fails with `EmptyTitle`,
+    /// or `InvalidTag` for any invalid Tag, before saving anything.
     pub fn create(
         &self,
         title: &str,
@@ -220,14 +237,17 @@ impl Tasks {
         priority: u8,
         tags: &[String],
     ) -> Result<Task, Error> {
-        let new = NewTask::checked(title, priority, tags)?;
-        let position = end_position(&list(&self.load()?, planning));
-        self.insert(&new, planning, None, position)
+        let mut tags = tags.to_vec();
+        if planning == Planning::Backlog {
+            tags.push(BACKLOG.to_owned());
+        }
+        self.insert(&NewTask::checked(title, priority, &tags)?, None)
     }
 
     /// `create` for a Subtask directly below the Open Task `parent`, after its
-    /// other Subtasks. It follows its top-level Task's Active or Backlog. Fails with `NotFound`
-    /// if there is no such Open Task.
+    /// other Subtasks. It starts with its Parent's Tags (later changes to
+    /// either leave the other alone), so it is planned as its Parent is. Fails
+    /// with `NotFound` if there is no such Open Task.
     pub fn create_subtask(
         &self,
         parent: &str,
@@ -235,22 +255,24 @@ impl Tasks {
         priority: u8,
         tags: &[String],
     ) -> Result<Task, Error> {
-        let new = NewTask::checked(title, priority, tags)?;
         let nodes = self.load()?;
-        let parent = nodes
-            .get(parent)
-            .filter(|n| !n.is_closed())
-            .ok_or(io::ErrorKind::NotFound)?;
+        let parent = nodes.get(parent).ok_or(io::ErrorKind::NotFound)?;
+        let mut all = parent.task.tags.clone();
+        all.extend_from_slice(tags);
+        let new = NewTask::checked(title, priority, &all)?;
         let planning = parent.task.planning;
         // After the Parent's last Subtask at any depth, so the list keeps the tree order.
-        let subtree = open_subtree(&nodes, &parent.task.id);
+        let order = self.planned(&nodes, planning)?;
+        let subtree = open_subtree(&nodes, &parent.task.id, &ranks(&order));
         let last = subtree
             .last()
             .map_or(parent.task.id.as_str(), ItemId::as_str);
-        let list = list(&nodes, planning);
-        let placement = place(&positions(&list), index_below(&list, last));
-        self.shift(&list, &placement.shifted)?;
-        self.insert(&new, planning, Some(&parent.task.id), placement.position)
+        let before = order
+            .get(index_below(&order, last))
+            .map(|n| n.task.id.clone());
+        let task = self.insert(&new, Some(&parent.task.id))?;
+        self.move_in_list(planning, &self.load()?, &task.id, before.as_deref())?;
+        Ok(task)
     }
 
     /// Now in ms, but at least a second after the last Task created here, so
@@ -264,14 +286,9 @@ impl Tasks {
         last as f64 * 1000.0
     }
 
-    /// Saves a new Task under a fresh Item ID.
-    fn insert(
-        &self,
-        new: &NewTask,
-        planning: Planning,
-        parent: Option<&str>,
-        position: f64,
-    ) -> Result<Task, Error> {
+    /// Saves a new Task under a fresh Item ID. No Filter is written: a Task
+    /// without a place follows the placed ones by `created`.
+    fn insert(&self, new: &NewTask, parent: Option<&str>) -> Result<Task, Error> {
         let mut entropy = Entropy::from_system();
         loop {
             let id = ItemId::new(&mut entropy);
@@ -279,12 +296,10 @@ impl Tasks {
             file.set_scalar("id", id.as_str());
             file.set_scalar("title", &new.title);
             file.set_scalar("priority", new.priority.to_string());
-            file.set_scalar("state", planning.state());
             if let Some(parent) = parent {
                 file.set_scalar("parent", parent);
             }
             set_list(&mut file, TAGS, new.tags.clone());
-            file.set_scalar(POSITION, position.to_string());
             let now = self.next_created();
             file.set_scalar(CREATED, iso8601(now));
             file.set_scalar("updated", iso8601(now));
@@ -340,41 +355,42 @@ impl Tasks {
     }
 
     /// Plans the Open top-level Task `id` as `planning`, at the end of that
-    /// list, with its Open Subtasks. A
-    /// Task already planned so stays untouched. Fails with `NotFound` if there
-    /// is no such Task and `SubtaskNotPlannable` for a Subtask.
+    /// list, with its Open Subtasks: Backlog is the Tag `backlog`, added to or
+    /// removed from each. A Task already planned so stays untouched. Fails
+    /// with `NotFound` if there is no such Task and `SubtaskNotPlannable` for
+    /// a Subtask.
     pub fn plan(&self, id: &str, planning: Planning) -> Result<Task, Error> {
         let nodes = self.load()?;
-        let task = &nodes
-            .get(id)
-            .filter(|n| !n.is_closed())
-            .ok_or(io::ErrorKind::NotFound)?
-            .task;
+        let task = &nodes.get(id).ok_or(io::ErrorKind::NotFound)?.task;
         if task.parent.is_some() {
             return Err(Error::SubtaskNotPlannable);
         }
         if task.planning == planning {
             return Ok(task.clone());
         }
-        let list = list(&nodes, planning);
-        let end = end_position(&list);
-        // The Task, then its Open Subtasks in their relative order, one after
-        // the other at the end of the list.
-        let mut placed = None;
-        for (n, item) in open_subtree(&nodes, id).into_iter().enumerate() {
-            let position = end + n as f64;
-            let file = self.rewrite(&item, |file| {
-                file.set_scalar("state", planning.state());
-                file.set_scalar(POSITION, position.to_string());
+        // The Task, then its Open Subtasks in their relative order.
+        let order = self.planned(&nodes, task.planning)?;
+        let subtree = open_subtree(&nodes, id, &ranks(&order));
+        let mut planned = None;
+        for (n, item) in subtree.iter().enumerate() {
+            let file = self.rewrite(item, |file| {
+                let mut tags = tags_of(file);
+                tags.retain(|t| t != BACKLOG);
+                if planning == Planning::Backlog {
+                    tags.push(BACKLOG.to_owned());
+                }
+                set_list(file, TAGS, tags);
                 if n == 0 {
-                    file.remove("parent"); // a Parent Sync left missing or Closed
+                    file.remove("parent"); // a Parent Sync left missing
                 }
             })?;
-            if n == 0 {
-                placed = Some(file);
-            }
+            planned.get_or_insert(file);
         }
-        Ok(placed
+        let nodes = self.load()?;
+        for item in &subtree {
+            self.move_in_list(planning, &nodes, item.as_str(), None)?;
+        }
+        Ok(planned
             .as_ref()
             .and_then(task_of)
             .ok_or(io::ErrorKind::InvalidData)?)
@@ -382,89 +398,52 @@ impl Tasks {
 
     /// Moves the Open Task `id` before the Task `before` in its list, or to
     /// the end of it if that is `None`; `before` is the Task itself: nothing
-    /// changes. Its Parent stays, whoever it is. Only the moved Task is
-    /// rewritten, plus, where neighbours share a key and so leave no room
-    /// between them, the Tasks that share it from the drop on (see `place`).
-    /// Fails with `NotFound` for an unknown or Closed Task, or a `before` that
-    /// isn't in its list.
+    /// changes. Its Parent stays, whoever it is. Only the list's Favorite is
+    /// written (see `move_in_filter`); without it the order stays as it is.
+    /// Fails with `NotFound` for an unknown Task, or a `before` that isn't in
+    /// its list.
     pub fn move_before(&self, id: &str, before: Option<&str>) -> Result<Task, Error> {
         let nodes = self.load()?;
-        let moved = nodes
-            .get(id)
-            .filter(|n| !n.is_closed())
-            .ok_or(io::ErrorKind::NotFound)?;
-        if before == Some(id) {
-            return Ok(moved.task.clone());
+        let moved = nodes.get(id).ok_or(io::ErrorKind::NotFound)?;
+        if before != Some(id) {
+            self.move_in_list(moved.task.planning, &nodes, id, before)?;
         }
-        let mut list = list(&nodes, moved.task.planning);
-        list.retain(|n| n.task.id != id);
-        if before.is_some_and(|before| !list.iter().any(|n| n.task.id == before)) {
-            return Err(io::ErrorKind::NotFound.into());
-        }
-        self.place_moved(id, &list, index_before(&list, before))
-    }
-
-    /// Puts the moved Task `id` at index `at` of `list` (without it): writes
-    /// its `position` and those of the Tasks `place` shifted, then returns it.
-    fn place_moved(&self, id: &str, list: &[&Node], at: usize) -> Result<Task, Error> {
-        let placement = place(&positions(list), at);
-        self.shift(list, &placement.shifted)?;
-        let position = placement.position;
-        Ok(self
-            .rewrite(&ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?, |file| {
-                file.set_scalar(POSITION, position.to_string());
-            })
-            .map(|file| task_of(&file))?
-            .ok_or(io::ErrorKind::InvalidData)?)
-    }
-
-    /// Rewrites the `position` of each Task of `list` that `shifted` names by
-    /// its index.
-    fn shift(&self, list: &[&Node], shifted: &[(usize, f64)]) -> Result<(), Error> {
-        for &(at, position) in shifted {
-            let id = ItemId::parse(&list[at].task.id).ok_or(io::ErrorKind::InvalidData)?;
-            self.rewrite(&id, |file| file.set_scalar(POSITION, position.to_string()))?;
-        }
-        Ok(())
+        Ok(moved.task.clone())
     }
 
     /// Moves the Open Subtask `id` before its sibling `before`, or after its
     /// last sibling if that is `None`; `before` is the Subtask itself: nothing
-    /// changes. Writes one `position`, never the Parent. At the end it lands
-    /// below the last sibling's own Subtasks, so the list keeps the tree
-    /// order. Fails with `NotFound` for an unknown or Closed Task and
-    /// `NotASibling` for a top-level Task or a `before` that isn't a sibling,
-    /// before saving anything.
+    /// changes. At the end it lands below the last sibling's own Subtasks, so
+    /// the list keeps the tree order. Fails with `NotFound` for an unknown
+    /// Task and `NotASibling` for a top-level Task or a `before` that isn't a
+    /// sibling, before saving anything.
     pub fn move_subtask(&self, id: &str, before: Option<&str>) -> Result<Task, Error> {
         let nodes = self.load()?;
-        let moved = nodes
-            .get(id)
-            .filter(|n| !n.is_closed())
-            .ok_or(io::ErrorKind::NotFound)?;
+        let moved = nodes.get(id).ok_or(io::ErrorKind::NotFound)?;
         let parent = moved.task.parent.as_deref().ok_or(Error::NotASibling)?;
         if before == Some(id) {
             return Ok(moved.task.clone());
         }
-        let mut list = list(&nodes, moved.task.planning);
+        let mut list = self.planned(&nodes, moved.task.planning)?;
         list.retain(|n| n.task.id != id);
         let siblings: Vec<&Node> = (list.iter().copied())
             .filter(|n| n.task.parent.as_deref() == Some(parent))
             .collect();
-        let at = match before {
-            Some(before) if siblings.iter().any(|n| n.task.id == before) => {
-                index_before(&list, Some(before))
-            }
+        let before = match before {
+            Some(before) if siblings.iter().any(|n| n.task.id == before) => Some(before),
             Some(_) => return Err(Error::NotASibling),
             None => {
                 let Some(last) = siblings.last() else {
                     return Ok(moved.task.clone());
                 };
-                let tail = open_subtree(&nodes, &last.task.id);
+                let tail = open_subtree(&nodes, &last.task.id, &ranks(&list));
                 let end = tail.last().map_or(last.task.id.as_str(), ItemId::as_str);
-                index_below(&list, end)
+                list.get(index_below(&list, end))
+                    .map(|n| n.task.id.as_str())
             }
         };
-        self.place_moved(id, &list, at)
+        self.move_in_list(moved.task.planning, &nodes, id, before)?;
+        Ok(moved.task.clone())
     }
 
     /// Closes the Open Task `id` and its Open Subtasks as one pending change:
@@ -475,12 +454,10 @@ impl Tasks {
         let id = ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?;
         self.commit()?;
         let nodes = self.load()?;
-        nodes
-            .get(id.as_str())
-            .filter(|n| !n.is_closed())
-            .ok_or(io::ErrorKind::NotFound)?;
+        nodes.get(id.as_str()).ok_or(io::ErrorKind::NotFound)?;
+        let order = self.in_app_order(&nodes)?;
         *self.pending() = Some(Pending {
-            ids: open_subtree(&nodes, id.as_str()),
+            ids: open_subtree(&nodes, id.as_str(), &ranks(&order)),
             closing,
         });
         Ok(())
@@ -545,9 +522,8 @@ impl Tasks {
     /// `id`, directly or through others) for a Blocked by that makes no sense.
     pub fn add_blocker(&self, id: &str, blocker: &str) -> Result<Task, Error> {
         let nodes = self.load()?;
-        let open = |id: &str| nodes.get(id).filter(|n| !n.is_closed());
-        open(id).ok_or(io::ErrorKind::NotFound)?;
-        open(blocker).ok_or(io::ErrorKind::NotFound)?;
+        nodes.get(id).ok_or(io::ErrorKind::NotFound)?;
+        nodes.get(blocker).ok_or(io::ErrorKind::NotFound)?;
         if let Some(refusal) = blocker_refusal(&nodes, id, blocker) {
             return Err(refusal);
         }
@@ -565,10 +541,7 @@ impl Tasks {
     /// already. Fails with `NotFound` if there is no such Task.
     pub fn blocker_candidates(&self, id: &str) -> Result<Vec<Row>, Error> {
         let nodes = self.load()?;
-        let task = nodes
-            .get(id)
-            .filter(|n| !n.is_closed())
-            .ok_or(io::ErrorKind::NotFound)?;
+        let task = nodes.get(id).ok_or(io::ErrorKind::NotFound)?;
         let mut rows = self.rows(Planning::Active)?;
         rows.extend(self.rows(Planning::Backlog)?);
         rows.retain(|row| {
@@ -614,9 +587,9 @@ impl Tasks {
         })
     }
 
-    /// Removes `tag` from every Task, Open or Closed, saving each changed file
-    /// with a new `updated`. The History and the Tags are left alone; repeating
-    /// it after an interruption finishes the job.
+    /// Removes `tag` from every Task, saving each changed file with a new
+    /// `updated`. The Tags are left alone; repeating it after an interruption
+    /// finishes the job.
     pub fn remove_tag_everywhere(&self, tag: &str) -> io::Result<()> {
         for listed in self.files.list(&self.root)? {
             let Some(id) = listed.name.strip_suffix(".md").and_then(ItemId::parse) else {
@@ -690,12 +663,12 @@ impl Tasks {
     }
 
     /// The Open Tasks planned as `planning`, Subtasks included, as one flat
-    /// list in their manual order. A pending Done shows marked, a pending
-    /// Rejected not at all. Structure Sync left broken is repaired here, not in
-    /// the files.
+    /// list in the order its Favorite keeps. A pending Done shows marked, a
+    /// pending Rejected not at all. Structure Sync left broken is repaired
+    /// here, not in the files.
     pub fn rows(&self, planning: Planning) -> io::Result<Vec<Row>> {
         let nodes = self.shown()?;
-        Ok(rows_of(&nodes, list(&nodes, planning)))
+        Ok(rows_of(&nodes, self.planned(&nodes, planning)?))
     }
 
     /// The direct Subtasks of the Open Task `parent`, in either list, as
@@ -703,10 +676,12 @@ impl Tasks {
     /// Empty for a Task that has none or isn't there.
     pub fn subtasks(&self, parent: &str) -> io::Result<Vec<Row>> {
         let nodes = self.shown()?;
+        let order = self.in_app_order(&nodes)?;
+        let ranks = ranks(&order);
         let mut found: Vec<&Node> = (nodes.values())
-            .filter(|n| !n.is_closed() && n.task.parent.as_deref() == Some(parent))
+            .filter(|n| n.task.parent.as_deref() == Some(parent))
             .collect();
-        found.sort_by(|a, b| by_position(a, b));
+        found.sort_by_key(|n| rank(&ranks, &n.task.id));
         Ok(rows_of(&nodes, found))
     }
 
@@ -748,21 +723,15 @@ impl Tasks {
         }
         self.remember_tags(read_tags)?;
         repair(&mut nodes);
-        for (id, position) in derive_positions(&mut nodes) {
-            self.migrate(&id, |file| {
-                file.set_scalar(POSITION, position.to_string());
-                file.remove("order");
-            })?;
-        }
         self.backfill_created(&mut nodes)?;
         Ok(nodes)
     }
 
-    /// Gives every Open Task without `created` one: its file's modification
+    /// Gives every Task without `created` one: its file's modification
     /// time.
     fn backfill_created(&self, nodes: &mut Nodes) -> io::Result<()> {
         let missing: Vec<ItemId> = (nodes.values())
-            .filter(|n| !n.is_closed() && n.created.is_none())
+            .filter(|n| n.created.is_none())
             .filter_map(|n| ItemId::parse(&n.task.id))
             .collect();
         if missing.is_empty() {
@@ -770,12 +739,9 @@ impl Tasks {
         }
         let listed = self.files.list(&self.root)?;
         for id in missing {
-            let modified = || {
-                let name = format!("{id}.md");
-                let (nanos, _) = listed.iter().find(|l| l.name == name)?.stamp;
-                Some(iso8601((nanos / 1_000_000) as f64))
-            };
-            let Some(created) = modified() else {
+            let name = format!("{id}.md");
+            let Some(created) = (listed.iter().find(|l| l.name == name)).map(|l| modified(l.stamp))
+            else {
                 continue;
             };
             self.migrate(&id, |file| file.set_scalar(CREATED, created.clone()))?;
@@ -786,8 +752,8 @@ impl Tasks {
         Ok(())
     }
 
-    /// Rewrites the Open Task `id` as a migration does: `updated` stays, so
-    /// that Devices migrating at once write the same bytes.
+    /// Rewrites the Task `id` as a migration does: `updated` stays, so that
+    /// Devices migrating at once write the same bytes.
     fn migrate(&self, id: &ItemId, change: impl FnOnce(&mut Document)) -> io::Result<()> {
         let (mut file, _) = self.read_open(id).map_err(|e| match e {
             Error::Io(e) => e,
@@ -865,55 +831,10 @@ enum Overwrite {
 #[derive(Debug, Clone)]
 pub(crate) struct Node {
     pub(crate) task: Task,
-    /// How it was Closed; `None` while it is Open.
-    pub(crate) closing: Option<Closing>,
-    /// The place in its Active or Backlog list; see `derive_positions`.
-    pub(crate) position: f64,
-    /// When it was created (ISO 8601 UTC); `None` for a Closed Task, and for
-    /// an Open one only until `backfill_created`.
+    /// When it was created (ISO 8601 UTC); `None` only until `backfill_created`.
     pub(crate) created: Option<String>,
-    /// For an Open Task whose file has no `position` yet (it dates from before
-    /// that key): its legacy `order`.
-    unplaced: Option<f64>,
     /// The IDs the file lists, whether or not such a Task exists.
     blocked_by: Vec<String>,
-}
-
-impl Node {
-    pub(crate) fn is_closed(&self) -> bool {
-        self.closing.is_some()
-    }
-
-    /// A Closed Task of an old version, kept as what Open Tasks and lists need
-    /// of it (how it was Closed, its place, Title and Parent), nothing more.
-    pub(crate) fn closed(
-        id: String,
-        closing: Closing,
-        title: String,
-        parent: Option<String>,
-        position: f64,
-    ) -> Self {
-        let task = Task {
-            id,
-            title,
-            priority: DEFAULT_PRIORITY,
-            planning: Planning::Active, // set by `repair`
-            description: String::new(),
-            tags: Vec::new(),
-            done: false,
-            parent,
-            blocked: false,
-            blocked_by: Vec::new(),
-        };
-        Self {
-            task,
-            closing: Some(closing),
-            position,
-            created: None,
-            unplaced: None,
-            blocked_by: Vec::new(),
-        }
-    }
 }
 
 type Nodes = HashMap<String, Node>;
@@ -927,15 +848,17 @@ fn read_node(files: &dyn Files, path: &Path) -> Option<(Node, Vec<String>)> {
     (path.file_stem()? == node.task.id.as_str()).then(|| (node, tags_of(&file)))
 }
 
-/// The Task a file describes, Open or Closed; `None` for a malformed one.
+/// The Task a file describes; `None` for a malformed one, or one of an old
+/// version that is Closed (`state: done` or `rejected`, which the migration
+/// Deletes) or has a `state` it doesn't know.
 fn node_of(file: &Document) -> Option<Node> {
-    let (closing, planning) = match file.scalar("state")? {
-        "active" => (None, Planning::Active),
-        "backlog" => (None, Planning::Backlog),
-        "done" => (Some(Closing::Done), Planning::Active), // planning set by `repair`
-        "rejected" => (Some(Closing::Rejected), Planning::Active),
-        _ => return None,
-    };
+    if file
+        .scalar("state")
+        .is_some_and(|s| !matches!(s, "active" | "backlog"))
+    {
+        return None;
+    }
+    let tags = tags_of(file);
     let task = Task {
         id: file.scalar("id")?.to_owned(),
         title: file.scalar("title")?.to_owned(),
@@ -944,9 +867,9 @@ fn node_of(file: &Document) -> Option<Node> {
             .and_then(|p| p.parse().ok())
             .filter(|p| (1..=4).contains(p))
             .unwrap_or(DEFAULT_PRIORITY),
-        planning,
+        planning: Planning::of(&tags),
         description: file.body.trim().to_owned(),
-        tags: tags_of(file),
+        tags,
         done: false,
         parent: file
             .scalar("parent")
@@ -955,51 +878,30 @@ fn node_of(file: &Document) -> Option<Node> {
         blocked: false,
         blocked_by: Vec::new(),
     };
-    let position: Option<f64> = file.scalar(POSITION).and_then(|p| p.parse().ok());
-    let position_or_zero = position.unwrap_or(0.0);
-    if let Some(closing) = closing {
-        return Some(Node::closed(
-            task.id,
-            closing,
-            task.title,
-            task.parent,
-            position_or_zero,
-        ));
-    }
-    let legacy_order = file.scalar("order").and_then(|o| o.parse().ok());
     Some(Node {
         task,
-        closing,
-        position: position_or_zero,
         created: file.scalar(CREATED).map(str::to_owned),
-        unplaced: position.is_none().then(|| legacy_order.unwrap_or(0.0)),
         blocked_by: blockers_of(file),
     })
 }
 
-/// Whether `file` is a Task, Open or Closed.
+/// Whether `file` is a Task.
 pub(crate) fn is_task(file: &Document) -> bool {
     node_of(file).is_some()
 }
 
-/// The Open Task a file describes; `None` for a closed or malformed one.
+/// The Task a file describes; `None` for a malformed one.
 fn task_of(file: &Document) -> Option<Task> {
-    node_of(file).filter(|n| !n.is_closed()).map(|n| n.task)
+    node_of(file).map(|n| n.task)
 }
 
-/// Fixes what no Device allowed but Sync can leave (ADR-0021): an Open Task
-/// whose Parent is missing or Closed becomes top-level, a Parent cycle is cut
-/// at the smallest Item ID, and a Subtask is planned as its top-level Task.
+/// Fixes what no Device allowed but Sync can leave (ADR-0021): a Task whose
+/// Parent is missing becomes top-level, and a Parent cycle is cut at the
+/// smallest Item ID.
 fn repair(nodes: &mut Nodes) {
     let orphans: Vec<String> = nodes
         .values()
-        .filter(|n| {
-            n.task.parent.as_ref().is_some_and(|p| {
-                nodes
-                    .get(p)
-                    .is_none_or(|parent| parent.is_closed() && !n.is_closed())
-            })
-        })
+        .filter(|n| (n.task.parent.as_ref()).is_some_and(|parent| !nodes.contains_key(parent)))
         .map(|n| n.task.id.clone())
         .collect();
     for id in orphans {
@@ -1019,20 +921,6 @@ fn repair(nodes: &mut Nodes) {
             seen.push(parent);
         }
     }
-
-    let planned: Vec<(String, Planning)> = nodes
-        .keys()
-        .map(|id| {
-            let mut root = &nodes[id];
-            while let Some(parent) = &root.task.parent {
-                root = &nodes[parent];
-            }
-            (id.clone(), root.task.planning)
-        })
-        .collect();
-    for (id, planning) in planned {
-        nodes.entry(id).and_modify(|n| n.task.planning = planning);
-    }
 }
 
 /// Fills `blocked` and `blocked_by` of every Task. A Blocked by pointing at a
@@ -1045,7 +933,7 @@ fn resolve_blockers(nodes: &mut Nodes) {
             let blocker = Blocker {
                 id: n.task.id.clone(),
                 title: n.task.title.clone(),
-                closed: n.is_closed() || n.task.done,
+                closed: n.task.done,
             };
             (blocker.id.clone(), blocker)
         })
@@ -1060,7 +948,7 @@ fn resolve_blockers(nodes: &mut Nodes) {
     }
 }
 
-/// Why the Open Task `id` can't be Blocked by the Open Task `blocker`, if so.
+/// Why the Task `id` can't be Blocked by the Task `blocker`, if so.
 fn blocker_refusal(nodes: &Nodes, id: &str, blocker: &str) -> Option<Error> {
     let parent_of = |id: &str| nodes.get(id).and_then(|n| n.task.parent.as_deref());
     if id == blocker {
@@ -1097,8 +985,20 @@ fn waits_for(nodes: &Nodes, from: &str, target: &str) -> bool {
     false
 }
 
-/// `root`, then its Open Subtasks at any depth in their list order.
-fn open_subtree(nodes: &Nodes, root: &str) -> Vec<ItemId> {
+/// Where each Task of an ordered list is, by ID.
+fn ranks<'a>(order: &[&'a Node]) -> HashMap<&'a str, usize> {
+    (order.iter().enumerate())
+        .map(|(at, n)| (n.task.id.as_str(), at))
+        .collect()
+}
+
+/// The place of `id` in `ranks`; after every Task in it if it isn't.
+fn rank(ranks: &HashMap<&str, usize>, id: &str) -> usize {
+    ranks.get(id).copied().unwrap_or(usize::MAX)
+}
+
+/// `root`, then its Subtasks at any depth, each Parent's in the order of `ranks`.
+fn open_subtree(nodes: &Nodes, root: &str, ranks: &HashMap<&str, usize>) -> Vec<ItemId> {
     let mut ids = vec![root.to_owned()];
     let mut next = 0;
     while next < ids.len() {
@@ -1106,11 +1006,11 @@ fn open_subtree(nodes: &Nodes, root: &str) -> Vec<ItemId> {
         next += 1;
         ids.extend(
             (nodes.values())
-                .filter(|n| !n.is_closed() && n.task.parent.as_deref() == Some(&parent))
+                .filter(|n| n.task.parent.as_deref() == Some(&parent))
                 .map(|n| n.task.id.clone()),
         );
     }
-    ids[1..].sort_by(|a, b| by_position(&nodes[a], &nodes[b]));
+    ids[1..].sort_by(|a, b| rank(ranks, a).cmp(&rank(ranks, b)).then_with(|| a.cmp(b)));
     ids.iter().filter_map(|id| ItemId::parse(id)).collect()
 }
 
@@ -1133,36 +1033,9 @@ fn rows_of(nodes: &Nodes, found: Vec<&Node>) -> Vec<Row> {
         .collect()
 }
 
-/// The Open Tasks planned as `planning`, Subtasks included, in their order.
-fn list(nodes: &Nodes, planning: Planning) -> Vec<&Node> {
-    let mut found: Vec<&Node> = nodes
-        .values()
-        .filter(|n| !n.is_closed() && n.task.planning == planning)
-        .collect();
-    found.sort_by(|a, b| by_position(a, b));
-    found
-}
-
-/// The `position` that puts a Task after the last Task of `list`.
-fn end_position(list: &[&Node]) -> f64 {
-    end_key(&positions(list))
-}
-
 /// The key after the last of `keys`.
 fn end_key(keys: &[f64]) -> f64 {
     keys.last().map_or(1.0, |k| k + 1.0)
-}
-
-fn positions(list: &[&Node]) -> Vec<f64> {
-    list.iter().map(|n| n.position).collect()
-}
-
-/// Where in `list` a Task goes to land right before `before`, or at the end
-/// if that is `None` or not in `list`.
-fn index_before(list: &[&Node], before: Option<&str>) -> usize {
-    before
-        .and_then(|b| list.iter().position(|n| n.task.id == b))
-        .unwrap_or(list.len())
 }
 
 /// Where in `list` a Task goes to land right below the Task `above`.
@@ -1180,11 +1053,10 @@ struct Placement {
 }
 
 /// The `Placement` that puts an entry at index `at` of the ascending `keys`
-/// of a list (without the entry): of Tasks in Active or the Backlog, of
-/// Filters, or of the Tasks in one Filter. Usually only the entry gets a key,
-/// between its neighbours'. Where they share one there is no key between
-/// them, so the entries of that run from `at` on move up, spread below the
-/// next key, ahead of which the entry goes.
+/// of a list (without the entry): of Filters, or of the Tasks in one Filter.
+/// Usually only the entry gets a key, between its neighbours'. Where they
+/// share one there is no key between them, so the entries of that run from
+/// `at` on move up, spread below the next key, ahead of which the entry goes.
 fn place(keys: &[f64], at: usize) -> Placement {
     let alone = |position| Placement {
         position,
@@ -1210,65 +1082,6 @@ fn place(keys: &[f64], at: usize) -> Placement {
     }
 }
 
-/// Gives every Open Task still without a `position` one, as the migration from
-/// `order` (ADR-0021): in today's tree order (top-level Tasks by `order`, each
-/// followed by its Subtasks, depth first), after the Tasks that have one. It
-/// is deterministic, so Devices migrating at once agree. Returns the Tasks it
-/// changed with their `position`.
-fn derive_positions(nodes: &mut Nodes) -> Vec<(ItemId, f64)> {
-    if nodes.values().all(|n| n.unplaced.is_none()) {
-        return Vec::new();
-    }
-    let key = |n: &Node| n.unplaced.unwrap_or(n.position);
-    let mut derived = Vec::new();
-    for planning in [Planning::Active, Planning::Backlog] {
-        let open: Vec<&Node> = nodes
-            .values()
-            .filter(|n| !n.is_closed() && n.task.planning == planning)
-            .collect();
-        let mut last = (open.iter())
-            .filter(|n| n.unplaced.is_none())
-            .fold(0.0, |last, n| f64::max(last, n.position));
-        let mut children: HashMap<Option<&str>, Vec<&Node>> = HashMap::new();
-        for node in open {
-            children
-                .entry(node.task.parent.as_deref())
-                .or_default()
-                .push(node);
-        }
-        for siblings in children.values_mut() {
-            siblings.sort_by(|a, b| {
-                (key(a).partial_cmp(&key(b)).unwrap_or(Ordering::Equal))
-                    .then_with(|| a.task.id.cmp(&b.task.id))
-            });
-        }
-        let mut todo = children.remove(&None).unwrap_or_default();
-        todo.reverse();
-        while let Some(node) = todo.pop() {
-            if node.unplaced.is_some() {
-                last += 1.0;
-                derived.push((node.task.id.clone(), last));
-            }
-            if let Some(subtasks) = children.remove(&Some(node.task.id.as_str())) {
-                todo.extend(subtasks.into_iter().rev());
-            }
-        }
-    }
-    derived
-        .into_iter()
-        .filter_map(|(id, position)| {
-            let node = nodes.get_mut(&id)?;
-            node.position = position;
-            node.unplaced = None;
-            Some((ItemId::parse(&id)?, position))
-        })
-        .collect()
-}
-
-fn by_position(a: &Node, b: &Node) -> Ordering {
-    compare_positions(a.position, b.position).then_with(|| a.task.id.cmp(&b.task.id))
-}
-
 /// Fractional keys in order; one that is no number ties.
 fn compare_positions(a: f64, b: f64) -> Ordering {
     a.partial_cmp(&b).unwrap_or(Ordering::Equal)
@@ -1278,12 +1091,17 @@ fn compare_positions(a: f64, b: f64) -> Ordering {
 /// Subtasks are still Open (a pending Done is no longer).
 fn open_subtask_counts(nodes: &Nodes) -> HashMap<&str, u32> {
     let mut counts = HashMap::new();
-    for node in nodes.values().filter(|n| !n.is_closed() && !n.task.done) {
+    for node in nodes.values().filter(|n| !n.task.done) {
         if let Some(parent) = node.task.parent.as_deref() {
             *counts.entry(parent).or_default() += 1;
         }
     }
     counts
+}
+
+/// A file's modification time as ISO 8601, what `created` falls back to.
+fn modified((nanos, _): Stamp) -> String {
+    iso8601((nanos / 1_000_000) as f64)
 }
 
 /// The valid Tags in a file; others, which only other tools could have
@@ -1502,12 +1320,31 @@ mod tests {
     fn a_subtask_is_created_with_its_priority_and_tags() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let parent = tasks.create("p", Planning::Backlog, 4, &[]).unwrap();
+        let parent = tasks
+            .create("p", Planning::Active, 4, &tag_names(&["work"]))
+            .unwrap();
         let sub = tasks
             .create_subtask(&parent.id, "s", 2, &tag_names(&["home"]))
             .unwrap();
-        assert_eq!((sub.priority, sub.tags), (2, tag_names(&["home"])));
+        assert_eq!(sub.priority, 2);
+        assert_eq!(sub.tags, tag_names(&["work", "home"]));
         assert!(tasks.tags().contains("home"));
+    }
+
+    #[test]
+    fn a_subtask_starts_with_its_parents_tags_and_keeps_its_own_afterwards() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let parent = tasks
+            .create("p", Planning::Backlog, 4, &tag_names(&["work"]))
+            .unwrap();
+        let sub = tasks.create_subtask(&parent.id, "s", 4, &[]).unwrap();
+        assert_eq!(sub.tags, tag_names(&["work", "backlog"]));
+        assert_eq!(sub.planning, Planning::Backlog);
+        tasks.add_tag(&parent.id, "home").unwrap();
+        tasks.remove_tag(&parent.id, "work").unwrap();
+        let subtasks = tasks.subtasks(&parent.id).unwrap();
+        assert_eq!(subtasks[0].task.tags, tag_names(&["work", "backlog"]));
     }
 
     #[test]
@@ -1545,9 +1382,13 @@ mod tests {
         assert_eq!(file.scalar("id"), Some(task.id.as_str()));
         assert_eq!(file.scalar("title"), Some("Buy: milk"));
         assert_eq!(file.scalar("priority"), Some("4"));
-        assert_eq!(file.scalar("state"), Some("backlog"));
-        assert!(file.scalar("position").is_some());
-        assert!(file.scalar("order").is_none());
+        assert_eq!(file.list("tags"), Some(&["backlog".to_owned()][..]));
+        assert!(
+            ["state", "position", "order"]
+                .iter()
+                .all(|k| file.scalar(k).is_none())
+        );
+        assert!(file.scalar("created").is_some());
         let updated = file.scalar("updated").unwrap();
         assert!(updated.len() == 20 && updated.ends_with('Z'), "{updated}");
     }
@@ -1670,7 +1511,6 @@ mod tests {
             file.list("aliases"),
             Some(&["a".to_owned(), "b".to_owned()][..])
         );
-        assert_eq!(file.scalar("state"), Some("active"));
         assert_ne!(file.scalar("updated"), Some("2000-01-01T00:00:00Z"));
     }
 
@@ -1826,7 +1666,11 @@ mod tests {
         let (tasks, task) = edit_fixture(&dir);
         let path = dir.0.join(format!("{}.md", task.id));
         let text = fs::read_to_string(&path).unwrap();
-        fs::write(&path, text.replace("state:", "tags:\n  - hand\nstate:")).unwrap();
+        fs::write(
+            &path,
+            text.replace("priority:", "tags:\n  - hand\npriority:"),
+        )
+        .unwrap();
         assert!(known(&tasks, "").is_empty()); // not read yet
         tasks.edit(&task.id, "new", "", 4, &[]).unwrap();
         assert_eq!(known(&tasks, ""), ["hand"]);
@@ -1839,7 +1683,7 @@ mod tests {
         let task = tasks.create("t", Planning::Active, 4, &[]).unwrap();
         let path = dir.0.join(format!("{}.md", task.id));
         let text = fs::read_to_string(&path).unwrap();
-        let text = text.replace("state:", "tags:\n  - synced\n  - Bad Tag\nstate:");
+        let text = text.replace("priority:", "tags:\n  - synced\n  - Bad Tag\npriority:");
         fs::write(&path, text).unwrap();
         list_of(&tasks, Planning::Active);
         assert_eq!(known(&tasks, ""), ["synced"]);
@@ -2049,11 +1893,18 @@ mod tests {
         (title.to_owned(), parent.map(str::to_owned))
     }
 
-    /// A raw Task file, as Sync or another tool could leave it.
-    fn raw(dir: &Scratch, id: &str, state: &str, parent: Option<&str>, order: u8) {
+    /// A raw Task file, as Sync or another tool could leave it: `state` is
+    /// "backlog" for one tagged so, "done" for one of an old version that is
+    /// Closed, and anything else for an Active one.
+    fn raw(dir: &Scratch, id: &str, state: &str, parent: Option<&str>) {
         let parent = parent.map_or(String::new(), |p| format!("parent: {p}\n"));
+        let state = match state {
+            "backlog" => "tags:\n  - backlog\n",
+            "done" => "state: done\n",
+            _ => "",
+        };
         let text = format!(
-            "---\nid: {id}\ntitle: {id}\npriority: 4\nstate: {state}\n{parent}order: {order}\nupdated: 2000-01-01T00:00:00Z\n---\n"
+            "---\nid: {id}\ntitle: {id}\npriority: 4\n{state}{parent}updated: 2000-01-01T00:00:00Z\n---\n"
         );
         fs::create_dir_all(&dir.0).unwrap();
         fs::write(dir.0.join(format!("{id}.md")), text).unwrap();
@@ -2094,32 +1945,26 @@ mod tests {
             tasks.create_subtask("aaaaaaaaaaaa", "x", 4, &[]),
             Err(Error::Io(e)) if e.kind() == io::ErrorKind::NotFound
         ));
-        raw(&dir, "bbbbbbbbbbbb", "done", None, 1);
+        raw(&dir, "bbbbbbbbbbbb", "done", None);
         assert!(tasks.create_subtask("bbbbbbbbbbbb", "x", 4, &[]).is_err());
     }
 
     #[test]
-    fn planning_a_task_rewrites_its_open_subtasks() {
+    fn planning_a_task_retags_its_open_subtasks() {
         let dir = Scratch::new();
         let tasks = dir.store();
         let parent = tasks.create("p", Planning::Backlog, 4, &[]).unwrap();
         let child = subtask(&tasks, &parent, "c");
         let grandchild = subtask(&tasks, &child, "g");
-        raw(&dir, "cccccccccccc", "done", Some(&parent.id), 9);
         tasks.plan(&parent.id, Planning::Active).unwrap();
-        assert!(file_of(&dir, &child).contains("state: active"));
-        assert!(file_of(&dir, &grandchild).contains("state: active"));
-        assert_eq!(
-            fs::read_to_string(dir.0.join("cccccccccccc.md"))
-                .unwrap()
-                .matches("state: done")
-                .count(),
-            1
-        );
+        assert!(!file_of(&dir, &child).contains("backlog"));
+        assert!(!file_of(&dir, &grandchild).contains("backlog"));
         assert_eq!(
             tree(&tasks, Planning::Active),
             [sub("p", None), sub("c", Some("p")), sub("g", Some("c"))]
         );
+        tasks.plan(&parent.id, Planning::Backlog).unwrap();
+        assert!(file_of(&dir, &grandchild).contains("backlog"));
     }
 
     #[test]
@@ -2134,7 +1979,7 @@ mod tests {
                 Err(Error::SubtaskNotPlannable)
             ));
         }
-        assert!(file_of(&dir, &child).contains("state: backlog"));
+        assert!(file_of(&dir, &child).contains("backlog"));
     }
 
     #[test]
@@ -2180,7 +2025,7 @@ mod tests {
     fn an_orphan_becomes_top_level() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        raw(&dir, "aaaaaaaaaaaa", "backlog", Some("zzzzzzzzzzzz"), 1);
+        raw(&dir, "aaaaaaaaaaaa", "backlog", Some("zzzzzzzzzzzz"));
         assert_eq!(titles(&tasks, Planning::Backlog), ["aaaaaaaaaaaa"]);
         tasks.plan("aaaaaaaaaaaa", Planning::Active).unwrap();
         assert!(
@@ -2194,27 +2039,16 @@ mod tests {
     fn a_parent_cycle_is_cut_at_the_smallest_item_id() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        raw(&dir, "bbbbbbbbbbbb", "active", Some("cccccccccccc"), 1);
-        raw(&dir, "cccccccccccc", "active", Some("aaaaaaaaaaaa"), 1);
-        raw(&dir, "aaaaaaaaaaaa", "active", Some("bbbbbbbbbbbb"), 1);
-        raw(&dir, "dddddddddddd", "active", Some("dddddddddddd"), 1);
+        raw(&dir, "bbbbbbbbbbbb", "active", Some("cccccccccccc"));
+        raw(&dir, "cccccccccccc", "active", Some("aaaaaaaaaaaa"));
+        raw(&dir, "aaaaaaaaaaaa", "active", Some("bbbbbbbbbbbb"));
+        raw(&dir, "dddddddddddd", "active", Some("dddddddddddd"));
         let parents: HashMap<_, _> = tree(&tasks, Planning::Active).into_iter().collect();
         let parent = |id: &str| parents[id].clone();
         assert_eq!(parent("aaaaaaaaaaaa"), None);
         assert_eq!(parent("dddddddddddd"), None);
         assert_eq!(parent("cccccccccccc").as_deref(), Some("aaaaaaaaaaaa"));
         assert_eq!(parent("bbbbbbbbbbbb").as_deref(), Some("cccccccccccc"));
-    }
-
-    #[test]
-    fn a_subtask_is_planned_as_its_top_level_task() {
-        let dir = Scratch::new();
-        let tasks = dir.store();
-        raw(&dir, "aaaaaaaaaaaa", "backlog", None, 1);
-        raw(&dir, "bbbbbbbbbbbb", "active", Some("aaaaaaaaaaaa"), 1);
-        raw(&dir, "cccccccccccc", "active", Some("bbbbbbbbbbbb"), 1);
-        assert!(titles(&tasks, Planning::Active).is_empty());
-        assert_eq!(titles(&tasks, Planning::Backlog).len(), 3);
     }
 
     #[test]
@@ -2249,8 +2083,8 @@ mod tests {
     fn an_open_subtask_of_a_closed_parent_becomes_top_level() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        raw(&dir, "aaaaaaaaaaaa", "done", None, 1);
-        raw(&dir, "bbbbbbbbbbbb", "active", Some("aaaaaaaaaaaa"), 1);
+        raw(&dir, "aaaaaaaaaaaa", "done", None);
+        raw(&dir, "bbbbbbbbbbbb", "active", Some("aaaaaaaaaaaa"));
         assert_eq!(titles(&tasks, Planning::Active), ["bbbbbbbbbbbb"]);
     }
 
@@ -2286,13 +2120,25 @@ mod tests {
     fn equal_keys_sort_by_item_id() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        raw(&dir, "cccccccccccc", "active", None, 1);
-        raw(&dir, "aaaaaaaaaaaa", "active", None, 1);
-        raw(&dir, "bbbbbbbbbbbb", "active", None, 1);
+        raw(&dir, "cccccccccccc", "active", None);
+        raw(&dir, "aaaaaaaaaaaa", "active", None);
+        raw(&dir, "bbbbbbbbbbbb", "active", None);
         assert_eq!(
             titles(&tasks, Planning::Active),
             ["aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc"]
         );
+    }
+
+    /// A raw Task file with a place in the Active list's Favorite, as Sync could
+    /// leave several Tasks with one place.
+    fn raw_positioned(dir: &Scratch, id: &str, position: f64) {
+        raw(dir, id, "active", None);
+        let path = dir.0.parent().unwrap().join("Filters/tasksactive2.md");
+        let mut favorite = Document::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+        let mut places = favorite.list("places").unwrap_or_default().to_vec();
+        places.push(format!("{id} {position}"));
+        favorite.set("places", Value::List(places));
+        fs::write(path, favorite.render()).unwrap();
     }
 
     #[test]
@@ -2481,7 +2327,7 @@ mod tests {
         let dir = Scratch::new();
         let (tasks, [_, b, _]) = move_fixture(&dir);
         let backlog = tasks.create("x", Planning::Backlog, 4, &[]).unwrap();
-        raw(&dir, "dddddddddddd", "done", None, 1);
+        raw(&dir, "dddddddddddd", "done", None);
         for (id, before) in [
             ("aaaaaaaaaaaa", None),
             ("dddddddddddd", None),
@@ -2499,15 +2345,6 @@ mod tests {
         }
     }
 
-    /// A raw Task file with a `position` and no `order`.
-    fn raw_positioned(dir: &Scratch, id: &str, position: f64) {
-        let text = format!(
-            "---\nid: {id}\ntitle: {id}\npriority: 4\nstate: active\nposition: {position}\ncreated: 2000-01-01T00:00:00Z\nupdated: 2000-01-01T00:00:00Z\n---\n"
-        );
-        fs::create_dir_all(&dir.0).unwrap();
-        fs::write(dir.0.join(format!("{id}.md")), text).unwrap();
-    }
-
     fn files_in(dir: &Scratch) -> Vec<(String, String)> {
         let mut files: Vec<_> = fs::read_dir(&dir.0)
             .unwrap()
@@ -2520,34 +2357,6 @@ mod tests {
             .collect();
         files.sort();
         files
-    }
-
-    #[test]
-    fn files_with_only_an_order_list_in_the_tree_order_and_then_carry_a_position() {
-        let dir = Scratch::new();
-        raw(&dir, "aaaaaaaaaaaa", "active", None, 2);
-        raw(&dir, "bbbbbbbbbbbb", "active", None, 1);
-        raw(&dir, "cccccccccccc", "active", None, 1); // ties with b: by Item ID
-        raw(&dir, "dddddddddddd", "active", Some("bbbbbbbbbbbb"), 2);
-        raw(&dir, "eeeeeeeeeeee", "active", Some("bbbbbbbbbbbb"), 1);
-        raw(&dir, "ffffffffffff", "active", Some("eeeeeeeeeeee"), 1);
-        raw(&dir, "gggggggggggg", "backlog", None, 5);
-        let expected = ["bbbb", "eeee", "ffff", "dddd", "cccc", "aaaa"].map(|p| p.repeat(3));
-        let rows = |tasks: &Tasks| -> Vec<String> {
-            let rows = tasks.rows(Planning::Active).unwrap();
-            rows.into_iter().map(|r| r.task.id).collect()
-        };
-        assert_eq!(rows(&dir.store()), expected);
-
-        let migrated = files_in(&dir);
-        for (name, text) in &migrated {
-            let file = Document::parse(text).unwrap();
-            assert!(file.scalar("position").is_some(), "{name}");
-            assert!(file.scalar("order").is_none(), "{name}");
-        }
-        // Once: opening again rewrites nothing and lists the same.
-        assert_eq!(rows(&dir.store()), expected);
-        assert_eq!(files_in(&dir), migrated);
     }
 
     fn created_of(dir: &Scratch, id: &str) -> Option<String> {
@@ -2571,7 +2380,7 @@ mod tests {
     #[test]
     fn a_task_without_created_gets_it_from_the_modification_time() {
         let dir = Scratch::new();
-        raw(&dir, "aaaaaaaaaaaa", "active", None, 1);
+        raw(&dir, "aaaaaaaaaaaa", "active", None);
         let modified: std::time::SystemTime = fs::metadata(dir.0.join("aaaaaaaaaaaa.md"))
             .unwrap()
             .modified()
@@ -2590,56 +2399,27 @@ mod tests {
     }
 
     #[test]
-    fn migrating_keeps_the_updated_time_of_every_file() {
+    fn a_move_writes_the_places_of_the_lists_favorite_and_no_task_file() {
         let dir = Scratch::new();
-        raw(&dir, "aaaaaaaaaaaa", "active", None, 1);
-        list_of(&dir.store(), Planning::Active);
-        assert!(
-            files_in(&dir)[0]
-                .1
-                .contains("updated: 2000-01-01T00:00:00Z")
-        );
-    }
-
-    #[test]
-    fn a_folder_with_migrated_and_unmigrated_files_lists_the_unmigrated_last() {
-        let dir = Scratch::new();
-        raw_positioned(&dir, "pppppppppppp", 7.5);
-        raw_positioned(&dir, "qqqqqqqqqqqq", -3.0);
-        raw(&dir, "zzzzzzzzzzzz", "active", None, 1);
-        raw(&dir, "yyyyyyyyyyyy", "active", Some("zzzzzzzzzzzz"), 1);
+        let (tasks, [a, b, c]) = move_fixture(&dir);
         let before = files_in(&dir);
-        let tasks = dir.store();
-        assert_eq!(
-            titles(&tasks, Planning::Active),
-            [
-                "qqqqqqqqqqqq",
-                "pppppppppppp",
-                "zzzzzzzzzzzz",
-                "yyyyyyyyyyyy"
-            ]
-        );
-        for (name, text) in files_in(&dir) {
-            let unchanged = before.iter().any(|(n, t)| *n == name && *t == text);
-            assert_eq!(unchanged, name.starts_with(['p', 'q']), "{name}");
-        }
+        tasks.move_before(&c.id, Some(&b.id)).unwrap();
+        assert_eq!(files_in(&dir), before);
+        assert_eq!(titles(&tasks, Planning::Active), ["a", "c", "b"]);
+        let favorite = dir.0.parent().unwrap().join("Filters/tasksactive2.md");
+        let favorite = Document::parse(&fs::read_to_string(favorite).unwrap()).unwrap();
+        let places = favorite.list("places").unwrap();
+        assert!(places.iter().any(|p| p.starts_with(&a.id)), "{places:?}");
     }
 
     #[test]
-    fn a_move_writes_a_fractional_position_and_nothing_else_changes() {
+    fn without_its_favorite_a_list_keeps_the_order_of_creation() {
         let dir = Scratch::new();
-        let (tasks, [_, b, c]) = move_fixture(&dir);
-        tasks.move_before(&c.id, Some(&b.id)).unwrap();
-        let text = file_of(&dir, &c);
-        let position: f64 = Document::parse(&text)
-            .unwrap()
-            .scalar("position")
-            .unwrap()
-            .parse()
-            .unwrap();
-        assert!(1.0 < position && position < 2.0, "{position}");
-        assert!(!text.contains("order"));
-        assert_eq!(titles(&tasks, Planning::Active), ["a", "c", "b"]);
+        let (tasks, [a, b, c]) = move_fixture(&dir);
+        fs::remove_file(dir.0.parent().unwrap().join("Filters/tasksactive2.md")).unwrap();
+        tasks.move_before(&c.id, Some(&a.id)).unwrap();
+        assert_eq!(titles(&tasks, Planning::Active), ["a", "b", "c"]);
+        let _ = b;
     }
 
     #[test]
@@ -2800,7 +2580,7 @@ mod tests {
         let dir = Scratch::new();
         let tasks = dir.store();
         let (a, _) = two_tasks(&tasks);
-        raw(&dir, "dddddddddddd", "done", None, 1);
+        raw(&dir, "dddddddddddd", "done", None);
         for blocker in ["aaaaaaaaaaaa", "dddddddddddd"] {
             assert!(matches!(
                 tasks.add_blocker(&a.id, blocker),
@@ -2840,12 +2620,13 @@ mod tests {
 
     /// `raw` with a `blocked-by` list.
     fn raw_blocked(dir: &Scratch, id: &str, state: &str, blockers: &[&str]) {
-        raw(dir, id, state, None, 1);
+        raw(dir, id, state, None);
         let path = dir.0.join(format!("{id}.md"));
         let list: String = blockers.iter().map(|b| format!("  - {b}\n")).collect();
-        let text = fs::read_to_string(&path)
-            .unwrap()
-            .replace("order: 1\n", &format!("order: 1\nblocked-by:\n{list}"));
+        let text = fs::read_to_string(&path).unwrap().replace(
+            "priority: 4\n",
+            &format!("priority: 4\nblocked-by:\n{list}"),
+        );
         fs::write(path, text).unwrap();
     }
 
@@ -2892,16 +2673,19 @@ mod tests {
             .unwrap()
             .replace("kept", "changed");
         fs::write(&path, text).unwrap();
-        raw(&dir, "aaaaaaaaaaaa", "active", None, 0);
+        raw(&dir, "aaaaaaaaaaaa", "active", None);
         fs::remove_file(dir.0.join(format!("{}.md", other.id))).unwrap();
-        // A Task found without a position joins the end.
+        let sorted = |mut titles: Vec<String>| {
+            titles.sort();
+            titles
+        };
         assert_eq!(
-            titles(&tasks, Planning::Active),
-            ["changed", "aaaaaaaaaaaa"]
+            sorted(titles(&tasks, Planning::Active)),
+            ["aaaaaaaaaaaa", "changed"]
         );
         assert_eq!(
-            titles(&dir.store(), Planning::Active),
-            ["changed", "aaaaaaaaaaaa"]
+            sorted(titles(&dir.store(), Planning::Active)),
+            ["aaaaaaaaaaaa", "changed"]
         );
     }
 
@@ -2914,7 +2698,7 @@ mod tests {
         let path = dir.0.join(format!("{}.md", task.id));
         let text = fs::read_to_string(&path)
             .unwrap()
-            .replace("state: active", "state: rejected");
+            .replace("priority:", "state: rejected\npriority:");
         fs::write(&path, text).unwrap();
         assert!(titles(&tasks, Planning::Active).is_empty());
     }
@@ -3017,6 +2801,7 @@ mod tests {
     fn tasks_live_on_any_files() {
         let files = Arc::new(crate::files::MemoryFiles::default());
         let tasks = Tasks::open_in(files.clone(), "Tasks");
+        files.take_changes(); // the migration
         let task = tasks.create("Buy milk", Planning::Backlog, 4, &[]).unwrap();
         tasks.add_tag(&task.id, "home").unwrap();
         tasks.plan(&task.id, Planning::Active).unwrap();

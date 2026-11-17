@@ -14,6 +14,14 @@ import Testing
                 root: root.appending(path: "Tasks").path))
     }
 
+    /// A model on a Device that has no Filters: the three Favorites a new Device
+    /// starts with are Deleted.
+    func openModelWithoutFavorites() throws -> TasksModel {
+        let store = try TaskStore.open(root: root.appending(path: "Tasks").path)
+        for filter in try store.filters() { try store.deleteFilter(id: filter.id) }
+        return TasksModel(store: store)
+    }
+
     @Test func aTaskIsAddedWithTheTitleAndPriorityOfQuickAdd() throws {
         let model = try openModel()
         let quickAdd = TaskQuickAdd()
@@ -607,7 +615,7 @@ import Testing
     }
 
     @Test func aTaskAddedInAFilterGetsTheTagsItsQueryRequires() throws {
-        let model = try openModel()
+        let model = try openModelWithoutFavorites()
         model.addFilter(title: "Work", query: "@work & !@review")
         model.addFilter(title: "Either", query: "@a | @b")
         model.addFilter(title: "All", query: "*")
@@ -623,7 +631,7 @@ import Testing
     }
 
     @Test func aQueryTakesWildcardsSuggestingNothingForThemAndMarkingThoseThatFitNoTag() throws {
-        let model = try openModel()
+        let model = try openModelWithoutFavorites()
         model.add(title: "t", tags: ["work-backlog"])
         #expect(TasksModel.allowedQueryText("@*Backlog") == "@*backlog")
         #expect(model.suggestQueryTags("@*back").isEmpty)
@@ -633,7 +641,7 @@ import Testing
     }
 
     @Test func theBarListsActiveBacklogFavoritesInTheFiltersOrderThenFilters() throws {
-        let model = try openModel()
+        let model = try openModelWithoutFavorites()
         #expect(model.bar == [.active, .backlog, .filters])
         for title in ["A", "B", "C"] { model.addFilter(title: title, query: "@a") }
         let ids = model.filters.map(\.id)
@@ -647,7 +655,7 @@ import Testing
     }
 
     @Test func aFilterOpenedFromTheFiltersListIsUnderFiltersUnlessItIsAFavorite() throws {
-        let model = try openModel()
+        let model = try openModelWithoutFavorites()
         model.addFilter(title: "A", query: "@a")
         let id = model.filters[0].id
         model.list = .filter(id)
@@ -659,7 +667,7 @@ import Testing
     }
 
     @Test func aFilterOpenOnTopOfTheFiltersListIsTheNavigationPathAndGoingBackLeavesIt() throws {
-        let model = try openModel()
+        let model = try openModelWithoutFavorites()
         model.addFilter(title: "A", query: "@a")
         let id = model.filters[0].id
         #expect(model.openFilterPath.isEmpty)
@@ -690,7 +698,7 @@ import Testing
     }
 
     @Test func aFilterShownThatSyncDeletesShowsTheFiltersList() throws {
-        let model = try openModel()
+        let model = try openModelWithoutFavorites()
         model.addFilter(title: "A", query: "@a")
         let id = model.filters[0].id
         model.setFavorite(id, to: true)
@@ -702,7 +710,7 @@ import Testing
     }
 
     @Test func aFilterKeepsNamingATagAfterItIsDeleted() throws {
-        let model = try openModel()
+        let model = try openModelWithoutFavorites()
         model.add(title: "t", tags: ["x"])
         model.addFilter(title: "F", query: "!@x")
         model.deleteTag("x")
@@ -710,8 +718,8 @@ import Testing
         #expect(model.checkQuery("!@x").unknown == ["x"])
     }
 
-    @Test func aFilterIsCreatedAtTheEndOfTheListAndShowsTheActiveTasksItsQueryMatches() throws {
-        let model = try openModel()
+    @Test func aFilterIsCreatedAtTheEndOfTheListAndShowsTheOpenTasksItsQueryMatches() throws {
+        let model = try openModelWithoutFavorites()
         model.add(title: "Reply", tags: ["work"])
         model.add(title: "Review", tags: ["work", "in-review"])
         model.add(title: "Milk", tags: ["home"])
@@ -723,7 +731,7 @@ import Testing
         #expect(model.filters.map(\.title) == ["Work", "Home"])
 
         model.list = .filter(model.filters[0].id)
-        #expect(model.tasks.map(\.title) == ["Reply"])
+        #expect(model.tasks.map(\.title) == ["Reply", "Plan"])
         model.list = .filter(model.filters[1].id)
         #expect(model.tasks.map(\.title) == ["Milk"])
         model.list = .filters
@@ -731,7 +739,7 @@ import Testing
     }
 
     @Test func aFilterWithoutTitleOrWithAnUnreadableQueryIsRefused() throws {
-        let model = try openModel()
+        let model = try openModelWithoutFavorites()
         #expect(!model.addFilter(title: "  ", query: "@work"))
         #expect(!model.addFilter(title: "Work", query: "@work &"))
         #expect(model.filters.isEmpty)
@@ -740,18 +748,20 @@ import Testing
     }
 
     @Test func aTaskLeavesAFilterAsSoonAsItNoLongerMatches() throws {
-        let model = try openModel()
+        let model = try openModelWithoutFavorites()
         model.add(title: "Reply", tags: ["work"])
         model.addFilter(title: "Work", query: "@work")
         model.list = .filter(model.filters[0].id)
         #expect(model.tasks.map(\.title) == ["Reply"])
 
         model.plan(model.tasks[0], as: .backlog)
+        #expect(model.tasks.map(\.title) == ["Reply"])
+        model.deleteTag("work")
         #expect(model.tasks.isEmpty)
     }
 
     @Test func addingFromAFilterStaysInItAndAddsToActive() throws {
-        let model = try openModel()
+        let model = try openModelWithoutFavorites()
         model.addFilter(title: "Work", query: "@work")
         let filter = TasksList.filter(model.filters[0].id)
         model.list = filter
@@ -764,7 +774,7 @@ import Testing
     }
 
     @Test func aTaskIsDraggedInAFilterWithoutChangingActiveOrOtherFilters() throws {
-        let model = try openModel()
+        let model = try openModelWithoutFavorites()
         for title in ["one", "two", "three"] { model.add(title: title, tags: ["work"]) }
         model.addFilter(title: "Work", query: "@work")
         model.addFilter(title: "Other", query: "@work")
@@ -779,7 +789,7 @@ import Testing
     }
 
     @Test func aTaskThatLeavesAFilterAndComesBackStartsAtTheEnd() throws {
-        let model = try openModel()
+        let model = try openModelWithoutFavorites()
         for title in ["one", "two", "three"] { model.add(title: title, tags: ["work"]) }
         model.addFilter(title: "Work", query: "@work")
         let filter = TasksList.filter(model.filters[0].id)
@@ -798,7 +808,7 @@ import Testing
     }
 
     @Test func aFilterIsEditedKeepingItsPlaceAndRefusingWhatCreatingRefuses() throws {
-        let model = try openModel()
+        let model = try openModelWithoutFavorites()
         model.addFilter(title: "Work", query: "@work")
         model.addFilter(title: "Home", query: "@home")
         let id = model.filters[0].id
@@ -812,7 +822,7 @@ import Testing
     }
 
     @Test func deletingAFilterLeavesTheTasksAndLeavesItsOpenList() throws {
-        let model = try openModel()
+        let model = try openModelWithoutFavorites()
         model.add(title: "Reply", tags: ["work"])
         model.addFilter(title: "Work", query: "@work")
         model.addFilter(title: "Home", query: "@home")
@@ -827,7 +837,7 @@ import Testing
     }
 
     @Test func filtersAreReorderedAndCountTheirActiveTasks() throws {
-        let model = try openModel()
+        let model = try openModelWithoutFavorites()
         model.add(title: "one", tags: ["a"])
         model.add(title: "two", tags: ["a"])
         model.addFilter(title: "A", query: "@a")

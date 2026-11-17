@@ -18,6 +18,9 @@ beforeEach(async () => {
   model = new TasksModel(await TaskFiles.open(storage));
 });
 
+/** Starts a Filters test from none: a new Device has the migration's three Favorites. */
+const deleteFavorites = () => [...model.filters].forEach((filter) => model.deleteFilter(filter));
+
 const titles = () => model.tasks.map((task) => task.title);
 const first = () => model.tasks[0];
 
@@ -755,7 +758,9 @@ describe("Sync", () => {
     await model.saved();
     const other = await TaskFiles.open(new MemoryStorage());
     other.store.create("Theirs", Planning.Active, 4, []);
-    const [path] = other.store.takeChanges().filter((p) => p.endsWith(".md"));
+    const [path] = other.store
+      .takeChanges()
+      .filter((p) => p.startsWith("Tasks/") && p.endsWith(".md"));
     await storage.write(path, new TextEncoder().encode(other.store.file(path)));
     await model.syncDidChange();
     expect(titles().sort()).toEqual(["Mine", "Theirs"]);
@@ -874,6 +879,7 @@ describe("Filters", () => {
   beforeEach(() => {
     let now = Date.now();
     vi.spyOn(Date, "now").mockImplementation(() => (now += 1000));
+    deleteFavorites();
   });
   afterEach(() => vi.restoreAllMocks());
 
@@ -899,16 +905,16 @@ describe("Filters", () => {
     expect(model.filters).toHaveLength(2);
   });
 
-  it("counts the Active Tasks each Filter matches, never the Backlog", () => {
+  it("counts the Open Tasks each Filter matches, the Backlog included", () => {
     model.add("A", Planning.Active, { tags: ["work"] });
     model.add("B", Planning.Active, { tags: ["work", "home"] });
     model.add("C", Planning.Backlog, { tags: ["work"] });
     model.addFilter("Work", "@work");
     model.addFilter("Only work", "@work & !@home");
     model.addFilter("None", "@nothing");
-    expect(model.filters.map((f) => f.matches)).toEqual([2, 1, 0]);
+    expect(model.filters.map((f) => f.matches)).toEqual([3, 2, 0]);
     model.add("D", Planning.Active, { tags: ["work"] });
-    expect(filter("Work").matches).toBe(3);
+    expect(filter("Work").matches).toBe(4);
   });
 
   it("gives a Task created in a Filter the Tags its Query requires", () => {
@@ -947,14 +953,14 @@ describe("Filters", () => {
     expect(filterTitles()).toEqual(["A", "B", "C"]);
   });
 
-  it("shows a Filter's Active Tasks, Subtasks on their own, in Active's order", () => {
+  it("shows a Filter's Open Tasks, the Backlog's and Subtasks on their own, in the order of creation", () => {
     model.add("A", Planning.Active, { tags: ["work"] });
     model.add("B", Planning.Active);
     model.add("C", Planning.Active, { tags: ["work"] });
     model.add("D", Planning.Backlog, { tags: ["work"] });
     model.addFilter("Work", "@work");
     model.list = { kind: "filter", id: filter("Work").id };
-    expect(titles()).toEqual(["A", "C"]);
+    expect(titles()).toEqual(["A", "C", "D"]);
     model.addSubtask("Sub", model.tasks[0], { tags: ["work"] });
     expect(model.tasks.find((t) => t.title === "Sub")?.parentTitle).toBe("A");
   });
@@ -968,8 +974,10 @@ describe("Filters", () => {
     expect(model.list).toEqual(list);
     expect(titles()).toEqual(["A", "Plain"]);
     model.plan(first(), Planning.Backlog);
-    expect(titles()).toEqual(["Plain"]);
-    expect(filter("Work").matches).toBe(1);
+    expect(titles()).toEqual(["A", "Plain"]); // the Backlog is no longer out of sight
+    model.close(first(), Closing.Done);
+    expect(titles()).toEqual(["A", "Plain"]); // a pending Done stays, marked
+    expect(filter("Work").matches).toBe(2);
   });
 
   it("orders Tasks within a Filter only", () => {
@@ -1110,6 +1118,7 @@ describe("Filters", () => {
 
 describe("a Query being typed", () => {
   beforeEach(() => {
+    deleteFavorites();
     model.add("A", Planning.Active, { tags: ["work", "home"] });
   });
 

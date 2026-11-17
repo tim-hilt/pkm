@@ -23,7 +23,8 @@ describe("the Tasks in storage", () => {
     const first = await TaskFiles.open(storage);
     first.store.create("Buy milk", Planning.Active, 4, []);
     await first.save();
-    expect((await storage.files("Tasks")).map((file) => file.name)).toEqual([
+    expect((await storage.files("Tasks")).map((file) => file.name).sort()).toEqual([
+      ".lists-migrated",
       expect.stringMatching(/^[a-z0-9]{12}\.md$/),
     ]);
 
@@ -38,7 +39,33 @@ describe("the Tasks in storage", () => {
     files.store.create("One", Planning.Active, 4, []);
     await files.save();
     expect(await storage.files("Tasks/.history")).toEqual([]);
-    expect(await storage.files("Tasks")).toHaveLength(1);
+    expect(await storage.files("Tasks")).toHaveLength(2); // the Task and the migration's file
+  });
+
+  it("migrates the files of an old version once, and saves the result", async () => {
+    const storage = new MemoryStorage();
+    const legacy = (id: string, state: string) =>
+      new TextEncoder().encode(
+        `---\nid: ${id}\ntitle: ${id}\npriority: 4\nstate: ${state}\nposition: 1\nupdated: 2000-01-01T00:00:00Z\n---\n`,
+      );
+    await storage.write("Tasks/aaaaaaaaaaaa.md", legacy("aaaaaaaaaaaa", "backlog"));
+    await storage.write("Tasks/bbbbbbbbbbbb.md", legacy("bbbbbbbbbbbb", "done"));
+    const first = await TaskFiles.open(storage);
+    await first.save();
+
+    const names = async (folder: string) => (await storage.files(folder)).map((f) => f.name).sort();
+    expect(await names("Tasks")).toEqual([".lists-migrated", "aaaaaaaaaaaa.md"]);
+    expect(await names("Filters")).toHaveLength(3);
+    const text = new TextDecoder().decode((await storage.read("Tasks/aaaaaaaaaaaa.md"))!);
+    expect(text).toContain("- backlog");
+    expect(text).not.toContain("state:");
+    expect(titles(first, Planning.Backlog)).toEqual(["aaaaaaaaaaaa"]);
+
+    // A Filter Deleted afterwards stays deleted: the Device remembers it migrated.
+    await storage.remove((await names("Filters")).map((n) => `Filters/${n}`)[0]);
+    const second = await TaskFiles.open(storage);
+    await second.save();
+    expect(await names("Filters")).toHaveLength(2);
   });
 
   it("reloads with what was changed and Closed while it read the files", async () => {
