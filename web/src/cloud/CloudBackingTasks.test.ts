@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { type Core, Planning, loadCore } from "../core/Core";
+import { Closing, type Core, Planning, loadCore } from "../core/Core";
 import { DrawingStore } from "../drawings/gallery/DrawingStore";
 import { MemoryStorage } from "../storage/MemoryStorage";
 import { TaskFiles } from "../tasks/TaskFiles";
@@ -44,7 +44,7 @@ async function device(tabs?: MemoryTabGroup): Promise<Device> {
   const cloud = await CloudBacking.open(
     core,
     storage,
-    server.fetch,
+    server.cachingFetch(),
     new DrawingStore(storage, core),
     tabs?.tab(),
   );
@@ -98,6 +98,27 @@ describe("the Tasks folders", () => {
     await sync(tablet);
     expect(await titles(tablet)).toEqual(["Buy milk"]);
     expect(tablet.tasksChanged).toBe(1);
+  });
+
+  it("reads a Task another Device Closed since, past the browser's HTTP cache", async () => {
+    const browser = await device();
+    const tablet = await device();
+    await createTask(tablet, "Buy milk");
+    await settle();
+    await sync(browser);
+    expect(await titles(browser)).toEqual(["Buy milk"]);
+
+    const files = await TaskFiles.open(core, tablet.storage);
+    const [row] = files.store.tasks(Planning.Active);
+    files.store.close(row.id, Closing.Done);
+    row.free();
+    files.store.commit();
+    await files.save();
+    tablet.cloud.localChange();
+    await settle();
+
+    await sync(browser);
+    expect(await titles(browser)).toEqual([]);
   });
 
   it("Syncs the Tags to the server and another Device, and tells it", async () => {

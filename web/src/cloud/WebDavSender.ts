@@ -19,7 +19,7 @@ export interface DavResult {
  * is over. Every request carries `Authorization: Basic` (the protocol sees to
  * that), so the browser's own password prompt never appears. A `fetch` that
  * throws (no network, an untrusted certificate, CORS) ends it as unreachable
- * or offline. Frees the operation.
+ * or offline. The browser's HTTP cache is bypassed. Frees the operation.
  */
 export async function runExchange(exchange: DavExchange, send: Fetch): Promise<DavResult> {
   try {
@@ -39,6 +39,9 @@ export async function runExchange(exchange: DavExchange, send: Fetch): Promise<D
           body: content.length > 0 ? (content as BodyInit) : undefined,
           // Credentials are ours; never the browser's.
           credentials: "omit",
+          // Sync must see what the server holds now, never a copy the browser
+          // kept: a stale GET merges an old version over newer ones.
+          cache: "no-store",
         });
         body = new Uint8Array(await response.arrayBuffer());
       } catch {

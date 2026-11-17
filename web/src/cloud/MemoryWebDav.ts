@@ -84,6 +84,29 @@ export class MemoryWebDav {
     }
   };
 
+  /**
+   * `fetch` through a browser's HTTP cache, one per Device: as for a real
+   * server's `Last-Modified` without `Cache-Control`, a GET is answered from
+   * what the cache kept, unless the request's `cache` mode says otherwise; a
+   * write to the URL drops it.
+   */
+  cachingFetch(): (input: string | URL, init?: RequestInit) => Promise<Response> {
+    const kept = new Map<string, Uint8Array>();
+    return async (input, init = {}) => {
+      const url = String(input);
+      const method = init.method ?? "GET";
+      const cacheable = method === "GET" && (init.cache ?? "default") === "default";
+      const hit = kept.get(url);
+      if (cacheable && hit) return new Response(hit.slice());
+      const response = await this.fetch(input, init);
+      if (method === "PUT" || method === "DELETE" || method === "MOVE") kept.delete(url);
+      if (!cacheable || !response.ok) return response;
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      kept.set(url, bytes);
+      return new Response(bytes.slice());
+    };
+  }
+
   /** The names and contents of the files in the folder `inside` (relative to the root). */
   contents(inside = ""): Map<string, Uint8Array> {
     const found = new Map<string, Uint8Array>();
