@@ -607,6 +607,16 @@ import Testing
         #expect(TasksModel.allowedQueryText("@Work & !@Ho_me") == "@work & !@home")
     }
 
+    @Test func aQueryTakesWildcardsSuggestingNothingForThemAndMarkingThoseThatFitNoTag() throws {
+        let model = try openModel()
+        model.add(title: "t", tags: ["work-backlog"])
+        #expect(TasksModel.allowedQueryText("@*Backlog") == "@*backlog")
+        #expect(model.suggestQueryTags("@*back").isEmpty)
+        #expect(model.checkQuery("@*backlog | @*nope*").unknown == ["*nope*"])
+        model.addFilter(title: "Backlogs", query: "@*backlog")
+        #expect(model.filters[0].matches == 1)
+    }
+
     @Test func theBarListsActiveBacklogFavoritesInTheFiltersOrderThenFilters() throws {
         let model = try openModel()
         #expect(model.bar == [.active, .backlog, .filters])

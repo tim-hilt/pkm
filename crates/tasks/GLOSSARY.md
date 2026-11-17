@@ -66,6 +66,10 @@ _Avoid_: View, smart list, saved search, perspective
 The expression a Filter matches Tasks by, on their own Tags, e.g. `@work & !@in-review`.
 _Avoid_: Filter (that is the saved whole), rule, search
 
+**Wildcard**:
+A `*` in a Query's Tag, standing for any characters or none, so that it matches every Tag that fits: `@*backlog`, `@*family*`, `@*` for any Tag.
+_Avoid_: Glob, pattern, regex
+
 **Favorite**:
 A Filter shown beside Active and Backlog, to be reached in one step.
 _Avoid_: Pin, star, shortcut (that is Quick Add's)

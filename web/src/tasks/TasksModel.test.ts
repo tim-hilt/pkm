@@ -1116,6 +1116,18 @@ describe("a Query being typed", () => {
     expect(TasksModel.completingQuery("@work & @h", "home")).toBe("@work & @home");
   });
 
+  it("takes Wildcards, suggesting nothing for them and marking those that fit no Tag", () => {
+    model.add("B", Planning.Active, { tags: ["work-backlog"] });
+    expect(TasksModel.allowedQueryText("@*Backlog")).toBe("@*backlog");
+    expect(model.suggestQueryTags("@*back")).toEqual([]);
+    expect(model.checkQuery("@*backlog | @*nope*")).toEqual({
+      problem: undefined,
+      unknown: ["*nope*"],
+    });
+    model.addFilter("Backlogs", "@*backlog");
+    expect(model.filters[0].matches).toBe(1);
+  });
+
   it("leaves a Query naming a Tag as it is when the Tag is Deleted", () => {
     model.addFilter("Work", "!@work");
     model.deleteTag("work");

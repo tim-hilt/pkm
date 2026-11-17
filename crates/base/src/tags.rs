@@ -124,6 +124,11 @@ impl Tags {
             .collect()
     }
 
+    /// Every Tag's name, alphabetically.
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.0.keys().map(String::as_str)
+    }
+
     /// Whether `tag` is known.
     pub fn contains(&self, tag: &str) -> bool {
         self.0.contains_key(tag)

@@ -200,14 +200,13 @@ impl Tasks {
         self.rewrite_filter(id, |file| set_places(file, &places))
     }
 
-    /// Checks a Query text without saving: the Tags it names that aren't
-    /// known (marked as such, and no reason to refuse it), or why it can't be
-    /// read.
+    /// Checks a Query text without saving: the Tags it names, Wildcards
+    /// included, that fit no known Tag (marked as such, and no reason to
+    /// refuse it), or why it can't be read.
     pub fn check_query(&self, text: &str) -> Result<Vec<String>, QueryError> {
-        let known = self.read_tags();
-        let mut named = Query::parse(text)?.tags();
-        named.retain(|t| !known.contains(t));
-        Ok(named)
+        let tags = self.read_tags();
+        let known: Vec<&str> = tags.names().collect();
+        Ok(Query::parse(text)?.unmatched(&known))
     }
 
     fn filters_folder(&self) -> PathBuf {
@@ -448,6 +447,7 @@ mod tests {
             Ok(vec!["nope".into(), "x".into()])
         );
         assert_eq!(tasks.check_query("@work"), Ok(vec![]));
+        assert_eq!(tasks.check_query("@wo* | @*nope"), Ok(vec!["*nope".into()]));
         assert_eq!(tasks.check_query("@work &").unwrap_err().position, 7);
         assert!(files.list(Path::new("Filters")).unwrap().is_empty());
     }

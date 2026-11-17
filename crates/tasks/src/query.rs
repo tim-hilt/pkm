@@ -8,13 +8,17 @@
 //! ```
 //!
 //! Whitespace between terms is ignored. A Tag matches exactly: `@work` does
-//! not match `work/acme`. The atom rule is the one place new terms would go.
+//! not match `work/acme`. A Wildcard `*` in it stands for any characters or
+//! none, `/` included: `@work*` does. The atom rule is the one place new
+//! terms would go.
 
 use pkm_base::tag;
 use std::fmt;
 
 /// Characters of a Query that aren't part of a Tag.
 const SYNTAX: &str = "@&|!() ";
+
+const WILDCARD: char = '*';
 
 /// Parentheses nest no deeper than this, so that no text can exhaust the stack.
 const MAX_DEPTH: usize = 64;
@@ -63,10 +67,12 @@ impl Query {
         }
     }
 
-    /// The Tags the Query names, each once, in order of appearance.
-    pub fn tags(&self) -> Vec<String> {
+    /// The Tags the Query names, Wildcards included, that fit none of `known`:
+    /// each once, in order of appearance.
+    pub fn unmatched(&self, known: &[&str]) -> Vec<String> {
         let mut named = Vec::new();
         self.0.collect_tags(&mut named);
+        named.retain(|t| !known.iter().any(|k| fits(t, k)));
         named
     }
 
@@ -82,7 +88,7 @@ impl Query {
 pub fn typed(text: &str) -> String {
     let mut kept = String::new();
     for c in text.chars().flat_map(char::to_lowercase) {
-        if SYNTAX.contains(c) {
+        if SYNTAX.contains(c) || c == WILDCARD {
             kept.push(c);
         } else {
             kept.push_str(&tag::strip_forbidden(c.encode_utf8(&mut [0; 4])));
@@ -92,10 +98,31 @@ pub fn typed(text: &str) -> String {
 }
 
 /// The Tag being typed at the end of `text`: what follows its last `@`, if
-/// that `@` isn't followed by a space or operator. Empty right after the `@`.
+/// that `@` isn't followed by a space, operator or Wildcard. Empty right after
+/// the `@`.
 pub fn unfinished_tag(text: &str) -> Option<&str> {
     let word = text.rsplit_once('@')?.1;
-    (!word.contains(|c: char| SYNTAX.contains(c))).then_some(word)
+    (!word.contains(|c: char| SYNTAX.contains(c) || c == WILDCARD)).then_some(word)
+}
+
+/// Whether `tag` fits `named`, a Tag that may hold Wildcards.
+fn fits(named: &str, tag: &str) -> bool {
+    let mut parts = named.split(WILDCARD);
+    let first = parts.next().unwrap_or_default();
+    let Some(last) = parts.next_back() else {
+        return named == tag;
+    };
+    let Some(mut rest) = tag.strip_prefix(first) else {
+        return false;
+    };
+    // Taking each middle part at its first fit leaves the most for the rest.
+    for part in parts {
+        match rest.find(part) {
+            Some(at) => rest = &rest[at + part.len()..],
+            None => return false,
+        }
+    }
+    rest.ends_with(last)
 }
 
 impl Expr {
@@ -115,7 +142,7 @@ impl Expr {
 
     fn matches(&self, tags: &[String]) -> bool {
         match self {
-            Self::Tag(tag) => tags.contains(tag),
+            Self::Tag(named) => tags.iter().any(|t| fits(named, t)),
             Self::Not(inner) => !inner.matches(tags),
             Self::And(parts) => parts.iter().all(|p| p.matches(tags)),
             Self::Or(parts) => parts.iter().any(|p| p.matches(tags)),
@@ -225,7 +252,9 @@ impl Parser {
         }
     }
 
-    /// `@` and the Tag after it: everything up to a space or an operator.
+    /// `@` and the Tag after it: everything up to a space or an operator. With
+    /// each Wildcard taken for a letter, it must be a valid Tag, else no Tag
+    /// could fit it.
     fn tag(&mut self) -> Result<Expr, QueryError> {
         let at = self.at;
         self.at += 1;
@@ -240,7 +269,7 @@ impl Parser {
         if name.is_empty() {
             return Err(self.error_at(at, "Expected a Tag after @"));
         }
-        if !tag::is_valid(&name) {
+        if !tag::is_valid(&name.replace(WILDCARD, "a")) {
             return Err(self.error_at(at, "Not a valid Tag"));
         }
         Ok(Expr::Tag(name))
@@ -262,9 +291,49 @@ mod tests {
     }
 
     #[test]
-    fn a_query_lists_the_tags_it_names_once() {
-        let query = Query::parse("@work & !(@home | @work) | @a/b").unwrap();
-        assert_eq!(query.tags(), ["work", "home", "a/b"]);
+    fn a_query_lists_what_it_names_that_matches_no_known_tag_once() {
+        let query = Query::parse("@work & !(@home | @nope | @nope) | @a/b | @*log | @*x*").unwrap();
+        let known = ["work", "backlog"];
+        assert_eq!(query.unmatched(&known), ["home", "nope", "a/b", "*x*"]);
+    }
+
+    #[test]
+    fn a_wildcard_stands_for_any_characters_or_none() {
+        assert!(matches("@*backlog", &["work-backlog"]));
+        assert!(matches("@*backlog", &["backlog"]));
+        assert!(!matches("@*backlog", &["backlog-old"]));
+        assert!(matches("@*family*", &["my-family-trip"]));
+        assert!(matches("@*family*", &["family"]));
+        assert!(!matches("@*family*", &["fam"]));
+        assert!(matches("@q*-2026", &["q3-2026"]));
+        assert!(!matches("@q*-2026", &["q3-2025"]));
+        assert!(matches("@a*b*a", &["aba"]));
+        assert!(!matches("@a*b*a", &["ab"]));
+        assert!(!matches("@ab*ba", &["aba"]));
+        assert!(matches("@**x", &["x"]));
+    }
+
+    #[test]
+    fn a_wildcard_crosses_slashes_but_a_plain_tag_stays_exact() {
+        assert!(matches("@work*", &["work/acme"]));
+        assert!(matches("@*acme", &["work/acme"]));
+        assert!(matches("@*/acme", &["work/acme"]));
+        assert!(!matches("@work", &["work/acme"]));
+    }
+
+    #[test]
+    fn a_lone_wildcard_matches_any_tag() {
+        assert!(matches("@*", &["a"]));
+        assert!(!matches("@*", &[]));
+        assert!(matches("!@*", &[]));
+        assert!(matches("@* & !@b*", &["a"]));
+    }
+
+    #[test]
+    fn a_wildcard_that_could_never_fit_a_tag_is_an_error() {
+        assert_eq!(error("@/*"), (0, "Not a valid Tag".into()));
+        assert_eq!(error("@a*/"), (0, "Not a valid Tag".into()));
+        assert_eq!(error("@*_a"), (0, "Not a valid Tag".into()));
     }
 
     #[test]
@@ -274,6 +343,7 @@ mod tests {
             "@work & !(@home1 | @a/b-2)"
         );
         assert_eq!(typed("@a ä\n#"), "@a ");
+        assert_eq!(typed("@*Family*"), "@*family*");
     }
 
     #[test]
@@ -284,6 +354,12 @@ mod tests {
         assert_eq!(unfinished_tag("@a "), None);
         assert_eq!(unfinished_tag("(@a)"), None);
         assert_eq!(unfinished_tag(""), None);
+    }
+
+    #[test]
+    fn a_wildcard_is_no_unfinished_tag() {
+        assert_eq!(unfinished_tag("@*fam"), None);
+        assert_eq!(unfinished_tag("@a* & @wo"), Some("wo"));
     }
 
     #[test]
