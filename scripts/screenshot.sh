@@ -41,20 +41,38 @@ ipad) SIM='iPad Pro (12.9-inch) (4th generation)' ;;
 esac
 
 if [ "$DEVICE" = mac ]; then
+    # A locked screen shows no app windows, so there is nothing to capture.
+    if ioreg -n Root -d1 | grep -q '"CGSSessionScreenIsLocked"=Yes'; then
+        echo "error: the screen is locked; unlock it to take a Mac screenshot" >&2
+        exit 1
+    fi
     xcodebuild -quiet -scheme pkm -destination 'platform=macOS' -derivedDataPath "$DERIVED" build
     app="$DERIVED/Build/Products/Debug/pkm.app"
     pkill -x 'pkm' 2>/dev/null || true
+    while pgrep -xq 'pkm'; do sleep 0.2; done # so its window isn't the one captured
+    caffeinate -u -t 1 # wakes the display: a sleeping one shows no windows
     open -n "$app" --args "$LAUNCH_ARG"
-    sleep 8
     # Capture just the app's window, so other windows never end up in the file.
-    window=$(osascript -l JavaScript -e '
-        ObjC.import("CoreGraphics");
-        const list = ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo(1, 0)));
-        let id = "";
-        for (const w of Array.from(list)) {
-            if (w.kCGWindowOwnerName === "pkm" && w.kCGWindowLayer === 0 && (w.kCGWindowName || "").includes("'"$WINDOW_NAME"'")) { id = w.kCGWindowNumber; break; }
-        }
-        id')
+    # Waits up to 60 s for it, as a busy Mac can take long to launch the app.
+    window=
+    for _ in $(seq 60); do
+        sleep 1
+        window=$(osascript -l JavaScript -e '
+            ObjC.import("CoreGraphics");
+            const list = ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo(1, 0))) || [];
+            let id = "";
+            for (const w of Array.from(list)) {
+                if (w.kCGWindowOwnerName === "pkm" && w.kCGWindowLayer === 0 && (w.kCGWindowName || "").includes("'"$WINDOW_NAME"'")) { id = w.kCGWindowNumber; break; }
+            }
+            id')
+        [ -n "$window" ] && break
+    done
+    if [ -z "$window" ]; then
+        pkill -x 'pkm' || true
+        echo "error: no pkm window appeared on screen within 60 s" >&2
+        exit 1
+    fi
+    sleep 3 # lets the window finish its first layout and render
     screencapture -x -o -l "$window" "$OUT"
     pkill -x 'pkm' || true
 else
