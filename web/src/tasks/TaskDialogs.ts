@@ -18,7 +18,7 @@ export interface TaskPlaces {
 let nextId = 0;
 
 /** A modal `<dialog>` with a form of `fields` and `actions`, gone once closed. */
-function modal(
+export function modal(
   parent: HTMLElement,
   title: string,
   fields: HTMLElement[],
@@ -37,17 +37,17 @@ function modal(
 }
 
 /** A confirm button of a form, off while it can't be saved. */
-function confirmButton(label: string): HTMLButtonElement {
+export function confirmButton(label: string): HTMLButtonElement {
   const confirm = make("button", "tasks-confirm", [label]);
   confirm.type = "submit";
   return confirm;
 }
 
-function field(label: string, control: HTMLElement): HTMLLabelElement {
+export function field(label: string, control: HTMLElement): HTMLLabelElement {
   return make("label", "tasks-field", [make("span", "", [label]), control]);
 }
 
-function textInput(value: string): HTMLInputElement {
+export function textInput(value: string): HTMLInputElement {
   const input = make("input", "tasks-input");
   input.type = "text";
   input.value = value;

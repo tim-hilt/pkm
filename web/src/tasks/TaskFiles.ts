@@ -11,8 +11,9 @@ const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
  * files in memory; this opens it from what is saved and saves what it
  * changed: the Task files, and this Device's History files
  * (`Tasks/.history/<device>-<yyyy-mm>.log`), which the store appends to and so
- * needs to start from, and the Tags (`Tags/tags.json`). Other Devices' History
- * files are never read.
+ * needs to start from, the Tags (`Tags/tags.json`) and the Filters
+ * (`Filters/<id>.md`); a file the store removed is removed. Other Devices'
+ * History files are never read.
  */
 export class TaskFiles {
   /** The writes in progress: each save waits for the one before. */
@@ -64,7 +65,8 @@ export class TaskFiles {
     if (changes.length === 0) return this.writing;
     const written = this.writing.then(async () => {
       for (const { path, text } of changes) {
-        if (text !== undefined) await this.storage.write(path, new TextEncoder().encode(text));
+        if (text === undefined) await this.storage.remove(path);
+        else await this.storage.write(path, new TextEncoder().encode(text));
       }
     });
     this.writing = written.catch(() => {});
@@ -79,7 +81,7 @@ export class TaskFiles {
   }
 }
 
-/** A store opened on the Task files and this Device's History files. */
+/** A store opened on the Task files, this Device's History files, the Tags and the Filters. */
 async function load(device: string, storage: FileStorage): Promise<TaskStore> {
   const folder = TaskStore.folder();
   const paths: string[] = [];
@@ -95,6 +97,7 @@ async function load(device: string, storage: FileStorage): Promise<TaskStore> {
   await take(folder, (name) => name.endsWith(".md"));
   await take(`${folder}/.history`, (name) => name.startsWith(`${device}-`));
   await take("Tags", (name) => name === "tags.json");
+  await take(TaskStore.filtersFolder(), (name) => name.endsWith(".md"));
   return new TaskStore(device, paths, texts);
 }
 

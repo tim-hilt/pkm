@@ -24,6 +24,8 @@ import init, {
   darkModeColor,
   isValidTag,
   stripForbiddenTagCharacters,
+  typedQuery,
+  unfinishedQueryTag,
   areSameDrawing,
   claimItemIds,
   drawingItemId,
@@ -67,6 +69,8 @@ export {
   darkModeColor,
   isValidTag,
   stripForbiddenTagCharacters,
+  typedQuery,
+  unfinishedQueryTag,
 };
 
 /** The sections of the Properties panel that apply. */

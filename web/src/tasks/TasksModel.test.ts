@@ -860,3 +860,186 @@ describe("Tags", () => {
     expect(reopened.allTags.find((t) => t.name === "work")?.color).toBe("#d0021b");
   });
 });
+
+describe("Filters", () => {
+  const filterTitles = () => model.filters.map((f) => f.title);
+  const filter = (title: string) => model.filters.find((f) => f.title === title)!;
+
+  it("starts with none, and shows the Filters list once chosen", () => {
+    expect(model.filters).toEqual([]);
+    model.list = { kind: "filters" };
+    expect(model.list).toEqual({ kind: "filters" });
+    expect(model.tasks).toEqual([]);
+  });
+
+  it("creates Filters at the end, refusing an empty Title and a Query that can't be read", () => {
+    expect(model.addFilter("Work", "@work")).toBe(true);
+    expect(model.addFilter("Home", "@home | @garden")).toBe(true);
+    expect(model.addFilter("  ", "@home")).toBe(false);
+    expect(model.addFilter("Bad", "@work &")).toBe(false);
+    expect(filterTitles()).toEqual(["Work", "Home"]);
+    expect(filter("Work")).toMatchObject({ query: "@work", favorite: false, error: undefined });
+  });
+
+  it("allows two Filters of one Title", () => {
+    expect(model.addFilter("Work", "@a")).toBe(true);
+    expect(model.addFilter("Work", "@b")).toBe(true);
+    expect(model.filters).toHaveLength(2);
+  });
+
+  it("counts the Active Tasks each Filter matches, never the Backlog", () => {
+    model.add("A", Planning.Active, { tags: ["work"] });
+    model.add("B", Planning.Active, { tags: ["work", "home"] });
+    model.add("C", Planning.Backlog, { tags: ["work"] });
+    model.addFilter("Work", "@work");
+    model.addFilter("Only work", "@work & !@home");
+    model.addFilter("None", "@nothing");
+    expect(model.filters.map((f) => f.matches)).toEqual([2, 1, 0]);
+    model.add("D", Planning.Active, { tags: ["work"] });
+    expect(filter("Work").matches).toBe(3);
+  });
+
+  it("edits the Title and Query, with the refusals of create", () => {
+    model.addFilter("Work", "@work");
+    const { id } = filter("Work");
+    expect(model.editFilter(id, "Job", "@job")).toBe(true);
+    expect(filter("Job")).toMatchObject({ id, query: "@job" });
+    expect(model.editFilter(id, "", "@job")).toBe(false);
+    expect(model.editFilter(id, "Job", "(@job")).toBe(false);
+    expect(filter("Job").query).toBe("@job");
+  });
+
+  it("moves a Filter before another, or to the end", () => {
+    for (const title of ["A", "B", "C"]) model.addFilter(title, "@x");
+    model.moveFilter(filter("C"), filter("A"));
+    expect(filterTitles()).toEqual(["C", "A", "B"]);
+    model.moveFilter(filter("C"), undefined);
+    expect(filterTitles()).toEqual(["A", "B", "C"]);
+  });
+
+  it("shows a Filter's Active Tasks, Subtasks on their own, in Active's order", () => {
+    model.add("A", Planning.Active, { tags: ["work"] });
+    model.add("B", Planning.Active);
+    model.add("C", Planning.Active, { tags: ["work"] });
+    model.add("D", Planning.Backlog, { tags: ["work"] });
+    model.addFilter("Work", "@work");
+    model.list = { kind: "filter", id: filter("Work").id };
+    expect(titles()).toEqual(["A", "C"]);
+    model.addSubtask("Sub", model.tasks[0], { tags: ["work"] });
+    expect(model.tasks.find((t) => t.title === "Sub")?.parentTitle).toBe("A");
+  });
+
+  it("closes, moves to the Backlog and adds Tasks inside a Filter, which stays shown", () => {
+    model.add("A", Planning.Active, { tags: ["work"] });
+    model.addFilter("Work", "@work");
+    const list = { kind: "filter" as const, id: filter("Work").id };
+    model.list = list;
+    model.add("Plain");
+    expect(model.list).toEqual(list);
+    expect(titles()).toEqual(["A"]);
+    model.plan(first(), Planning.Backlog);
+    expect(titles()).toEqual([]);
+    expect(filter("Work").matches).toBe(0);
+  });
+
+  it("orders Tasks within a Filter only", () => {
+    for (const title of ["A", "B", "C"]) model.add(title, Planning.Active, { tags: ["work"] });
+    model.addFilter("Work", "@work");
+    model.list = { kind: "filter", id: filter("Work").id };
+    model.moveBefore(model.tasks[2], model.tasks[0]);
+    expect(titles()).toEqual(["C", "A", "B"]);
+    model.list = { kind: "planning", planning: Planning.Active };
+    expect(titles()).toEqual(["A", "B", "C"]);
+  });
+
+  it("keeps the Filter shown when a Task of it is opened, and leaves one that is Deleted", () => {
+    model.add("A", Planning.Active, { tags: ["work"] });
+    model.addFilter("Work", "@work");
+    const list = { kind: "filter" as const, id: filter("Work").id };
+    model.list = list;
+    model.openLinked(first().id);
+    expect(model.list).toEqual(list);
+    expect(model.editing?.title).toBe("A");
+    model.openLinked(undefined);
+    model.deleteFilter(filter("Work"));
+    expect(model.list).toEqual({ kind: "filters" });
+    expect(model.filters).toEqual([]);
+    expect(titles()).toEqual([]);
+  });
+
+  it("Deletes a Filter after which every Task is as it was", () => {
+    model.add("A", Planning.Active, { tags: ["work"] });
+    model.addFilter("Work", "@work");
+    model.deleteFilter(filter("Work"));
+    model.list = { kind: "planning", planning: Planning.Active };
+    expect(titles()).toEqual(["A"]);
+    expect(first().tags).toEqual(["work"]);
+  });
+
+  it("saves Filters and their removal, and reads them again", async () => {
+    model.addFilter("Work", "@work");
+    model.addFilter("Home", "@home");
+    await model.saved();
+    expect((await storage.files("Filters")).map((f) => f.name)).toHaveLength(2);
+    model.deleteFilter(filter("Home"));
+    await model.saved();
+    expect((await storage.files("Filters")).map((f) => f.name)).toHaveLength(1);
+    const reopened = new TasksModel(await TaskFiles.open(core, storage));
+    expect(reopened.filters.map((f) => f.title)).toEqual(["Work"]);
+  });
+
+  it("lists a Filter whose stored Query can't be read with its error, matching nothing", async () => {
+    model.add("A", Planning.Active, { tags: ["work"] });
+    model.addFilter("Work", "@work");
+    await model.saved();
+    const [{ name }] = await storage.files("Filters");
+    const path = `Filters/${name}`;
+    const text = new TextDecoder().decode(await storage.read(path)).replace("'@work'", "'@work &'");
+    await storage.write(path, new TextEncoder().encode(text.replace("@work", "@work &")));
+    await model.syncDidChange();
+    expect(filter("Work").error).toBeDefined();
+    expect(filter("Work").matches).toBe(0);
+    expect(model.editFilter(filter("Work").id, "Work", "@work")).toBe(true);
+    expect(filter("Work").error).toBeUndefined();
+  });
+
+  it("follows Filters that Sync wrote", async () => {
+    model.addFilter("Work", "@work");
+    await model.saved();
+    const [{ name }] = await storage.files("Filters");
+    await storage.remove(`Filters/${name}`);
+    await model.syncDidChange();
+    expect(model.filters).toEqual([]);
+  });
+});
+
+describe("a Query being typed", () => {
+  beforeEach(() => {
+    model.add("A", Planning.Active, { tags: ["work", "home"] });
+  });
+
+  it("reports why it can't be read, with the position, and what Tags it names are unknown", () => {
+    expect(model.checkQuery("@a & (").problem).toEqual({
+      position: 6,
+      message: "Expected @tag, ! or (",
+    });
+    expect(model.checkQuery("@work | !@nope")).toEqual({ problem: undefined, unknown: ["nope"] });
+  });
+
+  it("makes typed text lowercase and refuses what neither a Tag nor the Query holds", () => {
+    expect(TasksModel.allowedQueryText("@Work & !(@Home)")).toBe("@work & !(@home)");
+    expect(TasksModel.allowedQueryText("@wo,rk")).toBe("@work");
+  });
+
+  it("suggests the known Tags for the Tag being typed, and completes it", () => {
+    expect(model.suggestQueryTags("@work & @h")).toEqual(["home"]);
+    expect(model.suggestQueryTags("@work & ")).toEqual([]);
+    expect(TasksModel.completingQuery("@work & @h", "home")).toBe("@work & @home");
+  });
+
+  it("leaves a Query naming a Tag as it is when the Tag is Deleted", () => {
+    model.addFilter("Work", "!@work");
+    model.deleteTag("work");
+    expect(model.filters[0].query).toBe("!@work");
+  });
+});

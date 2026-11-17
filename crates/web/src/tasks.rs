@@ -27,6 +27,51 @@ pub struct Blocker {
     pub closed: bool,
 }
 
+/// A Filter: a Title and a Query, see `pkm_tasks::Filter`.
+#[wasm_bindgen(getter_with_clone)]
+pub struct Filter {
+    pub id: String,
+    pub title: String,
+    /// As the user typed it.
+    pub query: String,
+    pub favorite: bool,
+    /// How many Active Tasks the Query matches.
+    pub matches: u32,
+    /// Why the stored Query can't be read; such a Filter matches nothing.
+    pub error: Option<String>,
+}
+
+impl From<pkm_tasks::Filter> for Filter {
+    fn from(f: pkm_tasks::Filter) -> Self {
+        Self {
+            id: f.id,
+            title: f.title,
+            query: f.query,
+            favorite: f.favorite,
+            matches: f.matches,
+            error: f.error,
+        }
+    }
+}
+
+/// What is wrong with a Query text, and where.
+#[wasm_bindgen(getter_with_clone)]
+#[derive(Clone)]
+pub struct QueryProblem {
+    /// In characters from the start of the text.
+    pub position: u32,
+    pub message: String,
+}
+
+/// What checking a Query text found.
+#[wasm_bindgen(getter_with_clone)]
+pub struct QueryCheck {
+    /// Why it can't be read, if it can't.
+    pub problem: Option<QueryProblem>,
+    /// Tags it names that don't exist: allowed, but worth marking.
+    pub unknown: Vec<String>,
+}
+
 /// A Tag that exists, with its Tag Color.
 #[wasm_bindgen(getter_with_clone)]
 #[derive(Clone)]
@@ -289,8 +334,14 @@ impl TaskStore {
         Tasks::FOLDER.to_owned()
     }
 
+    /// The folder of the Filters, beside the Tasks folder.
+    #[wasm_bindgen(js_name = filtersFolder)]
+    pub fn filters_folder() -> String {
+        Tasks::FILTERS_FOLDER.to_owned()
+    }
+
     /// Opens the Tasks from the saved files: `paths[i]` held `texts[i]`, in
-    /// storage paths (`Tasks/<id>.md`). `device` is this Device's ID.
+    /// storage paths (`Tasks/<id>.md`, `Filters/<id>.md`). `device` is this Device's ID.
     #[wasm_bindgen(constructor)]
     pub fn new(device: &str, paths: Vec<String>, texts: Vec<String>) -> Result<TaskStore, JsError> {
         let device =
@@ -492,6 +543,87 @@ impl TaskStore {
         Ok(self.listed(self.tasks.rows(planning.into()).map_err(error)?))
     }
 
+    /// Creates a Filter at the end of the Filters list, refusing an empty
+    /// Title or a Query that can't be read.
+    #[wasm_bindgen(js_name = createFilter)]
+    pub fn create_filter(&self, title: &str, query: &str) -> Result<Filter, JsError> {
+        self.tasks
+            .create_filter(title, query)
+            .map(Into::into)
+            .map_err(error)
+    }
+
+    /// Changes a Filter's Title and Query, refusing what `createFilter` does.
+    #[wasm_bindgen(js_name = editFilter)]
+    pub fn edit_filter(&self, id: &str, title: &str, query: &str) -> Result<Filter, JsError> {
+        self.tasks
+            .edit_filter(id, title, query)
+            .map(Into::into)
+            .map_err(error)
+    }
+
+    /// Marks a Filter as a Favorite, or unmarks it.
+    #[wasm_bindgen(js_name = setFavorite)]
+    pub fn set_favorite(&self, id: &str, favorite: bool) -> Result<(), JsError> {
+        self.tasks.set_favorite(id, favorite).map_err(error)
+    }
+
+    /// Moves a Filter before another, or to the end of the Filters list.
+    #[wasm_bindgen(js_name = moveFilter)]
+    pub fn move_filter(&self, id: &str, before: Option<String>) -> Result<(), JsError> {
+        self.tasks.move_filter(id, before.as_deref()).map_err(error)
+    }
+
+    /// Deletes a Filter; no Task changes.
+    #[wasm_bindgen(js_name = deleteFilter)]
+    pub fn delete_filter(&self, id: &str) -> Result<(), JsError> {
+        self.tasks.delete_filter(id).map_err(error)
+    }
+
+    /// Every Filter with its match count, in the Filters list's order.
+    pub fn filters(&self) -> Result<Vec<Filter>, JsError> {
+        let found = self.tasks.filters().map_err(error)?;
+        Ok(found.into_iter().map(Into::into).collect())
+    }
+
+    /// The Active Tasks a Filter matches, as `tasks` lists Active.
+    #[wasm_bindgen(js_name = filterTasks)]
+    pub fn filter_tasks(&self, id: &str) -> Result<Vec<ListedTask>, JsError> {
+        Ok(self.listed(self.tasks.filter_rows(id).map_err(error)?))
+    }
+
+    /// Moves a Task before another in a Filter's own order, or to its end.
+    #[wasm_bindgen(js_name = moveInFilter)]
+    pub fn move_in_filter(
+        &self,
+        id: &str,
+        task: &str,
+        before: Option<String>,
+    ) -> Result<(), JsError> {
+        self.tasks
+            .move_in_filter(id, task, before.as_deref())
+            .map_err(error)
+    }
+
+    /// Checks a Query text without saving: what is wrong with it, or which of
+    /// its Tags don't exist.
+    #[wasm_bindgen(js_name = checkQuery)]
+    pub fn check_query(&self, text: &str) -> QueryCheck {
+        match self.tasks.check_query(text) {
+            Ok(unknown) => QueryCheck {
+                problem: None,
+                unknown,
+            },
+            Err(e) => QueryCheck {
+                problem: Some(QueryProblem {
+                    position: u32::try_from(e.position).unwrap_or(u32::MAX),
+                    message: e.message,
+                }),
+                unknown: Vec::new(),
+            },
+        }
+    }
+
     /// The direct Subtasks of an Open Task, in either list: Open or pending
     /// Done, in their manual order.
     pub fn subtasks(&self, parent: &str) -> Result<Vec<ListedTask>, JsError> {
@@ -509,4 +641,18 @@ pub fn strip_forbidden_tag_characters(text: &str) -> String {
 #[wasm_bindgen(js_name = isValidTag)]
 pub fn is_valid_tag(tag: &str) -> bool {
     pkm_base::tag::is_valid(tag)
+}
+
+/// `text` as a Query may be typed: lowercase, without what neither a Tag nor
+/// the Query syntax can hold.
+#[wasm_bindgen(js_name = typedQuery)]
+pub fn typed_query(text: &str) -> String {
+    pkm_tasks::typed_query(text)
+}
+
+/// The Tag being typed at the end of a Query `text`, to suggest Tags for; none
+/// if it doesn't end in one.
+#[wasm_bindgen(js_name = unfinishedQueryTag)]
+pub fn unfinished_query_tag(text: &str) -> Option<String> {
+    pkm_tasks::unfinished_tag(text).map(str::to_owned)
 }

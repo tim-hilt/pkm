@@ -4,7 +4,7 @@ import { QuickAddField } from "./QuickAddField";
 import { RowDrag } from "./RowDrag";
 import { RowMenu } from "./RowMenu";
 import { taskLine } from "./TaskRow";
-import type { TasksModel } from "./TasksModel";
+import type { ListedTask, TasksModel } from "./TasksModel";
 
 const chevronGlyph = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>`;
 
@@ -31,7 +31,9 @@ export class SubtasksSection {
   /** Holds the "Add Subtask" button, or the Quick Add field it turned into. */
   private readonly adder = make("div", "tasks-subtasks-add", [this.addButton]);
   /** Its own, so that rows only reorder among the section's. */
-  private readonly drag = new RowDrag((subtask, before) => this.model.moveSubtask(subtask, before));
+  private readonly drag = new RowDrag<ListedTask>((subtask, before) =>
+    this.model.moveSubtask(subtask, before),
+  );
   private readonly menu = new RowMenu(document.body);
   private readonly body = make("div", "", [this.rows, this.adder]);
   /** The open Quick Add field and the Shortcuts it owns, until closed. */

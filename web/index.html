@@ -1334,6 +1334,66 @@
         gap: 4px;
         opacity: 0.7;
       }
+      .tasks-empty-new {
+        margin-top: 8px;
+        min-height: 40px;
+        padding: 0 16px;
+        border: 0;
+        border-radius: 8px;
+        background: var(--control-fill);
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+      }
+      /* A Filter's Tasks: a way back to the Filters list above its rows. */
+      .tasks-filter-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 0 auto;
+        max-width: 720px;
+        padding: 4px 0 8px;
+      }
+      .tasks-filter-title {
+        margin: 0;
+        font-size: 1.125rem;
+      }
+      .filter-count {
+        padding: 10px 0;
+        font-size: 0.875rem;
+        font-variant-numeric: tabular-nums;
+        opacity: 0.65;
+      }
+      .filter-query.error,
+      .tasks-query-note.error {
+        color: #c92a2a;
+      }
+      .tasks-query-note {
+        margin: 0;
+        font-size: 0.875rem;
+        color: #d9730d;
+      }
+      .tasks-query-suggestions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .tasks-query-suggestion {
+        padding: 4px 10px;
+        border: 0;
+        border-radius: 8px;
+        background: var(--control-fill);
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+      }
+      .tasks-actions .tasks-confirm.danger {
+        background: #c92a2a;
+        color: #fff;
+      }
       .tasks-failure {
         flex: none;
         margin: 0;
