@@ -967,6 +967,73 @@ describe("Filters", () => {
     expect(titles()).toEqual([]);
   });
 
+  it("moves Tasks inside a Filter, leaving Active's order alone", () => {
+    for (const title of ["A", "B", "C"]) model.add(title, Planning.Active, { tags: ["work"] });
+    model.addFilter("Work", "@work");
+    model.list = { kind: "filter", id: filter("Work").id };
+    model.moveBefore(model.tasks[0], undefined);
+    expect(titles()).toEqual(["B", "C", "A"]);
+    model.list = { kind: "planning", planning: Planning.Active };
+    expect(titles()).toEqual(["A", "B", "C"]);
+  });
+
+  it("offers Active, Backlog, the Favorites in the Filters' order, then Filters", () => {
+    expect(model.bar.map((e) => e.title)).toEqual(["Active", "Backlog", "Filters"]);
+    for (const title of ["A", "B", "C"]) model.addFilter(title, "@a");
+    model.setFavorite(filter("C"), true);
+    model.setFavorite(filter("A"), true);
+    expect(model.filter).toBeUndefined();
+    expect(filter("A").favorite).toBe(true);
+    expect(model.bar.map((e) => e.title)).toEqual(["Active", "Backlog", "A", "C", "Filters"]);
+    model.moveFilter(filter("C"), filter("A"));
+    expect(model.bar.map((e) => e.title)).toEqual(["Active", "Backlog", "C", "A", "Filters"]);
+    model.setFavorite(filter("C"), false);
+    expect(model.bar.map((e) => e.title)).toEqual(["Active", "Backlog", "A", "Filters"]);
+  });
+
+  it("puts a Filter that is no Favorite under Filters", () => {
+    model.addFilter("A", "@a");
+    model.list = { kind: "filter", id: filter("A").id };
+    expect(model.barEntry).toEqual({ kind: "filters" });
+    model.setFavorite(filter("A"), true);
+    expect(model.barEntry).toEqual({ kind: "filter", id: filter("A").id });
+    model.list = { kind: "planning", planning: Planning.Backlog };
+    expect(model.barEntry).toEqual({ kind: "planning", planning: Planning.Backlog });
+  });
+
+  it("saves a Favorite and reads it again", async () => {
+    model.addFilter("A", "@a");
+    model.setFavorite(filter("A"), true);
+    await model.saved();
+    const reopened = new TasksModel(await TaskFiles.open(core, storage));
+    expect(reopened.filters[0].favorite).toBe(true);
+  });
+
+  it("opens the Device's last list, and Active if its Filter is gone", async () => {
+    const values = new Map<string, string>();
+    const device = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => void values.set(key, value),
+    };
+    const open = async () => new TasksModel(await TaskFiles.open(core, storage), 5000, device);
+    const first = await open();
+    expect(first.list).toEqual({ kind: "planning", planning: Planning.Active });
+    first.addFilter("A", "@a");
+    await first.saved();
+    const id = first.filters[0].id;
+    for (const list of [
+      { kind: "planning" as const, planning: Planning.Backlog },
+      { kind: "filters" as const },
+      { kind: "filter" as const, id },
+    ]) {
+      first.list = list;
+      expect((await open()).list).toEqual(list);
+    }
+    first.deleteFilter(first.filters[0]);
+    first.list = { kind: "filter", id };
+    expect((await open()).list).toEqual({ kind: "planning", planning: Planning.Active });
+  });
+
   it("Deletes a Filter after which every Task is as it was", () => {
     model.add("A", Planning.Active, { tags: ["work"] });
     model.addFilter("Work", "@work");

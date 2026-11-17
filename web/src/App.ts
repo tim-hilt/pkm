@@ -60,7 +60,7 @@ export async function startApp(
   showChromeColors();
 
   const navigation = new Navigation(browserHistory(window), localStorage);
-  const tasks = new TasksModel(await TaskFiles.open(core, storage));
+  const tasks = new TasksModel(await TaskFiles.open(core, storage), undefined, localStorage);
   const shell = new Shell(navigation, new SettingsView(navigation, appearance, cloud, tasks));
   root.replaceChildren(shell.element);
   tasks.onSaved = () => cloud.tasksSaved();

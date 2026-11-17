@@ -84,22 +84,41 @@ export type TasksList =
   | { kind: "filters" }
   | { kind: "filter"; id: string };
 
-/** The Tasks bar: what each entry shows. */
-export const bar: { title: string; list: TasksList }[] = [
-  ...lists.map(({ planning, title }) => ({ title, list: { kind: "planning" as const, planning } })),
-  { title: "Filters", list: { kind: "filters" } },
-];
+const active: TasksList = { kind: "planning", planning: Planning.Active };
+const backlog: TasksList = { kind: "planning", planning: Planning.Backlog };
 
-/** The title of the bar's entry that shows `list`: a Filter is opened from the Filters list. */
-export function barEntry(list: TasksList): string {
+/** Whether `a` and `b` show the same list. */
+function sameList(a: TasksList, b: TasksList): boolean {
+  return storedList(a) === storedList(b);
+}
+
+/** The list as a Device stores it: `active`, `backlog`, `filters` or `filter:<id>` (as on Apple). */
+function storedList(list: TasksList): string {
   switch (list.kind) {
     case "planning":
-      return lists.find((l) => l.planning === list.planning)!.title;
+      return list.planning === Planning.Active ? "active" : "backlog";
     case "filters":
+      return "filters";
     case "filter":
-      return "Filters";
+      return `filter:${list.id}`;
   }
 }
+
+function parseList(stored: string | null): TasksList | undefined {
+  if (stored === "active") return active;
+  if (stored === "backlog") return backlog;
+  if (stored === "filters") return { kind: "filters" };
+  if (stored?.startsWith("filter:")) return { kind: "filter", id: stored.slice("filter:".length) };
+  return undefined;
+}
+
+/** What a Device keeps: the part of `localStorage` the last list uses. */
+export interface DeviceStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+const lastListKey = "lastTasksList";
 
 /** A Filter: a Title and a Query over the Active Tasks' Tags. */
 export interface Filter {
@@ -160,8 +179,35 @@ export class TasksModel {
   constructor(
     private readonly files: TaskFiles,
     private readonly revertWindow = 5000,
+    private readonly device?: DeviceStorage,
   ) {
     this.reload();
+    // The last list opens again, unless it is a Filter that is gone: then Active.
+    const last = parseList(device?.getItem(lastListKey) ?? null);
+    if (last && (last.kind !== "filter" || this.all.some((f) => f.id === last.id))) {
+      this.shownList = last;
+      this.reload();
+    }
+  }
+
+  /** The Tasks bar's entries: Active, Backlog, the Favorites in the Filters list's order, Filters. */
+  get bar(): { title: string; list: TasksList }[] {
+    return [
+      ...lists.map(({ planning, title }) => ({
+        title,
+        list: { kind: "planning" as const, planning },
+      })),
+      ...this.all
+        .filter((f) => f.favorite)
+        .map((f) => ({ title: f.title, list: { kind: "filter" as const, id: f.id } })),
+      { title: "Filters", list: { kind: "filters" as const } },
+    ];
+  }
+
+  /** The bar's entry that shows the list shown: a Filter that isn't a Favorite is under Filters. */
+  get barEntry(): TasksList {
+    const entry = this.bar.find(({ list }) => sameList(list, this.shownList));
+    return entry?.list ?? { kind: "filters" };
   }
 
   /** The list shown. */
@@ -171,6 +217,7 @@ export class TasksModel {
 
   set list(list: TasksList) {
     this.shownList = list;
+    this.device?.setItem(lastListKey, storedList(list));
     this.reload();
     this.onChange();
   }
@@ -406,6 +453,11 @@ export class TasksModel {
   /** Deletes a Filter; no Task changes. Shown, the Filters list shows instead. */
   deleteFilter(filter: Filter): void {
     this.apply(() => this.files.store.deleteFilter(filter.id));
+  }
+
+  /** Marks a Filter as a Favorite, which gives it an entry in the bar, or unmarks it. */
+  setFavorite(filter: Filter, favorite: boolean): void {
+    this.apply(() => this.files.store.setFavorite(filter.id, favorite));
   }
 
   /** Moves a Filter before `before` in the Filters list, or, with none, to its end. */

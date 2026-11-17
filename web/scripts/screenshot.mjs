@@ -1,5 +1,5 @@
-// Usage: [SCREEN=filters|filter] node scripts/screenshot.mjs [out.png] [url-path]
-// SCREEN=filters shows the Filters list, SCREEN=filter one Filter's Tasks, over
+// Usage: [SCREEN=filters|filter|favorites] node scripts/screenshot.mjs [out.png] [url-path]
+// SCREEN=filters shows the Filters list, SCREEN=filter one Filter's Tasks, SCREEN=favorites the Filters list with many Favorites, over
 // Tasks and Filters it first makes through the UI.
 // Serves nothing itself: expects the dev server on $PORT (default 3000).
 // Captures the page with Playwright's Chromium, WebGPU on.
@@ -21,7 +21,10 @@ try {
   page.on("pageerror", (error) => console.error(`[page error] ${error.message}`));
   await page.goto(`http://localhost:${port}${path}`);
   await page.waitForSelector(".shell, .unsupported");
-  if (screen === "filters" || screen === "filter") await seedFilters(page, screen === "filter");
+  if (screen === "filters" || screen === "filter" || screen === "favorites") {
+    await seedFilters(page, screen === "filter");
+  }
+  if (screen === "favorites") await seedFavorites(page);
   await page.waitForTimeout(1500);
   await page.screenshot({ path: out });
   console.log(out);
@@ -54,4 +57,18 @@ async function seedFilters(page, opensFilter) {
     }
   }
   if (opensFilter) await page.click(".task-open:has-text('Work')");
+}
+
+/** Adds Filters and marks them all as Favorites through the rows' menu, so that the bar overflows. */
+async function seedFavorites(page) {
+  for (const title of ["Reading list", "Errands", "Side project"]) {
+    await page.click(".tasks-new");
+    await page.fill("input[aria-label=Title]", title);
+    await page.type("input[aria-label=Query]", "@home");
+    await page.click(".tasks-confirm");
+  }
+  for (const title of ["Work", "Home or Garden", "Reading list", "Errands", "Side project"]) {
+    await page.click(`.task-open:has-text('${title}')`, { button: "right" });
+    await page.click("[role=menuitem]:has-text('Favorite')");
+  }
 }

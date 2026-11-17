@@ -6,15 +6,7 @@ import { RowDrag } from "./RowDrag";
 import { RowMenu, type RowMenuItem } from "./RowMenu";
 import { taskLine } from "./TaskRow";
 import { type TaskPlaces, editTaskDialog, newTaskDialog } from "./TaskDialogs";
-import {
-  type Filter,
-  type ListedTask,
-  type TasksList,
-  type TasksModel,
-  bar,
-  barEntry,
-  lists,
-} from "./TasksModel";
+import { type Filter, type ListedTask, type TasksList, type TasksModel, lists } from "./TasksModel";
 
 const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
 
@@ -26,14 +18,16 @@ const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" s
  * shows how many of its Subtasks are Done, a Subtask its Parent's Title,
  * before the Tags; rows are dragged to reorder. A row opens the edit view; its
  * menu (right click, long press) plans, moves or Rejects. The Filters entry of
- * the bar lists the Filters, with how many Tasks each matches; opening one shows
+ * the bar lists the Favorites, each a Filter, and the Filters, with how many Tasks each matches; opening one shows
  * its Tasks as Active's rows, under a way back. A port of the Swift
  * `TasksView`, in native elements.
  */
 export class TasksView {
   readonly element = make("main", "tasks");
   private readonly switch = make("div", "tasks-switch");
-  private readonly switchButtons = new Map<string, HTMLButtonElement>();
+  /** The bar as last built, to build it again only when its entries changed. */
+  private barKey = "";
+  private switchButtons: { list: TasksList; choose: HTMLButtonElement }[] = [];
   private readonly filterHeader = make("div", "tasks-filter-header");
   private readonly list = make("ul", "tasks-list");
   private readonly empty = make("div", "tasks-empty");
@@ -52,12 +46,6 @@ export class TasksView {
   ) {
     this.switch.setAttribute("role", "radiogroup");
     this.switch.setAttribute("aria-label", "List");
-    for (const { title, list } of bar) {
-      const choose = button("tasks-switch-button", title, () => (model.list = list));
-      choose.setAttribute("role", "radio");
-      this.switchButtons.set(title, choose);
-      this.switch.append(choose);
-    }
     onNewKey(this.element, () => this.createNew());
     this.create.innerHTML = plusGlyph;
     this.failure.setAttribute("role", "alert");
@@ -86,10 +74,7 @@ export class TasksView {
   update(): void {
     const { model } = this;
     const { list } = model;
-    const entry = barEntry(list);
-    for (const [title, choose] of this.switchButtons) {
-      choose.setAttribute("aria-checked", String(title === entry));
-    }
+    this.showBar();
     this.menu.hide();
     this.showList(list);
     this.showToast();
@@ -98,6 +83,29 @@ export class TasksView {
     this.showEditor();
     this.placeToast();
     this.editor?.refresh();
+  }
+
+  /** The bar's entries, the one that shows the list checked and scrolled into view. */
+  private showBar(): void {
+    const { model } = this;
+    const entries = model.bar;
+    const key = JSON.stringify(entries);
+    if (key !== this.barKey) {
+      this.barKey = key;
+      this.switchButtons = entries.map(({ title, list }) => {
+        const choose = button("tasks-switch-button", title, () => (model.list = list));
+        choose.setAttribute("role", "radio");
+        return { list, choose };
+      });
+      this.switch.replaceChildren(...this.switchButtons.map(({ choose }) => choose));
+    }
+    const current = JSON.stringify(model.barEntry);
+    for (const { list, choose } of this.switchButtons) {
+      const checked = JSON.stringify(list) === current;
+      choose.setAttribute("aria-checked", String(checked));
+      // The bar scrolls sideways when the entries don't fit.
+      if (checked) choose.scrollIntoView({ inline: "center", block: "nearest" });
+    }
   }
 
   /** "+" and the "n" key: a new Filter in the Filters list, a new Task elsewhere. */
@@ -148,6 +156,7 @@ export class TasksView {
       model.filters,
       {
         open: (filter) => (model.list = { kind: "filter", id: filter.id }),
+        favorite: (filter) => model.setFavorite(filter, !filter.favorite),
         edit: (filter) => filterDialog(model, element, filter),
         remove: (filter) => deleteFilterDialog(model, element, filter),
       },
