@@ -21,6 +21,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 const DEFAULT_PRIORITY: u8 = 4;
@@ -206,6 +207,8 @@ pub struct Tasks {
     pending: Mutex<Option<Pending>>,
     /// Held while the Tags file is read and written back.
     tags_lock: Mutex<()>,
+    /// Whole seconds of the last `created` given here.
+    last_created: AtomicU64,
 }
 
 impl Tasks {
@@ -249,6 +252,7 @@ impl Tasks {
             root,
             pending: Mutex::new(None),
             tags_lock: Mutex::new(()),
+            last_created: AtomicU64::new(0),
         }
     }
 
@@ -297,6 +301,17 @@ impl Tasks {
         self.insert(&new, planning, Some(&parent.task.id), placement.position)
     }
 
+    /// Now in ms, but at least a second after the last Task created here, so
+    /// that `created` (whole seconds) keeps the order of creation.
+    fn next_created(&self) -> f64 {
+        let secs = (now_ms() / 1000.0).floor() as u64;
+        let last = self
+            .last_created
+            .try_update(Relaxed, Relaxed, |l| Some(secs.max(l + 1)))
+            .map_or(secs, |l| secs.max(l + 1));
+        last as f64 * 1000.0
+    }
+
     /// Saves a new Task under a fresh Item ID and records its creation.
     fn insert(
         &self,
@@ -318,7 +333,7 @@ impl Tasks {
             }
             set_list(&mut file, TAGS, new.tags.clone());
             file.set_scalar(POSITION, position.to_string());
-            let now = now_ms();
+            let now = self.next_created();
             file.set_scalar(CREATED, iso8601(now));
             file.set_scalar("updated", iso8601(now));
             match self.write(&id, &file, Overwrite::No) {
