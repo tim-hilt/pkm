@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// A Task's Subtasks in its edit form: a header with the "Done/total" counter and a
+/// A Task's Subtasks in its edit form: a header with the Open Subtasks counter and a
 /// fold chevron, then the direct Subtasks as list rows. A tap opens a Subtask's form on top
 /// (the sheet's stack, as for a Blocker), unless `canOpen` is false (the Title on top is
 /// empty). The circle marks a Subtask Done or Reverts it, a swipe Rejects it, a drag reorders it
@@ -34,9 +34,9 @@ struct SubtasksSection: View {
             HStack {
                 Text("Subtasks")
                 Spacer()
-                if saved.subtasksTotal > 0 {
-                    Text("\(saved.subtasksDone)/\(saved.subtasksTotal)")
-                        .accessibilityLabel("\(saved.subtasksDone) of \(saved.subtasksTotal) Subtasks Done")
+                if saved.openSubtasks > 0 {
+                    Text("\(saved.openSubtasks)")
+                        .accessibilityLabel("\(saved.openSubtasks) Open Subtasks")
                 }
                 Button(isFolded ? "Unfold Subtasks" : "Fold Subtasks", systemImage: "chevron.down") {
                     withAnimation { isFolded.toggle() }

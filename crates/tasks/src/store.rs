@@ -74,23 +74,16 @@ impl Closing {
             _ => None,
         }
     }
-
-    fn event(self) -> Event {
-        match self {
-            Self::Done => Event::Done,
-            Self::Rejected => Event::Rejected,
-        }
-    }
 }
 
 /// A Close not yet saved, which `revert` can still take back.
 #[derive(Debug, Clone)]
 struct Pending {
-    /// The Task and its Open Subtasks, which are Closed with it.
+    /// The Task and its Open Subtasks, which are Deleted with it.
     ids: Vec<ItemId>,
+    /// Kept apart for the view while the toast shows (Done stays marked in
+    /// place, Rejected leaves at once); it changes nothing once committed.
     closing: Closing,
-    /// When the user Closed it, which the History records.
-    at_ms: f64,
 }
 
 /// A Task another Task is Blocked by.
@@ -133,10 +126,9 @@ pub struct Row {
     pub task: Task,
     /// The Title of its Parent (whose ID is `task.parent`), if it is a Subtask.
     pub parent_title: Option<String>,
-    /// How many of its direct Subtasks, Open or Done, are Done.
-    pub subtasks_done: u32,
-    /// How many direct Subtasks it has, Open or Done; Rejected ones don't count.
-    pub subtasks_total: u32,
+    /// How many of its direct Subtasks are still Open; one with a pending
+    /// Done no longer counts.
+    pub open_subtasks: u32,
 }
 
 #[derive(Debug)]
@@ -510,9 +502,9 @@ impl Tasks {
     }
 
     /// Closes the Open Task `id` and its Open Subtasks as one pending change:
-    /// nothing is saved until `commit`, and `revert` leaves no trace. A Close
-    /// still pending is committed first. There is no way to Delete a Task.
-    /// Fails with `NotFound` if there is no such Open Task.
+    /// nothing is Deleted until `commit`, and `revert` leaves no trace. Done
+    /// and Rejected differ only in how the list shows the Task meanwhile. A
+    /// Close still pending is committed first. Fails with `NotFound` if there is no such Open Task.
     pub fn close(&self, id: &str, closing: Closing) -> Result<(), Error> {
         let id = ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?;
         self.commit()?;
@@ -524,7 +516,6 @@ impl Tasks {
         *self.pending() = Some(Pending {
             ids: open_subtree(&nodes, id.as_str()),
             closing,
-            at_ms: now_ms(),
         });
         Ok(())
     }
@@ -534,23 +525,18 @@ impl Tasks {
         self.pending().take();
     }
 
-    /// Saves the pending Close, if any: sets the `state` of the Task and its
-    /// Subtasks and appends `done` or `rejected` to the History for each. One
-    /// Closed or removed meanwhile, e.g. by Sync, is left as it is.
+    /// Deletes the files of the pending Close, if any: the Task and its Open
+    /// Subtasks. One Deleted meanwhile, e.g. by Sync, is already as wanted;
+    /// where another Device edited one meanwhile, the Delete wins on Sync
+    /// (ADR-0020).
     pub fn commit(&self) -> Result<(), Error> {
-        let Some(Pending {
-            ids,
-            closing,
-            at_ms,
-        }) = self.pending().take()
-        else {
+        let Some(Pending { ids, .. }) = self.pending().take() else {
             return Ok(());
         };
         for id in ids {
-            match self.rewrite(&id, |file| file.set_scalar("state", closing.state())) {
-                Ok(_) => self.history.record(closing.event(), &id, at_ms)?,
-                Err(Error::Io(e)) if e.kind() == io::ErrorKind::NotFound => {}
-                Err(e) => return Err(e),
+            match self.files.remove(&self.path(&id)) {
+                Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e.into()),
+                _ => {}
             }
         }
         Ok(())
@@ -740,8 +726,7 @@ impl Tasks {
     /// The Open Tasks planned as `planning`, Subtasks included, as one flat
     /// list in their manual order. A pending Done shows marked, a pending
     /// Rejected not at all. Structure Sync left broken is repaired here, not in
-    /// the files. The counts of Done Subtasks come from the cache, which keeps
-    /// Closed Tasks without their files.
+    /// the files.
     pub fn rows(&self, planning: Planning) -> io::Result<Vec<Row>> {
         let nodes = self.shown()?;
         Ok(rows_of(&nodes, list(&nodes, planning)))
@@ -1128,20 +1113,18 @@ fn open_subtree(nodes: &Nodes, root: &str) -> Vec<ItemId> {
 
 /// `found` as Rows, with the markers counted over all `nodes`.
 fn rows_of(nodes: &Nodes, found: Vec<&Node>) -> Vec<Row> {
-    let counts = subtask_counts(nodes);
+    let counts = open_subtask_counts(nodes);
     found
         .into_iter()
         .map(|node| {
             let task = &node.task;
-            let (subtasks_done, subtasks_total) =
-                counts.get(task.id.as_str()).copied().unwrap_or_default();
+            let open_subtasks = counts.get(task.id.as_str()).copied().unwrap_or_default();
             Row {
                 task: task.clone(),
                 parent_title: (task.parent.as_ref())
                     .and_then(|p| nodes.get(p))
                     .map(|p| p.task.title.clone()),
-                subtasks_done,
-                subtasks_total,
+                open_subtasks,
             }
         })
         .collect()
@@ -1288,20 +1271,14 @@ fn compare_positions(a: f64, b: f64) -> Ordering {
     a.partial_cmp(&b).unwrap_or(Ordering::Equal)
 }
 
-/// What a Parent's marker shows, by Parent ID: its direct Subtasks that are
-/// Done, and all of them but the Rejected.
-fn subtask_counts(nodes: &Nodes) -> HashMap<&str, (u32, u32)> {
-    let mut counts: HashMap<&str, (u32, u32)> = HashMap::new();
-    for node in nodes.values() {
-        let Some(parent) = node.task.parent.as_deref() else {
-            continue;
-        };
-        if node.closing == Some(Closing::Rejected) {
-            continue;
+/// What a Parent's marker shows, by Parent ID: how many of its direct
+/// Subtasks are still Open (a pending Done is no longer).
+fn open_subtask_counts(nodes: &Nodes) -> HashMap<&str, u32> {
+    let mut counts = HashMap::new();
+    for node in nodes.values().filter(|n| !n.is_closed() && !n.task.done) {
+        if let Some(parent) = node.task.parent.as_deref() {
+            *counts.entry(parent).or_default() += 1;
         }
-        let count = counts.entry(parent).or_default();
-        count.0 += u32::from(node.closing == Some(Closing::Done) || node.task.done);
-        count.1 += 1;
     }
     counts
 }
@@ -1885,9 +1862,14 @@ mod tests {
         let open = tagged(&tasks, &["home", "work"]);
         let closed = tagged(&tasks, &["work"]);
         let other = tagged(&tasks, &["home"]);
-        tasks.close(&closed.id, Closing::Done).unwrap();
-        tasks.commit().unwrap();
         let path = |t: &Task| dir.0.join(format!("{}.md", t.id));
+        // A file Closed by an older version stays.
+        let legacy = fs::read_to_string(path(&closed)).unwrap();
+        fs::write(
+            path(&closed),
+            legacy.replace("state: active", "state: done"),
+        )
+        .unwrap();
         let stamp = |t: &Task| {
             let mut file = Document::parse(&fs::read_to_string(path(t)).unwrap()).unwrap();
             file.set_scalar("updated", "2000-01-01T00:00:00Z");
@@ -2030,7 +2012,7 @@ mod tests {
     }
 
     #[test]
-    fn reverting_leaves_no_trace_in_files_or_history() {
+    fn reverting_leaves_every_file_and_the_history_as_they_were() {
         let dir = Scratch::new();
         let (tasks, task) = closing_fixture(&dir);
         let (before, lines) = (file_of(&dir, &task), history(&dir));
@@ -2043,45 +2025,36 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_saved_before_the_commit() {
+    fn nothing_is_deleted_before_the_commit() {
         let dir = Scratch::new();
         let (tasks, task) = closing_fixture(&dir);
+        let before = file_of(&dir, &task);
         tasks.close(&task.id, Closing::Done).unwrap();
-        assert!(file_of(&dir, &task).contains("state: active"));
-        assert_eq!(history(&dir).len(), 2); // the two creations
+        assert_eq!(file_of(&dir, &task), before);
     }
 
     #[test]
-    fn committing_saves_the_state_and_appends_to_the_history() {
-        let dir = Scratch::new();
-        let (tasks, task) = closing_fixture(&dir);
-        tasks.close(&task.id, Closing::Done).unwrap();
-        tasks.commit().unwrap();
-        assert!(file_of(&dir, &task).contains("state: done"));
-        assert_eq!(titles(&dir.store(), Planning::Active), ["other"]);
-        assert!(
-            history(&dir)
-                .last()
-                .unwrap()
-                .ends_with(&format!(" done {}", task.id))
-        );
-        tasks.commit().unwrap(); // nothing pending: no second line
-        assert_eq!(history(&dir).len(), 3);
+    fn done_and_rejected_both_delete_the_file_on_commit() {
+        for closing in [Closing::Done, Closing::Rejected] {
+            let dir = Scratch::new();
+            let (tasks, task) = closing_fixture(&dir);
+            tasks.close(&task.id, closing).unwrap();
+            tasks.commit().unwrap();
+            assert!(!dir.0.join(format!("{}.md", task.id)).exists());
+            assert_eq!(titles(&dir.store(), Planning::Active), ["other"]);
+            tasks.commit().unwrap(); // nothing pending: nothing to do
+        }
     }
 
     #[test]
-    fn a_rejected_task_is_recorded_as_rejected() {
+    fn closing_leaves_the_other_tasks_files_as_they_were() {
         let dir = Scratch::new();
         let (tasks, task) = closing_fixture(&dir);
-        tasks.close(&task.id, Closing::Rejected).unwrap();
+        let other = list_of(&tasks, Planning::Active).remove(0);
+        let before = file_of(&dir, &other);
+        tasks.close(&task.id, Closing::Done).unwrap();
         tasks.commit().unwrap();
-        assert!(file_of(&dir, &task).contains("state: rejected"));
-        assert!(
-            history(&dir)
-                .last()
-                .unwrap()
-                .ends_with(&format!(" rejected {}", task.id))
-        );
+        assert_eq!(file_of(&dir, &other), before);
     }
 
     #[test]
@@ -2092,8 +2065,8 @@ mod tests {
         let second = tasks.create("second", Planning::Active, 4, &[]).unwrap();
         tasks.close(&first.id, Closing::Done).unwrap();
         tasks.close(&second.id, Closing::Rejected).unwrap();
-        assert!(file_of(&dir, &first).contains("state: done"));
-        assert!(file_of(&dir, &second).contains("state: active"));
+        assert!(!dir.0.join(format!("{}.md", first.id)).exists());
+        assert!(dir.0.join(format!("{}.md", second.id)).exists());
         tasks.revert();
         assert_eq!(titles(&tasks, Planning::Active), ["second"]);
     }
@@ -2105,17 +2078,27 @@ mod tests {
     }
 
     #[test]
-    fn a_pending_close_keeps_edits_made_meanwhile() {
+    fn a_pending_close_deletes_the_file_whatever_was_edited_meanwhile() {
         let dir = Scratch::new();
         let (tasks, task) = closing_fixture(&dir);
         tasks.close(&task.id, Closing::Done).unwrap();
         tasks.edit(&task.id, "Renamed", "", 1, &[]).unwrap();
         tasks.commit().unwrap();
-        let text = file_of(&dir, &task);
-        assert!(
-            text.contains("title: Renamed") && text.contains("state: done"),
-            "{text}"
-        );
+        assert!(!dir.0.join(format!("{}.md", task.id)).exists());
+    }
+
+    #[test]
+    fn a_task_blocked_by_a_closed_task_is_no_longer_blocked() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let blocker = tasks.create("blocker", Planning::Active, 4, &[]).unwrap();
+        let waiting = tasks.create("waiting", Planning::Active, 4, &[]).unwrap();
+        tasks.add_blocker(&waiting.id, &blocker.id).unwrap();
+        assert!(list_of(&tasks, Planning::Active)[1].blocked);
+        tasks.close(&blocker.id, Closing::Rejected).unwrap();
+        tasks.commit().unwrap();
+        let rows = tasks.rows(Planning::Active).unwrap();
+        assert!(!rows[0].task.blocked && rows[0].task.blocked_by.is_empty());
     }
 
     fn subtask(tasks: &Tasks, parent: &Task, title: &str) -> Task {
@@ -2255,12 +2238,7 @@ mod tests {
         assert!(list_of(&tasks, Planning::Active).is_empty());
         tasks.commit().unwrap();
         for task in [&parent, &child, &grandchild] {
-            assert!(file_of(&dir, task).contains("state: rejected"));
-            assert!(
-                history(&dir)
-                    .iter()
-                    .any(|l| l.ends_with(&format!(" rejected {}", task.id)))
-            );
+            assert!(!dir.0.join(format!("{}.md", task.id)).exists());
         }
     }
 
@@ -2336,7 +2314,7 @@ mod tests {
     }
 
     #[test]
-    fn committing_skips_a_subtask_closed_or_removed_meanwhile() {
+    fn committing_skips_a_subtask_removed_meanwhile() {
         let dir = Scratch::new();
         let tasks = dir.store();
         let parent = tasks.create("p", Planning::Active, 4, &[]).unwrap();
@@ -2345,8 +2323,8 @@ mod tests {
         tasks.close(&parent.id, Closing::Done).unwrap();
         fs::remove_file(dir.0.join(format!("{}.md", gone.id))).unwrap();
         tasks.commit().unwrap();
-        assert!(file_of(&dir, &parent).contains("state: done"));
-        assert!(file_of(&dir, &kept).contains("state: done"));
+        assert!(!dir.0.join(format!("{}.md", parent.id)).exists());
+        assert!(!dir.0.join(format!("{}.md", kept.id)).exists());
         assert!(titles(&tasks, Planning::Active).is_empty());
     }
 
@@ -2817,8 +2795,7 @@ mod tests {
         tasks.commit().unwrap();
         let a = listed(&tasks, &a.id);
         assert!(!a.blocked);
-        assert_eq!(a.blocked_by.len(), 2);
-        assert!(a.blocked_by.iter().all(|b| b.closed));
+        assert!(a.blocked_by.is_empty());
     }
 
     #[test]
@@ -2829,7 +2806,7 @@ mod tests {
         tasks.add_blocker(&a.id, &b.id).unwrap();
         tasks.close(&a.id, Closing::Done).unwrap();
         tasks.commit().unwrap();
-        assert!(file_of(&dir, &a).contains("state: done"));
+        assert!(!dir.0.join(format!("{}.md", a.id)).exists());
     }
 
     #[test]
@@ -2972,8 +2949,10 @@ mod tests {
         let parent = tasks.create("parent", Planning::Active, 4, &[]).unwrap();
         let gone = subtask(&tasks, &parent, "gone");
         subtask(&tasks, &parent, "open");
-        tasks.close(&gone.id, Closing::Done).unwrap();
-        tasks.commit().unwrap();
+        // Closing Deletes now; a file Closed by an older version stays.
+        let path = dir.0.join(format!("{}.md", gone.id));
+        let legacy = fs::read_to_string(&path).unwrap();
+        fs::write(&path, legacy.replace("state: active", "state: done")).unwrap();
         (tasks, gone)
     }
 
@@ -3012,12 +2991,7 @@ mod tests {
         list_of(&tasks, Planning::Active);
         lock_file(&dir.0.join(format!("{}.md", gone.id)));
         let rows = dir.store().rows(Planning::Active).unwrap();
-        assert_eq!(
-            (rows[0].subtasks_done, rows[0].subtasks_total),
-            (1, 2),
-            "{}",
-            gone.id
-        );
+        assert_eq!(rows[0].open_subtasks, 1, "{}", gone.id);
     }
 
     #[test]
@@ -3088,15 +3062,16 @@ mod tests {
     #[test]
     fn the_cache_file_is_rewritten_only_when_a_closed_task_changes() {
         let dir = Scratch::new();
-        let (tasks, _) = cache_fixture(&dir);
+        let (tasks, gone) = cache_fixture(&dir);
         let parent = list_of(&tasks, Planning::Active).remove(0);
         fs::remove_file(dir.cache()).unwrap();
         tasks.edit(&parent.id, "renamed", "", 1, &[]).unwrap();
         tasks.create("new", Planning::Active, 4, &[]).unwrap();
         list_of(&tasks, Planning::Active);
         assert!(!dir.cache().exists());
-        tasks.close(&parent.id, Closing::Rejected).unwrap();
-        tasks.commit().unwrap();
+        let path = dir.0.join(format!("{}.md", gone.id));
+        let text = fs::read_to_string(&path).unwrap();
+        fs::write(&path, text.replace("title: gone", "title: changed")).unwrap();
         list_of(&tasks, Planning::Active);
         assert!(dir.cache().exists());
     }
@@ -3112,22 +3087,15 @@ mod tests {
             .rows(Planning::Active)
             .unwrap()
             .into_iter()
-            .map(|r| {
-                (
-                    r.task.title,
-                    r.parent_title,
-                    r.subtasks_done,
-                    r.subtasks_total,
-                )
-            })
+            .map(|r| (r.task.title, r.parent_title, r.open_subtasks))
             .collect();
         let some = |t: &str| Some(t.to_owned());
         assert_eq!(
             rows,
             [
-                ("parent".to_owned(), None, 0, 1),
-                ("child".to_owned(), some("parent"), 0, 0),
-                ("other".to_owned(), None, 0, 0)
+                ("parent".to_owned(), None, 1),
+                ("child".to_owned(), some("parent"), 0),
+                ("other".to_owned(), None, 0)
             ]
         );
     }
@@ -3149,7 +3117,7 @@ mod tests {
         let rows = tasks.subtasks(&top.id).unwrap();
         let shown: Vec<_> = rows
             .iter()
-            .map(|r| (r.task.title.as_str(), r.task.done, r.subtasks_total))
+            .map(|r| (r.task.title.as_str(), r.task.done, r.open_subtasks))
             .collect();
         assert_eq!(
             shown,
@@ -3170,11 +3138,11 @@ mod tests {
         let rows = tasks.rows(Planning::Active).unwrap();
         let mid = &rows[1];
         assert_eq!(mid.parent_title.as_deref(), Some("top"));
-        assert_eq!((mid.subtasks_done, mid.subtasks_total), (0, 1));
+        assert_eq!(mid.open_subtasks, 1);
     }
 
     #[test]
-    fn done_subtasks_count_but_rejected_ones_do_not() {
+    fn closed_subtasks_are_not_counted() {
         let dir = Scratch::new();
         let tasks = dir.store();
         let parent = tasks.create("p", Planning::Active, 4, &[]).unwrap();
@@ -3186,12 +3154,12 @@ mod tests {
         tasks.close(&rejected.id, Closing::Rejected).unwrap();
         tasks.commit().unwrap();
         let rows = tasks.rows(Planning::Active).unwrap();
-        assert_eq!((rows[0].subtasks_done, rows[0].subtasks_total), (1, 2));
+        assert_eq!(rows[0].open_subtasks, 1);
         assert_eq!(rows.len(), 2);
     }
 
     #[test]
-    fn a_pending_done_subtask_stays_listed_and_counts_as_done() {
+    fn a_pending_done_subtask_stays_listed_but_is_no_longer_counted() {
         let dir = Scratch::new();
         let tasks = dir.store();
         let parent = tasks.create("p", Planning::Active, 4, &[]).unwrap();
@@ -3199,7 +3167,7 @@ mod tests {
         tasks.close(&child.id, Closing::Done).unwrap();
         let rows = tasks.rows(Planning::Active).unwrap();
         assert!(rows[1].task.done);
-        assert_eq!((rows[0].subtasks_done, rows[0].subtasks_total), (1, 1));
+        assert_eq!(rows[0].open_subtasks, 0);
     }
 
     #[cfg(unix)]
@@ -3210,7 +3178,7 @@ mod tests {
         let before = tasks.rows(Planning::Active).unwrap();
         lock_files(&dir);
         assert_eq!(tasks.rows(Planning::Active).unwrap(), before);
-        assert_eq!((before[0].subtasks_done, before[0].subtasks_total), (1, 2));
+        assert_eq!(before[0].open_subtasks, 1);
     }
 
     #[test]

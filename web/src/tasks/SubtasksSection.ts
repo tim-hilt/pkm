@@ -9,7 +9,7 @@ import type { ListedTask, TasksModel } from "./TasksModel";
 const chevronGlyph = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>`;
 
 /**
- * A Task's Subtasks in its edit view: a header with the "Done/total" counter
+ * A Task's Subtasks in its edit view: a header with the Open Subtasks counter
  * (none without Subtasks) and a fold button, then the direct Subtasks as list
  * rows, then an "Add Subtask" button that turns into a focused Quick Add field:
  * Enter adds the Subtask at the end and empties the field, which keeps the focus;
@@ -98,10 +98,10 @@ export class SubtasksSection {
   refresh(): void {
     const { model } = this;
     // The counts as last saved: the Subtasks' own edits change them, not this view's.
-    const { subtasksDone: done = 0, subtasksTotal: total = 0 } = model.find(this.taskId) ?? {};
-    this.counter.hidden = total === 0;
-    this.counter.textContent = `${done}/${total}`;
-    this.counter.title = `${done} of ${total} Subtasks Done`;
+    const { openSubtasks: open = 0 } = model.find(this.taskId) ?? {};
+    this.counter.hidden = open === 0;
+    this.counter.textContent = String(open);
+    this.counter.title = `${open} Open Subtasks`;
     this.fold.setAttribute("aria-label", this.folded ? "Unfold Subtasks" : "Fold Subtasks");
     this.fold.setAttribute("aria-expanded", String(!this.folded));
     this.fold.classList.toggle("folded", this.folded);

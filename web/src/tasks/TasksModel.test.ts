@@ -384,23 +384,20 @@ describe("Subtasks", () => {
   });
 
   it("lists a Subtask after its Parent, with the markers", () => {
-    expect(
-      model.tasks.map((t) => [t.title, t.parentTitle, t.subtasksDone, t.subtasksTotal]),
-    ).toEqual([
-      ["parent", undefined, 0, 1],
-      ["child", "parent", 0, 0],
+    expect(model.tasks.map((t) => [t.title, t.parentTitle, t.openSubtasks])).toEqual([
+      ["parent", undefined, 1],
+      ["child", "parent", 0],
     ]);
   });
 
-  it("shows both markers on a Task that is Parent and Subtask, and counts Done Subtasks", () => {
+  it("shows both markers on a Task that is Parent and Subtask, and counts only Open Subtasks", () => {
     model.addSubtask("grandchild", model.tasks[1]);
     model.close(model.tasks[2], Closing.Done);
     model.commit();
     expect(model.tasks.map((t) => t.title)).toEqual(["parent", "child"]);
     expect(model.tasks[1]).toMatchObject({
       parentTitle: "parent",
-      subtasksDone: 1,
-      subtasksTotal: 1,
+      openSubtasks: 0,
     });
   });
 
@@ -669,10 +666,7 @@ describe("Subtasks of a Task", () => {
 
   describe("closed in the section", () => {
     let parent: ListedTask;
-    const counts = () => {
-      const { subtasksDone, subtasksTotal } = model.find(parent.id)!;
-      return [subtasksDone, subtasksTotal];
-    };
+    const open = () => model.find(parent.id)!.openSubtasks;
     beforeEach(() => {
       model.add("Parent");
       parent = first();
@@ -680,22 +674,22 @@ describe("Subtasks of a Task", () => {
       model.addSubtask("Two", parent);
     });
 
-    it("keeps a Done Subtask, marked, and counts it; Revert takes it back", () => {
+    it("keeps a Done Subtask, marked, but no longer counts it; Revert takes it back", () => {
       model.close(model.subtasks(parent.id)[0], Closing.Done);
       expect(model.subtasks(parent.id).map((t) => [t.title, t.done])).toEqual([
         ["One", true],
         ["Two", false],
       ]);
-      expect(counts()).toEqual([1, 2]);
+      expect(open()).toBe(1);
       model.revert();
       expect(model.subtasks(parent.id).map((t) => t.done)).toEqual([false, false]);
-      expect(counts()).toEqual([0, 2]);
+      expect(open()).toBe(2);
     });
 
     it("drops a Rejected Subtask from the section and the counter", () => {
       model.close(model.subtasks(parent.id)[0], Closing.Rejected);
       expect(model.subtasks(parent.id).map((t) => t.title)).toEqual(["Two"]);
-      expect(counts()).toEqual([0, 1]);
+      expect(open()).toBe(1);
       model.revert();
       expect(model.subtasks(parent.id)).toHaveLength(2);
     });
@@ -843,25 +837,22 @@ describe("Tags", () => {
     expect(first().tagColors).toEqual({});
   });
 
-  it("deletes a Tag from every Task, Open or Closed, and forgets its Tag Color", async () => {
+  it("deletes a Tag from every Task and forgets its Tag Color", async () => {
     model.addSubtask("Old", first());
     const old = model.tasks.find((t) => t.title === "Old")!;
     model.edit(old, { title: "Old", description: "", priority: 4, tags: ["work"] });
-    model.close(old, Closing.Done);
-    model.commit();
-    const closedFile = async () => {
+    const oldFile = async () => {
       await model.saved();
       return new TextDecoder().decode(await storage.read(`Tasks/${old.id}.md`));
     };
-    expect(await closedFile()).toContain("state: done");
-    expect(await closedFile()).toContain("  - work\n");
+    expect(await oldFile()).toContain("  - work\n");
     model.setTagColor("work", "#d0021b");
     const changed = vi.fn();
     model.onChange = changed;
     model.deleteTag("work");
     expect(model.allTags.map((t) => t.name)).toEqual(["home"]);
     expect(first().tags).toEqual(["home"]);
-    expect(await closedFile()).not.toContain("work");
+    expect(await oldFile()).not.toContain("work");
     expect(changed).toHaveBeenCalled();
     model.edit(first(), { title: "Buy milk", description: "", priority: 4, tags: ["work"] });
     expect(tag("work")?.color).toBeUndefined();

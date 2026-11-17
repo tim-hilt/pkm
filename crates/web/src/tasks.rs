@@ -245,12 +245,9 @@ pub struct ListedTask {
     /// The Parent's Title, if it is a Subtask.
     #[wasm_bindgen(js_name = parentTitle)]
     pub parent_title: Option<String>,
-    /// How many of its direct Subtasks, Open or Done, are Done.
-    #[wasm_bindgen(js_name = subtasksDone)]
-    pub subtasks_done: u32,
-    /// How many direct Subtasks it has, Open or Done; Rejected ones don't count.
-    #[wasm_bindgen(js_name = subtasksTotal)]
-    pub subtasks_total: u32,
+    /// How many of its direct Subtasks are still Open.
+    #[wasm_bindgen(js_name = openSubtasks)]
+    pub open_subtasks: u32,
     /// Closed as Done, the Close still pending.
     pub done: bool,
     /// Whether any Task it's Blocked by is Open.
@@ -297,8 +294,7 @@ impl ListedTask {
             description: t.description,
             parent: t.parent,
             parent_title: row.parent_title,
-            subtasks_done: row.subtasks_done,
-            subtasks_total: row.subtasks_total,
+            open_subtasks: row.open_subtasks,
             done: t.done,
             blocked: t.blocked,
             blocked_by: t.blocked_by,
@@ -430,7 +426,7 @@ impl TaskStore {
     }
 
     /// Closes a Task as a pending change, committing the previous one first.
-    /// Nothing is saved until `commit`; `revert` takes it back.
+    /// Nothing is Deleted until `commit`; `revert` takes it back.
     pub fn close(&self, id: &str, closing: Closing) -> Result<(), JsError> {
         self.tasks.close(id, closing.into()).map_err(error)
     }
@@ -440,7 +436,7 @@ impl TaskStore {
         self.tasks.revert();
     }
 
-    /// Saves the pending Close, if any.
+    /// Deletes the files of the pending Close, if any.
     pub fn commit(&self) -> Result<(), JsError> {
         self.tasks.commit().map_err(error)
     }

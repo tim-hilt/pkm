@@ -26,10 +26,8 @@ export interface ListedTask {
   parent: string | undefined;
   /** The Parent's Title, if it is a Subtask. */
   parentTitle: string | undefined;
-  /** How many of its direct Subtasks, Open or Done, are Done. */
-  subtasksDone: number;
-  /** How many direct Subtasks it has, Open or Done. */
-  subtasksTotal: number;
+  /** How many of its direct Subtasks are still Open. */
+  openSubtasks: number;
   /** Closed as Done, the Close still pending. */
   done: boolean;
   /** Whether any Task it's Blocked by is Open. */
@@ -699,8 +697,7 @@ export class TasksModel {
         ),
         parent: row.parent ?? undefined,
         parentTitle: row.parentTitle ?? undefined,
-        subtasksDone: row.subtasksDone,
-        subtasksTotal: row.subtasksTotal,
+        openSubtasks: row.openSubtasks,
         done: row.done,
         blocked: row.blocked,
         blockedBy: row.blockedBy().map((b) => {

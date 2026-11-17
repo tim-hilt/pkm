@@ -46,13 +46,13 @@ export function taskLine(
   return { line, open };
 }
 
-/** The Parent marker ("Done/total") and, if `showsParent`, the Subtask marker (its Parent's Title). */
+/** The Parent marker (how many are Open) and, if `showsParent`, the Subtask marker (its Parent's Title). */
 function markers(task: ListedTask, showsParent: boolean): HTMLElement[] {
   const marks: HTMLElement[] = [];
-  if (task.subtasksTotal > 0) {
-    const mark = make("span", "task-mark", [`${task.subtasksDone}/${task.subtasksTotal}`]);
+  if (task.openSubtasks > 0) {
+    const mark = make("span", "task-mark", [String(task.openSubtasks)]);
     mark.insertAdjacentHTML("afterbegin", subtasksGlyph);
-    mark.title = `${task.subtasksDone} of ${task.subtasksTotal} Subtasks Done`;
+    mark.title = `${task.openSubtasks} Open Subtasks`;
     marks.push(mark);
   }
   if (showsParent && task.parentTitle !== undefined) {

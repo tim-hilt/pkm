@@ -159,10 +159,8 @@ pub struct ListedTask {
     /// The Parent's Title, if it is a Subtask. Only listings fill this and
     /// the Subtask counts; a Task a change returns has none.
     pub parent_title: Option<String>,
-    /// How many of its direct Subtasks, Open or Done, are Done.
-    pub subtasks_done: u32,
-    /// How many direct Subtasks it has, Open or Done; Rejected ones don't count.
-    pub subtasks_total: u32,
+    /// How many of its direct Subtasks are still Open.
+    pub open_subtasks: u32,
     /// Whether any Task it's Blocked by is Open.
     pub blocked: bool,
     /// The Tasks it's Blocked by, Open or Closed.
@@ -186,8 +184,7 @@ impl ListedTask {
             done: t.done,
             parent: t.parent,
             parent_title: None,
-            subtasks_done: 0,
-            subtasks_total: 0,
+            open_subtasks: 0,
             blocked: t.blocked,
             blocked_by: t.blocked_by,
         }
@@ -196,8 +193,7 @@ impl ListedTask {
     fn of_row(row: Row, known: &Tags) -> Self {
         Self {
             parent_title: row.parent_title,
-            subtasks_done: row.subtasks_done,
-            subtasks_total: row.subtasks_total,
+            open_subtasks: row.open_subtasks,
             ..Self::new(row.task, known)
         }
     }
@@ -373,7 +369,7 @@ impl TaskStore {
     }
 
     /// Closes a Task as a pending change, committing the previous one first.
-    /// Nothing is saved until `commit`; `revert` takes it back.
+    /// Nothing is Deleted until `commit`; `revert` takes it back.
     pub fn close(&self, id: String, closing: Closing) -> Result<(), TasksError> {
         Ok(self.0.close(&id, closing)?)
     }
@@ -383,7 +379,7 @@ impl TaskStore {
         self.0.revert();
     }
 
-    /// Saves the pending Close, if any.
+    /// Deletes the files of the pending Close, if any.
     pub fn commit(&self) -> Result<(), TasksError> {
         Ok(self.0.commit()?)
     }

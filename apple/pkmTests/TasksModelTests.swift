@@ -291,15 +291,15 @@ import Testing
 
         model.toggleDone(model.subtasks(of: p.id)[0])
         #expect(model.subtasks(of: p.id).map(\.done) == [true, false])
-        #expect(model.task(id: p.id)?.subtasksDone == 1 && model.task(id: p.id)?.subtasksTotal == 2)
+        #expect(model.task(id: p.id)?.openSubtasks == 1)
 
         model.toggleDone(model.subtasks(of: p.id)[0])
         #expect(model.subtasks(of: p.id).map(\.done) == [false, false])
-        #expect(model.task(id: p.id)?.subtasksDone == 0)
+        #expect(model.task(id: p.id)?.openSubtasks == 2)
 
         model.close(model.subtasks(of: p.id)[0], as: .rejected)
         #expect(model.subtasks(of: p.id).map(\.title) == ["b"])
-        #expect(model.task(id: p.id)?.subtasksTotal == 1)
+        #expect(model.task(id: p.id)?.openSubtasks == 1)
         #expect(model.tasks.map(\.title) == ["p", "b"])  // "a" and its Subtask "deep" went together
     }
 
@@ -476,11 +476,10 @@ import Testing
         #expect(!model.addSubtask(title: " ", under: model.tasks[0]))
         #expect(model.tasks.map(\.title) == ["Parent", "Child"])
         #expect(model.tasks.map(\.parentTitle) == [nil, "Parent"])
-        #expect(model.tasks.map(\.subtasksDone) == [0, 0])
-        #expect(model.tasks.map(\.subtasksTotal) == [1, 0])
+        #expect(model.tasks.map(\.openSubtasks) == [1, 0])
     }
 
-    @Test func aTaskThatIsParentAndSubtaskHasBothMarkersAndDoneSubtasksAreCounted() throws {
+    @Test func aTaskThatIsParentAndSubtaskHasBothMarkersAndOnlyOpenSubtasksAreCounted() throws {
         let model = try openModel()
         model.add(title: "Parent", planning: .active)
         model.addSubtask(title: "Child", under: model.tasks[0])
@@ -489,7 +488,7 @@ import Testing
         model.commit()
         #expect(model.tasks.map(\.title) == ["Parent", "Child"])
         #expect(model.tasks[1].parentTitle == "Parent")
-        #expect(model.tasks[1].subtasksTotal == 1 && model.tasks[1].subtasksDone == 1)
+        #expect(model.tasks[1].openSubtasks == 0)
     }
 
     @Test func aSubtaskCannotBeMadeActiveByItself() throws {

@@ -184,9 +184,9 @@ struct TaskRow: View {
                 }
                 if task.hasMarkers(showsParent: showsParent) || !task.tags.isEmpty {
                     HStack(spacing: 8) {
-                        if task.subtasksTotal > 0 {
-                            marker("\(task.subtasksDone)/\(task.subtasksTotal)", symbol: "checklist")
-                                .accessibilityLabel("\(task.subtasksDone) of \(task.subtasksTotal) Subtasks Done")
+                        if task.openSubtasks > 0 {
+                            marker("\(task.openSubtasks)", symbol: "checklist")
+                                .accessibilityLabel("\(task.openSubtasks) Open Subtasks")
                         }
                         if showsParent, let parentTitle = task.parentTitle {
                             marker(parentTitle, symbol: "arrow.turn.down.right")
@@ -217,7 +217,7 @@ struct TaskRow: View {
 
 extension ListedTask {
     fileprivate func hasMarkers(showsParent: Bool) -> Bool {
-        subtasksTotal > 0 || (showsParent && parentTitle != nil)
+        openSubtasks > 0 || (showsParent && parentTitle != nil)
     }
 
     fileprivate var priorityColor: Color {
