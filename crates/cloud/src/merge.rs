@@ -5,7 +5,7 @@
 use pkm_base::tags::Tags;
 use pkm_books::sync as books;
 use pkm_drawing::{are_same_drawing, is_drawing, merge_drawings};
-use pkm_tasks::sync as tasks;
+use pkm_tasks::sync::{self as tasks, filters};
 
 /// The merge hook of one Context folder.
 pub trait Merge: Send + Sync {
@@ -255,6 +255,38 @@ impl Merge for TagsFile {
 
     fn same_item(&self, a: &[u8], b: &[u8]) -> Option<bool> {
         (Tags::is_file(a) && Tags::is_file(b)).then_some(true)
+    }
+
+    fn transfers_unparseable(&self) -> bool {
+        false
+    }
+}
+
+/// Filters: `Filters/<id>.md` beside the Tasks folder, merged three-way by
+/// field with `places` per Task ID (ADR-0024). A file that isn't a Filter is
+/// left where it is.
+pub struct Filters;
+
+impl Filters {
+    /// The folder on the Device and in the cloud (`pkm/Filters`).
+    pub const FOLDER: &str = pkm_tasks::Tasks::FILTERS_FOLDER;
+}
+
+impl Merge for Filters {
+    fn extension(&self) -> &str {
+        ".md"
+    }
+
+    fn merge(&self, base: Option<&[u8]>, local: &[u8], remote: &[u8]) -> Option<Vec<u8>> {
+        filters::merge(base, local, remote)
+    }
+
+    fn is_item(&self, bytes: &[u8]) -> bool {
+        filters::is_item(bytes)
+    }
+
+    fn same_item(&self, a: &[u8], b: &[u8]) -> Option<bool> {
+        filters::same_item(a, b)
     }
 
     fn transfers_unparseable(&self) -> bool {

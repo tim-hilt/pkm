@@ -1325,6 +1325,19 @@ impl WebDavProtocol {
             .map_err(|_| JsError::new("notHttps"))
     }
 
+    /// The requests for the folder of the Filters. Throws `notHttps` for a URL
+    /// that is not https.
+    #[wasm_bindgen(js_name = newForFilters)]
+    pub fn new_for_filters(
+        url: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<WebDavProtocol, JsError> {
+        WebDav::new(url, username, password, Filters::FOLDER)
+            .map(Self)
+            .map_err(|_| JsError::new("notHttps"))
+    }
+
     /// Checks the server and makes its `pkm/Drawings` folder.
     pub fn connect(&self) -> DavExchange {
         DavExchange::new(self.0.connect(), DavOutcome::connect)
@@ -1364,8 +1377,8 @@ impl WebDavProtocol {
 
 use pkm_cloud::step::{LocalFile, Marks, Synced};
 use pkm_cloud::{
-    Blob, BookStates, Books, Drawings, Next, Request, Response, Schedule, Status, StepOutcome,
-    SyncStep, TagsFile, TaskHistory, Tasks, Timing,
+    Blob, BookStates, Books, Drawings, Filters, Next, Request, Response, Schedule, Status,
+    StepOutcome, SyncStep, TagsFile, TaskHistory, Tasks, Timing,
 };
 use std::time::Duration;
 
@@ -1556,6 +1569,13 @@ impl SyncRun {
     #[wasm_bindgen(js_name = newForTags)]
     pub fn new_for_tags(now_ms: f64) -> SyncRun {
         SyncRun::with_merge(now_ms, Arc::new(TagsFile))
+    }
+
+    /// A step over the Filter files, merged field by field, their order per
+    /// Task (ADR-0024).
+    #[wasm_bindgen(js_name = newForFilters)]
+    pub fn new_for_filters(now_ms: f64) -> SyncRun {
+        SyncRun::with_merge(now_ms, Arc::new(Filters))
     }
 
     pub fn start(&mut self) -> Option<SyncRequest> {

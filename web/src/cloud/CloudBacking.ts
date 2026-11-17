@@ -107,6 +107,8 @@ export class CloudBacking {
   private readonly taskHistoryState: SyncState;
   private readonly tags: FileFolder;
   private readonly tagsState: SyncState;
+  private readonly filters: FileFolder;
+  private readonly filtersState: SyncState;
   private report: SyncReport = {};
   private readonly reportListeners = new Set<(report: SyncReport) => void>();
   private visible = true;
@@ -120,6 +122,7 @@ export class CloudBacking {
   private readonly booksIncoming = { known: false };
   private readonly tasksIncoming = { known: false };
   private readonly tagsIncoming = { known: false };
+  private readonly filtersIncoming = { known: false };
 
   private constructor(
     private readonly core: Core,
@@ -139,6 +142,8 @@ export class CloudBacking {
     this.taskHistoryState = new SyncState(storage, "TasksHistory");
     this.tags = new FileFolder(storage, "Tags");
     this.tagsState = new SyncState(storage, "Tags");
+    this.filters = new FileFolder(storage, "Filters");
+    this.filtersState = new SyncState(storage, "Filters");
     tabs.listen((message) => void this.heard(message));
   }
 
@@ -161,22 +166,24 @@ export class CloudBacking {
     return data && JSON.parse(new TextDecoder().decode(data));
   }
 
-  /** Throws `ConnectFailed` unless the server takes `credentials` and has (or now has) its `pkm/Drawings`, `pkm/Books`, `pkm/Tasks` and `pkm/Tags` folders. */
+  /** Throws `ConnectFailed` unless the server takes `credentials` and has (or now has) its `pkm/Drawings`, `pkm/Books`, `pkm/Tasks`, `pkm/Tags` and `pkm/Filters` folders. */
   private async check({ url, username, password }: Credentials): Promise<void> {
     let drawings;
     let books;
     let tasks;
     let tags;
+    let filters;
     try {
       drawings = this.core.webDav(url, username, password);
       books = this.core.webDavForBooks(url, username, password);
       tasks = this.core.webDavForTasks(url, username, password);
       tags = this.core.webDavForTags(url, username, password);
+      filters = this.core.webDavForFilters(url, username, password);
     } catch {
       throw new ConnectFailed("notHttps");
     }
     try {
-      for (const protocol of [drawings, books, tasks, tags]) {
+      for (const protocol of [drawings, books, tasks, tags, filters]) {
         const result = await runExchange(protocol.connect(), this.send);
         if (result.error) throw new ConnectFailed(result.error as ConnectReason);
       }
@@ -185,6 +192,7 @@ export class CloudBacking {
       books.free();
       tasks.free();
       tags.free();
+      filters.free();
     }
   }
 
@@ -388,11 +396,16 @@ export class CloudBacking {
       credentials.username,
       credentials.password,
     );
+    const filtersProtocol = this.core.webDavForFilters(
+      credentials.url,
+      credentials.username,
+      credentials.password,
+    );
     const now = Date.now();
     // One step per folder, in order, all against the same server: Drawings,
     // the Book Files, then their state, which the core's Books merge merges,
     // the Task files and their History, which is only transferred and
-    // which the Tasks don't read, and the Tags file, which the Tasks do.
+    // which the Tasks don't read, and the Tags file and the Filters, which the Tasks do.
     const plans = [
       {
         run: this.core.syncRun(now),
@@ -440,6 +453,14 @@ export class CloudBacking {
         files: this.tags,
         state: this.tagsState,
         incoming: this.tagsIncoming,
+        reports: "tasks" as const,
+      },
+      {
+        run: this.core.syncRunForFilters(now),
+        protocol: filtersProtocol,
+        files: this.filters,
+        state: this.filtersState,
+        incoming: this.filtersIncoming,
         reports: "tasks" as const,
       },
     ];
@@ -492,6 +513,7 @@ export class CloudBacking {
       booksProtocol.free();
       tasksProtocol.free();
       tagsProtocol.free();
+      filtersProtocol.free();
     }
     if (this.schedule !== schedule) return;
     const status: SyncStatus = results.some((r) => r.accessLost)

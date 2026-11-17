@@ -3,6 +3,7 @@
 mod filters;
 
 pub use filters::Filter;
+pub(crate) use filters::is_filter;
 
 use crate::cache::Cache;
 use crate::files::{DiskFiles, Files};

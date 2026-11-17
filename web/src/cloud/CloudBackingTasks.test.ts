@@ -120,6 +120,22 @@ describe("the Tasks folders", () => {
     expect(tablet.tasksChanged).toBeGreaterThan(0);
   });
 
+  it("Syncs the Filters to the server and another Device, and tells it", async () => {
+    const browser = await device();
+    const tablet = await device();
+    const filter =
+      "---\nid: aaaaaaaaaaaa\ntitle: Work\nquery: '@work'\nfavorite: false\nposition: 1\nupdated: 2025-01-01T00:00:00Z\n---\n";
+    await browser.storage.write("Filters/aaaaaaaaaaaa.md", new TextEncoder().encode(filter));
+    browser.cloud.localChange();
+    await settle();
+
+    expect([...server.contents("pkm/Filters").keys()]).toEqual(["aaaaaaaaaaaa.md"]);
+
+    await sync(tablet);
+    expect(text(await tablet.storage.read("Filters/aaaaaaaaaaaa.md"))).toBe(filter);
+    expect(tablet.tasksChanged).toBeGreaterThan(0);
+  });
+
   it("doesn't tell of History files alone, which the Tasks don't read", async () => {
     const tablet = await device();
     server.put("pkm/Tasks", "bbbbbbbbbbbb-2025-01.log", new TextEncoder().encode("x\n"));

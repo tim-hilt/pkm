@@ -244,6 +244,8 @@ export interface Core {
   webDavForTasks(url: string, username: string, password: string): WebDavProtocol;
   /** The WebDAV protocol for the server's Tags folder; throws if the URL is not https. Free it when done. */
   webDavForTags(url: string, username: string, password: string): WebDavProtocol;
+  /** The WebDAV protocol for the server's Filters folder; throws if the URL is not https. Free it when done. */
+  webDavForFilters(url: string, username: string, password: string): WebDavProtocol;
   /** A Sync step over the Drawings, starting at `nowMs` (milliseconds since the epoch). Free it when done. */
   syncRun(nowMs: number): SyncRun;
   /** A Sync step over the Book Files, which are transferred but never merged. Free it when done. */
@@ -256,6 +258,8 @@ export interface Core {
   syncRunForTaskHistory(nowMs: number): SyncRun;
   /** A Sync step over the Tags file, merged per Tag. Free it when done. */
   syncRunForTags(nowMs: number): SyncRun;
+  /** A Sync step over the Filter files, merged field by field and their order per Task. Free it when done. */
+  syncRunForFilters(nowMs: number): SyncRun;
   /** When Sync steps run, in front with a step due at `now` (milliseconds on any clock). Free it when done. */
   syncSchedule(now: number): SyncSchedule;
 }
@@ -288,12 +292,15 @@ export async function loadCore(
     webDavForTasks: (url, username, password) =>
       WebDavProtocol.newForTasks(url, username, password),
     webDavForTags: (url, username, password) => WebDavProtocol.newForTags(url, username, password),
+    webDavForFilters: (url, username, password) =>
+      WebDavProtocol.newForFilters(url, username, password),
     syncRun: (nowMs) => new SyncRun(nowMs),
     syncRunForBooks: (nowMs) => SyncRun.newForBooks(nowMs),
     syncRunForBookStates: (nowMs) => SyncRun.newForBookStates(nowMs),
     syncRunForTasks: (nowMs) => SyncRun.newForTasks(nowMs),
     syncRunForTaskHistory: (nowMs) => SyncRun.newForTaskHistory(nowMs),
     syncRunForTags: (nowMs) => SyncRun.newForTags(nowMs),
+    syncRunForFilters: (nowMs) => SyncRun.newForFilters(nowMs),
     syncSchedule: (now) => new SyncSchedule(now),
   };
 }

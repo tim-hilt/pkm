@@ -214,7 +214,7 @@ describe("an idle poll", () => {
     await settle(40_000); // until the files are known to be unchanged
     server.requests.length = 0;
     await advance(10_000);
-    expect(server.requests).toHaveLength(6);
+    expect(server.requests).toHaveLength(7);
     expect(server.requests.every((request) => request.startsWith("PROPFIND "))).toBe(true);
   });
 });

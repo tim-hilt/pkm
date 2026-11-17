@@ -342,6 +342,11 @@ fn described(mut filter: Filter, active: &[&Node]) -> Filter {
     filter
 }
 
+/// Whether `file` is a Filter: it has an id, Title and Query.
+pub(crate) fn is_filter(file: &Document) -> bool {
+    stored_of(file).is_some()
+}
+
 /// The Filter a file describes; `None` for one without an id, Title or Query.
 fn stored_of(file: &Document) -> Option<Stored> {
     Some(Stored {

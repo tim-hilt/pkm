@@ -624,8 +624,8 @@ mod tests {
         use std::sync::{Arc, Mutex};
 
         use crate::{
-            Blob, BookStates, Books as BookFiles, DirStorage, Drawings, Folder, Merge, Progress,
-            Storage, SyncState, TagsFile, TaskHistory, Tasks, sync_folders, sync_step,
+            Blob, BookStates, Books as BookFiles, DirStorage, Drawings, Filters, Folder, Merge,
+            Progress, Storage, SyncState, TagsFile, TaskHistory, Tasks, sync_folders, sync_step,
         };
         use pkm_base::item_id::ItemId;
         use pkm_base::json;
@@ -2959,6 +2959,34 @@ mod tests {
                 }
             }
 
+            /// One Sync step of the Filters, with their cloud.
+            fn sync_filters(&self, filters: &Cloud) {
+                fs::create_dir_all(self.root.0.join("state")).unwrap();
+                let state = SyncState::open(self.root.0.join("state").join("Filters")).unwrap();
+                let dir = self.root.0.join("Filters");
+                fs::create_dir_all(&dir).unwrap();
+                let folders = [Folder {
+                    dir: &dir,
+                    state: &state,
+                    storage: &filters.storage,
+                    merge: Arc::new(Filters),
+                }];
+                for outcome in sync_folders(&folders, &AtomicBool::new(false), &|_| {}) {
+                    assert!(outcome.error.is_none(), "{:?}", outcome.error);
+                }
+            }
+
+            /// The Filters' Titles in order, as the store lists them.
+            fn filter_titles(&self) -> Vec<String> {
+                let store = self.store();
+                store
+                    .filters()
+                    .unwrap()
+                    .into_iter()
+                    .map(|f| f.title)
+                    .collect()
+            }
+
             /// The Tags with their Tag Colors, as the store lists them.
             fn tags(&self) -> Vec<(String, Option<String>)> {
                 let store = self.store();
@@ -3051,6 +3079,45 @@ mod tests {
                     .map(|r| r.task.title)
                     .collect();
                 assert_eq!(tagged, ["Eggs"]);
+            }
+        }
+
+        #[test]
+        fn filters_sync_and_merge_between_devices_and_a_delete_wins() {
+            let filters = Cloud::new();
+            let (phone, tablet) = (
+                TaggingDevice::new("aaaaaaaaaaaa"),
+                TaggingDevice::new("bbbbbbbbbbbb"),
+            );
+            let store = phone.store();
+            let work = store.create_filter("Work", "@work").unwrap();
+            let home = store.create_filter("Home", "@home").unwrap();
+            let gone = store.create_filter("Gone", "@gone").unwrap();
+            phone.sync_filters(&filters);
+            tablet.sync_filters(&filters);
+            assert_eq!(tablet.filter_titles(), ["Work", "Home", "Gone"]);
+
+            // Different fields of one Filter, a Delete of another one.
+            store.edit_filter(&work.id, "Job", "@work").unwrap();
+            store.delete_filter(&gone.id).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(1100));
+            let other = tablet.store();
+            other.set_favorite(&work.id, true).unwrap();
+            other
+                .edit_filter(&gone.id, "Gone for good", "@gone")
+                .unwrap();
+            other
+                .edit_filter(&home.id, "Home", "@home & !@wait")
+                .unwrap();
+            for device in [&phone, &tablet, &phone] {
+                device.sync_filters(&filters);
+            }
+
+            for device in [&phone, &tablet] {
+                assert_eq!(device.filter_titles(), ["Job", "Home"]);
+                let listed = device.store().filters().unwrap();
+                assert!(listed[0].favorite);
+                assert_eq!(listed[1].query, "@home & !@wait");
             }
         }
     }

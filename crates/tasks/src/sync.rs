@@ -8,26 +8,46 @@
 //! differing properties take the newer side's. Bytes that are no Task are no
 //! Item: `merge` and `same_item` say none.
 
+pub mod filters;
+
 use crate::store::is_task;
 use pkm_base::front_matter::{Document, Value};
 use std::cmp::Ordering;
 
-/// Properties that are sets of items: both sides' additions are kept.
-const SETS: [&str; 2] = ["tags", "blocked-by"];
 const UPDATED: &str = "updated";
+
+/// What differs between the kinds of file this module merges.
+struct Kind {
+    /// The document the bytes are, if they are one of this kind.
+    parse: fn(&[u8]) -> Option<Document>,
+    /// Properties that are sets of items: both sides' additions are kept.
+    sets: &'static [&'static str],
+    /// Properties of `<key> <value>` entries: merged per key.
+    maps: &'static [&'static str],
+}
+
+const TASK: Kind = Kind {
+    parse,
+    sets: &["tags", "blocked-by"],
+    maps: &[],
+};
 
 /// What `local` and `remote` merge to, given the Item's bytes at the last Sync
 /// (none if there was none); none if either isn't a Task or they differ in id.
 pub fn merge(base: Option<&[u8]>, local: &[u8], remote: &[u8]) -> Option<Vec<u8>> {
+    merge_kind(&TASK, base, local, remote)
+}
+
+fn merge_kind(kind: &Kind, base: Option<&[u8]>, local: &[u8], remote: &[u8]) -> Option<Vec<u8>> {
     if local == remote {
         return Some(local.to_vec());
     }
-    let (left, right) = (parse(local)?, parse(remote)?);
+    let (left, right) = ((kind.parse)(local)?, (kind.parse)(remote)?);
     if left.scalar("id") != right.scalar("id") {
         return None;
     }
     // An unreadable base is as good as none.
-    let base = base.and_then(parse);
+    let base = base.and_then(kind.parse);
     // Both Devices must pick the same winner, whichever side they call local.
     let newer = match updated(&left).cmp(updated(&right)) {
         Ordering::Equal => local.max(remote) == local,
@@ -46,7 +66,7 @@ pub fn merge(base: Option<&[u8]>, local: &[u8], remote: &[u8]) -> Option<Vec<u8>
             winner: winner.get(key),
             loser: loser.get(key),
         };
-        match sides.merged(key) {
+        match sides.merged(kind, key) {
             Some(value) => merged.set(key, value),
             None => merged.remove(key),
         }
@@ -83,6 +103,18 @@ fn items(value: Option<&Value>) -> &[String] {
     }
 }
 
+fn value_of<'a>(entries: &[(&'a str, &'a str)], key: &str) -> Option<&'a str> {
+    entries.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)
+}
+
+/// The `<key> <value>` entries of a list property.
+fn entries(value: Option<&Value>) -> Vec<(&str, &str)> {
+    items(value)
+        .iter()
+        .filter_map(|entry| entry.split_once(' '))
+        .collect()
+}
+
 fn updated(file: &Document) -> &str {
     file.scalar(UPDATED).unwrap_or("")
 }
@@ -95,17 +127,49 @@ struct Sides<'a> {
     loser: Option<&'a Value>,
 }
 
-impl Sides<'_> {
-    fn merged(&self, key: &str) -> Option<Value> {
+impl<'a> Sides<'a> {
+    fn merged(&self, kind: &Kind, key: &str) -> Option<Value> {
         if key == UPDATED {
             return self.winner.cloned(); // the newer one
         }
-        if SETS.contains(&key) {
+        if kind.maps.contains(&key) {
+            let entries = self.merged_map(entries(self.winner), entries(self.loser));
+            return (!entries.is_empty()).then_some(Value::List(entries));
+        }
+        if kind.sets.contains(&key) {
             // An empty set is no property at all, as the store writes it.
             let set = self.merged_set(items(self.winner), items(self.loser));
             return (!set.is_empty()).then_some(Value::List(set));
         }
         pick(self.base.as_ref(), &self.winner, &self.loser).cloned()
+    }
+
+    /// Entries `<key> <value>` merged per key, as `pick` merges a property;
+    /// a key whose value one side changed and the other dropped keeps the change.
+    fn merged_map(&self, winner: Vec<(&str, &str)>, loser: Vec<(&str, &str)>) -> Vec<String> {
+        let base: Option<Vec<(&str, &str)>> = self.base.map(entries);
+        let mut keys: Vec<&str> = winner.iter().chain(&loser).map(|(k, _)| *k).collect();
+        keys.sort_unstable();
+        keys.dedup();
+        keys.into_iter()
+            .filter_map(|key| {
+                let (w, l) = (value_of(&winner, key), value_of(&loser, key));
+                let merged = match &base {
+                    None => w.or(l),
+                    Some(base) => {
+                        let b = value_of(base, key);
+                        if w == b {
+                            l
+                        } else if l == b {
+                            w
+                        } else {
+                            w.or(l)
+                        }
+                    }
+                };
+                merged.map(|v| format!("{key} {v}"))
+            })
+            .collect()
     }
 
     fn merged_set(&self, winner: &[String], loser: &[String]) -> Vec<String> {

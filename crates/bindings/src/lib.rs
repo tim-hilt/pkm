@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use pkm_base::item_id::ItemId;
 use pkm_base::random::Entropy;
 use pkm_cloud::{
-    BookStates, Books, ConnectError, DirStorage, Drawings, GoogleDriveStorage, Observer,
+    BookStates, Books, ConnectError, DirStorage, Drawings, Filters, GoogleDriveStorage, Observer,
     OneDriveStorage, Progress, Status, Storage, SyncFolder, SyncLoop, SyncState, TagsFile,
     TaskHistory, Tasks as TaskFiles, Timing, WebDavStorage,
 };
@@ -44,14 +44,15 @@ pub enum ConnectError {
 
 /// Connects to the WebDAV server at `url` as `username` with `password`, which
 /// checks the server and creates the `pkm` folder under `url`, and the
-/// folders of Drawings, Books, Tasks and Tags in it, if they are missing. Blocks while it talks to the server, so call it off the
-/// main thread. Keeps nothing: the client keeps the credentials.
+/// folders of Drawings, Books, Tasks, Tags and Filters in it, if they are missing. Blocks while it talks to the
+/// server, so call it off the main thread. Keeps nothing: the client keeps the credentials.
 #[uniffi::export]
 pub fn connect_webdav(url: String, username: String, password: String) -> Result<(), ConnectError> {
     WebDavStorage::connect(&url, &username, &password, Drawings::FOLDER)?;
     WebDavStorage::connect(&url, &username, &password, Books::FOLDER)?;
     WebDavStorage::connect(&url, &username, &password, TaskFiles::FOLDER)?;
-    WebDavStorage::connect(&url, &username, &password, TagsFile::FOLDER).map(drop)
+    WebDavStorage::connect(&url, &username, &password, TagsFile::FOLDER)?;
+    WebDavStorage::connect(&url, &username, &password, Filters::FOLDER).map(drop)
 }
 
 /// Connects to iCloud Drive through `granted_directory`, the folder the user
@@ -304,8 +305,8 @@ impl Observer for ForeignObserver {
             self.0.changed(names);
         } else if folder == Books::FOLDER {
             self.0.books_changed(names);
-        } else if folder == TaskFiles::FOLDER || folder == TagsFile::FOLDER {
-            // The Tags show in the Tasks.
+        } else if [TaskFiles::FOLDER, TagsFile::FOLDER, Filters::FOLDER].contains(&folder) {
+            // The Tags and Filters show in the Tasks.
             self.0.tasks_changed(names);
         }
     }
@@ -524,6 +525,7 @@ struct ContextStorages {
     books: Arc<dyn Storage>,
     tasks: Arc<dyn Storage>,
     tags: Arc<dyn Storage>,
+    filters: Arc<dyn Storage>,
 }
 
 impl ContextStorages {
@@ -534,6 +536,7 @@ impl ContextStorages {
             books: open(Books::FOLDER)?,
             tasks: open(TaskFiles::FOLDER)?,
             tags: open(TagsFile::FOLDER)?,
+            filters: open(Filters::FOLDER)?,
         })
     }
 
@@ -544,15 +547,24 @@ impl ContextStorages {
             books,
             tasks,
             tags,
+            filters,
         } = self;
-        vec![drawings, books.clone(), books, tasks.clone(), tasks, tags]
+        vec![
+            drawings,
+            books.clone(),
+            books,
+            tasks.clone(),
+            tasks,
+            tags,
+            filters,
+        ]
     }
 }
 
 impl CloudSync {
     /// Syncs the Context folders: Drawings, both halves of Books (the Files
     /// and their hidden state) and of Tasks (the Task files and their hidden
-    /// History), and the Tags file in `Tags/` beside the Tasks folder, each
+    /// History), the Tags file in `Tags/` and the Filters in `Filters/` beside the Tasks folder, each
     /// with its state in a folder of its own in `state_directory` and its
     /// cloud folder.
     fn start_contexts(
@@ -573,10 +585,19 @@ impl CloudSync {
             .map_err(|_| SyncStartError::StateUnavailable)?;
         let tags_state = SyncState::open(state_root.join(TagsFile::FOLDER))
             .map_err(|_| SyncStartError::StateUnavailable)?;
+        let filters_state = SyncState::open(state_root.join(Filters::FOLDER))
+            .map_err(|_| SyncStartError::StateUnavailable)?;
         let books = Path::new(&directories.books);
         let tasks = Path::new(&directories.tasks);
-        let tags = tasks.parent().unwrap_or(tasks).join(TagsFile::FOLDER);
-        for hidden in [books.join(".state"), tasks.join(".history"), tags.clone()] {
+        let beside = tasks.parent().unwrap_or(tasks);
+        let (tags, filters) = (beside.join(TagsFile::FOLDER), beside.join(Filters::FOLDER));
+        let hidden = [
+            books.join(".state"),
+            tasks.join(".history"),
+            tags.clone(),
+            filters.clone(),
+        ];
+        for hidden in hidden {
             std::fs::create_dir_all(hidden).map_err(|_| SyncStartError::StateUnavailable)?;
         }
         let folders = vec![
@@ -621,6 +642,13 @@ impl CloudSync {
                 state: tags_state,
                 storage: storages.tags,
                 merge: Arc::new(TagsFile),
+            },
+            SyncFolder {
+                name: Filters::FOLDER.into(),
+                dir: filters,
+                state: filters_state,
+                storage: storages.filters,
+                merge: Arc::new(Filters),
             },
         ];
         let sync_loop = SyncLoop::start(
