@@ -980,6 +980,17 @@
         }
       }
     },
+    "Favorite": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Favorite"
+          }
+        }
+      }
+    },
     "File Size": {
       "extractionState": "manual",
       "localizations": {
@@ -2395,6 +2406,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Undo"
+          }
+        }
+      }
+    },
+    "Unfavorite": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unfavorite"
           }
         }
       }

@@ -506,6 +506,11 @@ impl TaskStore {
         Ok(self.0.edit_filter(&id, &title, &query)?)
     }
 
+    /// Marks a Filter as a Favorite, or unmarks it.
+    pub fn set_favorite(&self, id: String, favorite: bool) -> Result<(), TasksError> {
+        Ok(self.0.set_favorite(&id, favorite)?)
+    }
+
     /// Moves a Filter before another, or to the end of the Filters list.
     pub fn move_filter(&self, id: String, before: Option<String>) -> Result<(), TasksError> {
         Ok(self.0.move_filter(&id, before.as_deref())?)
@@ -679,6 +684,8 @@ mod tests {
             .move_filter(other.id.clone(), Some(filter.id.clone()))
             .unwrap();
         assert_eq!(store.filters().unwrap()[0].title, "Home");
+        store.set_favorite(other.id.clone(), true).unwrap();
+        assert!(store.filters().unwrap()[0].favorite);
         let first = store
             .create("a".into(), Planning::Active, 4, vec!["work".into()])
             .unwrap();

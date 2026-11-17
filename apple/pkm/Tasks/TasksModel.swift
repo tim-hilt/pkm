@@ -14,12 +14,37 @@ enum TasksList: Hashable {
         self = planning == .active ? .active : .backlog
     }
 
+    /// The Filter's ID, if it is a Filter.
+    var filterID: String? {
+        if case .filter(let id) = self { id } else { nil }
+    }
+
     /// The list of Tasks it is, if it is Active or the Backlog, which Tasks move in and are added to.
     var planning: Planning? {
         switch self {
         case .active: .active
         case .backlog: .backlog
         case .filters, .filter: nil
+        }
+    }
+
+    /// The list as stored on a Device: `active`, `backlog`, `filters` or `filter:<id>`.
+    var stored: String {
+        switch self {
+        case .active: "active"
+        case .backlog: "backlog"
+        case .filters: "filters"
+        case .filter(let id): "filter:\(id)"
+        }
+    }
+
+    init?(stored: String) {
+        switch stored {
+        case "active": self = .active
+        case "backlog": self = .backlog
+        case "filters": self = .filters
+        case _ where stored.hasPrefix("filter:"): self = .filter(String(stored.dropFirst("filter:".count)))
+        default: return nil
         }
     }
 }
@@ -30,10 +55,15 @@ final class TasksModel {
     private let store: TaskStore
     private let revertWindow: Duration
     private var commitTimer: Task<Void, Never>?
+    @ObservationIgnored private let defaults: UserDefaults?
+    private static let lastListKey = "lastTasksList"
 
-    /// The list shown.
+    /// The list shown; this Device opens on it again.
     var list: TasksList = .active {
-        didSet { reload() }
+        didSet {
+            defaults?.set(list.stored, forKey: Self.lastListKey)
+            reload()
+        }
     }
     /// The Tasks of the open sheet's stack, by id, first opened first: a Blocker
     /// or Subtask opened from a Task is pushed on it. Empty when no sheet is open. Over the
@@ -113,11 +143,28 @@ final class TasksModel {
     /// The Close that can still be Reverted, for the toast.
     private(set) var pendingClose: Closing?
 
-    /// A Close is saved once its toast has been shown for `revertWindow`.
-    init(store: TaskStore, revertWindow: Duration = .seconds(5)) {
+    /// The bar's entries: Active, Backlog, the Favorites in the Filters list's order, Filters.
+    var bar: [TasksList] {
+        [.active, .backlog] + filters.filter(\.favorite).map { .filter($0.id) } + [.filters]
+    }
+
+    /// The bar's entry that shows the list shown: a Filter that isn't a Favorite is under Filters.
+    var barEntry: TasksList {
+        bar.contains(list) ? list : .filters
+    }
+
+    /// A Close is saved once its toast has been shown for `revertWindow`. `defaults` holds the last
+    /// list, which opens again unless it is a Filter that is gone, then Active; `nil` remembers nothing.
+    init(store: TaskStore, revertWindow: Duration = .seconds(5), defaults: UserDefaults? = nil) {
         self.store = store
         self.revertWindow = revertWindow
+        self.defaults = defaults
         reload()
+        if let last = defaults?.string(forKey: Self.lastListKey).flatMap(TasksList.init(stored:)),
+            last.filterID.map({ id in filters.contains { $0.id == id } }) ?? true
+        {
+            list = last
+        }
     }
 
     /// Adds a Task, with a Description, Priority and Tags if given, and shows the list it landed in,
@@ -298,6 +345,12 @@ final class TasksModel {
         guard (try? store.editFilter(id: id, title: title, query: query)) != nil else { return false }
         reload()
         return true
+    }
+
+    /// Marks a Filter as a Favorite, which gives it an entry in the bar, or unmarks it.
+    func setFavorite(_ id: String, to favorite: Bool) {
+        try? store.setFavorite(id: id, favorite: favorite)
+        reload()
     }
 
     /// Deletes a Filter; no Task changes. Showing it, the Filters list shows instead.

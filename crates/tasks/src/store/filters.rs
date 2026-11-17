@@ -78,6 +78,12 @@ impl Tasks {
         Ok(self.filter(id)?)
     }
 
+    /// Marks the Filter `id` as a Favorite, or unmarks it. Fails with `NotFound`
+    /// if there is no such Filter.
+    pub fn set_favorite(&self, id: &str, favorite: bool) -> io::Result<()> {
+        self.rewrite_filter(id, |file| file.set_scalar("favorite", favorite.to_string()))
+    }
+
     /// Moves the Filter `id` before the Filter `before` in the Filters list, or
     /// to its end if that is `None`; a drop where it already is changes
     /// nothing. Usually only its file is written, as for Tasks (see `place`).
@@ -454,6 +460,31 @@ mod tests {
             tasks.check_query(&filter.query),
             Ok(vec!["x".into(), "y".into()])
         );
+    }
+
+    #[test]
+    fn a_filter_is_marked_and_unmarked_as_a_favorite_keeping_its_place() {
+        let (files, tasks) = open();
+        let a = tasks.create_filter("A", "@a").unwrap();
+        tasks.create_filter("B", "@b").unwrap();
+        tasks.set_favorite(&a.id, true).unwrap();
+        let listed = tasks.filters().unwrap();
+        assert_eq!(
+            listed.iter().map(|f| f.favorite).collect::<Vec<_>>(),
+            [true, false]
+        );
+        assert_eq!(names(&tasks), ["A", "B"]);
+        let text = files
+            .read(Path::new(&format!("Filters/{}.md", a.id)))
+            .unwrap();
+        assert_eq!(
+            Document::parse(&text).unwrap().scalar("favorite"),
+            Some("true")
+        );
+        tasks.set_favorite(&a.id, false).unwrap();
+        assert!(!tasks.filters().unwrap()[0].favorite);
+        let missing = tasks.set_favorite("aaaaaaaaaaaa", true).unwrap_err();
+        assert_eq!(missing.kind(), io::ErrorKind::NotFound);
     }
 
     #[test]

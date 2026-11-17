@@ -594,6 +594,49 @@ import Testing
         #expect(TasksModel.allowedQueryText("@Work & !@Ho_me") == "@work & !@home")
     }
 
+    @Test func theBarListsActiveBacklogFavoritesInTheFiltersOrderThenFilters() throws {
+        let model = try openModel()
+        #expect(model.bar == [.active, .backlog, .filters])
+        for title in ["A", "B", "C"] { model.addFilter(title: title, query: "@a") }
+        let ids = model.filters.map(\.id)
+        model.setFavorite(ids[2], to: true)
+        model.setFavorite(ids[0], to: true)
+        #expect(model.bar == [.active, .backlog, .filter(ids[0]), .filter(ids[2]), .filters])
+        model.moveFilters(from: IndexSet(integer: 2), to: 0)
+        #expect(model.bar == [.active, .backlog, .filter(ids[2]), .filter(ids[0]), .filters])
+        model.setFavorite(ids[2], to: false)
+        #expect(model.bar == [.active, .backlog, .filter(ids[0]), .filters])
+    }
+
+    @Test func aFilterOpenedFromTheFiltersListIsUnderFiltersUnlessItIsAFavorite() throws {
+        let model = try openModel()
+        model.addFilter(title: "A", query: "@a")
+        let id = model.filters[0].id
+        model.list = .filter(id)
+        #expect(model.barEntry == .filters)
+        model.setFavorite(id, to: true)
+        #expect(model.barEntry == .filter(id))
+        model.list = .backlog
+        #expect(model.barEntry == .backlog)
+    }
+
+    @Test func eachDeviceOpensTheLastListAndActiveIfItsFilterIsGone() throws {
+        let defaults = UserDefaults.isolated()
+        let store = try TaskStore.open(
+            root: root.appending(path: "Tasks").path, deviceFolder: root.appending(path: "Device").path)
+        let first = TasksModel(store: store, defaults: defaults)
+        #expect(first.list == .active)
+        first.addFilter(title: "A", query: "@a")
+        let id = first.filters[0].id
+        for list in [TasksList.backlog, .filters, .filter(id)] {
+            first.list = list
+            #expect(TasksModel(store: store, defaults: defaults).list == list)
+        }
+        first.deleteFilter(id)
+        first.list = .filter(id)
+        #expect(TasksModel(store: store, defaults: defaults).list == .active)
+    }
+
     @Test func aFilterKeepsNamingATagAfterItIsDeleted() throws {
         let model = try openModel()
         model.add(title: "t", tags: ["x"])

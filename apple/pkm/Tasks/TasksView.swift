@@ -1,16 +1,16 @@
 import SwiftUI
 
 /// The Tasks Context: the Active list, the Backlog and the Filters, as Todoist-style rows. A Filter
-/// opens on top of the Filters list.
+/// opens on top of the Filters list, unless it is a Favorite, which the bar shows directly.
 struct TasksView: View {
     @Environment(TasksModel.self) private var model
     @State private var isAdding = false
     @State private var isAddingFilter = false
 
-    /// The Filter open on top of the Filters list; going back leaves it.
+    /// The Filter open on top of the Filters list; going back leaves it. A Favorite is no part of it.
     private var openFilter: Binding<[String]> {
         Binding(
-            get: { if case .filter(let id) = model.list { [id] } else { [] } },
+            get: { if case .filter(let id) = model.list, model.barEntry == .filters { [id] } else { [] } },
             set: { path in
                 if let id = path.last {
                     model.list = .filter(id)
@@ -25,10 +25,12 @@ struct TasksView: View {
         @Bindable var model = model
         NavigationStack(path: openFilter) {
             Group {
-                switch model.list {
+                switch model.barEntry {
                 case .active, .backlog:
                     TaskListView(emptyText: model.list == .active ? "Nothing active." : "The Backlog is empty.")
-                case .filters, .filter:
+                case .filter:
+                    TaskListView(emptyText: "No Active Tasks match.")
+                case .filters:
                     FiltersList { isAddingFilter = true }
                 }
             }
@@ -39,17 +41,10 @@ struct TasksView: View {
                 // On iPhone and iPad the bar sits in the bottom bar, in thumb reach; the "+"
                 // and the toast sit above it, in its safe area. The Mac keeps it in its toolbar.
                 ToolbarItem(placement: barPlacement) {
-                    Picker("List", selection: barEntry) {
-                        Text("Active").tag(TasksList.active)
-                        Text("Backlog").tag(TasksList.backlog)
-                        Text("Filters").tag(TasksList.filters)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .accessibilityIdentifier("tasks-planning")
+                    TasksBar()
                 }
-                .sharedBackgroundVisibility(.hidden)  // no capsule round the picker, which has its own
-                if model.list.planning == nil {
+                .sharedBackgroundVisibility(.hidden)  // no capsule round the bar, which has its own
+                if model.barEntry == .filters {
                     AddToolbar(title: "New Filter", identifier: "add-filter") { isAddingFilter = true }
                 } else {
                     AddToolbar(title: "New Task", identifier: "add-task") { isAdding = true }
@@ -70,14 +65,6 @@ struct TasksView: View {
         .sheet(isPresented: Binding(get: { !model.editing.isEmpty }, set: { if !$0 { model.closeEditing() } })) {
             EditTaskSheet()
         }
-    }
-
-    /// The bar's entry that shows the list: a Filter is under Filters.
-    private var barEntry: Binding<TasksList> {
-        Binding(
-            get: { model.list.planning == nil ? .filters : model.list },
-            set: { model.list = $0 }
-        )
     }
 
     /// Where the bar sits: the bottom bar on iPhone and iPad, the toolbar's middle on the Mac.

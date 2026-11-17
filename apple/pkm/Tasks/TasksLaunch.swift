@@ -16,7 +16,7 @@ extension TasksModel {
     static func forLaunch() -> TasksModel {
         let arguments = ProcessInfo.processInfo.arguments
         guard arguments.contains(where: { $0.hasPrefix("-UITesting") }) else {
-            return TasksModel(store: openOrTemporary(documentsFolder))
+            return TasksModel(store: openOrTemporary(documentsFolder), defaults: .standard)
         }
         let store = openOrTemporary(temporaryFolder())
         let opensSheet = arguments.contains("-UITestingOpenTaskSheet")
@@ -43,8 +43,14 @@ extension TasksModel {
             }
             _ = try? store.create(title: "Learn Rust", planning: .backlog, priority: 4, tags: [])
             if opensFilters || opensFilter {
-                _ = try? store.createFilter(title: "Home and health", query: "@home | @health")
-                _ = try? store.createFilter(title: "Shopping", query: "@shopping")
+                // Favorites enough to overflow the bar on an iPhone.
+                for (title, query) in [
+                    ("Home and health", "@home | @health"), ("Shopping", "@shopping"), ("Work", "@work"),
+                    ("Errands", "@errands"), ("Someday", "@someday"),
+                ] {
+                    guard let filter = try? store.createFilter(title: title, query: query) else { continue }
+                    try? store.setFavorite(id: filter.id, favorite: true)
+                }
             }
         }
         let model = TasksModel(store: store)

@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// The Filters list: each Filter with its Query and how many Active Tasks it matches, opening on
-/// tap and ordered by dragging; swiping a row (a context menu on the Mac) edits or Deletes it,
-/// the latter after a confirmation. An empty list offers to create one.
+/// tap and ordered by dragging; swiping a row (a context menu on the Mac) marks it as a Favorite,
+/// edits or Deletes it, the latter after a confirmation. An empty list offers to create one.
 struct FiltersList: View {
     @Environment(TasksModel.self) private var model
     @State private var editing: Filter?
@@ -26,7 +26,9 @@ struct FiltersList: View {
                             Button("Delete", systemImage: "trash", role: .destructive) { deleting = filter }
                             Button("Edit", systemImage: "pencil") { editing = filter }.tint(.blue)
                         }
+                        .swipeActions(edge: .leading) { favoriteButton(filter).tint(.yellow) }
                         .contextMenu {
+                            favoriteButton(filter)
                             Button("Edit", systemImage: "pencil") { editing = filter }
                             Button("Delete", systemImage: "trash", role: .destructive) { deleting = filter }
                         }
@@ -47,6 +49,15 @@ struct FiltersList: View {
     }
 }
 
+extension FiltersList {
+    /// Marks the Filter as a Favorite, or unmarks it.
+    fileprivate func favoriteButton(_ filter: Filter) -> some View {
+        Button(
+            filter.favorite ? "Unfavorite" : "Favorite", systemImage: filter.favorite ? "star.slash" : "star"
+        ) { model.setFavorite(filter.id, to: !filter.favorite) }
+    }
+}
+
 /// A Filter's Title, its Query (or why it can't be read), and the count of Active Tasks it matches.
 private struct FilterRow: View {
     let filter: Filter
@@ -54,7 +65,13 @@ private struct FilterRow: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(filter.title)
+                HStack(spacing: 4) {
+                    Text(filter.title)
+                    if filter.favorite {
+                        Image(systemName: "star.fill").font(.caption).foregroundStyle(.yellow)
+                            .accessibilityLabel("Favorite")
+                    }
+                }
                 if let error = filter.error {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .font(.subheadline)
