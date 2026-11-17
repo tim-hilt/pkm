@@ -19,7 +19,7 @@ The random identifier an Item gets when it is created and keeps for life, throug
 _Avoid_: Name, hash, key
 
 **Delete**:
-Taking an Item out of its Context, with its file and everything recorded about it except its Tasks History, on every Device; it wins over edits made elsewhere at the same time.
+Taking an Item out of its Context, with its file and everything recorded about it, on every Device; it wins over edits made elsewhere at the same time.
 _Avoid_: Remove, trash
 
 **Task**:

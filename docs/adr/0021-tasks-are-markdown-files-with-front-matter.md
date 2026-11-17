@@ -1,5 +1,7 @@
 # Tasks are Markdown files with front matter, merged three-way
 
+> Superseded in part: `state` and `position` by ADR-0025, Closed Tasks and the Device cache by ADR-0026.
+
 Builds on ADR-0019 (Item IDs) and ADR-0020 (a folder and merge hook per Context).
 
 Each Task is `Tasks/<id>.md`: a front matter of fixed keys (`id`, `title`, `priority`, `state` (`active`, `backlog`, `done` or `rejected`), `parent`, `position`, `tags`, `blocked-by`, `updated`) and the Description as the body. The front matter is a YAML subset of scalars and block lists (`- item`) only, read and written by `pkm-base` so that Notes can reuse it. The file is named by Item ID, so changing the Title never renames it. The merge hook merges three-way against the file at the last Sync: a field changed on one side takes that side, tags and blocked-by merge as sets, and a field changed on both sides takes the side with the newer `updated`.

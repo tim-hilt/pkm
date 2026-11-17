@@ -1,5 +1,7 @@
 # The Tasks History is a log by Item ID beside the Task files
 
+> Superseded by ADR-0026: no History is kept.
+
 History is kept for later analysis, apart from the Task files: each Device appends lines (`<time> <event> <id>`) to its own file per month, `Tasks/.history/<device>-<yyyy-mm>.log`; events are created, made-active, moved-to-backlog, done and rejected. Tasks are never Deleted in the app (Reject takes its place), but a Task file removed outside the app takes nothing of the History with it, and the lines hold no Title, Tag or other content.
 
 ## Considered Options

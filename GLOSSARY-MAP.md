@@ -3,7 +3,7 @@
 ## Contexts
 
 - [App](./GLOSSARY.md): the Contexts, their items, Links between them, Settings and Cloud Backing
-- [Tasks](./crates/tasks/GLOSSARY.md): Tasks with Priorities and Tags, Active or in the Backlog, with Subtasks, possibly Blocked by others
+- [Tasks](./crates/tasks/GLOSSARY.md): Tasks with Priorities and Tags, seen through Filters, with Subtasks, possibly Blocked by others
 - [Drawings](./crates/drawing/GLOSSARY.md): Excalidraw-compatible Drawings, edited on the Canvas
 - [Books](./crates/books/GLOSSARY.md): PDFs and EPUBs to read and mark up, with Highlights and Comments
 

@@ -1,6 +1,6 @@
 # Tasks
 
-The Context for things to do, planned as Active or in the Backlog. App-wide terms (Context, Item, Item ID, Delete, Tag, Device, Cloud Backing, Sync) are in the [App glossary](../../GLOSSARY.md).
+The Context for things to do, seen through Filters. App-wide terms (Context, Item, Item ID, Delete, Tag, Device, Cloud Backing, Sync) are in the [App glossary](../../GLOSSARY.md).
 
 ## Language
 
@@ -34,33 +34,39 @@ _Avoid_: Token, magic input, marker
 Turning a Shortcut back into plain text of the Title.
 _Avoid_: Escape, dismiss, unmark
 
-### Planning
+### Closing
 
 **Open**:
-A Task not yet Closed: either Active or in the Backlog.
-_Avoid_: Pending, todo
-
-**Active**:
-An Open top-level Task the user plans to do now, with its Subtasks.
-_Avoid_: Current, in progress, today
-
-**Backlog**:
-The Open top-level Tasks the user plans to do later, with their Subtasks.
-_Avoid_: Inbox, someday, later
+A Task not yet Closed.
+_Avoid_: Pending, todo, Active
 
 **Close**:
-Ending a Task for good as **Done** (finished) or **Rejected** (given up on, or never meant). Tasks are Rejected, not Deleted.
+Ending a Task for good as **Done** (finished) or **Rejected** (given up on, or never meant), with its Open Subtasks. A Closed Task is Deleted, leaving no trace.
 _Avoid_: Complete, check off, resolve, cancel, drop, delete
 
 **Revert**:
 Taking back a Close in the moment after it, as if it never happened.
 _Avoid_: Undo, Reopen, restore
 
+### Order
+
+**Manual order**:
+The order the user drags a Filter's Tasks into; Tasks not yet dragged follow at the end.
+_Avoid_: Custom order, position
+
+**Subtask order**:
+The one order of a Parent's Subtasks, the same in its sheet and in every Filter: the order they are worked on in.
+_Avoid_: Sibling order, child order
+
+**Sort**:
+A Filter's automatic order by a **Sort key** (for now only Priority) in a **Direction** (Ascending or Descending), Subtasks by their own; Tasks with the same Sort key keep their Manual order, and Subtasks of one Parent always keep their Subtask order. A Filter is either **Sorted** or in Manual order; dragging a Task to a different Sort key puts it in Manual order.
+_Avoid_: View, sort order, arrangement
+
 ### Filters
 
 **Filter**:
-A Title and a Query, showing the Active Tasks the Query matches, in an order of its own. Not an Item.
-_Avoid_: View, smart list, saved search, perspective
+A Title and a Query, showing the Open Tasks the Query matches, in its own Manual order or Sort. Not an Item. Every list of Tasks is a Filter.
+_Avoid_: View, smart list, saved search, perspective, Active, Backlog, inbox
 
 **Query**:
 The expression a Filter matches Tasks by, on their own Tags, e.g. `@work & !@in-review`.
@@ -71,7 +77,7 @@ A `*` in a Query's Tag, standing for any characters or none, so that it matches 
 _Avoid_: Glob, pattern, regex
 
 **Favorite**:
-A Filter shown beside Active and Backlog, to be reached in one step.
+A Filter shown in the Tasks bar, to be reached in one step.
 _Avoid_: Pin, star, shortcut (that is Quick Add's)
 
 **Delete a Filter**:
@@ -91,7 +97,3 @@ _Avoid_: Depends on, prerequisite, Link (that is a reference between Items)
 **Blocker**:
 A Task another is Blocked by.
 _Avoid_: Dependency, prerequisite
-
-**History**:
-When Tasks were created, made Active, moved to the Backlog, Done and Rejected, by Item ID only, for later analysis.
-_Avoid_: Log, audit trail, events
