@@ -241,6 +241,19 @@ import Testing
         #expect(model.editing == [p.id])
     }
 
+    @Test func aSubtasksParentOpensOnTopOrGoesBackWhenJustBelow() throws {
+        let model = try openModel()
+        model.add(title: "p", planning: .active)
+        let p = model.tasks[0]
+        model.addSubtask(title: "s", under: p)
+        let s = model.subtasks(of: p.id)[0]
+        model.startEditing(s)
+        #expect(model.open(id: p.id))
+        #expect(model.editing == [s.id, p.id])
+        #expect(model.open(id: s.id))
+        #expect(model.editing == [s.id])
+    }
+
     @Test func subtasksAddedInARowKeepTheirOrder() throws {
         let model = try openModel()
         model.add(title: "p")

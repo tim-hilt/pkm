@@ -100,13 +100,13 @@ final class TasksModel {
         isLeavingBlocked = false
     }
 
-    /// Pushes the Open Task `id`, a Blocker or Subtask of the one on top, onto the stack,
-    /// leaving the list shown as it is. False, pushing nothing, if it is Closed or gone,
-    /// or while the Title on top is empty.
+    /// Pushes the Open Task `id`, a Blocker, Subtask or Parent of the one on top, onto the
+    /// stack, leaving the list shown as it is. The Task just below is popped to instead.
+    /// False, changing nothing, if it is Closed or gone, or while the Title on top is empty.
     @discardableResult
     func open(id: String) -> Bool {
         guard !editing.isEmpty, !isLeavingBlocked, task(id: id) != nil else { return false }
-        editing.append(id)
+        if editing.dropLast().last == id { editing.removeLast() } else { editing.append(id) }
         return true
     }
 

@@ -298,13 +298,15 @@ export class TasksModel {
   }
 
   /**
-   * Pushes the Open Task `id`, a Blocker or Subtask of the one on top, onto the
-   * stack; the list shown stays. False, pushing nothing, if it is Closed or
-   * gone, or while the Title on top is empty.
+   * Pushes the Open Task `id`, a Blocker, Subtask or Parent of the one on top,
+   * onto the stack; the list shown stays. The Task just below is popped to
+   * instead. False, changing nothing, if it is Closed or gone, or while the
+   * Title on top is empty.
    */
   open(id: string): boolean {
     if (this.stack.length === 0 || this.titleMissing || !this.find(id)) return false;
-    this.stack.push(id);
+    if (id === this.stack.at(-2)) this.stack.pop();
+    else this.stack.push(id);
     this.onChange();
     return true;
   }

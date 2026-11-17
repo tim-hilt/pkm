@@ -153,7 +153,8 @@ const typingPause = 500;
  * the Title is empty the last saved one is kept, a hint says why, and the
  * dialog can't be left (Done is off, Esc ignored).
  * The Tags are one line of pills that opens a picker. Closing saves what is pending.
- * An Open Blocker's title or a Subtask row opens it over this Task; Back (with a Task
+ * An Open Blocker's title, a Subtask row or the Parent opens it over this Task (the
+ * Parent just below is gone back to instead); Back (with a Task
  * below) returns, and is off while the Title is empty. `refresh` redraws the Subtasks.
  */
 export function editTaskDialog(
@@ -200,7 +201,11 @@ export function editTaskDialog(
   };
   const openTask = (id: string) => {
     save();
-    if (model.open(id)) places.open(id);
+    const depth = model.depth;
+    if (!model.open(id)) return;
+    // The model popped to the Task below (a Parent opened from its Subtask): the address follows.
+    if (model.depth > depth) places.open(id);
+    else places.back();
   };
   const subtasks = new SubtasksSection(model, task.id, openTask);
   const blockers = new BlockedByField(
@@ -233,8 +238,11 @@ export function editTaskDialog(
       field("Description", description),
       priorityChoice,
       tags.element,
-      blockers.element,
+      ...(task.parent === undefined
+        ? []
+        : [parentField(task.parent, task.parentTitle ?? "", openTask)]),
       subtasks.element,
+      blockers.element,
     ],
     [done],
   );
@@ -276,6 +284,14 @@ export function editTaskDialog(
     subtasks.stopAdding();
   });
   return { dialog, refresh: () => subtasks.refresh() };
+}
+
+/** A Subtask's Parent: one chip whose title opens it. */
+function parentField(id: string, title: string, open: (id: string) => void): HTMLElement {
+  const opener = button("tasks-chip-title", title, () => open(id));
+  opener.setAttribute("aria-label", `Open ${title}`);
+  const chips = make("ul", "tasks-chips", [make("li", "tasks-chip-pair", [opener])]);
+  return make("fieldset", "tasks-blocked", [make("legend", "", ["Parent"]), chips]);
 }
 
 /**

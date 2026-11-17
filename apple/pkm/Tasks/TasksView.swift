@@ -364,8 +364,8 @@ private struct EditTaskSheet: View {
 /// and when their field loses focus, everything else at once; the Tags are picked in their own
 /// sheet. The Title is Quick Add: the pause saves it without pending Shortcuts, and Return, losing focus and leaving the view apply them. While the Title is empty the rest still
 /// saves (the last saved Title stays), a hint shows, and the view can't be left.
-/// On macOS `done` closes the whole sheet. An Open Blocker or a Subtask is a row that opens its
-/// own form on top; Back then shows this one as last saved.
+/// On macOS `done` closes the whole sheet. An Open Blocker, a Subtask or the Parent is a row that
+/// opens its own form on top (the Parent just below is gone back to); Back then shows this one as last saved.
 private struct EditTaskForm: View {
     @Environment(TasksModel.self) private var model
     let task: ListedTask
@@ -432,6 +432,13 @@ private struct EditTaskForm: View {
                 save()
             }
             TagsRow(tags: tags) { isPickingTags = true }
+            if let parent = task.parent {
+                Section("Parent") {
+                    NavigationLink(task.parentTitle ?? "", value: parent).disabled(!hasTitle)
+                        .accessibilityIdentifier("task-parent")
+                }
+            }
+            SubtasksSection(task: task, canOpen: hasTitle)
             Section("Blocked by") {
                 ForEach(blockedBy, id: \.id) { blocker in
                     Group {
@@ -460,7 +467,6 @@ private struct EditTaskForm: View {
                     .accessibilityIdentifier("task-add-blocker")
                 }
             }
-            SubtasksSection(task: task, canOpen: hasTitle)
         }
         .formStyle(.grouped)
         .navigationTitle(task.title)  // as last saved; also the back button's label on the Blocker's form

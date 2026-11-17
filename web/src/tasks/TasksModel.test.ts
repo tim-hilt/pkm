@@ -739,6 +739,20 @@ describe("Subtasks of a Task", () => {
     model.back();
     expect(model.editing?.id).toBe(parent.id);
   });
+
+  it("opens a Subtask's Parent on top, or goes back to it when it is just below", () => {
+    model.add("Parent");
+    const parent = first();
+    model.addSubtask("Sub", parent);
+    const [sub] = model.subtasks(parent.id);
+    model.openLinked(sub.id);
+    expect(model.open(parent.id)).toBe(true);
+    expect(model.depth).toBe(2);
+    expect(model.editing?.id).toBe(parent.id);
+    expect(model.open(sub.id)).toBe(true);
+    expect(model.depth).toBe(1);
+    expect(model.editing?.id).toBe(sub.id);
+  });
 });
 
 describe("Sync", () => {

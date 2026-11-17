@@ -1,6 +1,6 @@
 import XCTest
 
-/// A Task's sheet: a Blocker opens on top of it, and Back returns to the Task; a Parent is picked in it.
+/// A Task's sheet: a Blocker or a Subtask's Parent opens on top of it, and Back returns to the Task.
 @MainActor final class TasksUITests: XCTestCase {
     private var app: XCUIApplication!
 
@@ -39,6 +39,34 @@ import XCTest
         app.navigationBars.buttons["Book the dentist"].tap()
         XCTAssertTrue(showsForm(of: "Book the dentist"))
         XCTAssertFalse(app.navigationBars["Reply to Anna's email"].exists)
+    }
+
+    func testASubtasksParentOpensOnTopOrGoesBackWhenJustBelow() {
+        let parent = app.buttons["task-parent"]
+        func openParent() {
+            for _ in 0..<4 where !parent.isHittable { app.collectionViews.firstMatch.swipeUp() }
+            parent.tap()
+        }
+        // Opened from the list: the Parent goes on top, Back returns.
+        app.staticTexts["Find the oat milk"].tap()
+        XCTAssertTrue(showsForm(of: "Find the oat milk"))
+        openParent()
+        XCTAssertTrue(showsForm(of: "Buy milk"))
+        app.navigationBars.buttons["Find the oat milk"].tap()
+        XCTAssertTrue(showsForm(of: "Find the oat milk"))
+
+        // Opened from its Parent: the Parent link goes back to it.
+        app.swipeDown(velocity: .fast)
+        XCTAssertTrue(app.navigationBars["Find the oat milk"].waitForNonExistence(timeout: 5))
+        app.staticTexts["Buy milk"].firstMatch.tap()  // the row, before its Subtask's Parent marker
+        XCTAssertTrue(showsForm(of: "Buy milk"))
+        let subtask = app.collectionViews.staticTexts["Find the oat milk"].firstMatch
+        for _ in 0..<4 where !subtask.isHittable { app.collectionViews.firstMatch.swipeUp() }
+        subtask.tap()
+        XCTAssertTrue(showsForm(of: "Find the oat milk"))
+        openParent()
+        XCTAssertTrue(showsForm(of: "Buy milk"))
+        XCTAssertFalse(app.navigationBars["Buy milk"].buttons["Find the oat milk"].exists)
     }
 
     func testTheListSwitchSwitchesTheLists() throws {
