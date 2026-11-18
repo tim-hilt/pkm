@@ -9,11 +9,19 @@ One thing to do, with a Title, a Description, a Priority and Tags.
 _Avoid_: Todo, item (when meaning a Task specifically)
 
 **Title**:
-The one line naming a Task, required; what lists show first.
+The one line naming a Task, required; what lists show first. Takes Inline formatting only.
 _Avoid_: Name, summary
 
+**Inline formatting**:
+Emphasis `*…*`, Strong `**…**` and Code `` `…` `` within a line of text.
+_Avoid_: Rich text, styling, markup
+
 **Description**:
-Plain text the user writes about a Task.
+Markdown text the user writes about a Task, as in a Note: headings, Inline formatting, lists, links, images, code blocks and quotes.
+
+**Image**:
+A picture pasted into a Description, kept beside its Task and Deleted with it, or once no Task's Description shows it any more.
+_Avoid_: Attachment, picture, file
 _Avoid_: Note (that is a Context of its own), body, details
 
 **Priority**:
