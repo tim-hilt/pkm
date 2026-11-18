@@ -23,7 +23,8 @@ struct Kind {
     parse: fn(&[u8]) -> Option<Document>,
     /// Properties that are sets of items: both sides' additions are kept.
     sets: &'static [&'static str],
-    /// Properties of `<key> <value>` entries: merged per key.
+    /// Properties of `<key> <value>` entries: merged per key, which is all
+    /// but the last space-separated field.
     maps: &'static [&'static str],
 }
 
@@ -108,11 +109,12 @@ fn value_of<'a>(entries: &[(&'a str, &'a str)], key: &str) -> Option<&'a str> {
     entries.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)
 }
 
-/// The `<key> <value>` entries of a list property.
+/// The `<key> <value>` entries of a list property; the value is the last
+/// field, so a key may have several (`<tag> <task-id>`).
 fn entries(value: Option<&Value>) -> Vec<(&str, &str)> {
     items(value)
         .iter()
-        .filter_map(|entry| entry.split_once(' '))
+        .filter_map(|entry| entry.rsplit_once(' '))
         .collect()
 }
 

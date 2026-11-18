@@ -1,7 +1,8 @@
 //! Merging what two Devices have kept of the same Filter (ADR-0024). Fields
-//! merge as the Tasks' do (see the parent module); `places` merges per Task
-//! ID: a place changed on one side keeps that side's value, one changed on
-//! both takes the newer side's.
+//! merge as the Tasks' do (see the parent module); `places` merges per
+//! Task (`<task-id> <position>`) or per Group and Task (`<tag> <task-id>
+//! <position>`): a place changed on one side keeps that side's value, one
+//! changed on both takes the newer side's.
 
 use super::{Kind, merge_kind};
 use crate::store::is_filter;
@@ -108,6 +109,42 @@ mod tests {
         );
         let file = merged(Some(&base), &local, &remote);
         assert_eq!(places(&file), [format!("{A} 3"), format!("{B} 0.5")]);
+    }
+
+    #[test]
+    fn places_in_different_groups_merge_per_group_and_task() {
+        let (g, h) = ("@home", "@work");
+        let base = filter(
+            "Work",
+            "@work",
+            &[&format!("{g} {A} 1"), &format!("{g} {B} 2")],
+            T0,
+        );
+        let local = filter(
+            "Work",
+            "@work",
+            &[&format!("{g} {A} 3"), &format!("{g} {B} 2")],
+            T1,
+        );
+        let remote = filter(
+            "Work",
+            "@work",
+            &[
+                &format!("{g} {A} 1"),
+                &format!("{g} {B} 0.5"),
+                &format!("{h} {A} 2"),
+            ],
+            T2,
+        );
+        let file = merged(Some(&base), &local, &remote);
+        assert_eq!(
+            places(&file),
+            [
+                format!("{g} {A} 3"),
+                format!("{g} {B} 0.5"),
+                format!("{h} {A} 2")
+            ]
+        );
     }
 
     #[test]
