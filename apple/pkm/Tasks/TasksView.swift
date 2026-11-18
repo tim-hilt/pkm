@@ -214,8 +214,9 @@ struct TaskRow: View {
             .accessibilityLabel(task.done ? "Revert Done" : "Done")
             VStack(alignment: .leading, spacing: 2) {
                 Text(AttributedString(title: task.title))
-                if !task.description.isEmpty {
-                    Text(task.description)
+                let preview = rowPreview(text: task.description)
+                if !preview.isEmpty {
+                    Text(AttributedString(title: preview))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

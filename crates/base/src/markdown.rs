@@ -343,6 +343,37 @@ pub fn parse_description(text: &str) -> Description {
 }
 
 /// Adds the Inline formatting and links of `text`, which starts at `offset`.
+/// The line a Task row shows for a Description: its first line with text, block
+/// markers stripped, empty and Image-only lines skipped (a fence's lines count as
+/// text, its markers not). Empty when there is none. Callers format it like a Title
+/// (`parse_title`).
+pub fn row_preview(text: &str) -> String {
+    let mut in_fence = false;
+    for line in text.split('\n') {
+        if in_fence {
+            if is_fence_close(line) {
+                in_fence = false;
+            } else if !line.is_empty() {
+                return line.to_string();
+            }
+            continue;
+        }
+        if line.starts_with("```") {
+            in_fence = true;
+            continue;
+        }
+        if image_target(line).is_some() {
+            continue;
+        }
+        let (_, from, len, ..) = line_block(line);
+        let body = line[from + len..].trim_start_matches(' ');
+        if !body.is_empty() {
+            return body.to_string();
+        }
+    }
+    String::new()
+}
+
 fn inline_spans(d: &mut Description, text: &str, offset: u32) {
     let spans = parse_title(text);
     let chars: Vec<char> = text.chars().collect();
@@ -627,6 +658,40 @@ fn closing_backticks(chars: &[char], from: usize, len: usize) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn row_preview_strips_block_markers() {
+        assert_eq!(row_preview("# x"), "x");
+        assert_eq!(row_preview("- x"), "x");
+        assert_eq!(row_preview("  - x"), "x");
+        assert_eq!(row_preview("3. x"), "x");
+        assert_eq!(row_preview("> x"), "x");
+        assert_eq!(row_preview("#x"), "#x");
+    }
+
+    #[test]
+    fn row_preview_keeps_inline_markers_for_formatting() {
+        assert_eq!(row_preview("- a **b**"), "a **b**");
+    }
+
+    #[test]
+    fn row_preview_skips_images_and_empty_lines() {
+        assert_eq!(row_preview("![](a.png)\n\n![](b.png)\n- x\ny"), "x");
+        assert_eq!(row_preview("![](a.png)"), "");
+        assert_eq!(row_preview("- \nx"), "x");
+    }
+
+    #[test]
+    fn row_preview_of_empty_description_is_empty() {
+        assert_eq!(row_preview(""), "");
+        assert_eq!(row_preview("\n\n"), "");
+    }
+
+    #[test]
+    fn row_preview_skips_fence_markers() {
+        assert_eq!(row_preview("```rs\nlet x;\n```"), "let x;");
+        assert_eq!(row_preview("```\n```\nafter"), "after");
+    }
 
     fn span(kind: Inline, start: u32, end: u32, marker_len: u32) -> InlineSpan {
         InlineSpan {

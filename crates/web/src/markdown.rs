@@ -191,3 +191,9 @@ pub fn shift_items(text: &str, start: u32, end: u32, outdent: bool) -> Option<Te
 pub fn toggle_inline(text: &str, start: u32, end: u32, kind: Inline) -> TextEdit {
     pkm_base::markdown::toggle_inline(text, start, end, kind.into()).into()
 }
+
+/// The line a Task row shows for a Description; format it like a Title.
+#[wasm_bindgen(js_name = rowPreview)]
+pub fn row_preview(text: &str) -> String {
+    pkm_base::markdown::row_preview(text)
+}

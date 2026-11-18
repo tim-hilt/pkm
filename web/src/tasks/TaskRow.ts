@@ -1,3 +1,4 @@
+import { rowPreview } from "../core/Core";
 import { make } from "../Dom";
 import { tagLabel } from "./TagLabel";
 import { titleNodes } from "./TitleText";
@@ -25,7 +26,8 @@ export function taskLine(
   circle.setAttribute("aria-label", task.done ? "Revert Done" : "Done");
   circle.addEventListener("click", () => model.toggleDone(task));
   const text = make("span", "task-text", [make("span", "task-title", titleNodes(task.title))]);
-  if (task.description) text.append(make("span", "task-description", [task.description]));
+  const preview = rowPreview(task.description);
+  if (preview) text.append(make("span", "task-description", titleNodes(preview)));
   const marks = markers(task, showsParent);
   if (marks.length > 0 || task.tags.length > 0) {
     const labels = task.tags.map((tag) => tagLabel(tag, task.tagColors[tag]));

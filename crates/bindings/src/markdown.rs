@@ -126,3 +126,9 @@ pub fn shift_items(text: String, start: u32, end: u32, outdent: bool) -> Option<
 pub fn toggle_inline(text: String, start: u32, end: u32, kind: Inline) -> TextEdit {
     pkm_base::markdown::toggle_inline(&text, start, end, kind)
 }
+
+/// The line a Task row shows for a Description; format it like a Title.
+#[uniffi::export]
+pub fn row_preview(text: String) -> String {
+    pkm_base::markdown::row_preview(&text)
+}
