@@ -120,8 +120,8 @@ final class TasksModel {
         list.filterID.flatMap { try? store.filterTasks(id: $0) } ?? []
     }
 
-    /// The direct Subtasks of the Open Task `id`, in list order: Open, or Done and still
-    /// Revertable; never Rejected. From either list.
+    /// The direct Subtasks of the Open Task `id`, in Subtask order: Open, or Done and still
+    /// Revertable; never Rejected.
     func subtasks(of id: String) -> [ListedTask] {
         _ = tasks  // reloads change it: views asking for Subtasks update with the list
         return (try? store.subtasks(parent: id)) ?? []

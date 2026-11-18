@@ -149,7 +149,7 @@ export class TasksModel {
   private stack: string[] = [];
   /** Whether the Task on top was last saved with an empty Title, which keeps the stack as it is. */
   private titleMissing = false;
-  /** The Tasks of the list shown, in their order, each Parent followed by its Subtasks; none for the Filters list. */
+  /** The Tasks of the list shown, in their order; none for the Filters list. */
   private shown: ListedTask[] = [];
   private shownList: TasksList = { kind: "filters" };
   private all: Filter[] = [];
@@ -285,7 +285,7 @@ export class TasksModel {
   }
 
   /**
-   * The direct Subtasks of the Open Task `id`, in list order: Open, or Done and
+   * The direct Subtasks of the Open Task `id`, in Subtask order: Open, or Done and
    * still Revertable; never Rejected.
    */
   subtasks(id: string): ListedTask[] {

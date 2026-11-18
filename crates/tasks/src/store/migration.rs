@@ -496,7 +496,6 @@ mod tests {
         assert_eq!(shown(&tasks, ALL_TASKS.id), "bac");
         assert_eq!(shown(&tasks, ACTIVE.id), "ba");
         assert_eq!(shown(&tasks, BACKLOG_LIST.id), "c");
-        assert_eq!(ids(tasks.rows().unwrap())[0], "bbbbbbbbbbbb");
     }
 
     #[test]

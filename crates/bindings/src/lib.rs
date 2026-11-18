@@ -472,7 +472,7 @@ impl CloudSync {
                 tokens.clone(),
             ))
         });
-        self.sync_loop.reconnect(storages.per_folder());
+        self.sync_loop.reconnect(storages.per_folder().into());
     }
 
     /// Like `reconnect_one_drive`, for Google Drive.
@@ -490,7 +490,7 @@ impl CloudSync {
                 tokens.clone(),
             ))
         });
-        self.sync_loop.reconnect(storages.per_folder());
+        self.sync_loop.reconnect(storages.per_folder().into());
     }
 
     /// Like `reconnect_one_drive`, for WebDAV.
@@ -502,7 +502,7 @@ impl CloudSync {
     ) -> Result<(), SyncStartError> {
         let storages =
             ContextStorages::open(|folder| webdav_storage(&url, &username, &password, folder))?;
-        self.sync_loop.reconnect(storages.per_folder());
+        self.sync_loop.reconnect(storages.per_folder().into());
         Ok(())
     }
 }
@@ -540,8 +540,9 @@ impl ContextStorages {
         })
     }
 
-    /// The cloud folder of each Sync folder, in `start_contexts`' order.
-    fn per_folder(self) -> Vec<Arc<dyn Storage>> {
+    /// The cloud folder of each Sync folder, in `start_contexts`' order: the
+    /// one list both starting and Reconnecting take them from.
+    fn per_folder(self) -> [Arc<dyn Storage>; 6] {
         let Self {
             drawings,
             books,
@@ -549,15 +550,7 @@ impl ContextStorages {
             tags,
             filters,
         } = self;
-        vec![
-            drawings,
-            books.clone(),
-            books,
-            tasks.clone(),
-            tasks,
-            tags,
-            filters,
-        ]
+        [drawings, books.clone(), books, tasks, tags, filters]
     }
 }
 
@@ -590,6 +583,14 @@ impl CloudSync {
         let beside = tasks.parent().unwrap_or(tasks);
         let (tags, filters) = (beside.join(TagsFile::FOLDER), beside.join(Filters::FOLDER));
         let hidden = [books.join(".state"), tags.clone(), filters.clone()];
+        let [
+            drawings_storage,
+            books_storage,
+            book_states_storage,
+            tasks_storage,
+            tags_storage,
+            filters_storage,
+        ] = storages.per_folder();
         for hidden in hidden {
             std::fs::create_dir_all(hidden).map_err(|_| SyncStartError::StateUnavailable)?;
         }
@@ -598,42 +599,42 @@ impl CloudSync {
                 name: Drawings::FOLDER.into(),
                 dir: directories.drawings.into(),
                 state: drawings_state,
-                storage: storages.drawings,
+                storage: drawings_storage,
                 merge: Arc::new(Drawings),
             },
             SyncFolder {
                 name: Books::FOLDER.into(),
                 dir: books.to_path_buf(),
                 state: books_state,
-                storage: Arc::clone(&storages.books),
+                storage: books_storage,
                 merge: Arc::new(Books),
             },
             SyncFolder {
                 name: Books::FOLDER.into(),
                 dir: books.join(".state"),
                 state: book_states_state,
-                storage: storages.books,
+                storage: book_states_storage,
                 merge: Arc::new(BookStates),
             },
             SyncFolder {
                 name: TaskFiles::FOLDER.into(),
                 dir: tasks.to_path_buf(),
                 state: tasks_state,
-                storage: storages.tasks,
+                storage: tasks_storage,
                 merge: Arc::new(TaskFiles),
             },
             SyncFolder {
                 name: TagsFile::FOLDER.into(),
                 dir: tags,
                 state: tags_state,
-                storage: storages.tags,
+                storage: tags_storage,
                 merge: Arc::new(TagsFile),
             },
             SyncFolder {
                 name: Filters::FOLDER.into(),
                 dir: filters,
                 state: filters_state,
-                storage: storages.filters,
+                storage: filters_storage,
                 merge: Arc::new(Filters),
             },
         ];

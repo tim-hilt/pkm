@@ -4,6 +4,7 @@ mod filters;
 mod migration;
 
 pub(crate) use filters::is_filter;
+use filters::shown_in;
 pub use filters::{Direction, Filter, FilterSort, FilterSortKey};
 
 use crate::files::{DiskFiles, Files, Stamp};
@@ -203,11 +204,11 @@ impl Tasks {
         tasks
     }
 
-    /// Creates a Task at the end of its list, with `priority` (clamped to 1 to
-    /// 4) and `tags`, in one write; Tags that are new join the Tags file. Created
-    /// in the Filter `filter`, it also gets the Tags its Query requires, so that
-    /// it stays there (see `Query::required_tags`; none for a Filter that is gone). The Title
-    /// is trimmed and kept to one line (line breaks become spaces). Fails with
+    /// Creates a Task with `priority` (clamped to 1 to 4) and `tags`, in one
+    /// write; Tags that are new join the Tags file. Created in the Filter
+    /// `filter`, it also gets the Tags its Query requires, so that it stays
+    /// there (see `Query::required_tags`; none for a Filter that is gone). The
+    /// Title is trimmed and kept to one line (line breaks become spaces). Fails with
     /// `EmptyTitle`, or `InvalidTag` for any invalid Tag, before saving
     /// anything.
     pub fn create(
@@ -594,13 +595,16 @@ impl Tasks {
         }
     }
 
-    /// Every Open Task, Subtasks included, as one flat list in the order of
-    /// the All Tasks Favorite. A pending Done shows marked, a pending Rejected
-    /// not at all. Structure Sync left broken is repaired here, not in the
-    /// files.
+    /// Every Open Task, Subtasks included, as one flat list in the order
+    /// created, the Subtasks of one Parent in their Subtask order. A pending
+    /// Done shows marked, a pending Rejected not at all. Structure Sync left
+    /// broken is repaired here, not in the files.
     pub fn rows(&self) -> io::Result<Vec<Row>> {
         let nodes = self.shown()?;
-        Ok(rows_of(&nodes, self.all_in_order(&nodes)?))
+        Ok(rows_of(
+            &nodes,
+            shown_in(&nodes, "*", &[], FilterSort::Manual),
+        ))
     }
 
     /// The direct Subtasks of the Open Task `parent`, as

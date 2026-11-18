@@ -1,7 +1,6 @@
 //! Filters (ADR-0024): `Filters/<id>.md` beside the Tasks folder, each a Title
 //! and a Query over the Open Tasks.
 
-use super::migration::ALL_TASKS;
 use super::{Anchor, Error, Node, Nodes, Row, Tasks, compare_positions, end_key, in_subtask_order};
 use super::{place, place_among, rows_of};
 use crate::query::{Query, QueryError};
@@ -344,22 +343,6 @@ impl Tasks {
             set_places(file, &places);
             sort.write(file);
         })
-    }
-
-    /// Every Open Task in the order the All Tasks Favorite keeps: by its
-    /// places, then by `created`, Subtasks in their Subtask order. Without the
-    /// Favorite, by `created`.
-    pub(super) fn all_in_order<'a>(&self, nodes: &'a Nodes) -> io::Result<Vec<&'a Node>> {
-        let places = (self.stored_filters()?.into_iter())
-            .find(|s| s.filter.id == ALL_TASKS.id)
-            .map(|s| s.places)
-            .unwrap_or_default();
-        Ok(shown_in(
-            nodes,
-            ALL_TASKS.query,
-            &places,
-            FilterSort::Manual,
-        ))
     }
 
     /// Checks a Query text without saving: the Tags it names, Wildcards

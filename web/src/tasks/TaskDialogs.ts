@@ -100,7 +100,7 @@ export function deleteTagDialog(
 
 /**
  * Asks for a Title, typed with Quick Add Shortcuts, and a Description and adds
- * the Task, Active, with the Priority and Tags the Shortcuts give. Add or Enter
+ * the Task with the Priority and Tags the Shortcuts give. Add or Enter
  * keeps the dialog open, cleared and focused for the next Task; Cancel or Esc
  * closes it. Add is off while the Title is empty.
  */

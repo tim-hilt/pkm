@@ -23,7 +23,7 @@ const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" s
  * circle coloured by Priority, the Title, the Description faded on one line
  * and the Tags fainter still. The circle marks the Task Done, and a toast
  * offers to Revert a Close, in the edit view while that is shown. A Parent
- * shows how many of its Subtasks are Done, a Subtask its Parent's Title,
+ * shows how many of its Subtasks are Open, a Subtask its Parent's Title,
  * before the Tags; rows are dragged to reorder. A row opens the edit view; its
  * menu (right click, long press) Rejects. The Filters entry of
  * the bar lists the Favorites, each a Filter, and the Filters, with how many Tasks each matches; opening one shows
