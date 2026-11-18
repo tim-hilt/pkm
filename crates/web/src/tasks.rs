@@ -388,19 +388,19 @@ impl TaskStore {
     }
 
     /// Creates a Task with a Priority and Tags, refusing an empty Title or an
-    /// invalid Tag; its Item ID. Created in the Filter `filter`, it also gets
-    /// the Tags its Query requires, so that it stays there.
-    pub fn create(
-        &self,
-        title: &str,
-        priority: u8,
-        tags: Vec<String>,
-        filter: Option<String>,
-    ) -> Result<String, JsError> {
+    /// invalid Tag; its Item ID.
+    pub fn create(&self, title: &str, priority: u8, tags: Vec<String>) -> Result<String, JsError> {
         self.tasks
-            .create(title, priority, &tags, filter.as_deref())
+            .create(title, priority, &tags)
             .map(|task| task.id)
             .map_err(error)
+    }
+
+    /// The Tags a Task needs to stay in the Filter `id`, which a new Task
+    /// starts with; none if there is no such Filter.
+    #[wasm_bindgen(js_name = requiredTags)]
+    pub fn required_tags(&self, id: &str) -> Result<Vec<String>, JsError> {
+        self.tasks.required_tags(id).map_err(error)
     }
 
     /// `create` for a Subtask under a Task; it starts with its Parent's Tags.

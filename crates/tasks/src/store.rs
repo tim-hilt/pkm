@@ -193,24 +193,11 @@ impl Tasks {
     }
 
     /// Creates a Task with `priority` (clamped to 1 to 4) and `tags`, in one
-    /// write; Tags that are new join the Tags file. Created in the Filter
-    /// `filter`, it also gets the Tags its Query requires, so that it stays
-    /// there (see `Query::required_tags`; none for a Filter that is gone). The
-    /// Title is trimmed and kept to one line (line breaks become spaces). Fails with
+    /// write; Tags that are new join the Tags file. The Title is trimmed and kept to one line (line breaks become spaces). Fails with
     /// `EmptyTitle`, or `InvalidTag` for any invalid Tag, before saving
     /// anything.
-    pub fn create(
-        &self,
-        title: &str,
-        priority: u8,
-        tags: &[String],
-        filter: Option<&str>,
-    ) -> Result<Task, Error> {
-        let mut tags = tags.to_vec();
-        if let Some(filter) = filter {
-            tags.extend(self.required_tags(filter)?);
-        }
-        self.insert(&NewTask::checked(title, priority, &tags)?, None)
+    pub fn create(&self, title: &str, priority: u8, tags: &[String]) -> Result<Task, Error> {
+        self.insert(&NewTask::checked(title, priority, tags)?, None)
     }
 
     /// `create` for a Subtask of the Open Task `parent`, at the end of its
@@ -1126,9 +1113,9 @@ mod tests {
     fn a_new_task_with_the_tag_backlog_is_listed_like_any_other() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        tasks.create("Buy milk", 4, &[], None).unwrap();
+        tasks.create("Buy milk", 4, &[]).unwrap();
         tasks
-            .create("Learn Rust", 4, &tag_names(&["backlog"]), None)
+            .create("Learn Rust", 4, &tag_names(&["backlog"]))
             .unwrap();
         assert_eq!(titles(&tasks), ["Buy milk", "Learn Rust"]);
     }
@@ -1138,7 +1125,7 @@ mod tests {
         let dir = Scratch::new();
         let tasks = dir.store();
         for title in ["one", "two", "three"] {
-            tasks.create(title, 4, &[], None).unwrap();
+            tasks.create(title, 4, &[]).unwrap();
         }
         assert_eq!(titles(&tasks), ["one", "two", "three"]);
     }
@@ -1146,7 +1133,7 @@ mod tests {
     #[test]
     fn a_new_task_has_priority_4() {
         let dir = Scratch::new();
-        let task = dir.store().create("x", 4, &[], None).unwrap();
+        let task = dir.store().create("x", 4, &[]).unwrap();
         assert_eq!(task.priority, 4);
     }
 
@@ -1159,7 +1146,7 @@ mod tests {
         let dir = Scratch::new();
         let tasks = dir.store();
         let tags = tag_names(&["bug", "work", "bug"]);
-        let task = tasks.create("Fix login", 1, &tags, None).unwrap();
+        let task = tasks.create("Fix login", 1, &tags).unwrap();
         assert_eq!(
             (task.priority, task.tags.clone()),
             (1, tag_names(&["bug", "work"]))
@@ -1176,9 +1163,7 @@ mod tests {
     fn the_tags_of_a_new_task_join_the_tags_file() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        tasks
-            .create("a", 4, &tag_names(&["new", "work"]), None)
-            .unwrap();
+        tasks.create("a", 4, &tag_names(&["new", "work"])).unwrap();
         let known: Vec<_> = tasks.tags().list().into_iter().map(|e| e.name).collect();
         assert_eq!(known, ["new", "work"]);
     }
@@ -1188,14 +1173,8 @@ mod tests {
         let dir = Scratch::new();
         let tasks = dir.store();
         let bad = tag_names(&["ok", "Bad"]);
-        assert!(matches!(
-            tasks.create("a", 4, &bad, None),
-            Err(Error::InvalidTag)
-        ));
-        assert!(matches!(
-            tasks.create(" ", 1, &[], None),
-            Err(Error::EmptyTitle)
-        ));
+        assert!(matches!(tasks.create("a", 4, &bad), Err(Error::InvalidTag)));
+        assert!(matches!(tasks.create(" ", 1, &[]), Err(Error::EmptyTitle)));
         assert!(titles(&tasks).is_empty());
         assert!(tasks.tags().list().is_empty());
     }
@@ -1204,15 +1183,15 @@ mod tests {
     fn a_priority_outside_1_to_4_is_clamped_on_create() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        assert_eq!(tasks.create("a", 0, &[], None).unwrap().priority, 1);
-        assert_eq!(tasks.create("b", 9, &[], None).unwrap().priority, 4);
+        assert_eq!(tasks.create("a", 0, &[]).unwrap().priority, 1);
+        assert_eq!(tasks.create("b", 9, &[]).unwrap().priority, 4);
     }
 
     #[test]
     fn a_subtask_is_created_with_its_priority_and_tags() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let parent = tasks.create("p", 4, &tag_names(&["work"]), None).unwrap();
+        let parent = tasks.create("p", 4, &tag_names(&["work"])).unwrap();
         let sub = tasks
             .create_subtask(&parent.id, "s", 2, &tag_names(&["home"]))
             .unwrap();
@@ -1226,7 +1205,7 @@ mod tests {
         let dir = Scratch::new();
         let tasks = dir.store();
         let parent = tasks
-            .create("p", 4, &tag_names(&["work", "backlog"]), None)
+            .create("p", 4, &tag_names(&["work", "backlog"]))
             .unwrap();
         let sub = tasks.create_subtask(&parent.id, "s", 4, &[]).unwrap();
         assert_eq!(sub.tags, tag_names(&["work", "backlog"]));
@@ -1242,7 +1221,7 @@ mod tests {
         let tasks = dir.store();
         for title in ["", "   ", "\n\t \n"] {
             assert!(matches!(
-                tasks.create(title, 4, &[], None),
+                tasks.create(title, 4, &[]),
                 Err(Error::EmptyTitle)
             ));
         }
@@ -1254,7 +1233,7 @@ mod tests {
         let dir = Scratch::new();
         let task = dir
             .store()
-            .create("  Buy\n  milk \r\n\n and eggs ", 4, &[], None)
+            .create("  Buy\n  milk \r\n\n and eggs ", 4, &[])
             .unwrap();
         assert_eq!(task.title, "Buy milk and eggs");
     }
@@ -1264,7 +1243,7 @@ mod tests {
         let dir = Scratch::new();
         let task = dir
             .store()
-            .create("Buy: milk", 4, &tag_names(&["backlog"]), None)
+            .create("Buy: milk", 4, &tag_names(&["backlog"]))
             .unwrap();
         let text = fs::read_to_string(dir.0.join(format!("{}.md", task.id))).unwrap();
         let file = Document::parse(&text).unwrap();
@@ -1285,13 +1264,13 @@ mod tests {
     #[test]
     fn tasks_persist_across_opens() {
         let dir = Scratch::new();
-        dir.store().create("kept", 4, &[], None).unwrap();
+        dir.store().create("kept", 4, &[]).unwrap();
         assert_eq!(titles(&dir.store()), ["kept"]);
     }
 
     fn edit_fixture(dir: &Scratch) -> (Tasks, Task) {
         let tasks = dir.store();
-        let task = tasks.create("Buy milk", 4, &[], None).unwrap();
+        let task = tasks.create("Buy milk", 4, &[]).unwrap();
         (tasks, task)
     }
 
@@ -1436,7 +1415,7 @@ mod tests {
     }
 
     fn tagged(tasks: &Tasks, tags: &[&str]) -> Task {
-        let task = tasks.create("t", 4, &[], None).unwrap();
+        let task = tasks.create("t", 4, &[]).unwrap();
         for tag in tags {
             tasks.add_tag(&task.id, tag).unwrap();
         }
@@ -1567,7 +1546,7 @@ mod tests {
     fn reading_a_task_file_with_an_unknown_tag_adds_it() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let task = tasks.create("t", 4, &[], None).unwrap();
+        let task = tasks.create("t", 4, &[]).unwrap();
         let path = dir.0.join(format!("{}.md", task.id));
         let text = fs::read_to_string(&path).unwrap();
         let text = text.replace("priority:", "tags:\n  - synced\n  - Bad Tag\npriority:");
@@ -1617,8 +1596,8 @@ mod tests {
 
     fn closing_fixture(dir: &Scratch) -> (Tasks, Task) {
         let tasks = dir.store();
-        tasks.create("other", 4, &[], None).unwrap();
-        let task = tasks.create("Buy milk", 4, &[], None).unwrap();
+        tasks.create("other", 4, &[]).unwrap();
+        let task = tasks.create("Buy milk", 4, &[]).unwrap();
         (tasks, task)
     }
 
@@ -1697,8 +1676,8 @@ mod tests {
     fn a_new_close_commits_the_previous_one_first() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let first = tasks.create("first", 4, &[], None).unwrap();
-        let second = tasks.create("second", 4, &[], None).unwrap();
+        let first = tasks.create("first", 4, &[]).unwrap();
+        let second = tasks.create("second", 4, &[]).unwrap();
         tasks.close(&first.id, Closing::Done).unwrap();
         tasks.close(&second.id, Closing::Rejected).unwrap();
         assert!(!dir.0.join(format!("{}.md", first.id)).exists());
@@ -1727,8 +1706,8 @@ mod tests {
     fn a_task_blocked_by_a_closed_task_is_no_longer_blocked() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let blocker = tasks.create("blocker", 4, &[], None).unwrap();
-        let waiting = tasks.create("waiting", 4, &[], None).unwrap();
+        let blocker = tasks.create("blocker", 4, &[]).unwrap();
+        let waiting = tasks.create("waiting", 4, &[]).unwrap();
         tasks.add_blocker(&waiting.id, &blocker.id).unwrap();
         assert!(list_of(&tasks)[1].blocked);
         tasks.close(&blocker.id, Closing::Rejected).unwrap();
@@ -1774,9 +1753,7 @@ mod tests {
     fn a_subtask_is_listed_under_its_parent_in_the_parents_list() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let parent = tasks
-            .create("parent", 4, &tag_names(&["backlog"]), None)
-            .unwrap();
+        let parent = tasks.create("parent", 4, &tag_names(&["backlog"])).unwrap();
         let child = subtask(&tasks, &parent, "child");
         let grandchild = subtask(&tasks, &child, "grandchild");
         subtask(&tasks, &parent, "second");
@@ -1796,7 +1773,7 @@ mod tests {
     fn a_subtask_needs_an_open_parent_and_a_title() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let parent = tasks.create("p", 4, &[], None).unwrap();
+        let parent = tasks.create("p", 4, &[]).unwrap();
         assert!(matches!(
             tasks.create_subtask(&parent.id, " ", 4, &[]),
             Err(Error::EmptyTitle)
@@ -1811,7 +1788,7 @@ mod tests {
     fn closing_a_parent_closes_its_open_subtasks_in_one_pending_change() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let parent = tasks.create("p", 4, &[], None).unwrap();
+        let parent = tasks.create("p", 4, &[]).unwrap();
         let child = subtask(&tasks, &parent, "c");
         let grandchild = subtask(&tasks, &child, "g");
         let before = file_of(&dir, &child);
@@ -1833,7 +1810,7 @@ mod tests {
     fn a_closed_subtask_leaves_the_list_once_the_close_is_committed() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let parent = tasks.create("p", 4, &[], None).unwrap();
+        let parent = tasks.create("p", 4, &[]).unwrap();
         let open = subtask(&tasks, &parent, "open");
         let gone = subtask(&tasks, &parent, "gone");
         tasks.close(&gone.id, Closing::Rejected).unwrap();
@@ -1874,7 +1851,7 @@ mod tests {
     fn a_copy_of_a_task_file_under_another_name_is_ignored() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let task = tasks.create("original", 4, &[], None).unwrap();
+        let task = tasks.create("original", 4, &[]).unwrap();
         let copy = file_of(&dir, &task).replace("original", "copy");
         for name in [format!("{} 1.md", task.id), format!("~{}.md", task.id)] {
             fs::write(dir.0.join(name), &copy).unwrap();
@@ -1887,7 +1864,7 @@ mod tests {
     fn committing_skips_a_subtask_removed_meanwhile() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let parent = tasks.create("p", 4, &[], None).unwrap();
+        let parent = tasks.create("p", 4, &[]).unwrap();
         let gone = subtask(&tasks, &parent, "gone");
         let kept = subtask(&tasks, &parent, "kept");
         tasks.close(&parent.id, Closing::Done).unwrap();
@@ -1900,7 +1877,7 @@ mod tests {
 
     fn move_fixture(dir: &Scratch) -> (Tasks, [Task; 3]) {
         let tasks = dir.store();
-        let [a, b, c] = ["a", "b", "c"].map(|t| tasks.create(t, 4, &[], None).unwrap());
+        let [a, b, c] = ["a", "b", "c"].map(|t| tasks.create(t, 4, &[]).unwrap());
         (tasks, [a, b, c])
     }
 
@@ -1930,7 +1907,7 @@ mod tests {
     fn a_subtask_moved_among_equal_keys_lands_in_place_and_the_others_shift() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let parent = tasks.create("p", 4, &[], None).unwrap();
+        let parent = tasks.create("p", 4, &[]).unwrap();
         let [b, c, d] = ["bbbbbbbbbbbb", "cccccccccccc", "dddddddddddd"];
         for id in [b, c, d] {
             raw_subtask(&dir, id, &parent.id, "1");
@@ -1946,7 +1923,7 @@ mod tests {
     fn a_subtask_without_a_key_follows_the_keyed_ones_and_gets_one_on_a_move() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let parent = tasks.create("p", 4, &[], None).unwrap();
+        let parent = tasks.create("p", 4, &[]).unwrap();
         let (a, b) = ("aaaaaaaaaaaa", "bbbbbbbbbbbb");
         raw(&dir, a, "active", Some(&parent.id));
         raw_subtask(&dir, b, &parent.id, "7");
@@ -2017,7 +1994,7 @@ mod tests {
     fn a_new_task_gets_created_once_and_edits_never_change_it() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let task = tasks.create("a", 4, &[], None).unwrap();
+        let task = tasks.create("a", 4, &[]).unwrap();
         let created = created_of(&dir, &task.id).unwrap();
         assert!(created.len() == 20 && created.ends_with('Z'), "{created}");
         tasks.edit(&task.id, "b", "", 1, &[]).unwrap();
@@ -2029,11 +2006,11 @@ mod tests {
     fn a_new_task_or_subtask_follows_the_others_by_created() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let parent = tasks.create("p", 4, &[], None).unwrap();
-        tasks.create("next", 4, &[], None).unwrap();
+        let parent = tasks.create("p", 4, &[]).unwrap();
+        tasks.create("next", 4, &[]).unwrap();
         let child = subtask(&tasks, &parent, "child");
         subtask(&tasks, &child, "grandchild");
-        tasks.create("last", 4, &[], None).unwrap();
+        tasks.create("last", 4, &[]).unwrap();
         let rows: Vec<_> = tasks
             .rows()
             .unwrap()
@@ -2045,10 +2022,8 @@ mod tests {
 
     fn two_tasks(tasks: &Tasks) -> (Task, Task) {
         (
-            tasks.create("a", 4, &[], None).unwrap(),
-            tasks
-                .create("b", 4, &tag_names(&["backlog"]), None)
-                .unwrap(),
+            tasks.create("a", 4, &[]).unwrap(),
+            tasks.create("b", 4, &tag_names(&["backlog"])).unwrap(),
         )
     }
 
@@ -2094,7 +2069,7 @@ mod tests {
         let dir = Scratch::new();
         let tasks = dir.store();
         let (a, b) = two_tasks(&tasks);
-        let c = tasks.create("c", 4, &[], None).unwrap();
+        let c = tasks.create("c", 4, &[]).unwrap();
         tasks.add_blocker(&a.id, &b.id).unwrap();
         tasks.add_blocker(&a.id, &c.id).unwrap();
         tasks.close(&b.id, Closing::Done).unwrap();
@@ -2147,7 +2122,7 @@ mod tests {
             tasks.add_blocker(&b.id, &a.id),
             Err(Error::BlockedByLoop)
         ));
-        let c = tasks.create("c", 4, &[], None).unwrap();
+        let c = tasks.create("c", 4, &[]).unwrap();
         tasks.add_blocker(&b.id, &c.id).unwrap();
         assert!(matches!(
             tasks.add_blocker(&c.id, &a.id),
@@ -2171,17 +2146,13 @@ mod tests {
     fn blocker_candidates_leave_out_what_add_blocker_refuses() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let a = tasks.create("a", 4, &[], None).unwrap();
+        let a = tasks.create("a", 4, &[]).unwrap();
         let sub = tasks.create_subtask(&a.id, "sub", 4, &[]).unwrap();
-        let b = tasks
-            .create("b", 4, &tag_names(&["backlog"]), None)
-            .unwrap();
-        let c = tasks.create("c", 4, &[], None).unwrap();
-        let d = tasks
-            .create("d", 4, &tag_names(&["backlog"]), None)
-            .unwrap();
-        let e = tasks.create("e", 4, &[], None).unwrap();
-        let gone = tasks.create("gone", 4, &[], None).unwrap();
+        let b = tasks.create("b", 4, &tag_names(&["backlog"])).unwrap();
+        let c = tasks.create("c", 4, &[]).unwrap();
+        let d = tasks.create("d", 4, &tag_names(&["backlog"])).unwrap();
+        let e = tasks.create("e", 4, &[]).unwrap();
+        let gone = tasks.create("gone", 4, &[]).unwrap();
         tasks.close(&gone.id, Closing::Done).unwrap();
         tasks.commit().unwrap();
         tasks.add_blocker(&b.id, &a.id).unwrap(); // direct loop for a
@@ -2234,7 +2205,7 @@ mod tests {
         let listed = list_of(&tasks);
         assert_eq!(listed.len(), 3);
         assert!(listed.iter().all(|t| t.blocked));
-        let d = tasks.create("d", 4, &[], None).unwrap();
+        let d = tasks.create("d", 4, &[]).unwrap();
         tasks.add_blocker(&d.id, "aaaaaaaaaaaa").unwrap();
         assert!(matches!(
             tasks.add_blocker("bbbbbbbbbbbb", &d.id),
@@ -2246,8 +2217,8 @@ mod tests {
     fn a_file_changed_added_or_removed_outside_the_app_shows_up() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let kept = tasks.create("kept", 4, &[], None).unwrap();
-        let other = tasks.create("other", 4, &[], None).unwrap();
+        let kept = tasks.create("kept", 4, &[]).unwrap();
+        let other = tasks.create("other", 4, &[]).unwrap();
         assert_eq!(titles(&tasks), ["kept", "other"]);
 
         let path = dir.0.join(format!("{}.md", kept.id));
@@ -2269,9 +2240,9 @@ mod tests {
     fn rows_list_each_task_before_its_subtasks() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let parent = tasks.create("parent", 4, &[], None).unwrap();
+        let parent = tasks.create("parent", 4, &[]).unwrap();
         tasks.create_subtask(&parent.id, "child", 4, &[]).unwrap();
-        tasks.create("other", 4, &[], None).unwrap();
+        tasks.create("other", 4, &[]).unwrap();
         let rows: Vec<_> = tasks
             .rows()
             .unwrap()
@@ -2293,17 +2264,13 @@ mod tests {
     fn subtasks_are_the_direct_open_ones_in_order_with_list_markers() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let top = tasks
-            .create("top", 4, &tag_names(&["backlog"]), None)
-            .unwrap();
+        let top = tasks.create("top", 4, &tag_names(&["backlog"])).unwrap();
         let first = subtask(&tasks, &top, "first");
         let second = subtask(&tasks, &top, "second");
         subtask(&tasks, &first, "grandchild");
         let done = subtask(&tasks, &top, "done");
         let rejected = subtask(&tasks, &top, "rejected");
-        tasks
-            .create("other", 4, &tag_names(&["backlog"]), None)
-            .unwrap();
+        tasks.create("other", 4, &tag_names(&["backlog"])).unwrap();
         tasks.close(&rejected.id, Closing::Rejected).unwrap();
         tasks.commit().unwrap();
         tasks.close(&done.id, Closing::Done).unwrap();
@@ -2325,7 +2292,7 @@ mod tests {
     fn a_task_that_is_parent_and_subtask_has_both_markers() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let top = tasks.create("top", 4, &[], None).unwrap();
+        let top = tasks.create("top", 4, &[]).unwrap();
         let mid = subtask(&tasks, &top, "mid");
         subtask(&tasks, &mid, "leaf");
         let rows = tasks.rows().unwrap();
@@ -2338,7 +2305,7 @@ mod tests {
     fn closed_subtasks_are_not_counted() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let parent = tasks.create("p", 4, &[], None).unwrap();
+        let parent = tasks.create("p", 4, &[]).unwrap();
         let done = subtask(&tasks, &parent, "done");
         let rejected = subtask(&tasks, &parent, "rejected");
         subtask(&tasks, &parent, "open");
@@ -2355,7 +2322,7 @@ mod tests {
     fn a_pending_done_subtask_stays_listed_but_is_no_longer_counted() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let parent = tasks.create("p", 4, &[], None).unwrap();
+        let parent = tasks.create("p", 4, &[]).unwrap();
         let child = subtask(&tasks, &parent, "c");
         tasks.close(&child.id, Closing::Done).unwrap();
         let rows = tasks.rows().unwrap();
@@ -2367,7 +2334,7 @@ mod tests {
     fn tasks_live_on_any_files() {
         let files = Arc::new(crate::files::MemoryFiles::default());
         let tasks = Tasks::open_in(files.clone(), "Tasks");
-        let task = tasks.create("Buy milk", 4, &[], None).unwrap();
+        let task = tasks.create("Buy milk", 4, &[]).unwrap();
         tasks.add_tag(&task.id, "home").unwrap();
         assert_eq!(known(&tasks, "h"), ["home"]);
         let listed = list_of(&tasks);

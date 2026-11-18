@@ -175,15 +175,24 @@ final class TasksModel {
         }
     }
 
-    /// Adds a Task, with a Description, Priority and Tags if given. In a Filter it gets the Tags the
-    /// Query requires, so that it stays there. False, adding nothing, if the Title is empty or a Tag invalid.
+    /// Quick Add for a new Task. In a Filter it starts with the Tags the Query requires, typed as
+    /// Shortcuts, so that the Task stays there unless the user changes them.
+    func newQuickAdd() -> TaskQuickAdd {
+        let quickAdd = TaskQuickAdd()
+        let tags = list.filterID.flatMap { try? store.requiredTags(id: $0) } ?? []
+        if !tags.isEmpty { quickAdd.replace(start: 0, end: 0, with: tags.map { "@\($0) " }.joined()) }
+        return quickAdd
+    }
+
+    /// Adds a Task, with a Description, Priority and Tags if given.
+    /// False, adding nothing, if the Title is empty or a Tag invalid.
     @discardableResult
     func add(
         title: String, description: String = "", priority: UInt8 = 4, tags: [String] = []
     ) -> Bool {
         guard
             let task = try? store.create(
-                title: title, priority: priority, tags: tags, filter: list.filterID)
+                title: title, priority: priority, tags: tags)
         else {
             return false
         }

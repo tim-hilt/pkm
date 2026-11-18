@@ -52,6 +52,17 @@ import Testing
         #expect(model.tasks.map(\.priority) == [4, 2])
     }
 
+    @Test func aNewTaskInAFilterStartsWithItsRequiredTagsAsShortcuts() throws {
+        let model = try openModel()
+        model.addFilter(title: "Zeta", query: "@backlog")
+        model.list = .filter(model.filters.first { $0.title == "Zeta" }!.id)
+        let quickAdd = model.newQuickAdd()
+        #expect(quickAdd.text() == "@backlog ")
+        #expect(quickAdd.tags() == ["backlog"])
+        model.list = .filters
+        #expect(model.newQuickAdd().text() == "")
+    }
+
     @Test func aTitleOfOnlyShortcutsIsRefusedLikeAnEmptyOne() throws {
         let model = try openModel()
         let quickAdd = TaskQuickAdd()
@@ -735,13 +746,13 @@ import Testing
         #expect(model.tasks.isEmpty)
     }
 
-    @Test func addingFromAFilterStaysInItAndShowsInTheFiltersThatMatch() throws {
+    @Test func addingFromAFilterWithItsTagsStaysInItAndShowsInTheFiltersThatMatch() throws {
         let model = try openModelWithoutFavorites()
         model.addFilter(title: "Work", query: "@work")
         let filter = TasksList.filter(model.filters[0].id)
         model.list = filter
 
-        model.add(title: "Reply")
+        model.add(title: "Reply", tags: model.newQuickAdd().tags())
         #expect(model.list == filter)
         #expect(model.tasks.map(\.title) == ["Reply"])
         model.addFilter(title: "All", query: "*")

@@ -105,7 +105,7 @@ export function deleteTagDialog(
  * closes it. Add is off while the Title is empty.
  */
 export function newTaskDialog(model: TasksModel, host: HTMLElement): void {
-  const quickAdd = new TaskQuickAdd();
+  let quickAdd = model.newQuickAdd();
   const title = new QuickAddField(model, quickAdd);
   const description = make("textarea", "tasks-input");
   description.rows = 4;
@@ -128,7 +128,9 @@ export function newTaskDialog(model: TasksModel, host: HTMLElement): void {
       tags: quickAdd.tags(),
     };
     if (model.add(title.title, extras)) {
-      title.clear();
+      quickAdd.free();
+      quickAdd = model.newQuickAdd();
+      title.use(quickAdd);
       description.value = "";
       enableAdd();
     }

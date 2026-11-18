@@ -48,7 +48,7 @@ struct TasksView: View {
                 #endif
         }
         // Outside the switch, not on the content that swaps between empty and list when a Task is added.
-        .sheet(isPresented: $isAdding) { NewTaskSheet() }
+        .sheet(isPresented: $isAdding) { NewTaskSheet(model: model) }
         .sheet(isPresented: $isAddingFilter) { FilterSheet() }
         .sheet(isPresented: Binding(get: { !model.editing.isEmpty }, set: { if !$0 { model.closeEditing() } })) {
             EditTaskSheet()
@@ -274,12 +274,16 @@ private struct DescriptionField: View {
 private struct NewTaskSheet: View {
     @Environment(TasksModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var quickAdd = TaskQuickAdd()
+    @State private var quickAdd: TaskQuickAdd
     /// Quick Add's Title, kept up to date by the field.
     @State private var title = ""
     @State private var description = ""
     /// Changes per Task, so that the field redraws empty; it keeps its focus, and so the keyboard.
     @State private var revision = 0
+
+    init(model: TasksModel) {
+        _quickAdd = State(initialValue: model.newQuickAdd())
+    }
 
     var body: some View {
         NavigationStack {
@@ -310,7 +314,7 @@ private struct NewTaskSheet: View {
         let priority = quickAdd.priority() ?? 4
         let tags = quickAdd.tags()
         guard model.add(title: title, description: description, priority: priority, tags: tags) else { return }
-        quickAdd = TaskQuickAdd()
+        quickAdd = model.newQuickAdd()
         title = ""
         description = ""
         revision += 1

@@ -393,17 +393,21 @@ impl TaskStore {
     }
 
     /// Creates a Task with a Priority and Tags, refusing an empty Title or an
-    /// invalid Tag. Created in the Filter `filter`, it also gets the Tags its
-    /// Query requires, so that it stays there.
+    /// invalid Tag.
     pub fn create(
         &self,
         title: String,
         priority: u8,
         tags: Vec<String>,
-        filter: Option<String>,
     ) -> Result<ListedTask, TasksError> {
-        let task = self.0.create(&title, priority, &tags, filter.as_deref())?;
+        let task = self.0.create(&title, priority, &tags)?;
         Ok(self.listed(task))
+    }
+
+    /// The Tags a Task needs to stay in the Filter `id`, which a new Task
+    /// starts with; none if there is no such Filter.
+    pub fn required_tags(&self, id: String) -> Result<Vec<String>, TasksError> {
+        Ok(self.0.required_tags(&id)?)
     }
 
     /// `create` for a Subtask under a Task; it starts with its Parent's Tags.
@@ -618,7 +622,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pkm-bindings-{}", std::process::id()));
         let path = |name: &str| dir.join(name).to_string_lossy().into_owned();
         let store = TaskStore::open(path("Tasks")).unwrap();
-        let task = store.create("t".into(), 4, vec![], None).unwrap();
+        let task = store.create("t".into(), 4, vec![]).unwrap();
         store.add_tag(task.id.clone(), "home".into()).unwrap();
         let task = store.add_tag(task.id, "work".into()).unwrap();
         assert_eq!(colors(&task), [("home", None), ("work", None)]);
@@ -642,7 +646,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pkm-bindings-del-{}", std::process::id()));
         let path = |name: &str| dir.join(name).to_string_lossy().into_owned();
         let store = TaskStore::open(path("Tasks")).unwrap();
-        let task = store.create("t".into(), 4, vec![], None).unwrap();
+        let task = store.create("t".into(), 4, vec![]).unwrap();
         store.add_tag(task.id.clone(), "home".into()).unwrap();
         store.add_tag(task.id, "work".into()).unwrap();
         store
@@ -663,10 +667,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pkm-bindings-filter-{}", std::process::id()));
         let path = |name: &str| dir.join(name).to_string_lossy().into_owned();
         let store = TaskStore::open(path("Tasks")).unwrap();
-        store
-            .create("t".into(), 4, vec!["work".into()], None)
-            .unwrap();
-        store.create("u".into(), 4, vec![], None).unwrap();
+        store.create("t".into(), 4, vec!["work".into()]).unwrap();
+        store.create("u".into(), 4, vec![]).unwrap();
         let filter = store.create_filter("Work".into(), "@work".into()).unwrap();
         let tasks = store.filter_tasks(filter.id.clone()).unwrap();
         assert_eq!(tasks.len(), 1);
@@ -687,12 +689,8 @@ mod tests {
         assert_eq!(store.filters().unwrap()[0].title, "Home");
         store.set_favorite(other.id.clone(), true).unwrap();
         assert!(store.filters().unwrap()[0].favorite);
-        let first = store
-            .create("a".into(), 4, vec!["work".into()], None)
-            .unwrap();
-        store
-            .create("b".into(), 4, vec!["work".into()], None)
-            .unwrap();
+        let first = store.create("a".into(), 4, vec!["work".into()]).unwrap();
+        store.create("b".into(), 4, vec!["work".into()]).unwrap();
         store
             .move_in_filter(filter.id.clone(), first.id.clone(), None)
             .unwrap();

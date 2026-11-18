@@ -57,6 +57,18 @@ describe("the Tasks list", () => {
     });
   });
 
+  it("starts a new Task in a Filter with the Tags its Query requires as Shortcuts", () => {
+    model.list = { kind: "filter", id: model.filters[2].id }; // @backlog
+    const quickAdd = model.newQuickAdd();
+    expect(quickAdd.text()).toBe("@backlog ");
+    expect(quickAdd.tags()).toEqual(["backlog"]);
+    quickAdd.free();
+    model.list = { kind: "filter", id: model.filters[0].id }; // *
+    const plain = model.newQuickAdd();
+    expect(plain.text()).toBe("");
+    plain.free();
+  });
+
   it("adds a Task with a Description", () => {
     expect(model.add("Buy milk", { description: "Two litres" })).toBe(true);
     expect(first()).toMatchObject({
@@ -1029,7 +1041,7 @@ describe("Filters", () => {
     model.addFilter("Work", "@work");
     const list = { kind: "filter" as const, id: filter("Work").id };
     model.list = list;
-    model.add("Plain");
+    model.add("Plain", { tags: ["work"] });
     expect(model.list).toEqual(list);
     expect(titles()).toEqual(["A", "Plain"]);
     model.close(first(), Closing.Done);
@@ -1051,7 +1063,7 @@ describe("Filters", () => {
   it("changes a Subtask's order in the sheet when it is dragged past a sibling in a Filter", () => {
     model.addFilter("Work", "@work");
     model.list = { kind: "filter", id: filter("Work").id };
-    model.add("P");
+    model.add("P", { tags: ["work"] });
     for (const title of ["x", "y"]) model.addSubtask(title, first());
     expect(titles()).toEqual(["P", "x", "y"]);
     model.moveBefore(model.tasks[2], model.tasks[1]);

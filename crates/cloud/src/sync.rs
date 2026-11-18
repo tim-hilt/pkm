@@ -2951,7 +2951,7 @@ mod tests {
             let (tags, tasks) = (Cloud::new(), Cloud::new());
             let (phone, tablet) = (TaggingDevice::new(), TaggingDevice::new());
             let store = phone.store();
-            let milk = store.create("Milk", 4, &[], None).unwrap();
+            let milk = store.create("Milk", 4, &[]).unwrap();
             store.add_tag(&milk.id, "home").unwrap();
             store.add_tag(&milk.id, "work").unwrap();
             phone.sync(&tags, &tasks);
@@ -2985,8 +2985,8 @@ mod tests {
             let (phone, tablet) = (TaggingDevice::new(), TaggingDevice::new());
             let store = phone.store();
             let (milk, eggs) = (
-                store.create("Milk", 4, &[], None).unwrap(),
-                store.create("Eggs", 4, &[], None).unwrap(),
+                store.create("Milk", 4, &[]).unwrap(),
+                store.create("Eggs", 4, &[]).unwrap(),
             );
             store.add_tag(&milk.id, "work").unwrap();
             store.set_tag_color("work", Some("#d0021b")).unwrap();

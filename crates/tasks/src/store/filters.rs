@@ -236,9 +236,10 @@ impl Tasks {
         Ok(rows_of(&nodes, found))
     }
 
-    /// The Tags a Task created in the Filter `id` gets, see `create`; none if
-    /// there is no such Filter or its Query can't be read.
-    pub(super) fn required_tags(&self, id: &str) -> io::Result<Vec<String>> {
+    /// The Tags a Task needs to stay in the Filter `id` (see
+    /// `Query::required_tags`), which a new Task starts with; none if there is
+    /// no such Filter or its Query can't be read.
+    pub fn required_tags(&self, id: &str) -> io::Result<Vec<String>> {
         let stored = self
             .stored_filters()?
             .into_iter()
@@ -580,7 +581,7 @@ mod tests {
 
     fn add(tasks: &Tasks, title: &str, tags: &[&str]) -> String {
         let tags: Vec<String> = tags.iter().map(|t| (*t).to_owned()).collect();
-        tasks.create(title, 4, &tags, None).unwrap().id
+        tasks.create(title, 4, &tags).unwrap().id
     }
 
     fn titles(rows: Vec<Row>) -> Vec<String> {
@@ -737,19 +738,16 @@ mod tests {
     }
 
     #[test]
-    fn a_task_created_in_a_filter_gets_the_tags_its_query_requires() {
+    fn a_filter_requires_the_tags_of_its_and_chain() {
         let (_, tasks) = open();
-        let tags_in = |filter: Option<&str>| {
-            let tags = ["x".to_owned(), "work".to_owned()];
-            (tasks.create("t", 4, &tags, filter).unwrap()).tags
-        };
+        let tags_in = |id: &str| tasks.required_tags(id).unwrap();
         let work = tasks.create_filter("F", "@work & !@review & @a").unwrap();
-        assert_eq!(tags_in(Some(&work.id)), ["x", "work", "a"]);
+        assert_eq!(tags_in(&work.id), ["work", "a"]);
         for query in ["@a | @b", "@*x", "*"] {
             let filter = tasks.create_filter("F", query).unwrap();
-            assert_eq!(tags_in(Some(&filter.id)), ["x", "work"]);
+            assert!(tags_in(&filter.id).is_empty());
         }
-        assert_eq!(tags_in(Some("aaaaaaaaaaaa")), ["x", "work"]); // gone
+        assert!(tags_in("aaaaaaaaaaaa").is_empty()); // gone
     }
 
     #[test]
@@ -1185,9 +1183,7 @@ mod tests {
         let (files, tasks) = open();
         let ids = [("a", 3), ("b", 1), ("c", 3), ("d", 2), ("e", 1)]
             .map(|(title, priority)| {
-                let task = tasks
-                    .create(title, priority, &["work".into()], None)
-                    .unwrap();
+                let task = tasks.create(title, priority, &["work".into()]).unwrap();
                 task.id
             })
             .to_vec();
@@ -1236,7 +1232,7 @@ mod tests {
 
     fn add_priority(tasks: &Tasks, title: &str, priority: u8, tags: &[&str]) -> String {
         let tags: Vec<String> = tags.iter().map(|t| (*t).to_owned()).collect();
-        tasks.create(title, priority, &tags, None).unwrap().id
+        tasks.create(title, priority, &tags).unwrap().id
     }
 
     #[test]

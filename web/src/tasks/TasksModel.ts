@@ -2,7 +2,7 @@ import {
   Closing,
   type Direction,
   type FilterSortKey,
-  type TaskQuickAdd,
+  TaskQuickAdd,
   isValidTag,
   stripForbiddenTagCharacters,
   typedQuery,
@@ -334,12 +334,20 @@ export class TasksModel {
     this.onChange();
   }
 
-  /** Adds a Task; in a Filter it gets the Tags the Query requires, so that it stays there. False, adding nothing, if the Title is empty or a Tag invalid. */
+  /** Quick Add for a new Task. In a Filter it starts with the Tags the Query requires, typed as Shortcuts, so that the Task stays there unless the user changes them. The caller frees it. */
+  newQuickAdd(): TaskQuickAdd {
+    const quickAdd = new TaskQuickAdd();
+    const list = this.shownList;
+    const tags = list.kind === "filter" ? this.files.store.requiredTags(list.id) : [];
+    if (tags.length > 0) quickAdd.replace(0, 0, tags.map((t) => `@${t} `).join(""));
+    return quickAdd;
+  }
+
+  /** Adds a Task. False, adding nothing, if the Title is empty or a Tag invalid. */
   add(title: string, extras: NewTask = {}): boolean {
     const { store } = this.files;
     const { description, priority = 4, tags = [] } = extras;
-    const filter = this.shownList.kind === "filter" ? this.shownList.id : undefined;
-    const create = () => store.create(title, priority, tags, filter);
+    const create = () => store.create(title, priority, tags);
     if (!this.change(() => this.describe(create(), title, priority, description))) return false;
     this.reload();
     this.onChange();

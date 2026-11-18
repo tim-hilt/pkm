@@ -34,7 +34,7 @@ extension TasksModel {
                 ("Reply to Anna's email", "About the trip", 3, []),
             ]
             for (title, description, priority, tags) in samples {
-                if let task = try? store.create(title: title, priority: 4, tags: [], filter: nil) {
+                if let task = try? store.create(title: title, priority: 4, tags: []) {
                     _ = try? store.edit(
                         id: task.id, title: title, description: description, priority: priority, addTags: [])
                     for tag in tags { _ = try? store.addTag(id: task.id, tag: tag) }
@@ -43,7 +43,7 @@ extension TasksModel {
                     }
                 }
             }
-            _ = try? store.create(title: "Learn Rust", priority: 4, tags: ["backlog"], filter: nil)
+            _ = try? store.create(title: "Learn Rust", priority: 4, tags: ["backlog"])
             if opensFilters || opensFilter {
                 // Favorites enough to overflow the bar on an iPhone.
                 for (title, query) in [
