@@ -10,7 +10,6 @@ Filters get `& !@backlog`."""  # `--test` runs its tests
 import json
 import os
 import re
-import shutil
 import stat
 import sys
 import tempfile
@@ -253,17 +252,23 @@ class Task:
         self.backlog = doc.scalar("state") == BACKLOG  # of its top-level Task, after `plan`
 
 
-def read_history(folder):
+def history_files(tasks):
+    """The History's files (ADR-0022): Sync kept every Device's
+    `<device>-<yyyy-mm>.log` in the cloud's Tasks folder."""
+    paths = (os.path.join(tasks, name) for name in sorted(os.listdir(tasks)) if name.endswith(".log"))
+    return [path for path in paths if os.path.isfile(path)]
+
+
+def read_history(paths):
     """When each Task was created, by Item ID; the earliest `created` line wins."""
     times = {}
-    for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
-        if name.endswith(".log"):
-            with open(os.path.join(folder, name), encoding="utf-8") as f:
-                for line in f:
-                    parts = line.split()
-                    if len(parts) == 3 and parts[1] == "created":
-                        time, _, id = parts
-                        times[id] = min(time, times.get(id, time))
+    for path in paths:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) == 3 and parts[1] == "created":
+                    time, _, id = parts
+                    times[id] = min(time, times.get(id, time))
     return times
 
 
@@ -272,9 +277,9 @@ def read_tasks(tasks):
     legacy, closed = [], []
     for name in sorted(os.listdir(tasks)):
         stem, ext = os.path.splitext(name)
-        if ext != ".md" or not ID.fullmatch(stem):
-            continue
         path = os.path.join(tasks, name)
+        if ext != ".md" or not ID.fullmatch(stem) or not os.path.isfile(path):
+            continue
         with open(path, encoding="utf-8", newline="") as f:
             doc = Doc.parse(f.read())
         if doc is None or doc.scalar("id") != stem:
@@ -340,8 +345,10 @@ def read_filters(folder):
     found = []
     for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
         path = os.path.join(folder, name)
+        if not name.endswith(".md") or not os.path.isfile(path):
+            continue  # e.g. the WebDAV storage's `.incoming` folder
         with open(path, encoding="utf-8", newline="") as f:
-            doc = Doc.parse(f.read()) if name.endswith(".md") else None
+            doc = Doc.parse(f.read())
         if doc and all(doc.scalar(k) is not None for k in ("id", "title", "query")) and name == doc.scalar("id") + ".md":
             found.append((to_float(doc.scalar("position")) or 0.0, doc.scalar("id"), path, doc))
     return [(path, doc) for _, _, path, doc in sorted(found, key=lambda f: (f[0], f[1]))]
@@ -373,8 +380,8 @@ def migrate(root, stamp=None, history=None):
     """Returns (Tasks rewritten, Closed Tasks Deleted, Filters written)."""
     stamp = stamp or stamp_of(datetime.now(timezone.utc).timestamp())
     tasks, filters = os.path.join(root, "Tasks"), os.path.join(root, "Filters")
-    history_folder = os.path.join(tasks, ".history")
-    created = read_history(history_folder) if history is None else history
+    logs = history_files(tasks)
+    created = read_history(logs) if history is None else history
     legacy, closed = read_tasks(tasks)
     plan(legacy)
     active, backlog = list_order(legacy, False), list_order(legacy, True)
@@ -415,9 +422,8 @@ def migrate(root, stamp=None, history=None):
     if any(t.backlog for t in legacy):
         remember_tag(root, BACKLOG, stamp)
 
-    for path in closed:
+    for path in closed + logs:
         os.remove(path)
-    shutil.rmtree(history_folder, ignore_errors=True)
     return len(legacy), len(closed), written
 
 
@@ -563,12 +569,13 @@ class MigrateTests(unittest.TestCase):
         self.task("aaaaaaaaaaaa", "active")
         self.task("bbbbbbbbbbbb", "active")
         os.utime(self.path("Tasks", "bbbbbbbbbbbb.md"), (1_700_000_000, 1_700_000_000))
-        self.put("Tasks/.history/p-2023-11.log", "2023-11-15T00:00:00Z created aaaaaaaaaaaa\n2023-11-15T01:00:00Z moved aaaaaaaaaaaa\n")
-        self.put("Tasks/.history/q-2023-11.log", "2023-11-14T22:13:20Z created aaaaaaaaaaaa\n")
+        # In the cloud, Sync kept each Device's History files in the Tasks folder.
+        self.put("Tasks/pppppppppppp-2023-11.log", "2023-11-15T00:00:00Z created aaaaaaaaaaaa\n2023-11-15T01:00:00Z moved aaaaaaaaaaaa\n")
+        self.put("Tasks/qqqqqqqqqqqq-2023-11.log", "2023-11-14T22:13:20Z created aaaaaaaaaaaa\n")
         migrate(self.root, "T1")
         self.assertEqual(self.doc("Tasks/aaaaaaaaaaaa.md").scalar("created"), "2023-11-14T22:13:20Z")
         self.assertEqual(self.doc("Tasks/bbbbbbbbbbbb.md").scalar("created"), "2023-11-14T22:13:20Z")  # modified then
-        self.assertFalse(os.path.exists(self.path("Tasks", ".history")))
+        self.assertEqual(sorted(os.listdir(self.path("Tasks"))), ["aaaaaaaaaaaa.md", "bbbbbbbbbbbb.md"])
 
     def test_quoted_values_survive(self):
         self.task("aaaaaaaaaaaa", "active", 'description: "a: b \\"c\\""\n')
@@ -583,6 +590,14 @@ class MigrateTests(unittest.TestCase):
         before = snapshot()
         self.assertEqual(migrate(self.root, "T2", {}), (0, 0, 0))
         self.assertEqual(snapshot(), before)
+
+    def test_folders_beside_the_files_are_left_alone(self):
+        self.legacy_set()
+        self.filter("wwwwwwwwwwww", "@work")
+        for folder in ("Tasks", "Filters"):
+            os.makedirs(self.path(folder, ".incoming", "x.md"))
+        self.assertEqual(migrate(self.root, "T1", {}), (3, 2, 4))
+        self.assertTrue(os.path.isdir(self.path("Filters", ".incoming", "x.md")))
 
     def test_keeps_permissions_and_leaves_no_temporary_files(self):
         self.task("aaaaaaaaaaaa", "backlog")
