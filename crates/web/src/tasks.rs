@@ -4,7 +4,7 @@
 //! memory: the client hands in the files it has saved when opening, and after
 //! each change saves the files `take_changes` names.
 
-use pkm_tasks::{Files, MemoryFiles, QuickAdd, Row, ShortcutMeaning, Tasks};
+use pkm_tasks::{Files, FilterSort, MemoryFiles, QuickAdd, Row, ShortcutMeaning, Tasks};
 use std::path::Path;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
@@ -13,6 +13,25 @@ mirror_enum!(
     /// How a Task is Closed.
     Closing in pkm_tasks::Closing { Done, Rejected }
 );
+
+mirror_enum!(
+    /// What a Sort orders by.
+    FilterSortKey in pkm_tasks::FilterSortKey { Manual, Priority }
+);
+
+mirror_enum!(
+    /// Which end of a Sort key comes first.
+    Direction in pkm_tasks::Direction { Ascending, Descending }
+);
+
+/// Every Sort key, in the order a menu lists them.
+#[wasm_bindgen(js_name = sortKeys)]
+pub fn sort_keys() -> Vec<FilterSortKey> {
+    pkm_tasks::FilterSortKey::ALL
+        .into_iter()
+        .map(Into::into)
+        .collect()
+}
 
 /// A Task another Task is Blocked by; a `closed` one no longer blocks.
 #[wasm_bindgen(getter_with_clone)]
@@ -30,6 +49,12 @@ pub struct Filter {
     /// As the user typed it.
     pub query: String,
     pub favorite: bool,
+    /// What the Filter is Sorted by.
+    #[wasm_bindgen(js_name = sortKey)]
+    pub sort_key: FilterSortKey,
+    /// Which end of the key comes first; none for Manual.
+    #[wasm_bindgen(js_name = sortDirection)]
+    pub sort_direction: Option<Direction>,
     /// How many Open Tasks the Query matches.
     pub matches: u32,
     /// Why the stored Query can't be read; such a Filter matches nothing.
@@ -43,6 +68,11 @@ impl From<pkm_tasks::Filter> for Filter {
             title: f.title,
             query: f.query,
             favorite: f.favorite,
+            sort_key: f.sort.key().into(),
+            sort_direction: match f.sort {
+                FilterSort::Manual => None,
+                FilterSort::Priority(direction) => Some(direction.into()),
+            },
             matches: f.matches,
             error: f.error,
         }
@@ -579,6 +609,23 @@ impl TaskStore {
         self.tasks
             .move_in_filter(id, task, before.as_deref())
             .map_err(error)
+    }
+
+    /// Sorts a Filter by `key`; Manual keeps the order shown, Priority from
+    /// Manual discards it. A key with a Direction takes `direction`, or its
+    /// default (P1 first) if none. No Task changes.
+    #[wasm_bindgen(js_name = setSort)]
+    pub fn set_sort(
+        &self,
+        id: &str,
+        key: FilterSortKey,
+        direction: Option<Direction>,
+    ) -> Result<(), JsError> {
+        let sort = match (key, direction) {
+            (FilterSortKey::Priority, Some(direction)) => FilterSort::Priority(direction.into()),
+            (key, _) => FilterSort::Manual.with_key(key.into()),
+        };
+        self.tasks.set_sort(id, sort).map_err(error)
     }
 
     /// Checks a Query text without saving: what is wrong with it, or which of

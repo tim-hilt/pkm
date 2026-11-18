@@ -7,6 +7,10 @@ export interface RowMenuItem {
   label: string;
   run: () => void;
   danger?: boolean;
+  /** Shown as a choice among others, checked or not. */
+  checked?: boolean;
+  /** A heading shown above this entry, starting a section. */
+  heading?: string;
 }
 
 /**
@@ -66,19 +70,28 @@ export class RowMenu {
     this.element.hidden = true;
   }
 
-  private show(items: RowMenuItem[], x: number, y: number, focusAfter: HTMLElement): void {
+  /** Opens `items` with its corner at (`x`, `y`), as a press on a row does. */
+  show(items: RowMenuItem[], x: number, y: number, focusAfter: HTMLElement): void {
     this.hide();
     this.focusAfter = focusAfter;
     if (items.length === 0) return;
     this.element.replaceChildren(
-      ...items.map(({ label, run, danger }) => {
+      ...items.flatMap(({ label, run, danger, checked, heading }) => {
         const entry = button(`row-menu-item${danger ? " danger" : ""}`, label, () => {
           this.hide();
           focusAfter.focus();
           run();
         });
-        entry.setAttribute("role", "menuitem");
-        return entry;
+        if (checked === undefined) entry.setAttribute("role", "menuitem");
+        else {
+          entry.setAttribute("role", "menuitemradio");
+          entry.setAttribute("aria-checked", String(checked));
+        }
+        if (heading === undefined) return [entry];
+        const title = document.createElement("div");
+        title.className = "row-menu-heading";
+        title.textContent = heading;
+        return [title, entry];
       }),
     );
     this.element.hidden = false;
@@ -91,11 +104,11 @@ export class RowMenu {
     };
     document.addEventListener("pointerdown", away, true);
     this.closeOnPressElsewhere = () => document.removeEventListener("pointerdown", away, true);
-    this.element.querySelector<HTMLElement>("[role=menuitem]")?.focus();
+    this.element.querySelector<HTMLElement>("[role^=menuitem]")?.focus();
   }
 
   private key(event: KeyboardEvent): void {
-    const entries = [...this.element.querySelectorAll<HTMLElement>("[role=menuitem]")];
+    const entries = [...this.element.querySelectorAll<HTMLElement>("[role^=menuitem]")];
     const at = entries.indexOf(document.activeElement as HTMLElement);
     if (event.key === "Escape") {
       this.hide();

@@ -1,6 +1,14 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { type Core, Closing, TaskQuickAdd, loadCore } from "../core/Core";
+import {
+  type Core,
+  Closing,
+  Direction,
+  FilterSortKey,
+  TaskQuickAdd,
+  loadCore,
+  sortKeys,
+} from "../core/Core";
 import { MemoryStorage } from "../storage/MemoryStorage";
 import { TaskFiles } from "./TaskFiles";
 import { type ListedTask, TasksModel } from "./TasksModel";
@@ -1029,6 +1037,61 @@ describe("Filters", () => {
     model.addFilter("All", "*");
     model.list = { kind: "filter", id: filter("All").id };
     expect(titles()).toEqual(["A", "B", "C"]);
+  });
+
+  it("changes a Subtask's order in the sheet when it is dragged past a sibling in a Filter", () => {
+    model.addFilter("Work", "@work");
+    model.list = { kind: "filter", id: filter("Work").id };
+    model.add("P");
+    for (const title of ["x", "y"]) model.addSubtask(title, first());
+    expect(titles()).toEqual(["P", "x", "y"]);
+    model.moveBefore(model.tasks[2], model.tasks[1]);
+    expect(titles()).toEqual(["P", "y", "x"]);
+    expect(model.subtasks(first().id).map((t) => t.title)).toEqual(["y", "x"]);
+  });
+
+  describe("Sort", () => {
+    beforeEach(() => {
+      for (const [title, priority] of [
+        ["low", 4],
+        ["high", 1],
+        ["mid", 2],
+      ] as const)
+        model.add(title, { priority, tags: ["work"] });
+      model.addFilter("Work", "@work");
+      model.list = { kind: "filter", id: filter("Work").id };
+    });
+
+    it("is Manual at first, and sorts by Priority in either Direction", () => {
+      expect(filter("Work").sort).toEqual({ key: FilterSortKey.Manual, direction: undefined });
+      expect(titles()).toEqual(["low", "high", "mid"]);
+      model.setSort(filter("Work"), FilterSortKey.Priority);
+      expect(filter("Work").sort).toEqual({
+        key: FilterSortKey.Priority,
+        direction: Direction.Ascending,
+      });
+      expect(titles()).toEqual(["high", "mid", "low"]);
+      model.setSort(filter("Work"), FilterSortKey.Priority, Direction.Descending);
+      expect(titles()).toEqual(["low", "mid", "high"]);
+    });
+
+    it("keeps the Direction when Priority is picked again, and the order shown for Manual", () => {
+      model.setSort(filter("Work"), FilterSortKey.Priority, Direction.Descending);
+      model.setSort(filter("Work"), FilterSortKey.Manual);
+      expect(filter("Work").sort.direction).toBeUndefined();
+      expect(titles()).toEqual(["low", "mid", "high"]);
+    });
+
+    it("turns Manual when a drag crosses Priority groups", () => {
+      model.setSort(filter("Work"), FilterSortKey.Priority);
+      model.moveBefore(model.tasks[2], model.tasks[0]);
+      expect(filter("Work").sort.key).toBe(FilterSortKey.Manual);
+      expect(titles()).toEqual(["low", "high", "mid"]);
+    });
+
+    it("lists the keys the core has, Manual first", () => {
+      expect(sortKeys()).toEqual([FilterSortKey.Manual, FilterSortKey.Priority]);
+    });
   });
 
   it("keeps the Filter shown when a Task of it is opened, and leaves one that is Deleted", () => {

@@ -1,5 +1,7 @@
 import {
   Closing,
+  type Direction,
+  type FilterSortKey,
   type TaskQuickAdd,
   isValidTag,
   stripForbiddenTagCharacters,
@@ -91,6 +93,12 @@ export interface DeviceStorage {
 
 const lastListKey = "lastTasksList";
 
+/** How a Filter orders its Tasks: by a key, which has a Direction unless it is Manual. */
+export interface Sort {
+  key: FilterSortKey;
+  direction: Direction | undefined;
+}
+
 /** A Filter: a Title and a Query over the Open Tasks' Tags. */
 export interface Filter {
   id: string;
@@ -98,6 +106,7 @@ export interface Filter {
   /** As the user typed it. */
   query: string;
   favorite: boolean;
+  sort: Sort;
   /** How many Open Tasks the Query matches. */
   matches: number;
   /** Why the stored Query can't be read; such a Filter matches nothing until it is edited. */
@@ -402,12 +411,22 @@ export class TasksModel {
 
   /**
    * Moves a Task before `before` in the Filter shown, or, with none, to its end.
-   * Its Parent stays. Only the Filter's own order changes.
+   * Its Parent stays. A Subtask passing a sibling also moves in its Subtask
+   * order; otherwise only the Filter's own order changes. In a Sorted Filter, a
+   * drop out of the Task's Priority group turns it Manual.
    */
   moveBefore(task: ListedTask, before: ListedTask | undefined): void {
     const list = this.shownList;
     if (list.kind !== "filter") return;
     this.apply(() => this.files.store.moveInFilter(list.id, task.id, before?.id));
+  }
+
+  /**
+   * Sorts a Filter by `key`, in `direction` if the key has one (else its
+   * default). Manual keeps the order shown, Priority from Manual discards it.
+   */
+  setSort(filter: Filter, key: FilterSortKey, direction?: Direction): void {
+    this.apply(() => this.files.store.setSort(filter.id, key, direction));
   }
 
   /** Creates a Filter at the end of the Filters list. False, creating nothing, if the Title is empty or the Query can't be read. */
@@ -621,6 +640,7 @@ export class TasksModel {
         title: row.title,
         query: row.query,
         favorite: row.favorite,
+        sort: { key: row.sortKey, direction: row.sortDirection ?? undefined },
         matches: row.matches,
         error: row.error ?? undefined,
       };

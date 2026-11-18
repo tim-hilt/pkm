@@ -1,4 +1,4 @@
-import { Closing } from "../core/Core";
+import { Closing, Direction, FilterSortKey, sortKeys } from "../core/Core";
 import { button, make, onNewKey } from "../Dom";
 import { filterDialog, deleteFilterDialog } from "./FilterDialogs";
 import { filterRows } from "./FiltersList";
@@ -7,6 +7,14 @@ import { RowMenu, type RowMenuItem } from "./RowMenu";
 import { taskLine } from "./TaskRow";
 import { type TaskPlaces, editTaskDialog, newTaskDialog } from "./TaskDialogs";
 import { type Filter, type ListedTask, type TasksList, type TasksModel } from "./TasksModel";
+
+const sortGlyph = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4v16M4 16l4 4 4-4M16 20V4M12 8l4-4 4 4"/></svg>`;
+
+const sortKeyLabels = { [FilterSortKey.Manual]: "Manual", [FilterSortKey.Priority]: "Priority" };
+const directionLabels = {
+  [Direction.Ascending]: "Ascending",
+  [Direction.Descending]: "Descending",
+};
 
 const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
 
@@ -19,7 +27,7 @@ const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" s
  * before the Tags; rows are dragged to reorder. A row opens the edit view; its
  * menu (right click, long press) Rejects. The Filters entry of
  * the bar lists the Favorites, each a Filter, and the Filters, with how many Tasks each matches; opening one shows
- * its Tasks as rows, under its Title. A port of the Swift
+ * its Tasks as rows, under its Title, with a Sort menu in the toolbar above them. A port of the Swift
  * `TasksView`, in native elements.
  */
 export class TasksView {
@@ -31,6 +39,8 @@ export class TasksView {
   private checkedKey = "";
   private switchButtons: { list: TasksList; choose: HTMLButtonElement }[] = [];
   private readonly filterHeader = make("div", "tasks-filter-header");
+  private readonly sort = button("tasks-sort", "", () => this.showSortMenu());
+  private readonly toolbar = make("div", "tasks-toolbar", [this.sort]);
   private readonly list = make("ul", "tasks-list");
   private readonly empty = make("div", "tasks-empty");
   private readonly failure = make("p", "tasks-failure");
@@ -50,6 +60,10 @@ export class TasksView {
     this.switch.setAttribute("aria-label", "List");
     onNewKey(this.element, () => this.createNew());
     this.create.innerHTML = plusGlyph;
+    this.sort.innerHTML = sortGlyph;
+    this.sort.title = "Sort";
+    this.sort.setAttribute("aria-label", "Sort");
+    this.sort.setAttribute("aria-haspopup", "menu");
     this.failure.setAttribute("role", "alert");
     this.list.setAttribute("aria-label", "Tasks");
     this.empty.setAttribute("role", "status");
@@ -57,7 +71,12 @@ export class TasksView {
     this.menu = new RowMenu(this.element);
     this.drag = new RowDrag((task, before) => model.moveBefore(task, before));
     this.filterDrag = new RowDrag((filter, before) => model.moveFilter(filter, before));
-    const scroll = make("div", "tasks-scroll", [this.filterHeader, this.list, this.empty]);
+    const scroll = make("div", "tasks-scroll", [
+      this.filterHeader,
+      this.toolbar,
+      this.list,
+      this.empty,
+    ]);
     this.drag.attachEnd(scroll);
     this.filterDrag.attachEnd(scroll);
     this.element.append(
@@ -133,12 +152,37 @@ export class TasksView {
     this.filterHeader.replaceChildren(
       ...(opened ? [make("h2", "tasks-filter-title", [opened.title])] : []),
     );
+    this.toolbar.hidden = filters;
     const rows = filters ? this.filterList() : model.tasks.map((task) => this.row(task));
     this.list.replaceChildren(...rows);
     this.empty.hidden = rows.length > 0;
     const [heading, text] = this.emptyText(list);
     this.empty.replaceChildren(make("strong", "", [heading]), make("span", "", [text]));
     if (filters) this.empty.append(button("tasks-empty-new", "New Filter", () => this.createNew()));
+  }
+
+  /** The Sort menu of the Filter shown, under the Sort button: the keys, and Direction unless Manual. */
+  private showSortMenu(): void {
+    const { model } = this;
+    const filter = model.filter;
+    if (!filter) return;
+    const { key: current, direction } = filter.sort;
+    const keys: RowMenuItem[] = sortKeys().map((key) => ({
+      label: sortKeyLabels[key],
+      checked: key === current,
+      run: () => model.setSort(filter, key, direction),
+    }));
+    const directions: RowMenuItem[] =
+      direction === undefined
+        ? []
+        : [Direction.Ascending, Direction.Descending].map((d, i) => ({
+            label: directionLabels[d],
+            checked: d === direction,
+            heading: i === 0 ? "Direction" : undefined,
+            run: () => model.setSort(filter, current, d),
+          }));
+    const { left, bottom } = this.sort.getBoundingClientRect();
+    this.menu.show([...keys, ...directions], left, bottom, this.sort);
   }
 
   private emptyText(list: TasksList): [string, string] {
