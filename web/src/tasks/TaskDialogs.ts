@@ -348,8 +348,8 @@ class TagField {
 }
 
 /**
- * A modal list of every known Tag with a checkbox each, and a search input at
- * the bottom that takes the focus on opening and also offers to create a Tag.
+ * A modal list of every known Tag with a checkbox each, a search input at the
+ * top that takes the focus on opening and also offers to create a Tag, and Done at the bottom right.
  * Done calls `done` with the Tags checked and closes; Cancel and Esc change nothing.
  */
 function pickTagsDialog(
@@ -419,7 +419,7 @@ function pickTagsDialog(
     event.preventDefault();
     if (creatable()) create();
   });
-  dialog.append(make("div", "tasks-picker-bar", [heading, confirm]), list, hint, search);
+  dialog.append(heading, search, list, hint, make("div", "tasks-actions", [confirm]));
   dialog.addEventListener("close", () => dialog.remove());
   show();
   parent.append(dialog);
