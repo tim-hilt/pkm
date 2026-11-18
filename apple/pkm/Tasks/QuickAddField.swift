@@ -206,7 +206,7 @@ struct QuickAddField: View {
         for shortcut in highlighted {
             let range = NSRange(location: Int(shortcut.start), length: Int(shortcut.end - shortcut.start))
             if let range = Range(range, in: drawn) {
-                drawn[range].foregroundColor = .accentColor
+                drawn[range].foregroundColor = color(of: shortcut)
                 drawn[range].inlinePresentationIntent = .stronglyEmphasized
             }
         }
@@ -223,6 +223,12 @@ struct QuickAddField: View {
             selected = 0
             isClosed = false
         }
+    }
+
+    /// A Tag Shortcut in its Tag's color; the accent color for Default and for Priorities.
+    private func color(of shortcut: QuickShortcut) -> Color {
+        guard case .tag(let tag) = shortcut.meaning else { return .accentColor }
+        return model.tagEntry(tag).color.flatMap(Color.init(tagColor:)) ?? .accentColor
     }
 
     /// The UTF-16 range of `old` that `new` replaced, and what replaced it: all but their common
