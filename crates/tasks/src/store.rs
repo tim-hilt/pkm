@@ -510,6 +510,15 @@ impl Tasks {
         })
     }
 
+    /// Deletes `tag`: removes it from every Task and every Filter's Group by
+    /// (with its places), then forgets it and its Tag Color. In that order, so
+    /// that repeating it after an interruption finishes the job.
+    pub fn delete_tag(&self, tag: &str) -> io::Result<()> {
+        self.remove_tag_everywhere(tag)?;
+        self.remove_from_group_bys(tag)?;
+        self.forget_tag(tag)
+    }
+
     /// Removes `tag` from every Task, saving each changed file with a new
     /// `updated`. The Tags are left alone; repeating it after an interruption
     /// finishes the job.

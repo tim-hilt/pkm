@@ -554,13 +554,12 @@ impl TaskStore {
             .map_err(error)
     }
 
-    /// Deletes a Tag: Removes it from every Task, Open or Closed, then forgets
-    /// it and its Tag Color. Removing first means an interrupted Delete can
-    /// simply be repeated.
+    /// Deletes a Tag: Removes it from every Task, Open or Closed, and every
+    /// Filter's Group by, then forgets it and its Tag Color. An interrupted
+    /// Delete can simply be repeated.
     #[wasm_bindgen(js_name = deleteTag)]
     pub fn delete_tag(&self, tag: &str) -> Result<(), JsError> {
-        self.tasks.remove_tag_everywhere(tag).map_err(error)?;
-        self.tasks.forget_tag(tag).map_err(error)
+        self.tasks.delete_tag(tag).map_err(error)
     }
 
     /// Every Open Task, Subtasks included, in the order of All Tasks.

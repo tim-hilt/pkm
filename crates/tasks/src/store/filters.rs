@@ -10,7 +10,7 @@ use pkm_base::clock::{iso8601, now_ms};
 use pkm_base::front_matter::{Document, Value};
 use pkm_base::item_id::ItemId;
 use pkm_base::random::Entropy;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::io;
 use std::iter;
 use std::path::PathBuf;
@@ -467,6 +467,21 @@ impl Tasks {
             .collect())
     }
 
+    /// Takes `tag` out of the Group by of every Filter that has it, with its
+    /// places. Safe to repeat.
+    pub(super) fn remove_from_group_bys(&self, tag: &str) -> io::Result<()> {
+        for s in self.stored_filters()? {
+            if s.filter.group_by.iter().any(|t| t == tag) {
+                self.rewrite_filter(&s.filter.id, |file| {
+                    let mut group_by = group_by_of(file);
+                    group_by.retain(|t| t != tag);
+                    write_group_by(file, &group_by);
+                })?;
+            }
+        }
+        Ok(())
+    }
+
     fn filters_folder(&self) -> PathBuf {
         let beside = self.root.parent().unwrap_or(std::path::Path::new(""));
         beside.join(Self::FILTERS_FOLDER)
@@ -522,7 +537,8 @@ impl Tasks {
     }
 
     /// The readable Filter files, in the Filters list's order. Only `<id>.md`
-    /// is the Filter `id`.
+    /// is the Filter `id`. A Group-by Tag missing from the Tags file (a Delete
+    /// racing an edit) is added back, grey, as a Task's is (ADR-0023).
     pub(super) fn stored_filters(&self) -> io::Result<Vec<Stored>> {
         let mut found: Vec<Stored> = (self.files.list(&self.filters_folder())?.iter())
             .filter_map(|f| {
@@ -534,6 +550,8 @@ impl Tasks {
         found.sort_by(|a, b| {
             compare_positions(a.position, b.position).then_with(|| a.filter.id.cmp(&b.filter.id))
         });
+        let tags = found.iter().flat_map(|s| s.filter.group_by.iter().cloned());
+        self.remember_tags(tags.collect::<BTreeSet<_>>())?;
         Ok(found)
     }
 }
@@ -1940,6 +1958,44 @@ mod tests {
         );
         tasks.edit_filter(&f.id, "All", "*", "@private").unwrap();
         assert!(!places_of_group(&files, &f, "work"));
+    }
+
+    #[test]
+    fn deleting_a_tag_takes_it_out_of_every_group_by_with_its_places() {
+        let (files, tasks, f) = group_fixture();
+        drag(&tasks, &f, Some("work"), "xy", Some("x"));
+        let other = tasks.create_filter("O", "*", "@private @work").unwrap();
+        tasks.delete_tag("work").unwrap();
+        let listed = tasks.filters().unwrap();
+        assert_eq!(listed[0].group_by, ["private"]);
+        assert_eq!(listed[1].group_by, ["private"]);
+        assert!(!places_of_group(&files, &f, "work"));
+        assert!(
+            grouped(&tasks, &other.id)
+                .iter()
+                .all(|g| g.0.as_deref() != Some("work"))
+        );
+        assert!(!tasks.tags().contains("work"));
+        tasks.delete_tag("work").unwrap(); // safe to repeat
+    }
+
+    #[test]
+    fn a_group_by_tag_missing_from_the_tags_file_returns_grey_when_filters_are_read() {
+        let (_, tasks, _) = group_fixture();
+        tasks.set_tag_color("work", Some("#d0021b")).unwrap();
+        tasks.forget_tag("work").unwrap(); // a Delete racing the edit
+        tasks.filters().unwrap();
+        assert!(tasks.tags().contains("work"));
+        assert_eq!(
+            tasks
+                .tags()
+                .list()
+                .iter()
+                .find(|t| t.name == "work")
+                .unwrap()
+                .color,
+            None
+        );
     }
 
     fn places_of_group(files: &MemoryFiles, f: &Filter, tag: &str) -> bool {

@@ -179,6 +179,14 @@ struct FilterSheet: View {
                         #endif
                         .onSubmit(save)
                         .accessibilityIdentifier("filter-group-by")
+                    ForEach(model.suggestGroupByTags(groupBy), id: \.self) { tag in
+                        Button {
+                            groupBy = TasksModel.completingQuery(groupBy, with: tag)
+                        } label: {
+                            Label(tag, systemImage: "tag")
+                                .foregroundStyle(model.tagEntry(tag).style(default: .primary))
+                        }
+                    }
                 } footer: {
                     if let problem = groupByProblem {
                         Text(problem)

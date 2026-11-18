@@ -494,12 +494,11 @@ impl TaskStore {
         Ok(self.0.set_tag_color(&tag, color.as_deref())?)
     }
 
-    /// Deletes a Tag: Removes it from every Item, Open or Closed, then forgets
-    /// it and its Tag Color. Removing first means an interrupted Delete can
-    /// just be repeated.
+    /// Deletes a Tag: Removes it from every Item, Open or Closed, and every
+    /// Filter's Group by, then forgets it and its Tag Color. An interrupted
+    /// Delete can just be repeated.
     pub fn delete_tag(&self, tag: String) -> Result<(), TasksError> {
-        self.0.remove_tag_everywhere(&tag)?;
-        Ok(self.0.forget_tag(&tag)?)
+        Ok(self.0.delete_tag(&tag)?)
     }
 
     /// Every known Tag with its Tag Color, alphabetically.

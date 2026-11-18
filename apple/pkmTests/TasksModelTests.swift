@@ -857,6 +857,28 @@ import Testing
         #expect(model.tasks.map(\.title) == ["plain", "both"])
     }
 
+    @Test func deletingATagTakesItOutOfEveryGroupByAndItsHeadingGoes() throws {
+        let store = try TaskStore.open(root: root.appending(path: "Tasks").path)
+        let model = TasksModel(store: store)
+        _ = try store.create(title: "t", priority: 4, tags: ["a", "b"])
+        #expect(model.addFilter(title: "G", query: "*", groupBy: "@a @b"))
+        model.list = .filter(model.filters[0].id)
+        #expect(model.groups.map(\.tag) == [nil, "a", "b"])
+
+        model.deleteTag("a")
+        #expect(model.filters[0].groupBy == ["b"])
+        #expect(model.groups.map(\.tag) == [nil, "b"])
+    }
+
+    @Test func theGroupByFieldSuggestsTagsNotYetListed() throws {
+        let model = try openModel()
+        model.add(title: "t", tags: ["work", "wine", "home"])
+        #expect(model.suggestGroupByTags("@work @w") == ["wine"])
+        #expect(model.suggestGroupByTags("@w") == ["wine", "work"])
+        #expect(model.suggestGroupByTags("@work ").isEmpty)
+        #expect(TasksModel.completingQuery("@work @w", with: "wine") == "@work @wine")
+    }
+
     @Test func aDragInOneGroupPassesItsGroupAndLeavesTheOthers() throws {
         let store = try TaskStore.open(root: root.appending(path: "Tasks").path)
         let model = TasksModel(store: store)

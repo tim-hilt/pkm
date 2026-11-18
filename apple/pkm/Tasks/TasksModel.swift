@@ -416,6 +416,15 @@ final class TasksModel {
         return suggestTags(word, leaveOut: []).matches
     }
 
+    /// The known Tags to suggest for the Tag being typed at the end of the Group-by `text`, leaving out
+    /// those already listed in it; none if it doesn't end in one.
+    func suggestGroupByTags(_ text: String) -> [String] {
+        guard let word = unfinishedQueryTag(text: text) else { return [] }
+        let listed = text.dropLast(word.count + 1).split(whereSeparator: \.isWhitespace)
+            .map { String($0.drop { $0 == "@" }) }
+        return suggestTags(word, leaveOut: listed).matches
+    }
+
     /// The Query `text` with the Tag being typed at its end completed to `tag`.
     static func completingQuery(_ text: String, with tag: String) -> String {
         let word = unfinishedQueryTag(text: text) ?? ""
@@ -428,7 +437,8 @@ final class TasksModel {
         reload()
     }
 
-    /// Deletes a Tag: it is Removed from every Task, Open or Closed, and its Tag Color is forgotten.
+    /// Deletes a Tag: it is Removed from every Task, Open or Closed, and every Filter's Group by, and
+    /// its Tag Color is forgotten.
     func deleteTag(_ tag: String) {
         try? store.deleteTag(tag: tag)
         reload()
