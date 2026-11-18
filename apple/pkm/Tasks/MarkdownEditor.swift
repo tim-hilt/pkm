@@ -3,15 +3,18 @@ import SwiftUI
 /// A Description edited in Live Preview (ADR-0028): a TextKit 2 text view whose lines are styled
 /// from the core's parse (`MarkdownStyler`), the caret's line raw. The text is exactly what was
 /// typed. It grows with its content, so the sheet around it scrolls. Links open on a tap or click,
-/// and pasting takes only the plain text.
+/// and pasting takes only the plain text. While focused it offers ⌘B, ⌘I and ⌘E (`FormatCommands`).
 struct MarkdownEditor: View {
     @Binding var text: String
     var placeholder: LocalizedStringKey
     /// The editor lost focus.
     var onBlur: () -> Void = {}
+    /// Formats the selection; set while the editor has the focus.
+    @State private var formatting: ((Inline) -> Void)?
 
     var body: some View {
-        MarkdownTextRepresentable(text: $text, onBlur: onBlur)
+        MarkdownTextRepresentable(text: $text, formatting: $formatting, onBlur: onBlur)
+            .focusedSceneValue(\.formatText, formatting)
             .accessibilityLabel(placeholder)
             .overlay(alignment: .topLeading) {
                 if text.isEmpty {
@@ -22,9 +25,10 @@ struct MarkdownEditor: View {
 }
 
 /// The keys the core edits for (ADR-0028): Return continues a list, Tab and Shift-Tab indent and
-/// outdent its items.
+/// outdent its items, and the format shortcuts toggle Inline formatting.
 private enum EditKey {
     case newline, indent, outdent
+    case toggle(Inline)
 
     /// The edit for the key with `selection` (UTF-16) selected in `text`; none to leave the key to
     /// the text view, as for Tab outside a list.
@@ -35,6 +39,7 @@ private enum EditKey {
         case .newline: return returnAt(text: text, start: start, end: end)
         case .indent: return shiftItems(text: text, start: start, end: end, outdent: false)
         case .outdent: return shiftItems(text: text, start: start, end: end, outdent: true)
+        case .toggle(let kind): return toggleInline(text: text, start: start, end: end, kind: kind)
         }
     }
 }
@@ -106,6 +111,7 @@ extension NSTextStorage {
 
     private struct MarkdownTextRepresentable: UIViewRepresentable {
         @Binding var text: String
+        @Binding var formatting: ((Inline) -> Void)?
         let onBlur: () -> Void
 
         func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -174,9 +180,13 @@ extension NSTextStorage {
 
             func textViewDidChangeSelection(_ view: UITextView) { restyle(view) }
 
-            func textViewDidBeginEditing(_ view: UITextView) { restyle(view) }
+            func textViewDidBeginEditing(_ view: UITextView) {
+                parent.formatting = (view as? MarkdownTextView).map(formatter)
+                restyle(view)
+            }
 
             func textViewDidEndEditing(_ view: UITextView) {
+                parent.formatting = nil
                 restyle(view)
                 parent.onBlur()
             }
@@ -205,7 +215,22 @@ extension NSTextStorage {
     }
 #else
     private final class MarkdownTextView: NSTextView {
+        /// Tells whether the view has the focus.
+        var onFocusChange: ((Bool) -> Void)?
+
         override func paste(_ sender: Any?) { pasteAsPlainText(sender) }
+
+        override func becomeFirstResponder() -> Bool {
+            let became = super.becomeFirstResponder()
+            if became { onFocusChange?(true) }
+            return became
+        }
+
+        override func resignFirstResponder() -> Bool {
+            let resigned = super.resignFirstResponder()
+            if resigned { onFocusChange?(false) }
+            return resigned
+        }
 
         /// Applies the core's edit for `key` as a typed change, so that undo takes it back.
         func apply(_ key: EditKey) -> Bool {
@@ -230,6 +255,7 @@ extension NSTextStorage {
 
     private struct MarkdownTextRepresentable: NSViewRepresentable {
         @Binding var text: String
+        @Binding var formatting: ((Inline) -> Void)?
         let onBlur: () -> Void
 
         func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -238,6 +264,9 @@ extension NSTextStorage {
             let view = MarkdownTextView(usingTextLayoutManager: true)
             let coordinator = context.coordinator
             view.delegate = coordinator
+            view.onFocusChange = { [unowned coordinator, weak view] focused in
+                coordinator.parent.formatting = focused ? view.map(formatter) : nil
+            }
             (view.textLayoutManager?.textContentManager as? NSTextContentStorage)?.delegate = coordinator.display
             view.drawsBackground = false
             view.isVerticallyResizable = false
@@ -321,3 +350,8 @@ extension NSTextStorage {
         }
     }
 #endif
+
+/// What formats the selection of `view`, for `FormatCommands`.
+private func formatter(for view: MarkdownTextView) -> (Inline) -> Void {
+    { [weak view] kind in _ = view?.apply(.toggle(kind)) }
+}

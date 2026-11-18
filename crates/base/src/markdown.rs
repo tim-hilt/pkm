@@ -513,6 +513,69 @@ pub fn shift_items(text: &str, start: u32, end: u32, outdent: bool) -> Option<Te
     })
 }
 
+/// The edit for ⌘B, ⌘I or ⌘E with the selection `start..end`: it removes the
+/// `kind` markers of the span the selection is in (outside its markers) or
+/// covers, else wraps the selection in them. Spaces at the selection's ends stay
+/// outside the markers, as a span can't open or close on one; an empty
+/// selection gets a pair with the caret between.
+pub fn toggle_inline(text: &str, start: u32, end: u32, kind: Inline) -> TextEdit {
+    let units: Vec<u16> = text.encode_utf16().collect();
+    let end = end.min(units.len() as u32);
+    let start = start.min(end);
+    let span = parse_description(text).inlines.into_iter().rev().find(|s| {
+        let marker = s.marker_len;
+        s.kind == kind
+            && ((s.start + marker <= start && end <= s.end - marker)
+                || (start <= s.start && s.end <= end))
+    });
+    if let Some(s) = span {
+        let marker = s.marker_len;
+        let inner = String::from_utf16_lossy(
+            &units[(s.start + marker) as usize..(s.end - marker) as usize],
+        );
+        // A position moves left by the markers before it.
+        let moved = |pos: u32| match pos {
+            p if p <= s.start => p,
+            p if p < s.start + marker => s.start,
+            p if p <= s.end - marker => p - marker,
+            p if p < s.end => s.end - 2 * marker,
+            p => p - 2 * marker,
+        };
+        return TextEdit {
+            start: s.start,
+            end: s.end,
+            replacement: inner,
+            selection_start: moved(start),
+            selection_end: moved(end),
+        };
+    }
+    let blank = |u: u16| char::from_u32(u32::from(u)).is_some_and(char::is_whitespace);
+    let (mut from, mut to) = (start as usize, end as usize);
+    while from < to && blank(units[from]) {
+        from += 1;
+    }
+    while to > from && blank(units[to - 1]) {
+        to -= 1;
+    }
+    if from == to {
+        (from, to) = (end as usize, end as usize);
+    }
+    let marker = match kind {
+        Inline::Emphasis => "*",
+        Inline::Strong => "**",
+        Inline::Code => "`",
+    };
+    let inner = String::from_utf16_lossy(&units[from..to]);
+    let width = utf16_len(marker);
+    TextEdit {
+        start: from as u32,
+        end: to as u32,
+        replacement: format!("{marker}{inner}{marker}"),
+        selection_start: from as u32 + width,
+        selection_end: to as u32 + width,
+    }
+}
+
 /// A run of `*` that may still be closed by a later run; `left` of its
 /// markers are unmatched, the innermost ones used first.
 #[derive(Clone, Copy)]
@@ -945,5 +1008,91 @@ mod tests {
     fn shifting_ignores_lines_that_are_no_items() {
         assert_eq!(shift_items("a\n# b", 0, 5, false), None);
         assert_eq!(shift_items("```\n- a\n```", 0, 11, false), None);
+    }
+
+    fn toggled(text: &str, start: u32, end: u32, kind: Inline) -> (String, u32, u32) {
+        let e = toggle_inline(text, start, end, kind);
+        (apply(text, &e), e.selection_start, e.selection_end)
+    }
+
+    #[test]
+    fn toggling_wraps_the_selection() {
+        let wrapped = |kind| toggled("a b c", 2, 3, kind);
+        assert_eq!(wrapped(Inline::Strong), ("a **b** c".into(), 4, 5));
+        assert_eq!(wrapped(Inline::Emphasis), ("a *b* c".into(), 3, 4));
+        assert_eq!(wrapped(Inline::Code), ("a `b` c".into(), 3, 4));
+    }
+
+    #[test]
+    fn toggling_an_empty_selection_inserts_a_pair() {
+        assert_eq!(toggled("ab", 1, 1, Inline::Strong), ("a****b".into(), 3, 3));
+        assert_eq!(toggled("", 0, 0, Inline::Code), ("``".into(), 1, 1));
+    }
+
+    #[test]
+    fn toggling_unwraps_when_the_markers_are_selected() {
+        assert_eq!(
+            toggled("a **b** c", 2, 7, Inline::Strong),
+            ("a b c".into(), 2, 3)
+        );
+        assert_eq!(toggled("`b`", 0, 3, Inline::Code), ("b".into(), 0, 1));
+    }
+
+    #[test]
+    fn toggling_unwraps_when_the_markers_are_just_outside() {
+        assert_eq!(
+            toggled("a **b** c", 4, 5, Inline::Strong),
+            ("a b c".into(), 2, 3)
+        );
+        assert_eq!(toggled("*b*", 1, 2, Inline::Emphasis), ("b".into(), 0, 1));
+    }
+
+    #[test]
+    fn toggling_unwraps_with_the_caret_in_the_span() {
+        assert_eq!(toggled("*ab*", 2, 2, Inline::Emphasis), ("ab".into(), 1, 1));
+    }
+
+    #[test]
+    fn emphasis_and_strong_are_not_confused() {
+        assert_eq!(
+            toggled("**b**", 2, 3, Inline::Emphasis),
+            ("***b***".into(), 3, 4)
+        );
+        assert_eq!(
+            toggled("*b*", 1, 2, Inline::Strong),
+            ("***b***".into(), 3, 4)
+        );
+        assert_eq!(
+            toggled("***b***", 3, 4, Inline::Emphasis),
+            ("**b**".into(), 2, 3)
+        );
+        assert_eq!(
+            toggled("***b***", 3, 4, Inline::Strong),
+            ("*b*".into(), 1, 2)
+        );
+    }
+
+    #[test]
+    fn toggling_keeps_spaces_outside_the_markers() {
+        assert_eq!(
+            toggled("a b ", 2, 4, Inline::Emphasis),
+            ("a *b* ".into(), 3, 4)
+        );
+        assert_eq!(
+            toggled("a  b", 1, 3, Inline::Strong),
+            ("a  ****b".into(), 5, 5)
+        );
+    }
+
+    #[test]
+    fn toggling_in_a_description_line_and_utf16() {
+        assert_eq!(
+            toggled("- 😀 x", 5, 6, Inline::Code),
+            ("- 😀 `x`".into(), 6, 7)
+        );
+        assert_eq!(
+            toggled("```\n*a*\n```", 5, 6, Inline::Emphasis),
+            ("```\n**a**\n```".into(), 6, 7)
+        );
     }
 }

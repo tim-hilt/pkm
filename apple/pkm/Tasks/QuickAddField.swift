@@ -109,6 +109,7 @@ struct QuickAddField: View {
             .accessibilityRepresentation { shortcutElements }
             .onChange(of: text) { typed() }
             .onChange(of: selection) { cursorMoved() }
+            .focusedSceneValue(\.formatText, formatting)
             .onKeyPress(.downArrow) { move(by: 1) }
             .onKeyPress(.upArrow) { move(by: -1) }
             .onKeyPress(.tab) { pickSelected() ? .handled : .ignored }
@@ -183,6 +184,23 @@ struct QuickAddField: View {
         draw()
     }
 
+    /// What formats the selection (see `FormatCommands`) while the field has the focus.
+    private var formatting: ((Inline) -> Void)? {
+        guard isFocused else { return nil }
+        return { format($0) }
+    }
+
+    /// Toggles Inline formatting on the selection, which stays selected.
+    private func format(_ kind: Inline) {
+        let (start, end) = Self.offsets(of: selection, in: text)
+        let edit = toggleInline(text: quickAdd.text(), start: start, end: end, kind: kind)
+        quickAdd.replace(start: edit.start, end: edit.end, with: edit.replacement)
+        quickAdd.moveCursor(at: edit.selectionEnd)
+        draw()
+        let range = NSRange(location: Int(edit.selectionStart), length: Int(edit.selectionEnd - edit.selectionStart))
+        if let range = Range(range, in: text) { selection = AttributedTextSelection(range: range) }
+    }
+
     /// A jump of the cursor into a highlight (a tap or click, unlike typing or the arrow keys, which
     /// move by one unit) Ignores that Shortcut.
     private func cursorMoved() {
@@ -248,13 +266,23 @@ struct QuickAddField: View {
         return (UInt32(head)..<UInt32(old16.count - tail), inserted)
     }
 
+    /// The UTF-16 start and end of the selection; both the caret's position without a range.
+    private static func offsets(of selection: AttributedTextSelection, in text: AttributedString) -> (
+        start: UInt32, end: UInt32
+    ) {
+        let range: Range<AttributedString.Index>
+        switch selection.indices(in: text) {
+        case .insertionPoint(let point): range = point..<point
+        case .ranges(let ranges):
+            let all = ranges.ranges
+            range = (all.first?.lowerBound ?? text.endIndex)..<(all.last?.upperBound ?? text.endIndex)
+        }
+        let at = NSRange(range, in: text)
+        return (UInt32(at.location), UInt32(at.location + at.length))
+    }
+
     /// The UTF-16 position of the caret, or of the end of a selection.
     private static func cursor(of selection: AttributedTextSelection, in text: AttributedString) -> UInt32 {
-        let index: AttributedString.Index
-        switch selection.indices(in: text) {
-        case .insertionPoint(let point): index = point
-        case .ranges(let ranges): index = ranges.ranges.last?.upperBound ?? text.endIndex
-        }
-        return UInt32(NSRange(index..<index, in: text).location)
+        offsets(of: selection, in: text).end
     }
 }

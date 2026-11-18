@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { loadCore } from "../core/Core";
 import wasmUrl from "../../generated/pkm_web_bg.wasm?url";
 import { DescriptionField } from "./DescriptionField";
-import { caretOffset, placeCaret } from "./TextCaret";
+import { caretOffset, placeCaret, selectRange } from "./TextCaret";
 
 beforeAll(async () => {
   await loadCore(fetch(wasmUrl));
@@ -113,5 +113,18 @@ describe("DescriptionField", () => {
     expect(field.value).toBe("- a");
     await userEvent.keyboard("{Control>}{Shift>}z{/Shift}{/Control}");
     expect(field.value).toBe("- a\n- ");
+  });
+
+  it("toggles Inline formatting on the selection with Mod-B, Mod-I and Mod-E", async () => {
+    const field = open("a b c");
+    selectRange(field.element, 2, 3);
+    await userEvent.keyboard("{Control>}b{/Control}");
+    expect(field.value).toBe("a **b** c");
+    await userEvent.keyboard("{Control>}i{/Control}");
+    expect(field.value).toBe("a ***b*** c");
+    await userEvent.keyboard("{Control>}i{/Control}{Control>}b{/Control}");
+    expect(field.value).toBe("a b c");
+    await userEvent.keyboard("{Control>}e{/Control}");
+    expect(field.value).toBe("a `b` c");
   });
 });

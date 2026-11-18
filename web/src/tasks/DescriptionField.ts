@@ -1,6 +1,7 @@
-import { rawRange, returnAt, shiftItems } from "../core/Core";
+import { rawRange, returnAt, shiftItems, toggleInline } from "../core/Core";
 import { make } from "../Dom";
 import { type Raw, descriptionNodes } from "./DescriptionText";
+import { formatKey } from "./TitleText";
 import { caretOffset, placeCaret, selectRange, selectionOffsets } from "./TextCaret";
 
 /**
@@ -87,16 +88,23 @@ export class DescriptionField {
     if (selected) this.apply(returnAt(this.value, selected.start, selected.end));
   }
 
-  /** Mod-Z and Mod-Shift-Z undo and redo; Tab and Shift-Tab indent and outdent the list items, and elsewhere move the focus on. */
+  /** Mod-Z and Mod-Shift-Z undo and redo; Mod-B, Mod-I and Mod-E toggle Inline formatting; Tab and Shift-Tab indent and outdent the list items, and elsewhere move the focus on. */
   private keyDown(event: KeyboardEvent): void {
     if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "z") {
       event.preventDefault();
       this.travel(event.shiftKey ? 1 : -1);
       return;
     }
-    if (event.key !== "Tab" || event.altKey || event.ctrlKey || event.metaKey) return;
     const selected = selectionOffsets(this.element);
-    const edit = selected && shiftItems(this.value, selected.start, selected.end, event.shiftKey);
+    if (!selected) return;
+    const format = formatKey(event);
+    if (format !== undefined) {
+      event.preventDefault();
+      this.apply(toggleInline(this.value, selected.start, selected.end, format));
+      return;
+    }
+    if (event.key !== "Tab" || event.altKey || event.ctrlKey || event.metaKey) return;
+    const edit = shiftItems(this.value, selected.start, selected.end, event.shiftKey);
     if (!edit) return;
     event.preventDefault();
     this.apply(edit);

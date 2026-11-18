@@ -28,6 +28,7 @@ struct PkmApp: App {
                 CanvasCommands()
                 ImportCommands()
                 AppearanceCommands()
+                FormatCommands()
             }
             // ⌘, opens it.
             Settings {
@@ -38,7 +39,10 @@ struct PkmApp: App {
                 ContentView().environment(cloud).environment(navigation).environment(readerSettings)
                     .environment(library).environment(tasks).appliesAppearance()
             }
-            .commands { CanvasCommands() }
+            .commands {
+                CanvasCommands()
+                FormatCommands()
+            }
         #endif
     }
 }

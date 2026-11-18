@@ -1,9 +1,9 @@
-import type { TaskQuickAdd } from "../core/Core";
+import { type Inline, type TaskQuickAdd, toggleInline } from "../core/Core";
 import { button, make } from "../Dom";
 import { tagLabel } from "./TagLabel";
-import { type Range, drawRanges, formatRanges } from "./TitleText";
+import { type Range, drawRanges, formatKey, formatRanges } from "./TitleText";
 import type { TasksModel } from "./TasksModel";
-import { caretOffset, placeCaret, textEdit } from "./TextCaret";
+import { caretOffset, placeCaret, selectRange, selectionOffsets, textEdit } from "./TextCaret";
 
 let nextId = 0;
 
@@ -177,6 +177,12 @@ export class QuickAddField {
 
   private keydown(event: KeyboardEvent): void {
     if (event.isComposing) return;
+    const format = formatKey(event);
+    if (format !== undefined) {
+      event.preventDefault();
+      this.format(format);
+      return;
+    }
     const open = this.suggestions.length > 0;
     const count = this.suggestions.length;
     switch (event.key) {
@@ -207,6 +213,18 @@ export class QuickAddField {
         this.drawSuggestions(true);
         break;
     }
+  }
+
+  /** Toggles Inline formatting on the selection, which stays selected. */
+  private format(kind: Inline): void {
+    const range = selectionOffsets(this.editor);
+    if (!range) return;
+    const edit = toggleInline(this.quickAdd.text(), range.start, range.end, kind);
+    this.quickAdd.replace(edit.start, edit.end, edit.replacement);
+    this.quickAdd.moveCursor(edit.selectionEnd);
+    this.draw();
+    selectRange(this.editor, edit.selectionStart, edit.selectionEnd);
+    this.changed();
   }
 
   /** Completes the `@` word to `@tag `. */

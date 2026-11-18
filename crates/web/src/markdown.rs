@@ -177,3 +177,10 @@ pub fn return_at(text: &str, start: u32, end: u32) -> TextEdit {
 pub fn shift_items(text: &str, start: u32, end: u32, outdent: bool) -> Option<TextEdit> {
     pkm_base::markdown::shift_items(text, start, end, outdent).map(Into::into)
 }
+
+/// The edit for ⌘B, ⌘I or ⌘E with the selection `start..end`: removes the
+/// `kind` markers around or in the selection, else wraps it in them.
+#[wasm_bindgen(js_name = toggleInline)]
+pub fn toggle_inline(text: &str, start: u32, end: u32, kind: Inline) -> TextEdit {
+    pkm_base::markdown::toggle_inline(text, start, end, kind.into()).into()
+}

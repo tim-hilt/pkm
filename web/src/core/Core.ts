@@ -33,6 +33,7 @@ import init, {
   shiftItems,
   sortKeys,
   stripForbiddenTagCharacters,
+  toggleInline,
   typedQuery,
   unfinishedQueryTag,
   areSameDrawing,
@@ -87,6 +88,7 @@ export {
   shiftItems,
   sortKeys,
   stripForbiddenTagCharacters,
+  toggleInline,
   typedQuery,
   unfinishedQueryTag,
 };

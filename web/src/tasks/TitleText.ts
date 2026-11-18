@@ -23,6 +23,12 @@ export function titleSpans(title: string): TitleSpan[] {
   });
 }
 
+/** The Inline formatting ⌘B, ⌘I or ⌘E (Ctrl off the Mac) asks for; none for any other key. */
+export function formatKey(event: KeyboardEvent): Inline | undefined {
+  if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return undefined;
+  return { b: Inline.Strong, i: Inline.Emphasis, e: Inline.Code }[event.key.toLowerCase()];
+}
+
 /** What to draw over `start..end` of a text, nested in the ranges it lies in. */
 export interface Range {
   start: number;
