@@ -47,7 +47,9 @@ export class TasksView {
   private readonly failure = make("p", "tasks-failure");
   private readonly toast = make("div", "tasks-toast");
   private readonly menu: RowMenu;
-  private readonly drag: RowDrag<ListedTask>;
+  /** One per Group (keyed by Tag, "" for none), so a row can only be dropped within its own Group. */
+  private readonly groupDrags = new Map<string, RowDrag<ListedTask>>();
+  private readonly scroll: HTMLElement;
   private readonly filterDrag: RowDrag<Filter>;
   private readonly create = button("tasks-new", "", () => this.createNew());
   /** The edit view, while shown, and the Task it is of. */
@@ -70,7 +72,6 @@ export class TasksView {
     this.empty.setAttribute("role", "status");
     this.toast.setAttribute("role", "status");
     this.menu = new RowMenu(this.element);
-    this.drag = new RowDrag((task, before) => model.moveBefore(task, before));
     this.filterDrag = new RowDrag((filter, before) => model.moveFilter(filter, before));
     const scroll = make("div", "tasks-scroll", [
       this.filterHeader,
@@ -78,7 +79,7 @@ export class TasksView {
       this.list,
       this.empty,
     ]);
-    this.drag.attachEnd(scroll);
+    this.scroll = scroll;
     this.filterDrag.attachEnd(scroll);
     this.element.append(
       make("header", "tasks-header", [this.switch]),
@@ -199,10 +200,9 @@ export class TasksView {
   /** The Tasks without a Group, then each Group's heading (its Tag in its Tag Color) and Tasks. */
   private taskList(): HTMLElement[] {
     const { model } = this;
-    // Dragging within a Group is not there yet: only a flat list reorders.
-    const draggable = !model.isGrouped;
     return model.groups.flatMap(({ tag, color, tasks }) => {
-      const rows = tasks.map((task) => this.row(task, draggable));
+      const drag = this.dragOf(tag);
+      const rows = tasks.map((task) => this.row(task, drag));
       if (tag === undefined) return rows;
       const heading = make("li", "tasks-group-heading", [tagLabel(tag, color)]);
       heading.setAttribute("role", "heading");
@@ -266,12 +266,24 @@ export class TasksView {
     );
   }
 
-  private row(task: ListedTask, draggable: boolean): HTMLElement {
+  /** The drag of the Group `tag` (none: the Tasks without a Group); blank space below the list drops at its end. */
+  private dragOf(tag: string | undefined): RowDrag<ListedTask> {
+    const key = tag ?? "";
+    let drag = this.groupDrags.get(key);
+    if (!drag) {
+      drag = new RowDrag((task, before) => this.model.moveBefore(task, before, tag));
+      drag.attachEnd(this.scroll);
+      this.groupDrags.set(key, drag);
+    }
+    return drag;
+  }
+
+  private row(task: ListedTask, drag: RowDrag<ListedTask>): HTMLElement {
     const { line, open } = taskLine(task, this.model, () => this.places.open(task.id));
     open.setAttribute("aria-haspopup", "menu");
     const row = make("li", "task-row", [line]);
     this.menu.attach(row, () => this.menuItems(task), open);
-    if (draggable) this.drag.attachRow(row, task);
+    drag.attachRow(row, task);
     return row;
   }
 

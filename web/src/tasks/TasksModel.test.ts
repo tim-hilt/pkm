@@ -1313,6 +1313,20 @@ describe("a Grouped Filter", () => {
     expect(model.isGrouped).toBe(true);
   });
 
+  it("moves a Task in one Group only, leaving its place in other Groups", () => {
+    model.add("H", { tags: ["home"] });
+    model.addFilter("Grouped", "*", "@home @work");
+    model.list = { kind: "filter", id: model.filters.find((f) => f.title === "Grouped")!.id };
+    const both = model.tasks.find((t) => t.title === "Both")!;
+    const w = model.tasks.find((t) => t.title === "W")!;
+    model.moveBefore(both, w, "work");
+    expect(groupsShown()).toEqual([
+      [undefined, ["Loose"]],
+      ["home", ["Both", "H"]],
+      ["work", ["Both", "W"]],
+    ]);
+  });
+
   it("is one Group without Group by", () => {
     model.list = { kind: "filter", id: model.filters[0].id };
     expect(model.isGrouped).toBe(false);

@@ -448,15 +448,16 @@ export class TasksModel {
   }
 
   /**
-   * Moves a Task before `before` in the Filter shown, or, with none, to its end.
-   * Its Parent stays. A Subtask passing a sibling also moves in its Subtask
+   * Moves a Task before `before` in the Group `group` of the Filter shown (none:
+   * the Tasks without a Group), or, with none, to its end. Only that Group's
+   * order changes. Its Parent stays. A Subtask passing a sibling also moves in its Subtask
    * order; otherwise only the Filter's own order changes. In a Sorted Filter, a
    * drop out of the Task's Priority group turns it Manual.
    */
-  moveBefore(task: ListedTask, before: ListedTask | undefined): void {
+  moveBefore(task: ListedTask, before: ListedTask | undefined, group?: string): void {
     const list = this.shownList;
     if (list.kind !== "filter") return;
-    this.apply(() => this.files.store.moveInFilter(list.id, undefined, task.id, before?.id));
+    this.apply(() => this.files.store.moveInFilter(list.id, group, task.id, before?.id));
   }
 
   /**
