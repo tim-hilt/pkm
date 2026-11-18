@@ -668,7 +668,7 @@ export class TasksModel {
   private read(list: TasksList): ListedTask[] {
     const { store } = this.files;
     if (list.kind !== "filter") return [];
-    // Until Group by exists, a Filter is one Group.
+    // The Groups' rows one after another: the web shows no headings yet.
     return store.filterGroups(list.id).flatMap((group) => {
       const rows = group.takeTasks();
       group.free();

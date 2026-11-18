@@ -522,7 +522,7 @@ impl Tasks {
     /// Removes `tag` from every Task, saving each changed file with a new
     /// `updated`. The Tags are left alone; repeating it after an interruption
     /// finishes the job.
-    pub fn remove_tag_everywhere(&self, tag: &str) -> io::Result<()> {
+    fn remove_tag_everywhere(&self, tag: &str) -> io::Result<()> {
         for listed in self.files.list(&self.root)? {
             let Some(id) = listed.name.strip_suffix(".md").and_then(ItemId::parse) else {
                 continue;
@@ -544,9 +544,9 @@ impl Tasks {
         Ok(())
     }
 
-    /// Forgets `tag` and its Tag Color. Call `remove_tag_everywhere` first, or
-    /// a Task still carrying it brings it back, grey.
-    pub fn forget_tag(&self, tag: &str) -> io::Result<()> {
+    /// Forgets `tag` and its Tag Color. A Task or Group by still carrying it
+    /// brings it back, grey (ADR-0023).
+    fn forget_tag(&self, tag: &str) -> io::Result<()> {
         self.change_tags(|tags| Ok(tags.forget(tag)))
     }
 
@@ -1580,7 +1580,7 @@ mod tests {
     }
 
     #[test]
-    fn removing_a_tag_everywhere_rewrites_only_the_tasks_carrying_it() {
+    fn deleting_a_tag_rewrites_only_the_tasks_carrying_it() {
         let dir = Scratch::new();
         let tasks = dir.store();
         let open = tagged(&tasks, &["home", "work"]);
@@ -1596,7 +1596,7 @@ mod tests {
         }
         let other_text = fs::read_to_string(path(&other)).unwrap();
 
-        tasks.remove_tag_everywhere("work").unwrap();
+        tasks.delete_tag("work").unwrap();
 
         let file = Document::parse(&fs::read_to_string(path(&open)).unwrap()).unwrap();
         assert_eq!(tags_of(&file), ["home"]);
@@ -1605,13 +1605,12 @@ mod tests {
     }
 
     #[test]
-    fn a_forgotten_tag_is_gone_and_starts_grey_when_added_again() {
+    fn a_deleted_tag_is_gone_and_starts_grey_when_added_again() {
         let dir = Scratch::new();
         let tasks = dir.store();
         let task = tagged(&tasks, &["work"]);
         tasks.set_tag_color("work", Some("#d0021b")).unwrap();
-        tasks.remove_tag_everywhere("work").unwrap();
-        tasks.forget_tag("work").unwrap();
+        tasks.delete_tag("work").unwrap();
         assert!(!tasks.tags().contains("work"));
         tasks.add_tag(&task.id, "work").unwrap();
         assert!(tasks.tags().contains("work"));

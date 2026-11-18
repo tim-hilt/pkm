@@ -130,8 +130,8 @@ import XCTest
         app.launchArguments = ["-UITestingOpenGroupedFilter"]
         app.launch()
         XCTAssertTrue(app.staticTexts["Book the dentist"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["group-home"].exists || app.staticTexts["home"].exists)
-        XCTAssertTrue(app.staticTexts["group-backlog"].exists || app.staticTexts["backlog"].exists)
+        XCTAssertTrue(app.staticTexts["group-home"].exists)
+        XCTAssertTrue(app.staticTexts["group-backlog"].exists)  // empty: the Query leaves it out
         XCTAssertFalse(app.staticTexts["Learn Rust"].exists)
     }
 }

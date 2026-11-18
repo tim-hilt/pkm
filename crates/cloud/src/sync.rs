@@ -2994,8 +2994,7 @@ mod tests {
             tablet.sync(&tags, &tasks);
 
             // The phone Deletes `work`; the tablet puts it on Eggs.
-            store.remove_tag_everywhere("work").unwrap();
-            store.forget_tag("work").unwrap();
+            store.delete_tag("work").unwrap();
             tablet.store().add_tag(&eggs.id, "work").unwrap();
             phone.sync(&tags, &tasks);
             tablet.sync(&tags, &tasks);
@@ -3012,6 +3011,37 @@ mod tests {
                     .map(|r| r.task.title)
                     .collect();
                 assert_eq!(tagged, ["Eggs"]);
+            }
+        }
+
+        #[test]
+        fn a_tag_put_in_a_group_by_while_another_device_deleted_it_comes_back_grey() {
+            let (tags, tasks, filters) = (Cloud::new(), Cloud::new(), Cloud::new());
+            let (phone, tablet) = (TaggingDevice::new(), TaggingDevice::new());
+            let store = phone.store();
+            let milk = store.create("Milk", 4, &[]).unwrap();
+            store.add_tag(&milk.id, "work").unwrap();
+            store.set_tag_color("work", Some("#d0021b")).unwrap();
+            let work = store.create_filter("Work", "*", "").unwrap();
+            for device in [&phone, &tablet] {
+                device.sync(&tags, &tasks);
+                device.sync_filters(&filters);
+            }
+
+            // The phone Deletes `work`; the tablet Groups a Filter by it.
+            store.delete_tag("work").unwrap();
+            (tablet.store())
+                .edit_filter(&work.id, "Work", "*", "@work")
+                .unwrap();
+            for device in [&phone, &tablet, &phone] {
+                device.sync(&tags, &tasks);
+                device.sync_filters(&filters);
+            }
+
+            for device in [&phone, &tablet] {
+                let listed = device.store().filters().unwrap(); // reads what Sync brought
+                assert_eq!(listed[0].group_by, ["work"]);
+                assert_eq!(device.tags(), [tag("work", None)]);
             }
         }
 

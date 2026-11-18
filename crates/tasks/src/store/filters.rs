@@ -161,9 +161,8 @@ impl Tasks {
     /// Changes the Title, Query and Group by of the Filter `id`, which keeps its
     /// place, Favorite flag and order. A Tag newly in Group by starts its Group
     /// in the order the Filter showed before; one taken out loses its Group's
-    /// order. Refuses what `create_filter` refuses,
-    /// before saving anything, and fails with `NotFound` if there is no such
-    /// Filter.
+    /// order. Refuses what `create_filter` refuses, before saving anything,
+    /// and fails with `NotFound` if there is no such Filter.
     pub fn edit_filter(
         &self,
         id: &str,
@@ -374,9 +373,9 @@ impl Tasks {
     }
 
     /// Sorts the Filter `id`. Manual keeps the order shown: every Task shown
-    /// in every Group gets a place for it. Priority from Manual discards the places; a new
-    /// Direction of Priority keeps them, so the Tasks of one Priority stay in
-    /// their order. Writes no Task file. Fails with `NotFound` if there is no
+    /// in every Group gets a place for it. Priority from Manual discards the
+    /// places; a new Direction of Priority keeps them, so the Tasks of one
+    /// Priority stay in their order. Writes no Task file. Fails with `NotFound` if there is no
     /// such Filter.
     pub fn set_sort(&self, id: &str, sort: FilterSort) -> io::Result<()> {
         let filter = self.stored_filter(id)?;
@@ -527,7 +526,6 @@ impl Tasks {
                     .is_some_and(|n| is_in_group(n, group.as_deref(), &group_by))
             });
         }
-        places.retain(|_, list| !list.is_empty());
         set_places(&mut file, &places);
         if file.render() == before {
             return Ok(());
@@ -888,8 +886,7 @@ mod tests {
         let (_, tasks) = open();
         add(&tasks, "t", &["x"]);
         tasks.create_filter("F", "!@x & @y", "").unwrap();
-        tasks.remove_tag_everywhere("x").unwrap();
-        tasks.forget_tag("x").unwrap();
+        tasks.delete_tag("x").unwrap();
         let filter = &tasks.filters().unwrap()[0];
         assert_eq!(filter.query, "!@x & @y");
         assert_eq!(
