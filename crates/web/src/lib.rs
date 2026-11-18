@@ -130,6 +130,7 @@ mirror_enum!(
     Distribution { Horizontally, Vertically }
 );
 
+mod markdown;
 mod tasks;
 
 /// Modifier keys as a bit set: shift 1, ctrl 2, alt 4, meta 8.

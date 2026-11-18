@@ -1250,6 +1250,20 @@
       .task-title {
         overflow-wrap: anywhere;
       }
+      /* Inline formatting of a Title (Markdown): rows show it without its markers; the Title field only while unfocused. */
+      .md-code {
+        font-family: ui-monospace, monospace;
+        font-size: 0.9em;
+      }
+      .md-marker {
+        opacity: 0.5;
+      }
+      .task-title .md-marker,
+      .task-parent-title .md-marker,
+      .tasks-chip-title .md-marker,
+      .tasks-quick-input:not(:focus) .md-marker {
+        display: none;
+      }
       .task-meta {
         display: flex;
         gap: 8px;

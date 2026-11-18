@@ -2,6 +2,7 @@
 //! exported here; the logic itself lives in `pkm-drawing` and `pkm-cloud`.
 
 mod books;
+mod markdown;
 mod tasks;
 
 use std::convert::Infallible;

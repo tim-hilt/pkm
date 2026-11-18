@@ -3,6 +3,7 @@ import { button, make } from "../Dom";
 import { QuickAddField } from "./QuickAddField";
 import { SubtasksSection } from "./SubtasksSection";
 import { tagLabel } from "./TagLabel";
+import { titleNodes } from "./TitleText";
 import { type Blocker, type ListedTask, TasksModel } from "./TasksModel";
 
 /** How the edit view moves between Tasks, each of which has an address of its own. */
@@ -290,7 +291,8 @@ export function editTaskDialog(
 
 /** A Subtask's Parent: one chip whose title opens it. */
 function parentField(id: string, title: string, open: (id: string) => void): HTMLElement {
-  const opener = button("tasks-chip-title", title, () => open(id));
+  const opener = button("tasks-chip-title", "", () => open(id));
+  opener.append(...titleNodes(title));
   opener.setAttribute("aria-label", `Open ${title}`);
   const chips = make("ul", "tasks-chips", [make("li", "tasks-chip-pair", [opener])]);
   return make("fieldset", "tasks-blocked", [make("legend", "", ["Parent"]), chips]);
@@ -466,7 +468,11 @@ class BlockedByField {
           this.changed();
         });
         remove.setAttribute("aria-label", `Remove ${blocker.title}`);
-        const title = make(blocker.closed ? "span" : "button", "tasks-chip-title", [blocker.title]);
+        const title = make(
+          blocker.closed ? "span" : "button",
+          "tasks-chip-title",
+          titleNodes(blocker.title),
+        );
         if (title instanceof HTMLButtonElement) {
           title.type = "button";
           title.setAttribute("aria-label", `Open ${blocker.title}`);

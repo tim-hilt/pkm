@@ -4,6 +4,8 @@
 //! Positions and ranges are in UTF-16 code units, which is how Swift's text
 //! views and JavaScript count.
 
+use pkm_base::markdown::{self, Inline};
+
 /// What a Shortcut sets.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShortcutMeaning {
@@ -51,9 +53,7 @@ impl QuickAdd {
     /// cursor is at the end.
     pub fn from_title(title: &str) -> Self {
         let text: Vec<u16> = single_line(title).encode_utf16().collect();
-        let ignored = words(&text)
-            .filter(|&(start, end)| meaning_of(&text[start..end]).is_some())
-            .collect();
+        let ignored = shortcut_words(&text).map(|(word, _)| word).collect();
         Self {
             cursor: text.len(),
             text,
@@ -92,21 +92,22 @@ impl QuickAdd {
     /// into plain text of the Title. Does nothing if `at` is in no Shortcut.
     pub fn ignore(&mut self, at: u32) {
         let at = at as usize;
-        if let Some(s) = self
+        if let Some((word, _)) = self
             .shortcuts()
             .into_iter()
-            .find(|s| (s.start as usize..s.end as usize).contains(&at))
+            .find(|&((start, end), _)| (start..end).contains(&at))
         {
-            self.ignored.push((s.start as usize, s.end as usize));
+            self.ignored.push(word);
         }
     }
 
     /// Ignores every Priority Shortcut, as when the user picks a Priority by
     /// hand: the pick, not the text, decides it. One typed afterwards counts.
     pub fn ignore_priority(&mut self) {
-        let found: Vec<_> = words(&self.text)
-            .filter(|word| !self.ignored.contains(word))
-            .filter(|&(start, end)| priority_of(&self.text[start..end]).is_some())
+        let found: Vec<_> = shortcut_words(&self.text)
+            .filter(|(word, _)| !self.ignored.contains(word))
+            .filter(|(_, s)| matches!(s.meaning, ShortcutMeaning::Priority(_)))
+            .map(|(word, _)| word)
             .collect();
         self.ignored.extend(found);
     }
@@ -130,30 +131,70 @@ impl QuickAdd {
     /// The Shortcuts to draw highlighted: all but the one the cursor is in or
     /// at the end of, which the user may still be typing.
     pub fn highlights(&self) -> Vec<QuickShortcut> {
-        let mut shortcuts = self.shortcuts();
+        let mut shortcuts: Vec<_> = self.shortcuts().into_iter().map(|(_, s)| s).collect();
         shortcuts.retain(|s| !(s.start as usize..=s.end as usize).contains(&self.cursor));
         shortcuts
     }
 
     /// The text without any Shortcut (even one under the cursor), whitespace
     /// collapsed to single spaces and trimmed. Empty if nothing else is typed.
+    /// Markdown markers stay, but a Shortcut that was all there was between a
+    /// pair of them takes the pair along: `*@work*` goes, `*fix @work*` becomes
+    /// `*fix*`.
     pub fn title(&self) -> String {
-        let mut rest = String::new();
+        let mut rest = Vec::new();
         let mut from = 0;
-        for s in self.shortcuts() {
-            rest.push_str(&String::from_utf16_lossy(
-                &self.text[from..s.start as usize],
-            ));
-            rest.push(' ');
-            from = s.end as usize;
+        for (word, s) in self.shortcuts() {
+            let (start, end, gap) = self.removal(word, &s);
+            if start < from {
+                continue;
+            }
+            rest.extend_from_slice(&self.text[from..start]);
+            rest.extend_from_slice(gap);
+            from = end;
         }
-        rest.push_str(&String::from_utf16_lossy(&self.text[from..]));
-        rest.split_whitespace().collect::<Vec<_>>().join(" ")
+        rest.extend_from_slice(&self.text[from..]);
+        String::from_utf16_lossy(&rest)
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// What to cut from the text for Shortcut `s` in `word`, and what to put
+    /// instead: the range and a gap (a space, or nothing where a marker stays
+    /// next to the cut).
+    fn removal(
+        &self,
+        (ws, we): (usize, usize),
+        s: &QuickShortcut,
+    ) -> (usize, usize, &'static [u16]) {
+        const SPACE: &[u16] = &[b' ' as u16];
+        let (start, end) = (s.start as usize, s.end as usize);
+        match (start > ws, end < we) {
+            (true, true) | (false, false) => (ws, we, SPACE),
+            // `*@work fix*`: the opening marker takes the next word.
+            (true, false) => {
+                let space = self.text[end..]
+                    .iter()
+                    .take_while(|&&u| is_space(u))
+                    .count();
+                (start, end + space, &[])
+            }
+            // `*fix @work*`: the closing marker takes the previous word.
+            (false, true) => {
+                let space = self.text[..start]
+                    .iter()
+                    .rev()
+                    .take_while(|&&u| is_space(u))
+                    .count();
+                (start - space, end, &[])
+            }
+        }
     }
 
     /// The Priority to apply, if a Shortcut sets one; the last one wins.
     pub fn priority(&self) -> Option<u8> {
-        self.shortcuts().iter().find_map(|s| match s.meaning {
+        self.shortcuts().iter().find_map(|(_, s)| match s.meaning {
             ShortcutMeaning::Priority(p) => Some(p),
             ShortcutMeaning::Tag(_) => None,
         })
@@ -162,7 +203,7 @@ impl QuickAdd {
     /// The Tags to add: every Tag Shortcut, a repeated one once, in order.
     pub fn tags(&self) -> Vec<String> {
         let mut tags = Vec::new();
-        for s in self.shortcuts() {
+        for (_, s) in self.shortcuts() {
             if let ShortcutMeaning::Tag(tag) = s.meaning
                 && !tags.contains(&tag)
             {
@@ -178,10 +219,8 @@ impl QuickAdd {
         let others = self
             .shortcuts()
             .into_iter()
-            .filter_map(|s| match s.meaning {
-                ShortcutMeaning::Tag(tag) if (s.start as usize, s.end as usize) != (start, end) => {
-                    Some(tag)
-                }
+            .filter_map(|(word, s)| match s.meaning {
+                ShortcutMeaning::Tag(tag) if word != (start, end) => Some(tag),
                 _ => None,
             });
         Some(TagQuery {
@@ -205,24 +244,17 @@ impl QuickAdd {
         })
     }
 
-    /// Every Shortcut in the text, in order, under the cursor or not. Ignored
-    /// ones are plain text. Of several Priority Shortcuts only the last counts;
-    /// earlier ones are plain.
-    fn shortcuts(&self) -> Vec<QuickShortcut> {
-        let mut found: Vec<QuickShortcut> = words(&self.text)
-            .filter(|word| !self.ignored.contains(word))
-            .filter_map(|(start, end)| {
-                meaning_of(&self.text[start..end]).map(|meaning| QuickShortcut {
-                    start: start as u32,
-                    end: end as u32,
-                    meaning,
-                })
-            })
+    /// Every Shortcut in the text with the word holding it, in order, under
+    /// the cursor or not. Ignored ones are plain text. Of several Priority
+    /// Shortcuts only the last counts; earlier ones are plain.
+    fn shortcuts(&self) -> Vec<((usize, usize), QuickShortcut)> {
+        let mut found: Vec<_> = shortcut_words(&self.text)
+            .filter(|(word, _)| !self.ignored.contains(word))
             .collect();
         let is_priority = |s: &QuickShortcut| matches!(s.meaning, ShortcutMeaning::Priority(_));
-        if let Some(last) = found.iter().rposition(is_priority) {
+        if let Some(last) = found.iter().rposition(|(_, s)| is_priority(s)) {
             let mut at = 0;
-            found.retain(|s| {
+            found.retain(|(_, s)| {
                 at += 1;
                 !is_priority(s) || at - 1 == last
             });
@@ -251,6 +283,39 @@ fn words(text: &[u16]) -> impl Iterator<Item = (usize, usize)> + '_ {
             .map_or(text.len(), |n| start + n);
         at = end;
         Some((start, end))
+    })
+}
+
+/// The words of `text` that hold a Shortcut, with it. Emphasis markers around
+/// the Shortcut (`*@work*`) are not part of it, and one inside a code span is
+/// plain text. They are found before any formatting, so formatting never
+/// hides a Shortcut.
+fn shortcut_words(text: &[u16]) -> impl Iterator<Item = ((usize, usize), QuickShortcut)> + '_ {
+    let code: Vec<_> = markdown::parse_title(&String::from_utf16_lossy(text))
+        .into_iter()
+        .filter(|s| s.kind == Inline::Code)
+        .collect();
+    words(text).filter_map(move |(ws, we)| {
+        let star = u16::from(b'*');
+        let start = ws + text[ws..we].iter().take_while(|&&u| u == star).count();
+        let end = we
+            - text[start..we]
+                .iter()
+                .rev()
+                .take_while(|&&u| u == star)
+                .count();
+        let meaning = meaning_of(&text[start..end])?;
+        let in_code = code
+            .iter()
+            .any(|c| c.start as usize <= start && end <= c.end as usize);
+        (!in_code).then_some((
+            (ws, we),
+            QuickShortcut {
+                start: start as u32,
+                end: end as u32,
+                meaning,
+            },
+        ))
     })
 }
 
@@ -723,5 +788,77 @@ mod tests {
         quick.pick_tag("bug");
         assert_eq!(quick.text(), "🚀 @bug ");
         assert_eq!(quick.cursor(), 8);
+    }
+
+    #[test]
+    fn a_shortcut_inside_code_stays_text() {
+        let quick = typed_cursor_at_start("run `p1` and `x @work y` now");
+        assert_eq!(quick.priority(), None);
+        assert!(quick.tags().is_empty());
+        assert!(quick.highlights().is_empty());
+        assert_eq!(quick.title(), "run `p1` and `x @work y` now");
+    }
+
+    #[test]
+    fn a_shortcut_next_to_code_still_counts() {
+        let quick = typed_cursor_at_start("`a` p1 `b`");
+        assert_eq!(quick.priority(), Some(1));
+        assert_eq!(quick.title(), "`a` `b`");
+    }
+
+    #[test]
+    fn an_unclosed_backtick_does_not_hide_a_shortcut() {
+        assert_eq!(typed_cursor_at_start("`a p2").priority(), Some(2));
+    }
+
+    #[test]
+    fn a_shortcut_inside_emphasis_counts_and_the_title_keeps_the_markers() {
+        let quick = typed_cursor_at_start("Fix *the @work login* now");
+        assert_eq!(quick.tags(), ["work"]);
+        assert_eq!(quick.title(), "Fix *the login* now");
+
+        let quick = typed_cursor_at_start("Fix *login @work* now");
+        assert_eq!(quick.tags(), ["work"]);
+        assert_eq!(quick.title(), "Fix *login* now");
+
+        let quick = typed_cursor_at_start("**p1 Fix** it");
+        assert_eq!(quick.priority(), Some(1));
+        assert_eq!(quick.title(), "**Fix** it");
+    }
+
+    #[test]
+    fn markers_left_with_nothing_between_them_are_dropped() {
+        let quick = typed_cursor_at_start("Fix *@work* now **p2**");
+        assert_eq!(quick.tags(), ["work"]);
+        assert_eq!(quick.priority(), Some(2));
+        assert_eq!(quick.title(), "Fix now");
+    }
+
+    #[test]
+    fn a_shortcut_inside_emphasis_is_highlighted_without_its_markers() {
+        let quick = typed_cursor_at_start("a *@work* b");
+        assert_eq!(quick.highlights(), [tag(3, 8, "work")]);
+    }
+
+    #[test]
+    fn ignoring_a_shortcut_inside_emphasis_keeps_it_in_the_title() {
+        let mut quick = typed_cursor_at_start("a *@work* b");
+        quick.ignore(4);
+        assert!(quick.tags().is_empty());
+        assert_eq!(quick.title(), "a *@work* b");
+    }
+
+    #[test]
+    fn a_saved_title_with_a_formatted_shortcut_starts_ignored() {
+        let quick = QuickAdd::from_title("a *@work* b");
+        assert!(quick.tags().is_empty());
+        assert_eq!(quick.title(), "a *@work* b");
+    }
+
+    #[test]
+    fn lone_asterisks_do_not_hide_shortcuts() {
+        let quick = typed_cursor_at_start("2 * 3 @math");
+        assert_eq!(quick.tags(), ["math"]);
+        assert_eq!(quick.title(), "2 * 3");
     }
 }

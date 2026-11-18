@@ -1,6 +1,7 @@
 import type { TaskQuickAdd } from "../core/Core";
 import { button, make } from "../Dom";
 import { tagLabel } from "./TagLabel";
+import { type Range, drawRanges, formatRanges } from "./TitleText";
 import type { TasksModel } from "./TasksModel";
 
 let nextId = 0;
@@ -294,21 +295,18 @@ export class QuickAddField {
     const key = JSON.stringify([text, highlights]);
     if (key !== this.drawn) {
       this.drawn = key;
-      const nodes: (Node | string)[] = [];
+      const ranges: Range[] = formatRanges(text);
       const labels: HTMLElement[] = [];
-      let at = 0;
       for (const { start, end, meaning } of highlights) {
         const word = text.slice(start, end);
         const label = `${word}, ${meaning}`;
-        const mark = make("mark", "tasks-shortcut", [word]);
+        const mark = make("mark", "tasks-shortcut");
         mark.dataset.start = String(start);
         mark.setAttribute("aria-label", label);
-        nodes.push(text.slice(at, start), mark);
+        ranges.push({ start, end, element: mark });
         labels.push(make("li", "", [this.ignoreButton(label, start)]));
-        at = end;
       }
-      nodes.push(text.slice(at));
-      this.editor.replaceChildren(...nodes.filter((node) => node !== ""));
+      this.editor.replaceChildren(...drawRanges(text, ranges));
       this.ignores.replaceChildren(...labels);
       if (document.activeElement === this.editor) placeCaret(this.editor, this.quickAdd.cursor());
     }

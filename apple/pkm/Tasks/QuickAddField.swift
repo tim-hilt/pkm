@@ -96,7 +96,10 @@ struct QuickAddField: View {
                 draw()
                 isFocused = autofocus
             }
-            .onChange(of: isFocused) { if !isFocused && suggestions.isEmpty { onBlur() } }
+            .onChange(of: isFocused) {
+                draw()
+                if !isFocused && suggestions.isEmpty { onBlur() }
+            }
             .onChange(of: revision) { draw(placingCursor: true) }
             .overlay(alignment: .topLeading) {
                 if text.characters.isEmpty {
@@ -202,7 +205,8 @@ struct QuickAddField: View {
         let plain = quickAdd.text()
         title = quickAdd.title()
         highlighted = quickAdd.highlights()
-        var drawn = AttributedString(plain)
+        // Raw markers while focused; unfocused, formatted with the markers too small to see.
+        var drawn = AttributedString(title: plain, markers: isFocused ? .shown : .hidden)
         for shortcut in highlighted {
             let range = NSRange(location: Int(shortcut.start), length: Int(shortcut.end - shortcut.start))
             if let range = Range(range, in: drawn) {

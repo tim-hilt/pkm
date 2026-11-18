@@ -186,10 +186,10 @@ private func tagText(_ tag: TagEntry) -> Text {
 }
 
 /// A symbol and a text, close together, for the line of Tags.
-private func marker(_ text: String, symbol: String) -> some View {
+private func marker(_ text: Text, symbol: String) -> some View {
     HStack(spacing: 3) {
         Image(systemName: symbol).imageScale(.small)
-        Text(text)
+        text
     }
 }
 
@@ -213,7 +213,7 @@ struct TaskRow: View {
             .buttonStyle(.plain)
             .accessibilityLabel(task.done ? "Revert Done" : "Done")
             VStack(alignment: .leading, spacing: 2) {
-                Text(task.title)
+                Text(AttributedString(title: task.title))
                 if !task.description.isEmpty {
                     Text(task.description)
                         .font(.subheadline)
@@ -224,11 +224,11 @@ struct TaskRow: View {
                 if task.hasMarkers(showsParent: showsParent) || !task.tags.isEmpty {
                     HStack(spacing: 8) {
                         if task.openSubtasks > 0 {
-                            marker("\(task.openSubtasks)", symbol: "checklist")
+                            marker(Text(verbatim: "\(task.openSubtasks)"), symbol: "checklist")
                                 .accessibilityLabel("\(task.openSubtasks) Open Subtasks")
                         }
                         if showsParent, let parentTitle = task.parentTitle {
-                            marker(parentTitle, symbol: "arrow.turn.down.right")
+                            marker(Text(AttributedString(title: parentTitle)), symbol: "arrow.turn.down.right")
                                 .lineLimit(1)
                                 .truncationMode(.tail)
                                 .opacity(0.7)
@@ -452,7 +452,8 @@ private struct EditTaskForm: View {
             TagsRow(tags: tags) { isPickingTags = true }
             if let parent = task.parent {
                 Section("Parent") {
-                    NavigationLink(task.parentTitle ?? "", value: parent).disabled(!hasTitle)
+                    NavigationLink(value: parent) { Text(AttributedString(title: task.parentTitle ?? "")) }
+                        .disabled(!hasTitle)
                         .accessibilityIdentifier("task-parent")
                 }
             }
@@ -461,9 +462,10 @@ private struct EditTaskForm: View {
                 ForEach(blockedBy, id: \.id) { blocker in
                     Group {
                         if blocker.closed {
-                            Text(blocker.title).strikethrough().foregroundStyle(.secondary)
+                            Text(AttributedString(title: blocker.title)).strikethrough().foregroundStyle(.secondary)
                         } else {
-                            NavigationLink(blocker.title, value: blocker.id).disabled(!hasTitle)
+                            NavigationLink(value: blocker.id) { Text(AttributedString(title: blocker.title)) }
+                                .disabled(!hasTitle)
                         }
                     }
                     .swipeActions(edge: .trailing) {

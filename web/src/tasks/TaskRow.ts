@@ -1,5 +1,6 @@
 import { make } from "../Dom";
 import { tagLabel } from "./TagLabel";
+import { titleNodes } from "./TitleText";
 import type { ListedTask, TasksModel } from "./TasksModel";
 
 const subtasksGlyph = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 7 2 2 3-3M4 17l2 2 3-3M13 8h7M13 18h7"/></svg>`;
@@ -23,7 +24,7 @@ export function taskLine(
   circle.classList.toggle("done", task.done);
   circle.setAttribute("aria-label", task.done ? "Revert Done" : "Done");
   circle.addEventListener("click", () => model.toggleDone(task));
-  const text = make("span", "task-text", [make("span", "task-title", [task.title])]);
+  const text = make("span", "task-text", [make("span", "task-title", titleNodes(task.title))]);
   if (task.description) text.append(make("span", "task-description", [task.description]));
   const marks = markers(task, showsParent);
   if (marks.length > 0 || task.tags.length > 0) {
@@ -57,7 +58,7 @@ function markers(task: ListedTask, showsParent: boolean): HTMLElement[] {
   }
   if (showsParent && task.parentTitle !== undefined) {
     // The Title in its own span, which alone can end in an ellipsis.
-    const title = make("span", "task-parent-title", [task.parentTitle]);
+    const title = make("span", "task-parent-title", titleNodes(task.parentTitle));
     const mark = make("span", "task-mark task-parent", [title]);
     mark.insertAdjacentHTML("afterbegin", parentGlyph);
     mark.title = `Subtask of ${task.parentTitle}`;

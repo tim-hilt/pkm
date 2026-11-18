@@ -47,6 +47,7 @@ extension TasksModel {
                 }
             }
             _ = try? store.create(title: "Learn Rust", priority: 4, tags: ["backlog"])
+            _ = try? store.create(title: "Try *italic*, **bold** and `code`", priority: 4, tags: ["backlog"])
             if opensFilters || opensFilter {
                 // Favorites enough to overflow the bar on an iPhone.
                 for (title, query) in [
