@@ -1,5 +1,6 @@
 import { TaskQuickAdd, isValidTag } from "../core/Core";
 import { button, make } from "../Dom";
+import { DescriptionField } from "./DescriptionField";
 import { QuickAddField } from "./QuickAddField";
 import { SubtasksSection } from "./SubtasksSection";
 import { tagLabel } from "./TagLabel";
@@ -108,15 +109,12 @@ export function deleteTagDialog(
 export function newTaskDialog(model: TasksModel, host: HTMLElement): void {
   let quickAdd = model.newQuickAdd();
   const title = new QuickAddField(model, quickAdd);
-  const description = make("textarea", "tasks-input");
-  description.rows = 4;
-  description.setAttribute("aria-label", "Description");
-  description.placeholder = "Description";
+  const description = new DescriptionField();
   const add = confirmButton("Add");
   const { dialog, form } = modal(
     host,
     "New Task",
-    [title.element, description],
+    [title.element, description.element],
     [button("", "Cancel", () => dialog.close()), add],
   );
   const enableAdd = () => (add.disabled = title.title === "");
@@ -173,9 +171,7 @@ export function editTaskDialog(
     submit: () => commit(),
   });
   const titleHint = make("p", "tasks-hint", ["A Task needs a Title."]);
-  const description = make("textarea", "tasks-input");
-  description.rows = 4;
-  description.value = task.description;
+  const description = new DescriptionField(task.description);
   let priority = task.priority;
   let pause: ReturnType<typeof setTimeout> | undefined;
   const save = () => {
@@ -238,7 +234,7 @@ export function editTaskDialog(
       back,
       title.element,
       titleHint,
-      field("Description", description),
+      field("Description", description.element),
       priorityChoice,
       tags.element,
       ...(task.parent === undefined
@@ -250,7 +246,7 @@ export function editTaskDialog(
     [done],
   );
   const isText = (target: EventTarget | null) =>
-    target === description || title.element.contains(target as Node);
+    target === description.element || title.element.contains(target as Node);
   const showTitleState = () => {
     titleHint.hidden = !titleEmpty();
     done.disabled = titleEmpty();
@@ -271,7 +267,7 @@ export function editTaskDialog(
     const leaves = (field: HTMLElement) =>
       field.contains(event.target as Node) && !field.contains(event.relatedTarget as Node);
     if (leaves(title.element)) commit();
-    else if (event.target === description) save();
+    else if (event.target === description.element) save();
   });
   form.addEventListener("submit", (event) => {
     event.preventDefault();

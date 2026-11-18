@@ -97,6 +97,12 @@ describe("the Tasks list", () => {
     expect(model.allTags.map((t) => t.name)).toEqual(["bug", "work/x"]);
   });
 
+  it("saves a Description of Markdown unchanged", () => {
+    const markdown = "# Plan\n\n- *one*\n  2. [two](https://example.com)\n```\nx **y**\n```";
+    expect(model.add("Plan", { description: markdown })).toBe(true);
+    expect(first().description).toBe(markdown);
+  });
+
   it("adds a Subtask with the Priority and Tags of Quick Add, and a Description", () => {
     model.add("Shop");
     const quickAdd = new TaskQuickAdd();

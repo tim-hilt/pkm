@@ -1,5 +1,6 @@
 import init, {
   Alignment,
+  Block,
   Closing,
   Cursor,
   Direction,
@@ -25,7 +26,9 @@ import init, {
   ZOrder,
   darkModeColor,
   isValidTag,
+  parseDescription,
   parseTitle,
+  rawRange,
   sortKeys,
   stripForbiddenTagCharacters,
   typedQuery,
@@ -51,6 +54,7 @@ import {
 
 export {
   Alignment,
+  Block,
   Closing,
   Cursor,
   Direction,
@@ -74,7 +78,9 @@ export {
   ZOrder,
   darkModeColor,
   isValidTag,
+  parseDescription,
   parseTitle,
+  rawRange,
   sortKeys,
   stripForbiddenTagCharacters,
   typedQuery,

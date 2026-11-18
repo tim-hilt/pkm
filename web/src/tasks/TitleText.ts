@@ -30,18 +30,29 @@ export interface Range {
   element: HTMLElement;
 }
 
-/** The Inline formatting spans of a Title as elements, with their markers (class `md-marker`) as ranges of their own. */
-export function formatRanges(title: string): Range[] {
-  return titleSpans(title).flatMap(({ kind, start, end, markerLen }) => {
+/**
+ * `spans` as elements, with their markers (class `md-marker`) as ranges of their own;
+ * those for which `shown` is true also get `md-shown`, so that the CSS keeps them visible.
+ */
+export function inlineRanges(
+  spans: TitleSpan[],
+  shown: (start: number, end: number) => boolean = () => false,
+): Range[] {
+  return spans.flatMap(({ kind, start, end, markerLen }) => {
     const tag = kind === Inline.Code ? "code" : kind === Inline.Strong ? "strong" : "em";
     const element = make(tag, kind === Inline.Code ? "md-code" : "");
-    const marker = () => make("span", "md-marker");
+    const marker = () => make("span", shown(start, end) ? "md-marker md-shown" : "md-marker");
     return [
       { start, end, element },
       { start, end: start + markerLen, element: marker() },
       { start: end - markerLen, end, element: marker() },
     ];
   });
+}
+
+/** The Inline formatting spans of a Title as elements. */
+export function formatRanges(title: string): Range[] {
+  return inlineRanges(titleSpans(title));
 }
 
 /**

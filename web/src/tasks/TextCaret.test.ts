@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { textEdit } from "./QuickAddField";
+import { textEdit } from "./TextCaret";
 
 describe("textEdit", () => {
   it("finds what typing inserted", () => {
@@ -22,5 +22,9 @@ describe("textEdit", () => {
 
   it("finds nothing in equal texts", () => {
     expect(textEdit("same", "same")).toEqual({ start: 4, end: 4, inserted: "" });
+  });
+
+  it("finds a line break typed between lines", () => {
+    expect(textEdit("one\ntwo", "one\n\ntwo")).toEqual({ start: 4, end: 4, inserted: "\n" });
   });
 });

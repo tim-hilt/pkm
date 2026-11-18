@@ -1604,6 +1604,63 @@
         content: attr(data-placeholder);
         opacity: 0.5;
       }
+      /* The Description in Live Preview: lines kept as typed, markers hidden but on the line with the caret (.md-shown). */
+      .tasks-description {
+        min-height: 6.5em;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .tasks-description:empty::before {
+        content: attr(data-placeholder);
+        opacity: 0.5;
+      }
+      .tasks-description .md-marker:not(.md-shown) {
+        display: none;
+      }
+      .tasks-description .md-marker.md-shown {
+        opacity: 0.5;
+      }
+      /* A rendered list marker shows a bullet or its number in its place. */
+      .tasks-description .md-marker.md-bullet,
+      .tasks-description .md-marker.md-number {
+        display: inline;
+        font-size: 0;
+      }
+      .tasks-description .md-bullet::before {
+        content: "• ";
+        font-size: 1rem;
+      }
+      .tasks-description .md-number::before {
+        content: attr(data-number) ". ";
+        font-size: 1rem;
+      }
+      .tasks-description .md-heading {
+        font-weight: 700;
+      }
+      .tasks-description .md-h1 {
+        font-size: 1.5em;
+      }
+      .tasks-description .md-h2 {
+        font-size: 1.3em;
+      }
+      .tasks-description .md-h3 {
+        font-size: 1.15em;
+      }
+      .tasks-description .md-quote {
+        padding-left: 12px;
+        border-left: 3px solid color-mix(in srgb, currentColor 30%, transparent);
+        opacity: 0.7;
+      }
+      .tasks-description .md-fence,
+      .tasks-description .md-code {
+        font-family: ui-monospace, monospace;
+        background: color-mix(in srgb, currentColor 10%, transparent);
+      }
+      .tasks-description .md-link[data-href] {
+        color: var(--accent);
+        text-decoration: underline;
+        cursor: pointer;
+      }
       .tasks-shortcut {
         border-radius: 3px;
         background: color-mix(in srgb, var(--accent) 25%, transparent);
