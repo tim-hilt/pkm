@@ -203,3 +203,10 @@ pub fn row_preview(text: &str) -> String {
 pub fn image_targets(text: &str) -> Vec<String> {
     pkm_base::markdown::image_targets(text)
 }
+
+/// The edit that puts the Image `reference` on a line of its own, replacing
+/// the selection `start..end`.
+#[wasm_bindgen(js_name = insertImage)]
+pub fn insert_image(text: &str, start: u32, end: u32, reference: &str) -> TextEdit {
+    pkm_base::markdown::insert_image(text, start, end, reference).into()
+}

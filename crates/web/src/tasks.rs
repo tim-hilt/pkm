@@ -412,6 +412,12 @@ impl TaskStore {
         self.files.read(Path::new(path)).ok()
     }
 
+    /// What the file at `path` holds now, as bytes; none if there is no such file.
+    #[wasm_bindgen(js_name = fileBytes)]
+    pub fn file_bytes(&self, path: &str) -> Option<Vec<u8>> {
+        self.files.read_bytes(Path::new(path)).ok()
+    }
+
     /// Keeps a PNG, JPEG, GIF or WebP beside the Tasks; its reference.
     #[wasm_bindgen(js_name = addImage)]
     pub fn add_image(&self, bytes: &[u8]) -> Result<String, JsError> {

@@ -437,6 +437,20 @@ export class TasksModel {
     return this.apply(() => this.describe(create(), title, priority, description));
   }
 
+  /** Keeps a PNG, JPEG, GIF or WebP beside the Tasks; its reference, or `undefined` for any other format. */
+  addImage(bytes: Uint8Array): string | undefined {
+    let reference: string | undefined;
+    this.change(() => {
+      reference = this.files.store.addImage(bytes);
+    });
+    return reference;
+  }
+
+  /** The bytes of the Image a reference names; `undefined` if there is none. */
+  readImage(reference: string): Promise<Uint8Array | undefined> {
+    return this.files.readImage(reference);
+  }
+
   /** Gives the Task `id`, just created with `title` and `priority`, its Description, if any. */
   private describe(id: string, title: string, priority: number, description = ""): void {
     if (description.trim() !== "") this.files.store.edit(id, title, description, priority, []);

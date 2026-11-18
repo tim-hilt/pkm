@@ -1661,6 +1661,15 @@
         text-decoration: underline;
         cursor: pointer;
       }
+      /* An Image line: its reference is hidden unless raw, the picture shows at most the editor's width. */
+      .tasks-description .md-image:not(.md-shown) {
+        font-size: 0;
+      }
+      .tasks-description .md-picture {
+        display: inline-block;
+        max-width: 100%;
+        vertical-align: top;
+      }
       .tasks-shortcut {
         border-radius: 3px;
         background: color-mix(in srgb, var(--accent) 25%, transparent);

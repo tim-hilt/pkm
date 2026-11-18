@@ -1,9 +1,10 @@
 import { userEvent } from "vitest/browser";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { loadCore } from "../core/Core";
 import { isApplePlatform } from "../drawings/input/KeyboardShortcuts";
 import wasmUrl from "../../generated/pkm_web_bg.wasm?url";
 import { DescriptionField } from "./DescriptionField";
+import { DescriptionImages, type ImageFiles } from "./DescriptionImages";
 import { caretOffset, placeCaret, selectRange } from "./TextCaret";
 
 beforeAll(async () => {
@@ -13,8 +14,8 @@ beforeAll(async () => {
 const fields: DescriptionField[] = [];
 afterEach(() => fields.splice(0).forEach((field) => field.element.remove()));
 
-function open(text: string): DescriptionField {
-  const field = new DescriptionField(text);
+function open(text: string, images?: DescriptionImages): DescriptionField {
+  const field = new DescriptionField(text, images);
   document.body.append(field.element);
   fields.push(field);
   field.focus();
@@ -141,5 +142,99 @@ describe("DescriptionField", () => {
     expect(field.value).toBe("a b c");
     await press("e");
     expect(field.value).toBe("a `b` c");
+  });
+
+  describe("Images", () => {
+    const isPng = (bytes: Uint8Array) => bytes[0] === 0x89 && bytes[1] === 0x50;
+
+    /** A store that keeps PNGs only, as the core does besides JPEG, GIF and WebP. */
+    function pngStore() {
+      const kept = new Map<string, Uint8Array>();
+      const files: ImageFiles = {
+        addImage(bytes) {
+          if (!isPng(bytes)) return undefined;
+          const reference = `a${kept.size}.png`;
+          kept.set(reference, bytes);
+          return reference;
+        },
+        readImage: async (reference) => kept.get(reference),
+      };
+      return { kept, images: new DescriptionImages(files) };
+    }
+
+    const png = async () => {
+      const canvas = new OffscreenCanvas(3, 2);
+      canvas.getContext("2d")!.fillRect(0, 0, 3, 2);
+      return new Uint8Array(
+        await (await canvas.convertToBlob({ type: "image/png" })).arrayBuffer(),
+      );
+    };
+
+    /** A 1x1 BMP, a format the core doesn't keep. */
+    const bmp = () =>
+      new Uint8Array([
+        0x42, 0x4d, 0x3a, 0, 0, 0, 0, 0, 0, 0, 0x36, 0, 0, 0, 0x28, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0,
+        1, 0, 0x18, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff,
+        0, 0, 0,
+      ]);
+
+    const pasting = (bytes: Uint8Array, type: string) => {
+      const data = new DataTransfer();
+      data.items.add(new File([bytes as Uint8Array<ArrayBuffer>], "picture", { type }));
+      return new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true });
+    };
+
+    const shown = async (field: DescriptionField) => {
+      const image = () => field.element.querySelector("img")!;
+      await vi.waitFor(() => expect(image().naturalWidth).toBeGreaterThan(0));
+      return image();
+    };
+
+    it("pastes a PNG as a reference on its own line and shows the Image", async () => {
+      const { kept, images } = pngStore();
+      const field = open("a", images);
+      const bytes = await png();
+      await moveTo(field, 1);
+      field.element.dispatchEvent(pasting(bytes, "image/png"));
+      await vi.waitFor(() => expect(field.value).toBe("a\n![](a0.png)\n"));
+      expect(kept.get("a0.png")).toEqual(bytes);
+      await moveTo(field, 0);
+      const image = await shown(field);
+      expect([image.naturalWidth, image.naturalHeight]).toEqual([3, 2]);
+      expect(image.alt).toBe("Image");
+    });
+
+    it("stores a picture of another format as PNG", async () => {
+      const { kept, images } = pngStore();
+      const field = open("", images);
+      field.element.dispatchEvent(pasting(bmp(), "image/bmp"));
+      await vi.waitFor(() => expect(field.value).toBe("![](a0.png)\n"));
+      expect(isPng(kept.get("a0.png")!)).toBe(true);
+    });
+
+    it("shows the reference while the caret is on the line, and the Image still", async () => {
+      const { images } = pngStore();
+      const field = open("", images);
+      field.element.dispatchEvent(pasting(await png(), "image/png"));
+      await vi.waitFor(() => expect(field.value).toBe("![](a0.png)\n"));
+      const line = () => field.element.querySelector<HTMLElement>(".md-image")!;
+      await moveTo(field, 3);
+      expect(line().classList.contains("md-shown")).toBe(true);
+      expect(line().querySelector("img")).not.toBeNull();
+      await moveTo(field, 13);
+      expect(line().classList.contains("md-shown")).toBe(false);
+    });
+
+    it("ignores a picture that is none, and pictures when there is no store", async () => {
+      const { images } = pngStore();
+      const field = open("", images);
+      field.element.dispatchEvent(pasting(new Uint8Array([1, 2, 3]), "image/png"));
+      const plain = open("x");
+      const event = pasting(await png(), "image/png");
+      plain.element.dispatchEvent(event);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(field.value).toBe("");
+      expect(plain.value).toBe("x");
+    });
   });
 });

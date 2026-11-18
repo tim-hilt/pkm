@@ -1,5 +1,6 @@
-import { rawRange, returnAt, shiftItems, toggleInline } from "../core/Core";
+import { insertImage, rawRange, returnAt, shiftItems, toggleInline } from "../core/Core";
 import { make } from "../Dom";
+import type { DescriptionImages } from "./DescriptionImages";
 import { type Raw, descriptionNodes } from "./DescriptionText";
 import { formatKey } from "./TitleText";
 import { caretOffset, placeCaret, selectRange, selectionOffsets } from "./TextCaret";
@@ -10,7 +11,9 @@ import { caretOffset, placeCaret, selectRange, selectionOffsets } from "./TextCa
  * edit, and when the caret moves to another line, the field is drawn again from
  * the core's parse, with the caret kept. Every line is rendered but the one
  * with the caret (the whole fence, in a code block), which shows its markers.
- * Rendered links open on a click; pasting inserts plain text.
+ * Rendered links open on a click; pasting inserts plain text. A picture pasted
+ * or dropped is added through `images` and put on a line of its own as an Image;
+ * without `images` pictures are ignored.
  */
 export class DescriptionField {
   /** The `contenteditable` element, which sends `input` events like a text field. */
@@ -22,7 +25,10 @@ export class DescriptionField {
   private history: { text: string; caret: number | undefined }[] = [];
   private at = -1;
 
-  constructor(text = "") {
+  constructor(
+    text = "",
+    private readonly images?: DescriptionImages,
+  ) {
     const editor = this.element;
     editor.setAttribute("contenteditable", "plaintext-only");
     editor.setAttribute("role", "textbox");
@@ -47,6 +53,13 @@ export class DescriptionField {
     editor.addEventListener("beforeinput", (event) => this.beforeInput(event));
     editor.addEventListener("keydown", (event) => this.keyDown(event));
     editor.addEventListener("mousedown", (event) => this.open(event));
+    editor.addEventListener("paste", (event) => this.take(event, event.clipboardData));
+    editor.addEventListener("dragover", (event) => {
+      if (this.images && hasFiles(event.dataTransfer)) event.preventDefault();
+    });
+    editor.addEventListener("drop", (event) =>
+      this.take(event, event.dataTransfer, offsetAt(event.clientX, event.clientY, this.element)),
+    );
     const moved = () => {
       if (!this.composing) this.draw();
     };
@@ -72,6 +85,27 @@ export class DescriptionField {
   /** Takes the keyboard focus. */
   focus(): void {
     this.element.focus();
+  }
+
+  /** Adds the pictures `data` carries, at `at` (the selection, if none), instead of the browser's own paste or drop; text and anything else is left to it. */
+  private take(event: Event, data: DataTransfer | null, at?: number): void {
+    const pictures = [...(data?.files ?? [])].filter((file) => file.type.startsWith("image/"));
+    if (!this.images || pictures.length === 0) return;
+    event.preventDefault();
+    const end = this.value.length;
+    const selected = at === undefined ? selectionOffsets(this.element) : { start: at, end: at };
+    void this.insertPictures(pictures, selected ?? { start: end, end });
+  }
+
+  private async insertPictures(files: File[], selected: { start: number; end: number }) {
+    let { start, end } = selected;
+    for (const file of files) {
+      const reference = await this.images?.add(new Uint8Array(await file.arrayBuffer()));
+      if (reference === undefined) continue;
+      const edit = insertImage(this.value, start, end, reference);
+      this.apply(edit);
+      start = end = edit.selectionEnd;
+    }
   }
 
   /** Undo and redo walk our history. Return continues or ends a list item, else breaks the line: the browser's own leaves a second break after the last line. */
@@ -151,7 +185,7 @@ export class DescriptionField {
     const key = JSON.stringify([text, raw && [raw.start, raw.end]]);
     if (key === this.drawn) return;
     this.drawn = key;
-    const nodes = descriptionNodes(text, raw);
+    const nodes = descriptionNodes(text, raw, this.images);
     // A last line break shows only with something after it.
     if (text.endsWith("\n")) nodes.push(document.createElement("br"));
     this.element.replaceChildren(...nodes);
@@ -164,4 +198,16 @@ export class DescriptionField {
     event.preventDefault();
     window.open(href, "_blank", "noopener,noreferrer");
   }
+}
+
+const hasFiles = (data: DataTransfer | null) => data?.types.includes("Files") === true;
+
+/** The text offset of the point `x`, `y` in `root`, where a drop landed; none if it isn't in its text. */
+function offsetAt(x: number, y: number, root: HTMLElement): number | undefined {
+  const position = document.caretPositionFromPoint?.(x, y);
+  if (!position || !root.contains(position.offsetNode)) return undefined;
+  const range = document.createRange();
+  range.selectNodeContents(root);
+  range.setEnd(position.offsetNode, position.offset);
+  return range.toString().length;
 }

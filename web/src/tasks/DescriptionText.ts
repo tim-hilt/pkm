@@ -1,5 +1,6 @@
 import { Block, parseDescription } from "../core/Core";
 import { make } from "../Dom";
+import type { DescriptionImages } from "./DescriptionImages";
 import { type Range, type TitleSpan, drawRanges, inlineRanges } from "./TitleText";
 
 /** The UTF-16 range of a Description that shows its Markdown raw. */
@@ -13,8 +14,14 @@ export interface Raw {
  * markers class `md-marker`) but the `raw` range, whose markers also get
  * `md-shown`. The nodes hold exactly `text`, so a caret offset in them is one in
  * the text. Rendered links are `a` elements with their target in `data-href`.
+ * An Image line holds its reference as text, hidden unless raw, and an `img`
+ * (no text) that `images` fills.
  */
-export function descriptionNodes(text: string, raw?: Raw): (Node | string)[] {
+export function descriptionNodes(
+  text: string,
+  raw?: Raw,
+  images?: DescriptionImages,
+): (Node | string)[] {
   const isRaw = (start: number, end: number) =>
     raw !== undefined && raw.start <= start && end <= raw.end;
   const parsed = parseDescription(text);
@@ -26,6 +33,7 @@ export function descriptionNodes(text: string, raw?: Raw): (Node | string)[] {
     return element;
   };
   const blocks = parsed.blocks;
+  const pictures: [HTMLElement, string][] = [];
   for (const block of blocks) {
     const { start, end, markerStart, markerEnd, level, number } = block;
     const shown = isRaw(start, end);
@@ -52,6 +60,12 @@ export function descriptionNodes(text: string, raw?: Raw): (Node | string)[] {
         marker(markerStart, markerEnd, shown);
         marker(block.closingStart, block.closingEnd, shown);
         break;
+      case Block.Image: {
+        const element = make("span", `md-image${shown ? " md-shown" : ""}`);
+        ranges.push({ start, end, element });
+        pictures.push([element, block.target]);
+        break;
+      }
       case Block.Bullet:
       case Block.Numbered: {
         // Rendered, a bullet or the number reached is drawn in the marker's place by the CSS.
@@ -80,6 +94,12 @@ export function descriptionNodes(text: string, raw?: Raw): (Node | string)[] {
     marker(link.textEnd, link.end, shown);
   }
   const nodes = drawRanges(text, ranges);
+  for (const [element, target] of pictures) {
+    const image = make("img", "md-picture");
+    image.alt = "Image";
+    images?.show(image, target);
+    element.append(image);
+  }
   for (const span of [...blocks, ...inlineSpans, ...links, parsed]) span.free();
   return nodes;
 }

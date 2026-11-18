@@ -1,5 +1,6 @@
 import { TaskQuickAdd, isValidTag } from "../core/Core";
 import { button, make } from "../Dom";
+import { DescriptionImages } from "./DescriptionImages";
 import { DescriptionField } from "./DescriptionField";
 import { QuickAddField } from "./QuickAddField";
 import { SubtasksSection } from "./SubtasksSection";
@@ -109,7 +110,8 @@ export function deleteTagDialog(
 export function newTaskDialog(model: TasksModel, host: HTMLElement): void {
   let quickAdd = model.newQuickAdd();
   const title = new QuickAddField(model, quickAdd);
-  const description = new DescriptionField();
+  const images = new DescriptionImages(model);
+  const description = new DescriptionField("", images);
   const add = confirmButton("Add");
   const { dialog, form } = modal(
     host,
@@ -136,7 +138,10 @@ export function newTaskDialog(model: TasksModel, host: HTMLElement): void {
     // Clicking Add moved the focus off the Title.
     title.focus();
   });
-  dialog.addEventListener("close", () => quickAdd.free());
+  dialog.addEventListener("close", () => {
+    quickAdd.free();
+    images.dispose();
+  });
   enableAdd();
   title.focus();
 }
@@ -171,7 +176,8 @@ export function editTaskDialog(
     submit: () => commit(),
   });
   const titleHint = make("p", "tasks-hint", ["A Task needs a Title."]);
-  const description = new DescriptionField(task.description);
+  const images = new DescriptionImages(model);
+  const description = new DescriptionField(task.description, images);
   let priority = task.priority;
   let pause: ReturnType<typeof setTimeout> | undefined;
   const save = () => {
@@ -280,6 +286,7 @@ export function editTaskDialog(
     commit();
     save();
     quickAdd.free();
+    images.dispose();
     subtasks.stopAdding();
   });
   return { dialog, refresh: () => subtasks.refresh() };

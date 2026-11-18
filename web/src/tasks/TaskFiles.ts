@@ -3,11 +3,14 @@ import type { FileStorage } from "../storage/FileStorage";
 
 const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 
+/** What an Image's reference looks like: no way out of the Tasks folder. */
+const imageName = /^[a-z0-9]+\.(png|jpg|gif|webp)$/;
+
 /**
  * The Tasks, kept in the Origin Private File System. The core's store works on
  * files in memory; this opens it from what is saved and saves what it
  * changed: the Task files, the Tags (`Tags/tags.json`) and the Filters
- * (`Filters/<id>.md`); a file the store removed is removed.
+ * (`Filters/<id>.md`), and the Images beside the Tasks; a file the store removed is removed.
  */
 export class TaskFiles {
   /** The writes in progress: each save waits for the one before. */
@@ -25,6 +28,17 @@ export class TaskFiles {
   /** The store; a new one after `reload`. */
   get store(): TaskStore {
     return this.current;
+  }
+
+  /** The bytes of the Image `reference` names: from the store if it was added meanwhile, else from storage. */
+  async readImage(reference: string): Promise<Uint8Array | undefined> {
+    try {
+      return this.store.readImage(reference);
+    } catch {
+      return imageName.test(reference)
+        ? this.storage.read(`${TaskStore.folder()}/${reference}`)
+        : undefined;
+    }
   }
 
   /**
@@ -53,12 +67,14 @@ export class TaskFiles {
    */
   save(): Promise<void> {
     // What the files hold now, so that a later change can't overtake this save.
-    const changes = this.store.takeChanges().map((path) => ({ path, text: this.store.file(path) }));
+    const changes = this.store
+      .takeChanges()
+      .map((path) => ({ path, bytes: this.store.fileBytes(path) }));
     if (changes.length === 0) return this.writing;
     const written = this.writing.then(async () => {
-      for (const { path, text } of changes) {
-        if (text === undefined) await this.storage.remove(path);
-        else await this.storage.write(path, new TextEncoder().encode(text));
+      for (const { path, bytes } of changes) {
+        if (bytes === undefined) await this.storage.remove(path);
+        else await this.storage.write(path, bytes);
       }
     });
     this.writing = written.catch(() => {});
