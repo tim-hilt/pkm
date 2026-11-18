@@ -143,8 +143,9 @@ pub enum Block {
 
 /// A block of a Description. It covers `start..end` (a line, or all lines of
 /// a fence) and its marker is `marker_start..marker_end` (empty for a
-/// paragraph or an Image; a fence's opening line), which the clients hide on
-/// rendered lines.
+/// paragraph or an Image), which the clients hide on rendered lines. A fence
+/// has two markers, its opening and closing lines, each with the line break
+/// after it, so that hiding them hides the lines.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockSpan {
     pub kind: Block,
@@ -157,6 +158,10 @@ pub struct BlockSpan {
     pub number: u32,
     /// An Image's reference.
     pub target: String,
+    /// A fence's closing marker; empty at `end` for an unclosed fence and
+    /// every other block.
+    pub closing_start: u32,
+    pub closing_end: u32,
 }
 
 /// A link `[text](target)`. Its markers are `start..text_start` and
@@ -293,13 +298,22 @@ pub fn parse_description(text: &str) -> Description {
             level,
             number,
             target: target.to_string(),
+            closing_start: line.end,
+            closing_end: line.end,
         };
         if line.text.starts_with("```") {
             lists = Lists::default();
             let close = lines[i..].iter().position(|l| is_fence_close(l.text));
             let last = close.map_or(lines.len() - 1, |c| i + c);
-            let mut fence = block(Block::CodeFence, (0, utf16_len(line.text)), 0, 0, "");
+            // A line's end with its line break, if it has one.
+            let with_break = |l: usize| lines[l].end + u32::from(l + 1 < lines.len());
+            let opening = with_break(i - 1) - line.start;
+            let mut fence = block(Block::CodeFence, (0, opening), 0, 0, "");
             fence.end = lines[last].end;
+            (fence.closing_start, fence.closing_end) = match close {
+                Some(_) => (lines[last].start, with_break(last)),
+                None => (fence.end, fence.end),
+            };
             d.blocks.push(fence);
             i = last + 1;
             continue;
@@ -311,7 +325,10 @@ pub fn parse_description(text: &str) -> Description {
         }
         let (kind, from, len, level, number) = line_block(line.text);
         let number = match kind {
-            Block::Bullet => lists.number(from, false, 0),
+            Block::Bullet => {
+                lists.number(from, false, 0);
+                0
+            }
             Block::Numbered => lists.number(from, true, number),
             _ => {
                 lists = Lists::default();
@@ -514,19 +531,31 @@ pub fn shift_items(text: &str, start: u32, end: u32, outdent: bool) -> Option<Te
 }
 
 /// The edit for ⌘B, ⌘I or ⌘E with the selection `start..end`: it removes the
-/// `kind` markers of the span the selection is in (outside its markers) or
-/// covers, else wraps the selection in them. Spaces at the selection's ends stay
-/// outside the markers, as a span can't open or close on one; an empty
-/// selection gets a pair with the caret between.
+/// `kind` markers of the span the selection is in (inside its markers) or is
+/// exactly, else wraps the selection in them. Spaces at the selection's ends
+/// are left out, as a span can't open or close on one; an empty selection gets
+/// a pair with the caret between.
 pub fn toggle_inline(text: &str, start: u32, end: u32, kind: Inline) -> TextEdit {
     let units: Vec<u16> = text.encode_utf16().collect();
     let end = end.min(units.len() as u32);
     let start = start.min(end);
+    let blank = |u: u16| char::from_u32(u32::from(u)).is_some_and(char::is_whitespace);
+    let (mut from, mut to) = (start as usize, end as usize);
+    while from < to && blank(units[from]) {
+        from += 1;
+    }
+    while to > from && blank(units[to - 1]) {
+        to -= 1;
+    }
+    if from == to {
+        (from, to) = (end as usize, end as usize);
+    }
+    let (trimmed_start, trimmed_end) = (from as u32, to as u32);
     let span = parse_description(text).inlines.into_iter().rev().find(|s| {
         let marker = s.marker_len;
         s.kind == kind
-            && ((s.start + marker <= start && end <= s.end - marker)
-                || (start <= s.start && s.end <= end))
+            && ((s.start + marker <= trimmed_start && trimmed_end <= s.end - marker)
+                || (trimmed_start, trimmed_end) == (s.start, s.end))
     });
     if let Some(s) = span {
         let marker = s.marker_len;
@@ -548,17 +577,6 @@ pub fn toggle_inline(text: &str, start: u32, end: u32, kind: Inline) -> TextEdit
             selection_start: moved(start),
             selection_end: moved(end),
         };
-    }
-    let blank = |u: u16| char::from_u32(u32::from(u)).is_some_and(char::is_whitespace);
-    let (mut from, mut to) = (start as usize, end as usize);
-    while from < to && blank(units[from]) {
-        from += 1;
-    }
-    while to > from && blank(units[to - 1]) {
-        to -= 1;
-    }
-    if from == to {
-        (from, to) = (end as usize, end as usize);
     }
     let marker = match kind {
         Inline::Emphasis => "*",
@@ -725,6 +743,8 @@ mod tests {
             level,
             number: 0,
             target: String::new(),
+            closing_start: end,
+            closing_end: end,
         }
     }
 
@@ -799,19 +819,40 @@ mod tests {
         assert_eq!(numbers("1. a\ntext\n5. b"), [1, 0, 5]);
         assert_eq!(numbers("1. a\n  1. b\n  1. c\n1. d"), [1, 1, 2, 2]);
         assert_eq!(numbers("1. a\n- b\n1. c"), [1, 0, 1]);
+        assert_eq!(numbers("- a\n- b"), [0, 0]);
     }
 
     #[test]
     fn fenced_code_is_one_block_without_inline_spans() {
         let d = parse_description("```rs\n*a*\n# b\n```\nafter");
-        assert_eq!(d.blocks[0], block(Block::CodeFence, 0, 17, (0, 5), 0));
+        let fence = BlockSpan {
+            closing_start: 14,
+            closing_end: 18,
+            ..block(Block::CodeFence, 0, 17, (0, 6), 0)
+        };
+        assert_eq!(d.blocks[0], fence);
         assert_eq!(d.blocks[1].kind, Block::Paragraph);
         assert!(d.inlines.is_empty());
     }
 
     #[test]
+    fn fence_markers_take_their_line_breaks_along() {
+        let markers = |text| {
+            let b = &blocks(text)[0];
+            (b.marker_start, b.marker_end, b.closing_start, b.closing_end)
+        };
+        assert_eq!(markers("```\na\n```"), (0, 4, 6, 9));
+        assert_eq!(markers("```\n```"), (0, 4, 4, 7));
+    }
+
+    #[test]
     fn unclosed_fence_runs_to_the_end() {
-        assert_eq!(blocks("```\na\nb")[0].end, 7);
+        let b = &blocks("```\na\nb")[0];
+        assert_eq!(
+            (b.end, b.marker_end, b.closing_start, b.closing_end),
+            (7, 4, 7, 7)
+        );
+        assert_eq!(blocks("```")[0].marker_end, 3);
     }
 
     #[test]
@@ -1045,6 +1086,18 @@ mod tests {
             ("a b c".into(), 2, 3)
         );
         assert_eq!(toggled("*b*", 1, 2, Inline::Emphasis), ("b".into(), 0, 1));
+    }
+
+    #[test]
+    fn toggling_a_selection_around_a_span_wraps_the_selection() {
+        assert_eq!(
+            toggled("a **b** c", 0, 9, Inline::Strong),
+            ("**a **b** c**".into(), 2, 11)
+        );
+        assert_eq!(
+            toggled("a **b** ", 2, 8, Inline::Strong),
+            ("a b ".into(), 2, 4)
+        );
     }
 
     #[test]

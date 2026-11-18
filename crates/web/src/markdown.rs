@@ -47,7 +47,8 @@ mirror_enum!(
     }
 );
 
-/// A block at `start..end` with its marker at `markerStart..markerEnd`.
+/// A block at `start..end` with its marker at `markerStart..markerEnd`; a
+/// fence's closing marker is `closingStart..closingEnd`.
 #[wasm_bindgen]
 #[derive(Clone)]
 pub struct BlockSpan {
@@ -63,6 +64,10 @@ pub struct BlockSpan {
     /// An Image's reference.
     #[wasm_bindgen(getter_with_clone)]
     pub target: String,
+    #[wasm_bindgen(js_name = closingStart)]
+    pub closing_start: u32,
+    #[wasm_bindgen(js_name = closingEnd)]
+    pub closing_end: u32,
 }
 
 /// A link `[text](target)`; its markers are `start..textStart` and `textEnd..end`.
@@ -104,6 +109,8 @@ pub fn parse_description(text: &str) -> Description {
                 level: b.level,
                 number: b.number,
                 target: b.target,
+                closing_start: b.closing_start,
+                closing_end: b.closing_end,
             })
             .collect(),
         inlines: d.inlines.into_iter().map(Into::into).collect(),

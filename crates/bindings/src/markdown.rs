@@ -41,7 +41,8 @@ pub enum Block {
     Image,
 }
 
-/// A block at `start..end` with its marker at `marker_start..marker_end`.
+/// A block at `start..end` with its marker at `marker_start..marker_end`; a
+/// fence's closing marker is `closing_start..closing_end`.
 #[uniffi::remote(Record)]
 pub struct BlockSpan {
     pub kind: Block,
@@ -52,6 +53,8 @@ pub struct BlockSpan {
     pub level: u32,
     pub number: u32,
     pub target: String,
+    pub closing_start: u32,
+    pub closing_end: u32,
 }
 
 /// A link `[text](target)`; its markers are `start..text_start` and `text_end..end`.

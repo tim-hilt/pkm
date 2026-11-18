@@ -1,5 +1,6 @@
 import { Inline, parseTitle } from "../core/Core";
 import { make } from "../Dom";
+import { isApplePlatform } from "../drawings/input/KeyboardShortcuts";
 
 /** A formatted span of a Title, plain copy of the core's: `start..end` in UTF-16 units, its first and last `markerLen` being markers. */
 export interface TitleSpan {
@@ -23,9 +24,16 @@ export function titleSpans(title: string): TitleSpan[] {
   });
 }
 
-/** The Inline formatting ⌘B, ⌘I or ⌘E (Ctrl off the Mac) asks for; none for any other key. */
-export function formatKey(event: KeyboardEvent): Inline | undefined {
-  if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return undefined;
+/**
+ * The Inline formatting ⌘B, ⌘I or ⌘E (Ctrl off Apple platforms) asks for; none for any
+ * other key. On Apple platforms Ctrl-B and Ctrl-E stay the text field's own moves.
+ */
+export function formatKey(
+  event: KeyboardEvent,
+  apple = isApplePlatform(navigator.platform),
+): Inline | undefined {
+  const [primary, other] = apple ? [event.metaKey, event.ctrlKey] : [event.ctrlKey, event.metaKey];
+  if (!primary || other || event.altKey || event.shiftKey) return undefined;
   return { b: Inline.Strong, i: Inline.Emphasis, e: Inline.Code }[event.key.toLowerCase()];
 }
 

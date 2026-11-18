@@ -83,8 +83,9 @@ enum MarkdownStyler {
                     [
                         .font: monospaced(baseFont), .backgroundColor: PlatformColor.fenceTint,
                     ], range: line)
-                text.addAttribute(
-                    .foregroundColor, value: PlatformColor.secondaryLabel, range: NSRange(block.start, block.markerEnd))
+                // Each fence line's marker holds its line break, so hiding it hides the line.
+                fade(marker, hidden: hidden)
+                fade(NSRange(block.closingStart, block.closingEnd), hidden: hidden)
             }
         }
 

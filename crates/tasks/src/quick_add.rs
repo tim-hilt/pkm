@@ -142,54 +142,30 @@ impl QuickAdd {
     /// pair of them takes the pair along: `*@work*` goes, `*fix @work*` becomes
     /// `*fix*`.
     pub fn title(&self) -> String {
-        let mut rest = Vec::new();
-        let mut from = 0;
-        for (word, s) in self.shortcuts() {
-            let (start, end, gap) = self.removal(word, &s);
-            if start < from {
+        let shortcuts = self.shortcuts();
+        let mut kept: Vec<Vec<u16>> = Vec::new();
+        // Opening markers of removed Shortcuts, waiting for the next kept word.
+        let mut opening = 0;
+        for (ws, we) in words(&self.text) {
+            let Some((_, s)) = shortcuts.iter().find(|(word, _)| *word == (ws, we)) else {
+                let mut word = vec![u16::from(b'*'); opening];
+                word.extend_from_slice(&self.text[ws..we]);
+                kept.push(word);
+                opening = 0;
                 continue;
-            }
-            rest.extend_from_slice(&self.text[from..start]);
-            rest.extend_from_slice(gap);
-            from = end;
-        }
-        rest.extend_from_slice(&self.text[from..]);
-        String::from_utf16_lossy(&rest)
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-    }
-
-    /// What to cut from the text for Shortcut `s` in `word`, and what to put
-    /// instead: the range and a gap (a space, or nothing where a marker stays
-    /// next to the cut).
-    fn removal(
-        &self,
-        (ws, we): (usize, usize),
-        s: &QuickShortcut,
-    ) -> (usize, usize, &'static [u16]) {
-        const SPACE: &[u16] = &[b' ' as u16];
-        let (start, end) = (s.start as usize, s.end as usize);
-        match (start > ws, end < we) {
-            (true, true) | (false, false) => (ws, we, SPACE),
-            // `*@work fix*`: the opening marker takes the next word.
-            (true, false) => {
-                let space = self.text[end..]
-                    .iter()
-                    .take_while(|&&u| is_space(u))
-                    .count();
-                (start, end + space, &[])
-            }
-            // `*fix @work*`: the closing marker takes the previous word.
-            (false, true) => {
-                let space = self.text[..start]
-                    .iter()
-                    .rev()
-                    .take_while(|&&u| is_space(u))
-                    .count();
-                (start - space, end, &[])
+            };
+            opening += s.start as usize - ws;
+            // Closing markers first close pending opening ones (an emptied
+            // pair), then go to the previous kept word.
+            let closing = we - s.end as usize;
+            let paired = closing.min(opening);
+            opening -= paired;
+            if let Some(last) = kept.last_mut() {
+                last.extend(std::iter::repeat_n(u16::from(b'*'), closing - paired));
             }
         }
+        let words: Vec<String> = kept.iter().map(|w| String::from_utf16_lossy(w)).collect();
+        words.join(" ")
     }
 
     /// The Priority to apply, if a Shortcut sets one; the last one wins.
@@ -832,6 +808,16 @@ mod tests {
         assert_eq!(quick.tags(), ["work"]);
         assert_eq!(quick.priority(), Some(2));
         assert_eq!(quick.title(), "Fix now");
+
+        let quick = typed_cursor_at_start("Fix *p1 @work* now");
+        assert_eq!(quick.tags(), ["work"]);
+        assert_eq!(quick.title(), "Fix now");
+    }
+
+    #[test]
+    fn markers_of_several_shortcuts_go_to_the_words_beside_them() {
+        let quick = typed_cursor_at_start("*p1 @work fix @home* now");
+        assert_eq!(quick.title(), "*fix* now");
     }
 
     #[test]

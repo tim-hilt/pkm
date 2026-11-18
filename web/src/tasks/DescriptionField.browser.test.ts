@@ -1,6 +1,7 @@
 import { userEvent } from "vitest/browser";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { loadCore } from "../core/Core";
+import { isApplePlatform } from "../drawings/input/KeyboardShortcuts";
 import wasmUrl from "../../generated/pkm_web_bg.wasm?url";
 import { DescriptionField } from "./DescriptionField";
 import { caretOffset, placeCaret, selectRange } from "./TextCaret";
@@ -53,11 +54,22 @@ describe("DescriptionField", () => {
 
   it("shows a fenced code block raw as a whole while the caret is inside it", async () => {
     const field = open("```\ncode\n```\n**x**");
-    const fence = () => field.element.querySelector(".md-fence .md-marker")!;
+    // Both fence lines, each with its line break.
+    const fence = () =>
+      [...field.element.querySelectorAll(".md-fence .md-marker")].map((marker) => [
+        marker.textContent,
+        marker.classList.contains("md-shown"),
+      ]);
     await moveTo(field, 6);
-    expect(fence().classList.contains("md-shown")).toBe(true);
+    expect(fence()).toEqual([
+      ["```\n", true],
+      ["```\n", true],
+    ]);
     await moveTo(field, 15);
-    expect(fence().classList.contains("md-shown")).toBe(false);
+    expect(fence()).toEqual([
+      ["```\n", false],
+      ["```\n", false],
+    ]);
   });
 
   it("opens a rendered link on a press, and leaves a raw one to edit", async () => {
@@ -118,13 +130,16 @@ describe("DescriptionField", () => {
   it("toggles Inline formatting on the selection with Mod-B, Mod-I and Mod-E", async () => {
     const field = open("a b c");
     selectRange(field.element, 2, 3);
-    await userEvent.keyboard("{Control>}b{/Control}");
+    const mod = isApplePlatform(navigator.platform) ? "Meta" : "Control";
+    const press = (key: string) => userEvent.keyboard(`{${mod}>}${key}{/${mod}}`);
+    await press("b");
     expect(field.value).toBe("a **b** c");
-    await userEvent.keyboard("{Control>}i{/Control}");
+    await press("i");
     expect(field.value).toBe("a ***b*** c");
-    await userEvent.keyboard("{Control>}i{/Control}{Control>}b{/Control}");
+    await press("i");
+    await press("b");
     expect(field.value).toBe("a b c");
-    await userEvent.keyboard("{Control>}e{/Control}");
+    await press("e");
     expect(field.value).toBe("a `b` c");
   });
 });

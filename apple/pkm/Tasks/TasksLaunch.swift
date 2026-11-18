@@ -40,6 +40,9 @@ extension TasksModel {
                     1. Bakery
                     1. Aldi
                     > Closes at six
+                    ```
+                    list = ["milk", "bread"]
+                    ```
                     """, UInt8(1), ["home", "shopping"]
                 ),
                 ("Book the dentist", "", 2, ["health"]),

@@ -463,9 +463,11 @@ private struct EditTaskForm: View {
                 if !blockerCandidates.isEmpty {
                     Menu("Add Blocked by") {
                         ForEach(blockerCandidates) { candidate in
-                            Button(candidate.title) {
+                            Button {
                                 blockedBy.append(Blocker(id: candidate.id, title: candidate.title, closed: false))
                                 saveBlockedBy()
+                            } label: {
+                                Text(AttributedString(title: candidate.title))
                             }
                         }
                     }
@@ -474,7 +476,8 @@ private struct EditTaskForm: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle(task.title)  // as last saved; also the back button's label on the Blocker's form
+        // As last saved; also the back button's label on the Blocker's form.
+        .navigationTitle(Text(AttributedString(title: task.title)))
         #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
         #endif

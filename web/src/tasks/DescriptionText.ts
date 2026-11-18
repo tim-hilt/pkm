@@ -43,8 +43,14 @@ export function descriptionNodes(text: string, raw?: Raw): (Node | string)[] {
         marker(markerStart, markerEnd, shown);
         break;
       case Block.CodeFence:
-        ranges.push({ start, end, element: make("span", "md-fence") });
-        marker(start, markerEnd, shown);
+        // Each fence line's marker holds its line break, so hiding it hides the line.
+        ranges.push({
+          start,
+          end: Math.max(end, block.closingEnd),
+          element: make("span", "md-fence"),
+        });
+        marker(markerStart, markerEnd, shown);
+        marker(block.closingStart, block.closingEnd, shown);
         break;
       case Block.Bullet:
       case Block.Numbered: {
