@@ -2,7 +2,7 @@ import Foundation
 
 /// What a `pkm://` link does to the window: leaves what is open, switches to the
 /// Context and opens the Item it names. A link to an Item that isn't there
-/// leaves its Context's Gallery shown, or for Tasks the Active list.
+/// leaves its Context's Gallery shown, or for Tasks the list a Device opens on.
 @MainActor
 struct AppLinks {
     let navigation: AppNavigation

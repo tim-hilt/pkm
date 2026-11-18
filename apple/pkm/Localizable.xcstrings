@@ -67,17 +67,6 @@
         }
       }
     },
-    "Active": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Active"
-          }
-        }
-      }
-    },
     "Add": {
       "extractionState": "manual",
       "localizations": {
@@ -305,17 +294,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Background"
-          }
-        }
-      }
-    },
-    "Backlog": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Backlog"
           }
         }
       }
@@ -1398,17 +1376,6 @@
         }
       }
     },
-    "Make Active": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Make Active"
-          }
-        }
-      }
-    },
     "Medium": {
       "extractionState": "manual",
       "localizations": {
@@ -1449,17 +1416,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "More colours"
-          }
-        }
-      }
-    },
-    "Move to Backlog": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Move to Backlog"
           }
         }
       }
@@ -1592,17 +1548,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Notes"
-          }
-        }
-      }
-    },
-    "Nothing active.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Nothing active."
           }
         }
       }
@@ -2318,17 +2263,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "That name cannot be used. Choose another name."
-          }
-        }
-      }
-    },
-    "The Backlog is empty.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The Backlog is empty."
           }
         }
       }

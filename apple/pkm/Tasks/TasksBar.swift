@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The Tasks bar: Active, Backlog, the Favorites, Filters. On iPhone and iPad it scrolls sideways when
+/// The Tasks bar: the Favorites, Filters. On iPhone and iPad it scrolls sideways when
 /// the entries don't fit; on the Mac it is a segmented control in the toolbar, whose overflow takes them.
 struct TasksBar: View {
     @Environment(TasksModel.self) private var model
@@ -38,8 +38,6 @@ struct TasksBar: View {
 
     private func label(_ entry: TasksList) -> Text {
         switch entry {
-        case .active: Text("Active")
-        case .backlog: Text("Backlog")
         case .filters: Text("Filters")
         case .filter(let id): Text(verbatim: model.filters.first { $0.id == id }?.title ?? "")
         }

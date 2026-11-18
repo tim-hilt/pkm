@@ -159,24 +159,28 @@ extension AppNavigationTests {
         #expect(gallery.open == nil)
     }
 
-    @Test func aTaskLinkOpensTheTaskOverItsListAndAnUnknownOneShowsTheActiveList() throws {
+    @Test func aTaskLinkOpensTheTaskOverTheFirstFavoriteShowingItAndAnUnknownOneShowsTheStartList() throws {
         let (links, _, _, tasks) = try makeLinks()
-        tasks.add(title: "Later", planning: .backlog)
+        tasks.add(title: "Later", tags: ["backlog"])
         let id = try #require(tasks.tasks.first?.id)
+        let start = tasks.list
+        tasks.addFilter(title: "Backlog only", query: "@backlog")
+        tasks.setFavorite(tasks.filters.last!.id, to: true)
+        tasks.list = .filters
 
         links.follow(URL(string: "pkm://tasks/\(id)")!)
         #expect(links.navigation.selected == .tasks)
-        #expect(tasks.list == .backlog)
+        #expect(tasks.list == start)
         #expect(tasks.editing == [id])
 
         links.follow(URL(string: "pkm://tasks/unknown")!)
-        #expect(tasks.list == .active)
+        #expect(tasks.list == start)
         #expect(tasks.editing.isEmpty)
     }
 
     @Test func aContextLinkToTasksClosesAnOpenTask() throws {
         let (links, _, _, tasks) = try makeLinks()
-        tasks.add(title: "Now", planning: .active)
+        tasks.add(title: "Now")
         links.follow(URL(string: "pkm://tasks/\(tasks.tasks[0].id)")!)
         links.follow(URL(string: "pkm://tasks")!)
         #expect(tasks.editing.isEmpty)
@@ -184,14 +188,13 @@ extension AppNavigationTests {
 
     @Test func aLinkToAClosedSubtaskOpensNoSheet() throws {
         let (links, _, _, tasks) = try makeLinks()
-        tasks.add(title: "Parent", planning: .backlog)
+        tasks.add(title: "Parent")
         _ = tasks.addSubtask(title: "Sub", under: tasks.tasks[0])
         let sub = tasks.tasks[1]
         tasks.toggleDone(sub)
         tasks.commit()
 
         links.follow(URL(string: "pkm://tasks/\(sub.id)")!)
-        #expect(tasks.list == .active)
         #expect(tasks.editing.isEmpty)
     }
 }

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The Tasks Context: the Active list, the Backlog and the Filters, as Todoist-style rows. A Filter
+/// The Tasks Context: the Filters and the Tasks they match, as Todoist-style rows. A Filter
 /// opens on top of the Filters list, unless it is a Favorite, which the bar shows directly.
 struct TasksView: View {
     @Environment(TasksModel.self) private var model
@@ -11,8 +11,6 @@ struct TasksView: View {
         // In `ContentView`'s stack, whose path is `model.openFilterPath`.
         Group {
             switch model.barEntry {
-            case .active, .backlog:
-                TaskListView(emptyText: model.list == .active ? "Nothing active." : "The Backlog is empty.")
             case .filter:
                 TaskListView(emptyText: "No Active Tasks match.")
             case .filters:
@@ -59,7 +57,7 @@ struct TasksView: View {
 }
 
 /// The Tasks of the list shown (`model.tasks`) as rows with their actions, and the toast of a
-/// pending Close. Dragging orders Active or the Backlog, or in a Filter only that Filter.
+/// pending Close. Dragging orders only the Filter shown.
 private struct TaskListView: View {
     @Environment(TasksModel.self) private var model
     let emptyText: LocalizedStringKey
@@ -86,17 +84,6 @@ private struct TaskListView: View {
                             }
                             .contextMenu {
                                 if !task.done {  // a pending Done is Reverted at its circle
-                                    if task.parent == nil {  // a Subtask follows its top-level Task
-                                        if task.planning == .backlog {
-                                            Button("Make Active", systemImage: "arrow.up.circle") {
-                                                model.plan(task, as: .active)
-                                            }
-                                        } else {
-                                            Button("Move to Backlog", systemImage: "tray") {
-                                                model.plan(task, as: .backlog)
-                                            }
-                                        }
-                                    }
                                     Button("Reject", systemImage: "xmark.circle", role: .destructive) {
                                         model.close(task, as: .rejected)
                                     }
@@ -243,7 +230,7 @@ private struct DescriptionField: View {
     }
 }
 
-/// Asks for a Title and a Description; the Task is added Active. The sheet stays open after each
+/// Asks for a Title and a Description; the Task is added. The sheet stays open after each
 /// Add, cleared and focused for the next Task; Cancel or swiping down ends it.
 private struct NewTaskSheet: View {
     @Environment(TasksModel.self) private var model
