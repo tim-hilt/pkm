@@ -136,7 +136,7 @@ enum MarkdownStyler {
 }
 
 extension NSRange {
-    fileprivate init<T: BinaryInteger>(_ start: T, _ end: T) {
+    init<T: BinaryInteger>(_ start: T, _ end: T) {
         self.init(location: Int(start), length: Int(end - start))
     }
 }

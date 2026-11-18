@@ -137,3 +137,43 @@ pub fn raw_range(text: &str, caret: u32) -> TextRange {
         end: r.end,
     }
 }
+
+/// A change to a text: `start..end` (UTF-16 code units) is replaced by
+/// `replacement`, and the selection is `selectionStart..selectionEnd` of the
+/// text after the change.
+#[wasm_bindgen(getter_with_clone)]
+pub struct TextEdit {
+    pub start: u32,
+    pub end: u32,
+    pub replacement: String,
+    #[wasm_bindgen(js_name = selectionStart)]
+    pub selection_start: u32,
+    #[wasm_bindgen(js_name = selectionEnd)]
+    pub selection_end: u32,
+}
+
+impl From<pkm_base::markdown::TextEdit> for TextEdit {
+    fn from(e: pkm_base::markdown::TextEdit) -> Self {
+        Self {
+            start: e.start,
+            end: e.end,
+            replacement: e.replacement,
+            selection_start: e.selection_start,
+            selection_end: e.selection_end,
+        }
+    }
+}
+
+/// The edit for Return with the selection `start..end`: continues or ends a
+/// list item, else a plain line break.
+#[wasm_bindgen(js_name = returnAt)]
+pub fn return_at(text: &str, start: u32, end: u32) -> TextEdit {
+    pkm_base::markdown::return_at(text, start, end).into()
+}
+
+/// The edit that indents or outdents the list items touched by the selection
+/// by two spaces; `undefined` when nothing changes.
+#[wasm_bindgen(js_name = shiftItems)]
+pub fn shift_items(text: &str, start: u32, end: u32, outdent: bool) -> Option<TextEdit> {
+    pkm_base::markdown::shift_items(text, start, end, outdent).map(Into::into)
+}

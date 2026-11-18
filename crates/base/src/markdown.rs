@@ -398,6 +398,121 @@ pub fn raw_range(text: &str, caret: u32) -> TextRange {
     }
 }
 
+/// A change to a text: `start..end` (UTF-16 code units) is replaced by
+/// `replacement`, and the selection is `selection_start..selection_end` of the
+/// text after the change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextEdit {
+    pub start: u32,
+    pub end: u32,
+    pub replacement: String,
+    pub selection_start: u32,
+    pub selection_end: u32,
+}
+
+impl TextEdit {
+    fn replace(start: u32, end: u32, replacement: String, caret: u32) -> Self {
+        Self {
+            start,
+            end,
+            replacement,
+            selection_start: caret,
+            selection_end: caret,
+        }
+    }
+}
+
+/// The lines of `text` that are list items outside a code fence, with their
+/// indentation.
+fn list_items(text: &str) -> Vec<(Line<'_>, usize)> {
+    let fences: Vec<_> = parse_description(text)
+        .blocks
+        .into_iter()
+        .filter(|b| b.kind == Block::CodeFence)
+        .collect();
+    lines(text)
+        .into_iter()
+        .filter(|l| !fences.iter().any(|f| (f.start..=f.end).contains(&l.start)))
+        .filter_map(|l| {
+            let (kind, indent, ..) = line_block(l.text);
+            matches!(kind, Block::Bullet | Block::Numbered).then_some((l, indent))
+        })
+        .collect()
+}
+
+/// The edit for Return with the selection `start..end`. On a `- ` or `N. `
+/// item it continues the list at the same indentation (`3.` → `4. `), or ends
+/// it when the item is empty; anywhere else it is a plain line break.
+pub fn return_at(text: &str, start: u32, end: u32) -> TextEdit {
+    let item = list_items(text)
+        .into_iter()
+        .find(|(l, _)| (l.start..=l.end).contains(&start));
+    if let Some((line, indent)) = item {
+        let (kind, _, len, _, number) = line_block(line.text);
+        let marker_end = (indent + len) as u32;
+        if start - line.start >= marker_end {
+            if start == end && line.text[indent + len..].trim().is_empty() {
+                return TextEdit::replace(line.start, line.end, String::new(), line.start);
+            }
+            let marker = match kind {
+                Block::Numbered => format!("{}. ", number + 1),
+                _ => "- ".to_string(),
+            };
+            let replacement = format!("\n{}{marker}", " ".repeat(indent));
+            let caret = start + utf16_len(&replacement);
+            return TextEdit::replace(start, end, replacement, caret);
+        }
+    }
+    TextEdit::replace(start, end, "\n".to_string(), start + 1)
+}
+
+/// The edit that indents (or, with `outdent`, outdents) by two spaces the list
+/// items touched by the selection `start..end`. `None` when nothing changes.
+pub fn shift_items(text: &str, start: u32, end: u32, outdent: bool) -> Option<TextEdit> {
+    // A range ending at the start of a line doesn't touch that line.
+    let last = if end > start { end - 1 } else { end };
+    let items: Vec<_> = list_items(text)
+        .into_iter()
+        .filter(|(l, _)| l.end >= start && l.start <= last)
+        .collect();
+    let (from, to) = (items.first()?.0.start, items.last()?.0.end);
+    let amounts: Vec<(u32, u32)> = items
+        .iter()
+        .map(|(l, indent)| (l.start, if outdent { (*indent).min(2) as u32 } else { 2 }))
+        .collect();
+    if amounts.iter().all(|&(_, n)| n == 0) {
+        return None;
+    }
+    let mut replacement = Vec::new();
+    for line in lines(text)
+        .iter()
+        .filter(|l| (from..=to).contains(&l.start))
+    {
+        replacement.push(match amounts.iter().find(|a| a.0 == line.start) {
+            Some(&(_, n)) if outdent => line.text[n as usize..].to_string(),
+            Some(_) => format!("  {}", line.text),
+            None => line.text.to_string(),
+        });
+    }
+    // A position moves with the items before it, and within its own line.
+    let moved = |pos: u32| {
+        amounts
+            .iter()
+            .filter(|a| a.0 <= pos)
+            .fold(
+                pos,
+                |p, &(at, n)| if outdent { p - n.min(pos - at) } else { p + n },
+            )
+    };
+    Some(TextEdit {
+        start: from,
+        end: to,
+        replacement: replacement.join("\n"),
+        selection_start: moved(start),
+        selection_end: moved(end),
+    })
+}
+
 /// A run of `*` that may still be closed by a later run; `left` of its
 /// markers are unmatched, the innermost ones used first.
 #[derive(Clone, Copy)]
@@ -722,5 +837,113 @@ mod tests {
         assert_eq!(raw(text, 14), (2, 14));
         assert_eq!(raw(text, 1), (0, 1));
         assert_eq!(raw(text, 15), (15, 16));
+    }
+
+    /// The text after Return at `start..end`, with the caret as `|`.
+    fn pressed(text: &str, start: u32, end: u32) -> String {
+        apply(text, &return_at(text, start, end))
+    }
+
+    fn apply(text: &str, e: &TextEdit) -> String {
+        let units: Vec<u16> = text.encode_utf16().collect();
+        let mut out = String::from_utf16(&units[..e.start as usize]).unwrap();
+        out += &e.replacement;
+        out += &String::from_utf16(&units[e.end as usize..]).unwrap();
+        out
+    }
+
+    #[test]
+    fn return_continues_a_bullet() {
+        let e = return_at("- a", 3, 3);
+        assert_eq!(apply("- a", &e), "- a\n- ");
+        assert_eq!((e.selection_start, e.selection_end), (6, 6));
+    }
+
+    #[test]
+    fn return_continues_at_the_same_indentation() {
+        assert_eq!(pressed("  - a", 5, 5), "  - a\n  - ");
+    }
+
+    #[test]
+    fn return_counts_a_numbered_item_up() {
+        assert_eq!(pressed("3. foo", 6, 6), "3. foo\n4. ");
+        assert_eq!(pressed("9. a", 4, 4), "9. a\n10. ");
+    }
+
+    #[test]
+    fn return_in_the_middle_of_an_item_splits_it() {
+        assert_eq!(pressed("- ab", 3, 3), "- a\n- b");
+    }
+
+    #[test]
+    fn return_on_an_empty_item_removes_its_marker() {
+        let e = return_at("- a\n- ", 6, 6);
+        assert_eq!(apply("- a\n- ", &e), "- a\n");
+        assert_eq!(e.selection_start, 4);
+        assert_eq!(pressed("1. a\n  2. ", 10, 10), "1. a\n");
+    }
+
+    #[test]
+    fn return_elsewhere_is_a_plain_break() {
+        let e = return_at("ab", 1, 1);
+        assert_eq!((apply("ab", &e).as_str(), e.selection_start), ("a\nb", 2));
+        assert_eq!(pressed("# - a", 5, 5), "# - a\n");
+        assert_eq!(pressed("- a", 1, 1), "-\n a");
+        assert_eq!(pressed("```\n- a\n```", 7, 7), "```\n- a\n\n```");
+        assert_eq!(pressed("", 0, 0), "\n");
+    }
+
+    #[test]
+    fn return_replaces_the_selection() {
+        assert_eq!(pressed("- abc", 3, 4), "- a\n- c");
+        assert_eq!(pressed("- ", 0, 2), "\n");
+    }
+
+    #[test]
+    fn return_counts_utf16_units() {
+        assert_eq!(pressed("- 😀", 4, 4), "- 😀\n- ");
+    }
+
+    fn shifted_by(text: &str, start: u32, end: u32, outdent: bool) -> Option<(String, u32, u32)> {
+        shift_items(text, start, end, outdent)
+            .map(|e| (apply(text, &e), e.selection_start, e.selection_end))
+    }
+
+    #[test]
+    fn indent_adds_two_spaces_over_every_item_in_the_range() {
+        let text = "- a\nx\n1. b\n- c";
+        let (out, s, e) = shifted_by(text, 2, 11, false).unwrap();
+        assert_eq!(out, "  - a\nx\n  1. b\n- c");
+        assert_eq!((s, e), (4, 15));
+    }
+
+    #[test]
+    fn indent_with_a_caret_moves_it_along() {
+        let (out, s, e) = shifted_by("- a\n- b", 7, 7, false).unwrap();
+        assert_eq!((out.as_str(), s, e), ("- a\n  - b", 9, 9));
+    }
+
+    #[test]
+    fn a_range_ending_at_a_line_start_leaves_that_line() {
+        let (out, ..) = shifted_by("- a\n- b", 0, 4, false).unwrap();
+        assert_eq!(out, "  - a\n- b");
+    }
+
+    #[test]
+    fn outdent_removes_up_to_two_spaces() {
+        let (out, s, e) = shifted_by("    - a\n - b", 6, 12, true).unwrap();
+        assert_eq!(out, "  - a\n- b");
+        assert_eq!((s, e), (4, 9));
+    }
+
+    #[test]
+    fn outdent_at_column_zero_does_nothing() {
+        assert_eq!(shift_items("- a\n1. b", 0, 8, true), None);
+    }
+
+    #[test]
+    fn shifting_ignores_lines_that_are_no_items() {
+        assert_eq!(shift_items("a\n# b", 0, 5, false), None);
+        assert_eq!(shift_items("```\n- a\n```", 0, 11, false), None);
     }
 }

@@ -21,6 +21,29 @@ struct MarkdownEditor: View {
     }
 }
 
+/// The keys the core edits for (ADR-0028): Return continues a list, Tab and Shift-Tab indent and
+/// outdent its items.
+private enum EditKey {
+    case newline, indent, outdent
+
+    /// The edit for the key with `selection` (UTF-16) selected in `text`; none to leave the key to
+    /// the text view, as for Tab outside a list.
+    func edit(in text: String, selection: NSRange) -> TextEdit? {
+        let start = UInt32(clamping: selection.location)
+        let end = UInt32(clamping: selection.upperBound)
+        switch self {
+        case .newline: return returnAt(text: text, start: start, end: end)
+        case .indent: return shiftItems(text: text, start: start, end: end, outdent: false)
+        case .outdent: return shiftItems(text: text, start: start, end: end, outdent: true)
+        }
+    }
+}
+
+extension TextEdit {
+    fileprivate var replaced: NSRange { NSRange(start, end) }
+    fileprivate var selection: NSRange { NSRange(selectionStart, selectionEnd) }
+}
+
 /// At least as high as this many lines of text.
 private let minimumLines: CGFloat = 3
 
@@ -48,8 +71,36 @@ extension NSTextStorage {
 
 #if canImport(UIKit)
     private final class MarkdownTextView: UITextView {
+        /// An edit is going in, whose own line break the delegate must not take for a Return.
+        private var isApplying = false
+
         override func paste(_ sender: Any?) {
             if let text = UIPasteboard.general.string { insertText(text) }
+        }
+
+        /// Tab and Shift-Tab of a hardware keyboard, which the text view would take as focus keys.
+        override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+            let tab = presses.first { $0.key?.keyCode == .keyboardTab }
+            if let tab, let key = tab.key,
+                apply(key.modifierFlags.contains(.shift) ? .outdent : .indent)
+            {
+                return
+            }
+            super.pressesBegan(presses, with: event)
+        }
+
+        /// Applies the core's edit for `key` as a typed change, so that undo takes it back.
+        func apply(_ key: EditKey) -> Bool {
+            guard !isApplying, let edit = key.edit(in: text, selection: selectedRange),
+                let from = position(from: beginningOfDocument, offset: Int(edit.start)),
+                let to = position(from: beginningOfDocument, offset: Int(edit.end)),
+                let range = textRange(from: from, to: to)
+            else { return false }
+            isApplying = true
+            replace(range, withText: edit.replacement)
+            isApplying = false
+            selectedRange = edit.selection
+            return true
         }
     }
 
@@ -111,6 +162,11 @@ extension NSTextStorage {
                 isStyling = false
             }
 
+            func textView(_ view: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+                guard text == "\n", let view = view as? MarkdownTextView else { return true }
+                return !view.apply(.newline)
+            }
+
             func textViewDidChange(_ view: UITextView) {
                 parent.text = view.text
                 restyle(view)
@@ -150,6 +206,14 @@ extension NSTextStorage {
 #else
     private final class MarkdownTextView: NSTextView {
         override func paste(_ sender: Any?) { pasteAsPlainText(sender) }
+
+        /// Applies the core's edit for `key` as a typed change, so that undo takes it back.
+        func apply(_ key: EditKey) -> Bool {
+            guard let edit = key.edit(in: string, selection: selectedRange()) else { return false }
+            insertText(edit.replacement, replacementRange: edit.replaced)
+            setSelectedRange(edit.selection)
+            return true
+        }
 
         override func mouseDown(with event: NSEvent) {
             let point = convert(event.locationInWindow, from: nil)
@@ -224,6 +288,17 @@ extension NSTextStorage {
                 MarkdownStyler.style(storage, caret: isEditing ? view.selectedRange().location : nil)
                 view.typingAttributes = MarkdownStyler.baseAttributes
                 isStyling = false
+            }
+
+            func textView(_ view: NSTextView, doCommandBy selector: Selector) -> Bool {
+                let key: EditKey
+                switch selector {
+                case #selector(NSResponder.insertNewline(_:)): key = .newline
+                case #selector(NSResponder.insertTab(_:)): key = .indent
+                case #selector(NSResponder.insertBacktab(_:)): key = .outdent
+                default: return false
+                }
+                return (view as? MarkdownTextView)?.apply(key) ?? false
             }
 
             func textDidChange(_ notification: Notification) {

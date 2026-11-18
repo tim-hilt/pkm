@@ -85,4 +85,33 @@ describe("DescriptionField", () => {
     await userEvent.keyboard("b");
     expect(field.value).toBe("a\nb");
   });
+  it("continues a list on Return, ends it on an empty item and numbers on", async () => {
+    const field = open("");
+    await userEvent.keyboard("3. a{Enter}b{Enter}");
+    expect(field.value).toBe("3. a\n4. b\n5. ");
+    await userEvent.keyboard("{Enter}");
+    expect(field.value).toBe("3. a\n4. b\n");
+    expect(caretOffset(field.element)).toBe(10);
+  });
+
+  it("indents and outdents items with Tab and Shift-Tab", async () => {
+    const field = open("- a\n- b");
+    await moveTo(field, 7);
+    await userEvent.keyboard("{Tab}");
+    expect(field.value).toBe("- a\n  - b");
+    await userEvent.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(field.value).toBe("- a\n- b");
+    await userEvent.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(field.value).toBe("- a\n- b");
+  });
+
+  it("undoes a list continuation", async () => {
+    const field = open("- a");
+    await userEvent.keyboard("{End}{Enter}");
+    expect(field.value).toBe("- a\n- ");
+    await userEvent.keyboard("{Control>}z{/Control}");
+    expect(field.value).toBe("- a");
+    await userEvent.keyboard("{Control>}{Shift>}z{/Shift}{/Control}");
+    expect(field.value).toBe("- a\n- ");
+  });
 });

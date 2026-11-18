@@ -1,7 +1,7 @@
-import { rawRange } from "../core/Core";
+import { rawRange, returnAt, shiftItems } from "../core/Core";
 import { make } from "../Dom";
 import { type Raw, descriptionNodes } from "./DescriptionText";
-import { caretOffset, placeCaret, selectionOffsets } from "./TextCaret";
+import { caretOffset, placeCaret, selectRange, selectionOffsets } from "./TextCaret";
 
 /**
  * The Description of a Task, edited in Live Preview: its model is the Markdown
@@ -17,6 +17,9 @@ export class DescriptionField {
   /** Text and raw range as last drawn, to draw only what changed. */
   private drawn: string | undefined;
   private composing = false;
+  /** The texts and carets to undo and redo through, and where in them the field is. */
+  private history: { text: string; caret: number | undefined }[] = [];
+  private at = -1;
 
   constructor(text = "") {
     const editor = this.element;
@@ -29,14 +32,19 @@ export class DescriptionField {
     editor.spellcheck = true;
     this.value = text;
     editor.addEventListener("input", (event) => {
-      if (!(event as InputEvent).isComposing) this.draw();
+      if (!(event as InputEvent).isComposing) {
+        this.draw();
+        this.record();
+      }
     });
     editor.addEventListener("compositionstart", () => (this.composing = true));
     editor.addEventListener("compositionend", () => {
       this.composing = false;
       this.draw();
+      this.record();
     });
-    editor.addEventListener("beforeinput", (event) => this.lineBreak(event));
+    editor.addEventListener("beforeinput", (event) => this.beforeInput(event));
+    editor.addEventListener("keydown", (event) => this.keyDown(event));
     editor.addEventListener("mousedown", (event) => this.open(event));
     const moved = () => {
       if (!this.composing) this.draw();
@@ -56,6 +64,8 @@ export class DescriptionField {
   set value(text: string) {
     this.drawn = undefined;
     this.draw(text);
+    this.history = [{ text, caret: undefined }];
+    this.at = 0;
   }
 
   /** Takes the keyboard focus. */
@@ -63,14 +73,63 @@ export class DescriptionField {
     this.element.focus();
   }
 
-  /** Return inserts a line break itself: the browser's leaves a second one after the last line. */
-  private lineBreak(event: InputEvent): void {
+  /** Undo and redo walk our history. Return continues or ends a list item, else breaks the line: the browser's own leaves a second break after the last line. */
+  private beforeInput(event: InputEvent): void {
+    const undo = event.inputType === "historyUndo";
+    if (undo || event.inputType === "historyRedo") {
+      event.preventDefault();
+      this.travel(undo ? -1 : 1);
+      return;
+    }
     if (event.inputType !== "insertParagraph" && event.inputType !== "insertLineBreak") return;
     event.preventDefault();
     const selected = selectionOffsets(this.element);
-    if (!selected) return;
+    if (selected) this.apply(returnAt(this.value, selected.start, selected.end));
+  }
+
+  /** Mod-Z and Mod-Shift-Z undo and redo; Tab and Shift-Tab indent and outdent the list items, and elsewhere move the focus on. */
+  private keyDown(event: KeyboardEvent): void {
+    if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "z") {
+      event.preventDefault();
+      this.travel(event.shiftKey ? 1 : -1);
+      return;
+    }
+    if (event.key !== "Tab" || event.altKey || event.ctrlKey || event.metaKey) return;
+    const selected = selectionOffsets(this.element);
+    const edit = selected && shiftItems(this.value, selected.start, selected.end, event.shiftKey);
+    if (!edit) return;
+    event.preventDefault();
+    this.apply(edit);
+  }
+
+  /** Applies a core edit to the text and selects what it says. */
+  private apply(edit: ReturnType<typeof returnAt>): void {
     const text = this.value;
-    this.draw(text.slice(0, selected.start) + "\n" + text.slice(selected.end), selected.start + 1);
+    this.draw(
+      text.slice(0, edit.start) + edit.replacement + text.slice(edit.end),
+      edit.selectionEnd,
+    );
+    selectRange(this.element, edit.selectionStart, edit.selectionEnd);
+    this.element.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  /** Remembers the text and caret as a state to undo to. */
+  private record(): void {
+    const top = this.history[this.at];
+    if (top?.text === this.value) return;
+    this.history.splice(this.at + 1, Infinity, {
+      text: this.value,
+      caret: caretOffset(this.element),
+    });
+    this.at++;
+  }
+
+  /** Steps through the history, as the browser's own undo can't follow a field that is drawn again. */
+  private travel(step: -1 | 1): void {
+    const state = this.history[this.at + step];
+    if (!state) return;
+    this.at += step;
+    this.draw(state.text, state.caret ?? state.text.length);
     this.element.dispatchEvent(new Event("input", { bubbles: true }));
   }
 

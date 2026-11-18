@@ -52,16 +52,26 @@ export function caretOffset(root: HTMLElement): number | undefined {
 
 /** Puts the caret at the UTF-16 `offset` of `root`'s text, at the end of a text node rather than the start of the next. */
 export function placeCaret(root: HTMLElement, offset: number): void {
+  selectRange(root, offset, offset);
+}
+
+/** Selects the UTF-16 range `start` up to `end` of `root`'s text. */
+export function selectRange(root: HTMLElement, start: number, end: number): void {
   const range = document.createRange();
   range.selectNodeContents(root);
   range.collapse(false);
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let seen = 0;
+  let startSet = false;
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     const length = node.textContent?.length ?? 0;
-    if (seen + length >= offset) {
-      range.setStart(node, offset - seen);
+    if (!startSet && seen + length >= start) {
+      range.setStart(node, start - seen);
       range.collapse(true);
+      startSet = true;
+    }
+    if (startSet && seen + length >= end) {
+      range.setEnd(node, end - seen);
       break;
     }
     seen += length;

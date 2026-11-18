@@ -1,7 +1,9 @@
 //! The Markdown surface of the UniFFI library (ADR-0007). The logic lives in
 //! `pkm_base::markdown`.
 
-use pkm_base::markdown::{Block, BlockSpan, Description, Inline, InlineSpan, LinkSpan, TextRange};
+use pkm_base::markdown::{
+    Block, BlockSpan, Description, Inline, InlineSpan, LinkSpan, TextEdit, TextRange,
+};
 
 /// What an inline span is formatted as.
 #[uniffi::remote(Enum)]
@@ -87,4 +89,30 @@ pub fn parse_description(text: String) -> Description {
 #[uniffi::export]
 pub fn raw_range(text: String, caret: u32) -> TextRange {
     pkm_base::markdown::raw_range(&text, caret)
+}
+
+/// A change to a text: `start..end` (UTF-16 code units) is replaced by
+/// `replacement`, and the selection is `selection_start..selection_end` of the
+/// text after the change.
+#[uniffi::remote(Record)]
+pub struct TextEdit {
+    pub start: u32,
+    pub end: u32,
+    pub replacement: String,
+    pub selection_start: u32,
+    pub selection_end: u32,
+}
+
+/// The edit for Return with the selection `start..end`: continues or ends a
+/// list item, else a plain line break.
+#[uniffi::export]
+pub fn return_at(text: String, start: u32, end: u32) -> TextEdit {
+    pkm_base::markdown::return_at(&text, start, end)
+}
+
+/// The edit that indents or outdents the list items touched by the selection
+/// by two spaces; `None` when nothing changes.
+#[uniffi::export]
+pub fn shift_items(text: String, start: u32, end: u32, outdent: bool) -> Option<TextEdit> {
+    pkm_base::markdown::shift_items(&text, start, end, outdent)
 }
