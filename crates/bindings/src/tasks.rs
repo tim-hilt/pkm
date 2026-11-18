@@ -663,9 +663,6 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pkm-bindings-filter-{}", std::process::id()));
         let path = |name: &str| dir.join(name).to_string_lossy().into_owned();
         let store = TaskStore::open(path("Tasks")).unwrap();
-        for favorite in store.filters().unwrap() {
-            store.delete_filter(favorite.id).unwrap(); // the migration's
-        }
         store
             .create("t".into(), 4, vec!["work".into()], None)
             .unwrap();

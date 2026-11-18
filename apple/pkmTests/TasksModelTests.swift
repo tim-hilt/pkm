@@ -10,16 +10,13 @@ import Testing
 
     func openModel() throws -> TasksModel {
         TasksModel(
-            store: try TaskStore.open(
+            store: try TaskStore.withFavorites(
                 root: root.appending(path: "Tasks").path))
     }
 
-    /// A model on a Device that has no Filters: the three Favorites a new Device
-    /// starts with are Deleted.
+    /// A model on a Device that has no Filters.
     func openModelWithoutFavorites() throws -> TasksModel {
-        let store = try TaskStore.open(root: root.appending(path: "Tasks").path)
-        for filter in try store.filters() { try store.deleteFilter(id: filter.id) }
-        return TasksModel(store: store)
+        TasksModel(store: try TaskStore.open(root: root.appending(path: "Tasks").path))
     }
 
     @Test func aTaskIsAddedWithTheTitleAndPriorityOfQuickAdd() throws {
@@ -170,7 +167,7 @@ import Testing
 
     @Test func aCloseIsCommittedWhenItsToastGoesAway() async throws {
         let model = TasksModel(
-            store: try TaskStore.open(
+            store: try TaskStore.withFavorites(
                 root: root.appending(path: "Tasks").path),
             revertWindow: .milliseconds(20))
         model.add(title: "Gone")
@@ -630,13 +627,6 @@ import Testing
         #expect(model.bar == [.filter(ids[0]), .filters])
     }
 
-    @Test func aNewDeviceHasTheThreeFavoritesInTheBarWithoutListsOfItsOwn() throws {
-        let model = try openModel()
-        #expect(model.bar.count == 4 && model.bar.last == .filters)
-        #expect(model.filters.prefix(3).map(\.title) == ["All Tasks", "Active", "Backlog"])
-        #expect(model.list == model.bar[0])
-    }
-
     @Test func aFilterOpenedFromTheFiltersListIsUnderFiltersUnlessItIsAFavorite() throws {
         let model = try openModelWithoutFavorites()
         model.addFilter(title: "A", query: "@a")
@@ -663,7 +653,7 @@ import Testing
 
     @Test func eachDeviceOpensTheLastListElseTheFirstFavoriteElseTheFiltersList() throws {
         let defaults = UserDefaults.isolated()
-        let store = try TaskStore.open(
+        let store = try TaskStore.withFavorites(
             root: root.appending(path: "Tasks").path)
         let first = TasksModel(store: store, defaults: defaults)
         let allTasks = TasksList.filter(first.filters[0].id)
@@ -863,5 +853,18 @@ import Testing
         #expect(model.filters.map(\.title) == ["C", "A", "B"])
         model.moveFilters(from: IndexSet(integer: 0), to: 3)
         #expect(model.filters.map(\.title) == ["A", "B", "C"])
+    }
+}
+
+extension TaskStore {
+    /// A store whose Filters are the Favorites All Tasks, Active and Backlog, the
+    /// lists most tests start from; created once, when there are no Filters.
+    static func withFavorites(root: String) throws -> TaskStore {
+        let store = try TaskStore.open(root: root)
+        guard try store.filters().isEmpty else { return store }
+        for (title, query) in [("All Tasks", "*"), ("Active", "!@backlog"), ("Backlog", "@backlog")] {
+            try store.setFavorite(id: store.createFilter(title: title, query: query).id, favorite: true)
+        }
+        return store
     }
 }

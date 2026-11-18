@@ -353,12 +353,6 @@ impl TaskStore {
         Tasks::FOLDER.to_owned()
     }
 
-    /// The hidden file in the Tasks folder that says the lists were migrated.
-    #[wasm_bindgen(js_name = migratedFile)]
-    pub fn migrated_file() -> String {
-        Tasks::MIGRATED.to_owned()
-    }
-
     /// The folder of the Filters, beside the Tasks folder.
     #[wasm_bindgen(js_name = filtersFolder)]
     pub fn filters_folder() -> String {

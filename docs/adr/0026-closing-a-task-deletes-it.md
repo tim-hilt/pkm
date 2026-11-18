@@ -9,4 +9,4 @@ Done and Rejected both Delete the Task's file, and those of its Open Subtasks, o
 - Revert still works: the Close is only written when the toast goes away.
 - A Close against an edit on another Device is a Delete against an edit, so the Close wins (ADR-0020).
 - A Blocked by pointing at a Closed Task points at a missing one, and is dropped as ADR-0021 already does.
-- Every Task file is Open, and there are few, so the Device cache and the Device ID (which only named History files) go. The migration Deletes existing Closed files and `Tasks/.history/`.
+- Every Task file is Open, and there are few, so the Device cache and the Device ID (which only named History files) go. The migration script (ADR-0025) Deletes existing Closed files and `Tasks/.history/`.

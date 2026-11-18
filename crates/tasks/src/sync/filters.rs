@@ -157,7 +157,7 @@ mod tests {
     #[test]
     fn files_that_are_no_filters_are_no_items() {
         let good = filter("Work", "@work", &[], T0);
-        let task = b"---\nid: aaaaaaaaaaaa\ntitle: Milk\nstate: active\n---\n";
+        let task = b"---\nid: aaaaaaaaaaaa\ntitle: Milk\n---\n";
         for bad in [
             &b"just text"[..],
             b"---\ntitle: x\n---\n",

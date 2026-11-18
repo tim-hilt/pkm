@@ -122,7 +122,7 @@ extension AppNavigationTests {
             coversFolder: root.appending(path: "Covers"),
             defaults: UserDefaults(suiteName: root.lastPathComponent)!)
         let tasks = TasksModel(
-            store: try TaskStore.open(
+            store: try TaskStore.withFavorites(
                 root: root.appending(path: "Tasks").path))
         let links = AppLinks(
             navigation: AppNavigation(remembering: device()), gallery: gallery, library: library, tasks: tasks)

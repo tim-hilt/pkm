@@ -23,10 +23,19 @@ let storage: MemoryStorage;
 let model: TasksModel;
 beforeEach(async () => {
   storage = new MemoryStorage();
-  model = new TasksModel(await TaskFiles.open(storage));
+  const files = await TaskFiles.open(storage);
+  for (const [title, query] of [
+    ["All Tasks", "*"],
+    ["Active", "!@backlog"],
+    ["Backlog", "@backlog"],
+  ]) {
+    files.store.setFavorite(files.store.createFilter(title, query).id, true);
+  }
+  await files.save();
+  model = new TasksModel(files);
 });
 
-/** Starts a Filters test from none: a new Device has the migration's three Favorites. */
+/** Starts a Filters test from none: the others start with the Favorites All Tasks, Active and Backlog. */
 const deleteFavorites = () => [...model.filters].forEach((filter) => model.deleteFilter(filter));
 
 const titles = () => model.tasks.map((task) => task.title);

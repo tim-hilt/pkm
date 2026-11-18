@@ -1,13 +1,12 @@
 //! The Tasks store: a folder of `<id>.md` files.
 
 mod filters;
-mod migration;
 
 pub(crate) use filters::is_filter;
 use filters::shown_in;
 pub use filters::{Direction, Filter, FilterSort, FilterSortKey};
 
-use crate::files::{DiskFiles, Files, Stamp};
+use crate::files::{DiskFiles, Files};
 use crate::query::QueryError;
 use pkm_base::clock::{iso8601, now_ms};
 use pkm_base::front_matter::{Document, Value};
@@ -174,34 +173,23 @@ impl Tasks {
     /// The folder's name, in the app's storage and in the cloud.
     pub const FOLDER: &'static str = "Tasks";
 
-    /// The hidden file in the Tasks folder that says this Device migrated the
-    /// lists (see `migration`). Sync leaves it on the Device, but a client that
-    /// loads the folder itself must load it too.
-    pub const MIGRATED: &'static str = ".lists-migrated";
-
-    /// Opens the Tasks in `root`, creating the folder if needed, and removes
-    /// the History folder the migration emptied (ADR-0026).
+    /// Opens the Tasks in `root`, creating the folder if needed.
     pub fn open(root: impl Into<PathBuf>) -> io::Result<Self> {
         let root = root.into();
         fs::create_dir_all(&root)?;
-        let tasks = Self::open_in(Arc::new(DiskFiles), &root);
-        drop(fs::remove_dir(root.join(".history")));
-        Ok(tasks)
+        Ok(Self::open_in(Arc::new(DiskFiles), root))
     }
 
     /// The Tasks in `root` on any `files`, which must hold the folder `root`
     /// (an empty one is none).
     pub fn open_in(files: Arc<dyn Files>, root: impl Into<PathBuf>) -> Self {
-        let tasks = Self {
+        Self {
             files,
             root: root.into(),
             pending: Mutex::new(None),
             tags_lock: Mutex::new(()),
             last_created: AtomicU64::new(0),
-        };
-        // One that fails is tried again at the next open (see `migration`).
-        drop(tasks.migrate_lists());
-        tasks
+        }
     }
 
     /// Creates a Task with `priority` (clamped to 1 to 4) and `tags`, in one
@@ -637,9 +625,7 @@ impl Tasks {
     }
 
     /// Every Task in the folder, repaired. Only `<id>.md` is the Task `id`: a
-    /// copy under another name (`<id> 1.md`) would shadow it. A Task without
-    /// `created`, which the migration gave every Task it found, is given its
-    /// file's modification time.
+    /// copy under another name (`<id> 1.md`) would shadow it.
     fn load(&self) -> io::Result<Nodes> {
         let mut read_tags = BTreeSet::new();
         let mut nodes = Nodes::new();
@@ -647,31 +633,16 @@ impl Tasks {
             if !listed.name.ends_with(".md") {
                 continue;
             }
-            let Some((mut node, tags)) =
-                read_node(self.files.as_ref(), &self.root.join(&listed.name))
+            let Some((node, tags)) = read_node(self.files.as_ref(), &self.root.join(&listed.name))
             else {
                 continue;
             };
-            if node.created.is_none() {
-                let created = modified(listed.stamp);
-                let id = ItemId::parse(&node.task.id).ok_or(io::ErrorKind::InvalidData)?;
-                self.migrate(&id, |file| file.set_scalar(CREATED, &created))?;
-                node.created = Some(created);
-            }
             read_tags.extend(tags);
             nodes.insert(node.task.id.clone(), node);
         }
         self.remember_tags(read_tags)?;
         repair(&mut nodes);
         Ok(nodes)
-    }
-
-    /// Rewrites the Task `id` as a migration does: `updated` stays, so that
-    /// Devices migrating at once write the same bytes.
-    fn migrate(&self, id: &ItemId, change: impl FnOnce(&mut Document)) -> io::Result<()> {
-        let (mut file, _) = self.read_open(id).map_err(Error::into_io)?;
-        change(&mut file);
-        self.write(id, &file, Overwrite::Yes)
     }
 
     fn path(&self, id: &ItemId) -> PathBuf {
@@ -763,16 +734,8 @@ fn read_node(files: &dyn Files, path: &Path) -> Option<(Node, Vec<String>)> {
     (path.file_stem()? == node.task.id.as_str()).then(|| (node, tags_of(&file)))
 }
 
-/// The Task a file describes; `None` for a malformed one, or one of an old
-/// version that is Closed (`state: done` or `rejected`, which the migration
-/// Deletes) or has a `state` it doesn't know.
+/// The Task a file describes; `None` for a malformed one.
 fn node_of(file: &Document) -> Option<Node> {
-    if file
-        .scalar("state")
-        .is_some_and(|s| !matches!(s, "active" | "backlog"))
-    {
-        return None;
-    }
     let tags = tags_of(file);
     let task = Task {
         id: file.scalar("id")?.to_owned(),
@@ -1052,11 +1015,6 @@ fn open_subtask_counts(nodes: &Nodes) -> HashMap<&str, u32> {
         }
     }
     counts
-}
-
-/// A file's modification time as ISO 8601, what `created` falls back to.
-fn modified((nanos, _): Stamp) -> String {
-    iso8601((nanos / 1_000_000) as f64)
 }
 
 /// The valid Tags in a file; others, which only other tools could have
@@ -1619,41 +1577,27 @@ mod tests {
     }
 
     #[test]
-    fn removing_a_tag_everywhere_reaches_closed_tasks() {
+    fn removing_a_tag_everywhere_rewrites_only_the_tasks_carrying_it() {
         let dir = Scratch::new();
         let tasks = dir.store();
         let open = tagged(&tasks, &["home", "work"]);
-        let closed = tagged(&tasks, &["work"]);
         let other = tagged(&tasks, &["home"]);
         let path = |t: &Task| dir.0.join(format!("{}.md", t.id));
-        // A file Closed by an older version stays.
-        let legacy = fs::read_to_string(path(&closed)).unwrap();
-        fs::write(
-            path(&closed),
-            legacy.replace("state: active", "state: done"),
-        )
-        .unwrap();
         let stamp = |t: &Task| {
             let mut file = Document::parse(&fs::read_to_string(path(t)).unwrap()).unwrap();
             file.set_scalar("updated", "2000-01-01T00:00:00Z");
             fs::write(path(t), file.render()).unwrap();
         };
-        for task in [&open, &closed, &other] {
+        for task in [&open, &other] {
             stamp(task);
         }
         let other_text = fs::read_to_string(path(&other)).unwrap();
 
         tasks.remove_tag_everywhere("work").unwrap();
 
-        for task in [&open, &closed] {
-            let file = Document::parse(&fs::read_to_string(path(task)).unwrap()).unwrap();
-            assert!(!tags_of(&file).contains(&"work".to_owned()));
-            assert_ne!(file.scalar("updated"), Some("2000-01-01T00:00:00Z"));
-        }
-        assert_eq!(
-            tags_of(&Document::parse(&fs::read_to_string(path(&open)).unwrap()).unwrap()),
-            ["home"]
-        );
+        let file = Document::parse(&fs::read_to_string(path(&open)).unwrap()).unwrap();
+        assert_eq!(tags_of(&file), ["home"]);
+        assert_ne!(file.scalar("updated"), Some("2000-01-01T00:00:00Z"));
         assert_eq!(fs::read_to_string(path(&other)).unwrap(), other_text);
     }
 
@@ -1680,18 +1624,6 @@ mod tests {
 
     fn file_of(dir: &Scratch, task: &Task) -> String {
         fs::read_to_string(dir.0.join(format!("{}.md", task.id))).unwrap()
-    }
-
-    #[test]
-    fn opening_deletes_the_history_old_versions_kept() {
-        let dir = Scratch::new();
-        let history = dir.0.join(".history");
-        fs::create_dir_all(&history).unwrap();
-        fs::write(history.join("dddddddddddd-2023-11.log"), "x\n").unwrap();
-        let tasks = dir.store();
-        tasks.create("a", 4, &[], None).unwrap();
-        assert!(!history.exists());
-        assert_eq!(files_in(&dir).len(), 1);
     }
 
     #[test]
@@ -1823,14 +1755,13 @@ mod tests {
     }
 
     /// A raw Task file, as Sync or another tool could leave it: `state` is
-    /// "backlog" for one tagged so, "done" for one of an old version that is
-    /// Closed, and anything else for an Active one.
+    /// "backlog" for one tagged so, anything else for an Active one.
     fn raw(dir: &Scratch, id: &str, state: &str, parent: Option<&str>) {
         let parent = parent.map_or(String::new(), |p| format!("parent: {p}\n"));
-        let state = match state {
-            "backlog" => "tags:\n  - backlog\n",
-            "done" => "state: done\n",
-            _ => "",
+        let state = if state == "backlog" {
+            "tags:\n  - backlog\n"
+        } else {
+            ""
         };
         let text = format!(
             "---\nid: {id}\ntitle: {id}\npriority: 4\n{state}{parent}updated: 2000-01-01T00:00:00Z\n---\n"
@@ -1874,8 +1805,6 @@ mod tests {
             tasks.create_subtask("aaaaaaaaaaaa", "x", 4, &[]),
             Err(Error::Io(e)) if e.kind() == io::ErrorKind::NotFound
         ));
-        raw(&dir, "bbbbbbbbbbbb", "done", None);
-        assert!(tasks.create_subtask("bbbbbbbbbbbb", "x", 4, &[]).is_err());
     }
 
     #[test]
@@ -1967,15 +1896,6 @@ mod tests {
         assert!(!dir.0.join(format!("{}.md", parent.id)).exists());
         assert!(!dir.0.join(format!("{}.md", kept.id)).exists());
         assert!(titles(&tasks).is_empty());
-    }
-
-    #[test]
-    fn an_open_subtask_of_a_closed_parent_becomes_top_level() {
-        let dir = Scratch::new();
-        let tasks = dir.store();
-        raw(&dir, "aaaaaaaaaaaa", "done", None);
-        raw(&dir, "bbbbbbbbbbbb", "active", Some("aaaaaaaaaaaa"));
-        assert_eq!(titles(&tasks), ["bbbbbbbbbbbb"]);
     }
 
     fn move_fixture(dir: &Scratch) -> (Tasks, [Task; 3]) {
@@ -2088,20 +2008,6 @@ mod tests {
         assert_eq!(subtask_titles(&tasks, &a), ["x"]);
     }
 
-    fn files_in(dir: &Scratch) -> Vec<(String, String)> {
-        let mut files: Vec<_> = fs::read_dir(&dir.0)
-            .unwrap()
-            .filter_map(Result::ok)
-            .filter(|e| e.file_name().to_string_lossy().ends_with(".md"))
-            .map(|e| {
-                let name = e.file_name().to_string_lossy().into_owned();
-                (name, fs::read_to_string(e.path()).unwrap())
-            })
-            .collect();
-        files.sort();
-        files
-    }
-
     fn created_of(dir: &Scratch, id: &str) -> Option<String> {
         let text = fs::read_to_string(dir.0.join(format!("{id}.md"))).unwrap();
         Document::parse(&text)?.scalar("created").map(str::to_owned)
@@ -2117,27 +2023,6 @@ mod tests {
         tasks.edit(&task.id, "b", "", 1, &[]).unwrap();
         tasks.add_tag(&task.id, "x").unwrap();
         assert_eq!(created_of(&dir, &task.id), Some(created));
-    }
-
-    #[test]
-    fn a_task_without_created_gets_it_from_the_modification_time() {
-        let dir = Scratch::new();
-        raw(&dir, "aaaaaaaaaaaa", "active", None);
-        let modified: std::time::SystemTime = fs::metadata(dir.0.join("aaaaaaaaaaaa.md"))
-            .unwrap()
-            .modified()
-            .unwrap();
-        let ms = modified
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as f64;
-        dir.store().rows().unwrap();
-        assert_eq!(created_of(&dir, "aaaaaaaaaaaa"), Some(iso8601(ms)));
-        assert!(
-            files_in(&dir)[0]
-                .1
-                .contains("updated: 2000-01-01T00:00:00Z")
-        );
     }
 
     #[test]
@@ -2272,17 +2157,14 @@ mod tests {
     }
 
     #[test]
-    fn blocking_by_an_unknown_or_closed_task_fails() {
+    fn blocking_by_an_unknown_task_fails() {
         let dir = Scratch::new();
         let tasks = dir.store();
         let (a, _) = two_tasks(&tasks);
-        raw(&dir, "dddddddddddd", "done", None);
-        for blocker in ["aaaaaaaaaaaa", "dddddddddddd"] {
-            assert!(matches!(
-                tasks.add_blocker(&a.id, blocker),
-                Err(Error::Io(e)) if e.kind() == io::ErrorKind::NotFound
-            ));
-        }
+        assert!(matches!(
+            tasks.add_blocker(&a.id, "aaaaaaaaaaaa"),
+            Err(Error::Io(e)) if e.kind() == io::ErrorKind::NotFound
+        ));
     }
 
     #[test]
@@ -2381,20 +2263,6 @@ mod tests {
         };
         assert_eq!(sorted(titles(&tasks)), ["aaaaaaaaaaaa", "changed"]);
         assert_eq!(sorted(titles(&dir.store())), ["aaaaaaaaaaaa", "changed"]);
-    }
-
-    #[test]
-    fn a_task_closed_by_another_device_is_no_longer_open() {
-        let dir = Scratch::new();
-        let tasks = dir.store();
-        let task = tasks.create("t", 4, &[], None).unwrap();
-        assert_eq!(titles(&tasks), ["t"]);
-        let path = dir.0.join(format!("{}.md", task.id));
-        let text = fs::read_to_string(&path)
-            .unwrap()
-            .replace("priority:", "state: rejected\npriority:");
-        fs::write(&path, text).unwrap();
-        assert!(titles(&tasks).is_empty());
     }
 
     #[test]
@@ -2499,7 +2367,6 @@ mod tests {
     fn tasks_live_on_any_files() {
         let files = Arc::new(crate::files::MemoryFiles::default());
         let tasks = Tasks::open_in(files.clone(), "Tasks");
-        files.take_changes(); // the migration
         let task = tasks.create("Buy milk", 4, &[], None).unwrap();
         tasks.add_tag(&task.id, "home").unwrap();
         assert_eq!(known(&tasks, "h"), ["home"]);

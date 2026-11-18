@@ -567,7 +567,6 @@ fn stored_of(file: &Document) -> Option<Stored> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::migration;
     use super::*;
     use crate::{Files, MemoryFiles};
     use std::path::Path;
@@ -575,28 +574,13 @@ mod tests {
 
     fn open() -> (Arc<MemoryFiles>, Tasks) {
         let files = Arc::new(MemoryFiles::default());
-        files
-            .write(&migration::marker(Path::new("Tasks")), "")
-            .unwrap();
         let tasks = Tasks::open_in(files.clone(), "Tasks");
         (files, tasks)
     }
 
     fn add(tasks: &Tasks, title: &str, tags: &[&str]) -> String {
         let tags: Vec<String> = tags.iter().map(|t| (*t).to_owned()).collect();
-        stamp(tasks, tasks.create(title, 4, &tags, None).unwrap().id)
-    }
-
-    /// Created within one second, Tasks would tie on `created`: one second apart.
-    fn stamp(tasks: &Tasks, id: String) -> String {
-        static ADDED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let n = ADDED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let created = iso8601(1_700_000_000_000.0 + n as f64 * 1000.0);
-        let item = ItemId::parse(&id).unwrap();
-        tasks
-            .migrate(&item, |file| file.set_scalar("created", created))
-            .unwrap();
-        id
+        tasks.create(title, 4, &tags, None).unwrap().id
     }
 
     fn titles(rows: Vec<Row>) -> Vec<String> {
@@ -1044,16 +1028,16 @@ mod tests {
     fn unplaced_tasks_follow_the_placed_ones_by_created_then_item_id() {
         let (files, tasks) = open();
         let f = tasks.create_filter("F", "*").unwrap();
-        // Positions run against `created`, which must win; `x` and `y` tie.
-        for (id, position, created) in [
-            ("aaaaaaaaaaaa", 1, "2024-03-01T00:00:00Z"),
-            ("bbbbbbbbbbbb", 2, "2024-01-01T00:00:00Z"),
-            ("yyyyyyyyyyyy", 3, "2024-02-01T00:00:00Z"),
-            ("xxxxxxxxxxxx", 4, "2024-02-01T00:00:00Z"),
+        // `x` and `y` tie.
+        for (id, created) in [
+            ("aaaaaaaaaaaa", "2024-03-01T00:00:00Z"),
+            ("bbbbbbbbbbbb", "2024-01-01T00:00:00Z"),
+            ("yyyyyyyyyyyy", "2024-02-01T00:00:00Z"),
+            ("xxxxxxxxxxxx", "2024-02-01T00:00:00Z"),
         ] {
             files.load(
                 Path::new(&format!("Tasks/{id}.md")),
-                format!("---\nid: {id}\ntitle: {id}\npriority: 4\nstate: active\nposition: {position}\ncreated: {created}\nupdated: 2024-04-01T00:00:00Z\n---\n"),
+                format!("---\nid: {id}\ntitle: {id}\npriority: 4\ncreated: {created}\nupdated: 2024-04-01T00:00:00Z\n---\n"),
             );
         }
         assert_eq!(
@@ -1129,7 +1113,7 @@ mod tests {
         let mut ids = vec![p.clone()];
         for title in ["s1", "s2", "s3"] {
             let id = tasks.create_subtask(&p, title, 4, &[]).unwrap().id;
-            ids.push(stamp(&tasks, id));
+            ids.push(id);
         }
         for title in ["t1", "t2", "t3"] {
             ids.push(add(&tasks, title, &["work"]));
@@ -1204,7 +1188,7 @@ mod tests {
                 let task = tasks
                     .create(title, priority, &["work".into()], None)
                     .unwrap();
-                stamp(&tasks, task.id)
+                task.id
             })
             .to_vec();
         let filter = tasks.create_filter("Work", "@work").unwrap();
@@ -1252,10 +1236,7 @@ mod tests {
 
     fn add_priority(tasks: &Tasks, title: &str, priority: u8, tags: &[&str]) -> String {
         let tags: Vec<String> = tags.iter().map(|t| (*t).to_owned()).collect();
-        stamp(
-            tasks,
-            tasks.create(title, priority, &tags, None).unwrap().id,
-        )
+        tasks.create(title, priority, &tags, None).unwrap().id
     }
 
     #[test]
@@ -1309,16 +1290,8 @@ mod tests {
     fn sorted_subtasks_take_their_own_priority_but_siblings_keep_their_subtask_order() {
         let (_, tasks, _, _) = priority_fixture();
         let p = add_priority(&tasks, "p", 4, &["work"]);
-        let s1 = tasks
-            .create_subtask(&p, "s1", 3, &["work".into()])
-            .unwrap()
-            .id;
-        stamp(&tasks, s1);
-        let s2 = tasks
-            .create_subtask(&p, "s2", 1, &["work".into()])
-            .unwrap()
-            .id;
-        stamp(&tasks, s2);
+        tasks.create_subtask(&p, "s1", 3, &["work".into()]).unwrap();
+        tasks.create_subtask(&p, "s2", 1, &["work".into()]).unwrap();
         let f = tasks.create_filter("Work", "@work").unwrap();
         tasks.set_sort(&f.id, ASCENDING).unwrap();
         // The rows of s1 (P3) and s2 (P1) are refilled in Subtask order.

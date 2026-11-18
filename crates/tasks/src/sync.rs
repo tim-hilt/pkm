@@ -203,7 +203,7 @@ mod tests {
             }
         };
         format!(
-            "---\nid: aaaaaaaaaaaa\ntitle: {title}\npriority: {priority}\nstate: active\nposition: 1\n{}{}updated: {updated}\n---\n",
+            "---\nid: aaaaaaaaaaaa\ntitle: {title}\npriority: {priority}\n{}{}updated: {updated}\n---\n",
             list("tags", tags),
             list("blocked-by", blocked),
         )
@@ -303,21 +303,32 @@ mod tests {
 
     #[test]
     fn the_body_follows_the_side_that_changed_it() {
-        let base = b"---\nid: aaaaaaaaaaaa\ntitle: Milk\nstate: active\nupdated: 2024-01-01T00:00:00Z\n---\nOne\n".to_vec();
-        let local = b"---\nid: aaaaaaaaaaaa\ntitle: Milk\nstate: active\nupdated: 2024-01-05T00:00:00Z\n---\nOne\n".to_vec();
-        let remote = b"---\nid: aaaaaaaaaaaa\ntitle: Milk\nstate: active\nupdated: 2024-01-02T00:00:00Z\n---\nTwo\n".to_vec();
+        let base = b"---\nid: aaaaaaaaaaaa\ntitle: Milk\nupdated: 2024-01-01T00:00:00Z\n---\nOne\n"
+            .to_vec();
+        let local =
+            b"---\nid: aaaaaaaaaaaa\ntitle: Milk\nupdated: 2024-01-05T00:00:00Z\n---\nOne\n"
+                .to_vec();
+        let remote =
+            b"---\nid: aaaaaaaaaaaa\ntitle: Milk\nupdated: 2024-01-02T00:00:00Z\n---\nTwo\n"
+                .to_vec();
         assert_eq!(merged(Some(&base), &local, &remote).body, "Two\n");
     }
 
     #[test]
-    fn a_position_changed_on_one_device_is_taken_as_a_scalar() {
-        let base = task("Milk", 4, &[], &[], T0);
-        let moved = String::from_utf8(task("Milk", 4, &[], &[], T1))
-            .unwrap()
-            .replace("position: 1\n", "position: 1.5\n");
-        let renamed = task("Oat milk", 4, &[], &[], T2);
-        let file = merged(Some(&base), moved.as_bytes(), &renamed);
-        assert_eq!(file.scalar("position"), Some("1.5"));
+    fn a_subtask_position_changed_on_one_device_is_taken_as_a_scalar() {
+        let with_position = |updated, position| {
+            String::from_utf8(task("Milk", 4, &[], &[], updated))
+                .unwrap()
+                .replace(
+                    "priority: 4\n",
+                    &format!("priority: 4\nsubtask-position: {position}\n"),
+                )
+        };
+        let base = with_position(T0, "1");
+        let moved = with_position(T1, "1.5");
+        let renamed = with_position(T2, "1").replace("title: Milk", "title: Oat milk");
+        let file = merged(Some(base.as_bytes()), moved.as_bytes(), renamed.as_bytes());
+        assert_eq!(file.scalar("subtask-position"), Some("1.5"));
         assert_eq!(file.scalar("title"), Some("Oat milk"));
     }
 
@@ -325,7 +336,7 @@ mod tests {
     fn unknown_properties_survive() {
         let base = task("Milk", 4, &[], &[], T0);
         let mut local = String::from_utf8(task("Milk", 4, &[], &[], T1)).unwrap();
-        local = local.replace("position: 1\n", "position: 1\nx-extra: kept\n");
+        local = local.replace("priority: 4\n", "priority: 4\nx-extra: kept\n");
         let remote = task("Milk", 2, &[], &[], T2);
         let file = merged(Some(&base), local.as_bytes(), &remote);
         assert_eq!(file.scalar("x-extra"), Some("kept"));
@@ -334,12 +345,7 @@ mod tests {
     #[test]
     fn files_that_are_no_tasks_are_no_items() {
         let good = task("Milk", 4, &[], &[], T0);
-        for bad in [
-            &b"just text"[..],
-            b"---\ntitle: x\n---\n",
-            b"---\nid: a\nstate: weird\ntitle: t\n---\n",
-            b"\xff\xfe",
-        ] {
+        for bad in [&b"just text"[..], b"---\ntitle: x\n---\n", b"\xff\xfe"] {
             assert!(!is_item(bad));
             assert_eq!(merge(None, &good, bad), None);
             assert_eq!(merge(None, bad, &good), None);

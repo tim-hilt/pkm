@@ -5,7 +5,8 @@ extension TasksModel {
     static let documentsFolder = URL.documentsDirectory.appending(path: "Tasks", directoryHint: .isDirectory)
 
     /// The Tasks for this launch: the Tasks folder. For UI tests and screenshots
-    /// (`-UITesting…`) it is empty and temporary, with sample Tasks when
+    /// (`-UITesting…`) it is empty and temporary, with sample Tasks and the
+    /// Favorites All Tasks, Active and Backlog when
     /// launched with `-UITestingOpenTasks`, the sheet of "Buy milk" open with
     /// `-UITestingOpenTaskSheet`, and also a Filter, with the Filters list shown with
     /// `-UITestingOpenFilters` and the Filter itself with `-UITestingOpenFilter`.
@@ -20,6 +21,10 @@ extension TasksModel {
         let opensFilters = arguments.contains("-UITestingOpenFilters")
         let opensFilter = arguments.contains("-UITestingOpenFilter")
         if opensSheet || opensFilters || opensFilter || arguments.contains("-UITestingOpenTasks") {
+            for (title, query) in [("All Tasks", "*"), ("Active", "!@backlog"), ("Backlog", "@backlog")] {
+                guard let filter = try? store.createFilter(title: title, query: query) else { continue }
+                try? store.setFavorite(id: filter.id, favorite: true)
+            }
             let samples = [
                 (
                     "Buy milk", "Two litres of oat milk, and a loaf of bread if the bakery is still open.", UInt8(1),
