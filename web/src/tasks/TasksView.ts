@@ -1,4 +1,4 @@
-import { Closing, Planning } from "../core/Core";
+import { Closing } from "../core/Core";
 import { button, make, onNewKey } from "../Dom";
 import { filterDialog, deleteFilterDialog } from "./FilterDialogs";
 import { filterRows } from "./FiltersList";
@@ -6,20 +6,20 @@ import { RowDrag } from "./RowDrag";
 import { RowMenu, type RowMenuItem } from "./RowMenu";
 import { taskLine } from "./TaskRow";
 import { type TaskPlaces, editTaskDialog, newTaskDialog } from "./TaskDialogs";
-import { type Filter, type ListedTask, type TasksList, type TasksModel, lists } from "./TasksModel";
+import { type Filter, type ListedTask, type TasksList, type TasksModel } from "./TasksModel";
 
 const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
 
 /**
- * The Tasks Context: the Active list, the Backlog and the Filters as Todoist-style rows: a
+ * The Tasks Context: the Filters and the Tasks they match as Todoist-style rows: a
  * circle coloured by Priority, the Title, the Description faded on one line
  * and the Tags fainter still. The circle marks the Task Done, and a toast
  * offers to Revert a Close, in the edit view while that is shown. A Parent
  * shows how many of its Subtasks are Done, a Subtask its Parent's Title,
  * before the Tags; rows are dragged to reorder. A row opens the edit view; its
- * menu (right click, long press) plans, moves or Rejects. The Filters entry of
+ * menu (right click, long press) Rejects. The Filters entry of
  * the bar lists the Favorites, each a Filter, and the Filters, with how many Tasks each matches; opening one shows
- * its Tasks as Active's rows, under its Title. A port of the Swift
+ * its Tasks as rows, under its Title. A port of the Swift
  * `TasksView`, in native elements.
  */
 export class TasksView {
@@ -143,8 +143,6 @@ export class TasksView {
 
   private emptyText(list: TasksList): [string, string] {
     switch (list.kind) {
-      case "planning":
-        return ["Tasks", lists.find((l) => l.planning === list.planning)!.empty];
       case "filters":
         return ["Filters", "No Filters yet."];
       case "filter":
@@ -220,31 +218,12 @@ export class TasksView {
     // A pending Done is Reverted at its circle.
     if (task.done) return [];
     const { model } = this;
-    const items: RowMenuItem[] = [];
-    // A Subtask follows its top-level Task's list.
-    if (task.parent === undefined) {
-      items.push(
-        task.planning === Planning.Backlog
-          ? {
-              label: "Make Active",
-              run: () => model.plan(task, Planning.Active),
-            }
-          : {
-              label: "Move to Backlog",
-              run: () => model.plan(task, Planning.Backlog),
-            },
-      );
-    } else {
-      items.push({
-        label: "Make Top-Level",
-        run: () => model.moveBefore(task, undefined),
-      });
-    }
-    items.push({
-      label: "Reject",
-      run: () => model.close(task, Closing.Rejected),
-      danger: true,
-    });
-    return items;
+    return [
+      {
+        label: "Reject",
+        run: () => model.close(task, Closing.Rejected),
+        danger: true,
+      },
+    ];
   }
 }

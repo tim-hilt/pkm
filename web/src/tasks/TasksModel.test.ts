@@ -25,8 +25,8 @@ const titles = () => model.tasks.map((task) => task.title);
 const first = () => model.tasks[0];
 
 describe("the Tasks list", () => {
-  it("starts on the Active list, empty", () => {
-    expect(model.planning).toBe(Planning.Active);
+  it("starts on the first Favorite, empty", () => {
+    expect(model.list).toEqual({ kind: "filter", id: model.filters[0].id });
     expect(model.tasks).toEqual([]);
   });
 
@@ -42,8 +42,11 @@ describe("the Tasks list", () => {
   });
 
   it("adds a Task with a Description", () => {
-    expect(model.add("Buy milk", Planning.Active, { description: "Two litres" })).toBe(true);
-    expect(first()).toMatchObject({ title: "Buy milk", description: "Two litres" });
+    expect(model.add("Buy milk", { description: "Two litres" })).toBe(true);
+    expect(first()).toMatchObject({
+      title: "Buy milk",
+      description: "Two litres",
+    });
   });
 
   it("adds a Subtask with a Description", () => {
@@ -56,9 +59,13 @@ describe("the Tasks list", () => {
     const quickAdd = new TaskQuickAdd();
     quickAdd.replace(0, 0, "Fix login p1 @bug @work/x ");
     const { title, tags } = { title: quickAdd.title(), tags: quickAdd.tags() };
-    expect(model.add(title, Planning.Active, { priority: quickAdd.priority(), tags })).toBe(true);
+    expect(model.add(title, { priority: quickAdd.priority(), tags })).toBe(true);
     quickAdd.free();
-    expect(first()).toMatchObject({ title: "Fix login", priority: 1, tags: ["bug", "work/x"] });
+    expect(first()).toMatchObject({
+      title: "Fix login",
+      priority: 1,
+      tags: ["bug", "work/x"],
+    });
     expect(model.allTags.map((t) => t.name)).toEqual(["bug", "work/x"]);
   });
 
@@ -66,7 +73,11 @@ describe("the Tasks list", () => {
     model.add("Shop");
     const quickAdd = new TaskQuickAdd();
     quickAdd.replace(0, 0, "p2 Milk @food ");
-    const extras = { description: "Oat", priority: quickAdd.priority(), tags: quickAdd.tags() };
+    const extras = {
+      description: "Oat",
+      priority: quickAdd.priority(),
+      tags: quickAdd.tags(),
+    };
     expect(model.addSubtask(quickAdd.title(), first(), extras)).toBe(true);
     quickAdd.free();
     expect(model.tasks[1]).toMatchObject({
@@ -80,7 +91,7 @@ describe("the Tasks list", () => {
   it("refuses a Title of only Shortcuts like an empty one", () => {
     const quickAdd = new TaskQuickAdd();
     quickAdd.replace(0, 0, "p1 @bug");
-    expect(model.add(quickAdd.title(), Planning.Active, { tags: quickAdd.tags() })).toBe(false);
+    expect(model.add(quickAdd.title(), { tags: quickAdd.tags() })).toBe(false);
     quickAdd.free();
     expect(model.tasks).toEqual([]);
   });
@@ -88,14 +99,6 @@ describe("the Tasks list", () => {
   it("refuses an empty Title and adds nothing", () => {
     expect(model.add("   ")).toBe(false);
     expect(model.tasks).toEqual([]);
-  });
-
-  it("shows the Backlog when a Task is added there", () => {
-    model.add("Learn Rust", Planning.Backlog);
-    expect(model.planning).toBe(Planning.Backlog);
-    expect(titles()).toEqual(["Learn Rust"]);
-    model.planning = Planning.Active;
-    expect(titles()).toEqual([]);
   });
 
   it("edits Title, Description, Priority and Tags", () => {
@@ -204,9 +207,14 @@ describe("the Tasks list", () => {
 
   it("keeps the old Title and saves the rest if the Title is empty", () => {
     model.add("Buy milk");
-    expect(model.edit(first(), { title: " ", description: "x", priority: 1, tags: ["a"] })).toBe(
-      true,
-    );
+    expect(
+      model.edit(first(), {
+        title: " ",
+        description: "x",
+        priority: 1,
+        tags: ["a"],
+      }),
+    ).toBe(true);
     expect(first()).toMatchObject({
       title: "Buy milk",
       description: "x",
@@ -218,29 +226,33 @@ describe("the Tasks list", () => {
   it("saves nothing if a Tag is invalid", () => {
     model.add("Buy milk");
     expect(
-      model.edit(first(), { title: "New", description: "x", priority: 1, tags: ["No!"] }),
+      model.edit(first(), {
+        title: "New",
+        description: "x",
+        priority: 1,
+        tags: ["No!"],
+      }),
     ).toBe(false);
-    expect(first()).toMatchObject({ title: "Buy milk", description: "", priority: 4 });
+    expect(first()).toMatchObject({
+      title: "Buy milk",
+      description: "",
+      priority: 4,
+    });
   });
 
   it("edits again from a stale Task, as an autosaving view does", () => {
     model.add("Buy milk");
     const stale = first();
     const edit = (tags: string[]) =>
-      model.edit(stale, { title: "Buy milk", description: "", priority: 4, tags });
+      model.edit(stale, {
+        title: "Buy milk",
+        description: "",
+        priority: 4,
+        tags,
+      });
     edit(["a"]);
     edit([]);
     expect(first().tags).toEqual([]);
-  });
-
-  it("moves a Task between the lists; it leaves the one shown", () => {
-    model.add("Buy milk");
-    model.plan(first(), Planning.Backlog);
-    expect(titles()).toEqual([]);
-    model.planning = Planning.Backlog;
-    expect(titles()).toEqual(["Buy milk"]);
-    model.plan(first(), Planning.Active);
-    expect(titles()).toEqual([]);
   });
 
   it("suggests the known Tags that start with what is typed, then those containing it", () => {
@@ -251,9 +263,18 @@ describe("the Tasks list", () => {
       priority: 4,
       tags: ["home", "work"],
     });
-    expect(model.suggestTags("h", [])).toEqual({ matches: ["home"], create: true });
-    expect(model.suggestTags("", [])).toEqual({ matches: ["home", "work"], create: false });
-    expect(model.suggestTags("o", [])).toEqual({ matches: ["home", "work"], create: true });
+    expect(model.suggestTags("h", [])).toEqual({
+      matches: ["home"],
+      create: true,
+    });
+    expect(model.suggestTags("", [])).toEqual({
+      matches: ["home", "work"],
+      create: false,
+    });
+    expect(model.suggestTags("o", [])).toEqual({
+      matches: ["home", "work"],
+      create: true,
+    });
     expect(model.suggestTags("o", ["home"]).matches).toEqual(["work"]);
     expect(model.suggestTags("x", [])).toEqual({ matches: [], create: true });
     expect(model.suggestTags("X", []).create).toBe(false);
@@ -267,8 +288,8 @@ describe("the Tasks list", () => {
     let changes = 0;
     model.onChange = () => changes++;
     model.add("a");
-    model.plan(first(), Planning.Backlog);
-    model.planning = Planning.Backlog;
+    model.list = { kind: "filters" };
+    model.list = { kind: "filter", id: model.filters[0].id };
     expect(changes).toBe(3);
   });
 
@@ -408,12 +429,6 @@ describe("Subtasks", () => {
     expect(model.addSubtask(" ", first())).toBe(false);
   });
 
-  it("follows the Parent to the Backlog", () => {
-    model.plan(first(), Planning.Backlog);
-    model.planning = Planning.Backlog;
-    expect(titles()).toEqual(["parent", "child"]);
-  });
-
   it("Closes the Subtasks with a Parent, and Reverts them together", () => {
     model.close(first(), Closing.Rejected);
     expect(titles()).toEqual([]);
@@ -463,7 +478,7 @@ describe("order and moving", () => {
     model.moveBefore(task("c"), task("a"));
     await model.saved();
     expect(
-      (await TaskFiles.open(storage)).store.tasks(Planning.Active).map((t) => t.title),
+      (await TaskFiles.open(storage)).store.filterTasks(model.filters[0].id).map((t) => t.title),
     ).toEqual(["c", "a", "b"]);
   });
 });
@@ -493,9 +508,8 @@ describe("Blocked by", () => {
     expect(model.setBlockedBy(task("b"), [task("a").id])).toBe(false);
   });
 
-  it("offers the Open Tasks it isn't Blocked by yet, of both lists", () => {
-    model.add("c", Planning.Backlog);
-    model.planning = Planning.Active;
+  it("offers the Open Tasks it isn't Blocked by yet", () => {
+    model.add("c");
     model.setBlockedBy(task("a"), [task("b").id]);
     expect(model.blockerCandidates(task("a")).map((t) => t.title)).toEqual(["c"]);
   });
@@ -513,21 +527,30 @@ describe("Blocked by", () => {
 });
 
 describe("opening a Task by its id", () => {
-  it("shows the list the Task is in, with the Task to edit", () => {
-    model.add("Later", Planning.Backlog);
+  it("shows the list shown, with the Task to edit", () => {
+    model.add("Later");
     const { id } = first();
-    model.planning = Planning.Active;
     model.openLinked(id);
-    expect(model.planning).toBe(Planning.Backlog);
+    expect(model.list).toEqual({ kind: "filter", id: model.filters[0].id });
     expect(model.editing?.id).toBe(id);
     model.openLinked(undefined);
     expect(model.editing).toBeUndefined();
   });
 
-  it("shows the Active list for an unknown id", () => {
-    model.add("Later", Planning.Backlog);
+  it("shows the first Favorite over a Filter that doesn't hold the Task", () => {
+    model.add("Later");
+    const { id } = first();
+    model.list = { kind: "filters" };
+    model.openLinked(id);
+    expect(model.list).toEqual({ kind: "filter", id: model.filters[0].id });
+    expect(model.editing?.id).toBe(id);
+  });
+
+  it("shows the first Favorite for an unknown id", () => {
+    model.add("Later");
+    model.list = { kind: "filters" };
     model.openLinked("unknown");
-    expect(model.planning).toBe(Planning.Active);
+    expect(model.list).toEqual({ kind: "filter", id: model.filters[0].id });
     expect(model.editing).toBeUndefined();
   });
 
@@ -538,7 +561,6 @@ describe("opening a Task by its id", () => {
     model.close(sub, Closing.Done);
     model.commit();
     model.openLinked(sub.id);
-    expect(model.planning).toBe(Planning.Active);
     expect(model.editing).toBeUndefined();
   });
 
@@ -552,14 +574,12 @@ describe("opening a Task by its id", () => {
 });
 
 describe("opening Blockers and Subtasks", () => {
-  /** "Top" (opened) Blocked by "Mid", itself Blocked by "Low", the last of which is in the Backlog. */
+  /** "Top" (opened) Blocked by "Mid", itself Blocked by "Low". */
   function chain() {
-    model.add("Low", Planning.Backlog);
+    model.add("Low");
     model.add("Mid");
     model.add("Top");
-    model.planning = Planning.Backlog;
     const low = model.tasks.find((t) => t.title === "Low")!;
-    model.planning = Planning.Active;
     const mid = model.tasks.find((t) => t.title === "Mid")!;
     const top = model.tasks.find((t) => t.title === "Top")!;
     model.setBlockedBy(top, [mid.id]);
@@ -581,14 +601,6 @@ describe("opening Blockers and Subtasks", () => {
     expect(model.editing?.id).toBe(top.id);
   });
 
-  it("leaves the list shown when the Blocker is on the other list", () => {
-    const { low, mid, top } = chain();
-    model.openLinked(mid.id);
-    expect(model.open(low.id)).toBe(true);
-    expect(model.planning).toBe(Planning.Active);
-    expect(top.planning).toBe(Planning.Active);
-  });
-
   it("refuses a Closed Blocker", () => {
     const { mid, top } = chain();
     model.openLinked(top.id);
@@ -602,12 +614,22 @@ describe("opening Blockers and Subtasks", () => {
     const { low, mid, top } = chain();
     model.openLinked(top.id);
     model.open(mid.id);
-    model.edit(model.editing!, { title: " ", description: "", priority: 4, tags: [] });
+    model.edit(model.editing!, {
+      title: " ",
+      description: "",
+      priority: 4,
+      tags: [],
+    });
     expect(model.isLeavingBlocked).toBe(true);
     expect(model.open(low.id)).toBe(false);
     model.back();
     expect(model.editing?.id).toBe(mid.id);
-    model.edit(model.editing!, { title: "Mid", description: "", priority: 4, tags: [] });
+    model.edit(model.editing!, {
+      title: "Mid",
+      description: "",
+      priority: 4,
+      tags: [],
+    });
     expect(model.isLeavingBlocked).toBe(false);
     expect(model.open(low.id)).toBe(true);
   });
@@ -616,7 +638,12 @@ describe("opening Blockers and Subtasks", () => {
     const { mid, top } = chain();
     model.openLinked(top.id);
     model.open(mid.id);
-    model.edit(model.editing!, { title: "Renamed", description: "", priority: 1, tags: [] });
+    model.edit(model.editing!, {
+      title: "Renamed",
+      description: "",
+      priority: 1,
+      tags: [],
+    });
     model.back();
     expect(model.editing?.blockedBy.map((b) => b.title)).toEqual(["Renamed"]);
   });
@@ -632,15 +659,14 @@ describe("opening Blockers and Subtasks", () => {
     expect(model.depth).toBe(2);
     model.openLinked(low.id);
     expect(model.depth).toBe(1);
-    expect(model.planning).toBe(Planning.Backlog);
     model.openLinked(undefined);
     expect(model.depth).toBe(0);
   });
 });
 
 describe("Subtasks of a Task", () => {
-  it("lists the direct Subtasks in order, from either list, without Rejected ones", () => {
-    model.add("Parent", Planning.Backlog);
+  it("lists the direct Subtasks in order, without Rejected ones", () => {
+    model.add("Parent");
     const parent = first();
     model.addSubtask("One", parent);
     model.addSubtask("Two", parent);
@@ -650,7 +676,6 @@ describe("Subtasks of a Task", () => {
       Closing.Rejected,
     );
     model.commit();
-    model.planning = Planning.Active;
     expect(model.subtasks(parent.id).map((t) => t.title)).toEqual(["One", "Two"]);
   });
 
@@ -708,10 +733,9 @@ describe("Subtasks of a Task", () => {
       for (const title of ["A", "B", "C"]) model.addSubtask(title, parent);
     });
 
-    it("moves a Subtask before a sibling, in the section and the list", () => {
+    it("moves a Subtask before a sibling in the section", () => {
       expect(model.moveSubtask(sub("C"), sub("A"))).toBe(true);
       expect(sectionTitles()).toEqual(["C", "A", "B"]);
-      expect(model.tasks.map((t) => t.title)).toEqual(["Parent", "C", "A", "B"]);
     });
 
     it("moves a Subtask to the end with no sibling given", () => {
@@ -820,7 +844,12 @@ describe("Tags", () => {
   });
 
   it("lists a Tag no Task carries any more", () => {
-    model.edit(first(), { title: "Buy milk", description: "", priority: 4, tags: [] });
+    model.edit(first(), {
+      title: "Buy milk",
+      description: "",
+      priority: 4,
+      tags: [],
+    });
     expect(model.allTags.map((t) => t.name)).toEqual(["home", "work"]);
     expect(model.suggestTags("ho", []).matches).toEqual(["home"]);
   });
@@ -845,7 +874,12 @@ describe("Tags", () => {
   it("deletes a Tag from every Task and forgets its Tag Color", async () => {
     model.addSubtask("Old", first());
     const old = model.tasks.find((t) => t.title === "Old")!;
-    model.edit(old, { title: "Old", description: "", priority: 4, tags: ["work"] });
+    model.edit(old, {
+      title: "Old",
+      description: "",
+      priority: 4,
+      tags: ["work"],
+    });
     const oldFile = async () => {
       await model.saved();
       return new TextDecoder().decode(await storage.read(`Tasks/${old.id}.md`));
@@ -859,7 +893,12 @@ describe("Tags", () => {
     expect(first().tags).toEqual(["home"]);
     expect(await oldFile()).not.toContain("work");
     expect(changed).toHaveBeenCalled();
-    model.edit(first(), { title: "Buy milk", description: "", priority: 4, tags: ["work"] });
+    model.edit(first(), {
+      title: "Buy milk",
+      description: "",
+      priority: 4,
+      tags: ["work"],
+    });
     expect(tag("work")?.color).toBeUndefined();
   });
 
@@ -896,7 +935,11 @@ describe("Filters", () => {
     expect(model.addFilter("  ", "@home")).toBe(false);
     expect(model.addFilter("Bad", "@work &")).toBe(false);
     expect(filterTitles()).toEqual(["Work", "Home"]);
-    expect(filter("Work")).toMatchObject({ query: "@work", favorite: false, error: undefined });
+    expect(filter("Work")).toMatchObject({
+      query: "@work",
+      favorite: false,
+      error: undefined,
+    });
   });
 
   it("allows two Filters of one Title", () => {
@@ -906,14 +949,14 @@ describe("Filters", () => {
   });
 
   it("counts the Open Tasks each Filter matches, the Backlog included", () => {
-    model.add("A", Planning.Active, { tags: ["work"] });
-    model.add("B", Planning.Active, { tags: ["work", "home"] });
-    model.add("C", Planning.Backlog, { tags: ["work"] });
+    model.add("A", { tags: ["work"] });
+    model.add("B", { tags: ["work", "home"] });
+    model.add("C", { tags: ["work"] });
     model.addFilter("Work", "@work");
     model.addFilter("Only work", "@work & !@home");
     model.addFilter("None", "@nothing");
     expect(model.filters.map((f) => f.matches)).toEqual([3, 2, 0]);
-    model.add("D", Planning.Active, { tags: ["work"] });
+    model.add("D", { tags: ["work"] });
     expect(filter("Work").matches).toBe(4);
   });
 
@@ -921,7 +964,7 @@ describe("Filters", () => {
     model.addFilter("Work", "@work & !@review");
     model.addFilter("Either", "@a | @b");
     model.list = { kind: "filter", id: filter("Work").id };
-    expect(model.add("A", Planning.Active, { tags: ["x", "work"] })).toBe(true);
+    expect(model.add("A", { tags: ["x", "work"] })).toBe(true);
     expect([...model.tasks[0].tags].sort()).toEqual(["work", "x"]);
     model.list = { kind: "filter", id: filter("Either").id };
     model.add("B");
@@ -954,10 +997,10 @@ describe("Filters", () => {
   });
 
   it("shows a Filter's Open Tasks, the Backlog's and Subtasks on their own, in the order of creation", () => {
-    model.add("A", Planning.Active, { tags: ["work"] });
-    model.add("B", Planning.Active);
-    model.add("C", Planning.Active, { tags: ["work"] });
-    model.add("D", Planning.Backlog, { tags: ["work"] });
+    model.add("A", { tags: ["work"] });
+    model.add("B");
+    model.add("C", { tags: ["work"] });
+    model.add("D", { tags: ["work"] });
     model.addFilter("Work", "@work");
     model.list = { kind: "filter", id: filter("Work").id };
     expect(titles()).toEqual(["A", "C", "D"]);
@@ -965,33 +1008,32 @@ describe("Filters", () => {
     expect(model.tasks.find((t) => t.title === "Sub")?.parentTitle).toBe("A");
   });
 
-  it("closes, moves to the Backlog and adds Tasks inside a Filter, which stays shown", () => {
-    model.add("A", Planning.Active, { tags: ["work"] });
+  it("closes and adds Tasks inside a Filter, which stays shown", () => {
+    model.add("A", { tags: ["work"] });
     model.addFilter("Work", "@work");
     const list = { kind: "filter" as const, id: filter("Work").id };
     model.list = list;
     model.add("Plain");
     expect(model.list).toEqual(list);
     expect(titles()).toEqual(["A", "Plain"]);
-    model.plan(first(), Planning.Backlog);
-    expect(titles()).toEqual(["A", "Plain"]); // the Backlog is no longer out of sight
     model.close(first(), Closing.Done);
     expect(titles()).toEqual(["A", "Plain"]); // a pending Done stays, marked
     expect(filter("Work").matches).toBe(2);
   });
 
   it("orders Tasks within a Filter only", () => {
-    for (const title of ["A", "B", "C"]) model.add(title, Planning.Active, { tags: ["work"] });
+    for (const title of ["A", "B", "C"]) model.add(title, { tags: ["work"] });
     model.addFilter("Work", "@work");
     model.list = { kind: "filter", id: filter("Work").id };
     model.moveBefore(model.tasks[2], model.tasks[0]);
     expect(titles()).toEqual(["C", "A", "B"]);
-    model.list = { kind: "planning", planning: Planning.Active };
+    model.addFilter("All", "*");
+    model.list = { kind: "filter", id: filter("All").id };
     expect(titles()).toEqual(["A", "B", "C"]);
   });
 
   it("keeps the Filter shown when a Task of it is opened, and leaves one that is Deleted", () => {
-    model.add("A", Planning.Active, { tags: ["work"] });
+    model.add("A", { tags: ["work"] });
     model.addFilter("Work", "@work");
     const list = { kind: "filter" as const, id: filter("Work").id };
     model.list = list;
@@ -1005,18 +1047,18 @@ describe("Filters", () => {
     expect(titles()).toEqual([]);
   });
 
-  it("offers Active, Backlog, the Favorites in the Filters' order, then Filters", () => {
-    expect(model.bar.map((e) => e.title)).toEqual(["Active", "Backlog", "Filters"]);
+  it("offers the Favorites in the Filters' order, then Filters", () => {
+    expect(model.bar.map((e) => e.title)).toEqual(["Filters"]);
     for (const title of ["A", "B", "C"]) model.addFilter(title, "@a");
     model.setFavorite(filter("C"), true);
     model.setFavorite(filter("A"), true);
     expect(model.filter).toBeUndefined();
     expect(filter("A").favorite).toBe(true);
-    expect(model.bar.map((e) => e.title)).toEqual(["Active", "Backlog", "A", "C", "Filters"]);
+    expect(model.bar.map((e) => e.title)).toEqual(["A", "C", "Filters"]);
     model.moveFilter(filter("C"), filter("A"));
-    expect(model.bar.map((e) => e.title)).toEqual(["Active", "Backlog", "C", "A", "Filters"]);
+    expect(model.bar.map((e) => e.title)).toEqual(["C", "A", "Filters"]);
     model.setFavorite(filter("C"), false);
-    expect(model.bar.map((e) => e.title)).toEqual(["Active", "Backlog", "A", "Filters"]);
+    expect(model.bar.map((e) => e.title)).toEqual(["A", "Filters"]);
   });
 
   it("puts a Filter that is no Favorite under Filters", () => {
@@ -1025,8 +1067,8 @@ describe("Filters", () => {
     expect(model.barEntry).toEqual({ kind: "filters" });
     model.setFavorite(filter("A"), true);
     expect(model.barEntry).toEqual({ kind: "filter", id: filter("A").id });
-    model.list = { kind: "planning", planning: Planning.Backlog };
-    expect(model.barEntry).toEqual({ kind: "planning", planning: Planning.Backlog });
+    model.list = { kind: "filters" };
+    expect(model.barEntry).toEqual({ kind: "filters" });
   });
 
   it("saves a Favorite and reads it again", async () => {
@@ -1037,7 +1079,7 @@ describe("Filters", () => {
     expect(reopened.filters[0].favorite).toBe(true);
   });
 
-  it("opens the Device's last list, and Active if its Filter is gone", async () => {
+  it("opens the Device's last list, and the first Favorite if its Filter is gone", async () => {
     const values = new Map<string, string>();
     const device = {
       getItem: (key: string) => values.get(key) ?? null,
@@ -1045,36 +1087,30 @@ describe("Filters", () => {
     };
     const open = async () => new TasksModel(await TaskFiles.open(storage), 5000, device);
     const first = await open();
-    expect(first.list).toEqual({ kind: "planning", planning: Planning.Active });
+    expect(first.list).toEqual({ kind: "filters" }); // no Favorite
+    first.addFilter("Fav", "*");
+    first.setFavorite(first.filters[0], true);
     first.addFilter("A", "@a");
     await first.saved();
-    const id = first.filters[0].id;
-    for (const list of [
-      { kind: "planning" as const, planning: Planning.Backlog },
-      { kind: "filters" as const },
-      { kind: "filter" as const, id },
-    ]) {
+    const id = first.filters.find((f) => f.title === "A")!.id;
+    for (const list of [{ kind: "filters" as const }, { kind: "filter" as const, id }]) {
       first.list = list;
       expect((await open()).list).toEqual(list);
     }
-    first.deleteFilter(first.filters[0]);
+    first.deleteFilter(first.filters.find((f) => f.title === "A")!);
     first.list = { kind: "filter", id };
-    expect((await open()).list).toEqual({ kind: "planning", planning: Planning.Active });
-    // The list an added Task landed in, and the one a linked Task opened in.
-    first.list = { kind: "planning", planning: Planning.Active };
-    first.add("Later", Planning.Backlog);
-    expect((await open()).list).toEqual({ kind: "planning", planning: Planning.Backlog });
-    const later = first.tasks[0].id;
-    first.list = { kind: "filters" };
-    first.openLinked(later);
-    expect((await open()).list).toEqual({ kind: "planning", planning: Planning.Backlog });
+    expect((await open()).list).toEqual({ kind: "filter", id: first.filters[0].id });
+    // The Filters list when there is no Favorite.
+    first.deleteFilter(first.filters[0]);
+    expect((await open()).list).toEqual({ kind: "filters" });
   });
 
   it("Deletes a Filter after which every Task is as it was", () => {
-    model.add("A", Planning.Active, { tags: ["work"] });
+    model.add("A", { tags: ["work"] });
     model.addFilter("Work", "@work");
     model.deleteFilter(filter("Work"));
-    model.list = { kind: "planning", planning: Planning.Active };
+    model.addFilter("All", "*");
+    model.list = { kind: "filter", id: filter("All").id };
     expect(titles()).toEqual(["A"]);
     expect(first().tags).toEqual(["work"]);
   });
@@ -1092,7 +1128,7 @@ describe("Filters", () => {
   });
 
   it("lists a Filter whose stored Query can't be read with its error, matching nothing", async () => {
-    model.add("A", Planning.Active, { tags: ["work"] });
+    model.add("A", { tags: ["work"] });
     model.addFilter("Work", "@work");
     await model.saved();
     const [{ name }] = await storage.files("Filters");
@@ -1119,7 +1155,7 @@ describe("Filters", () => {
 describe("a Query being typed", () => {
   beforeEach(() => {
     deleteFavorites();
-    model.add("A", Planning.Active, { tags: ["work", "home"] });
+    model.add("A", { tags: ["work", "home"] });
   });
 
   it("reports why it can't be read, with the position, and what Tags it names are unknown", () => {
@@ -1127,7 +1163,10 @@ describe("a Query being typed", () => {
       position: 6,
       message: "Expected @tag, ! or (",
     });
-    expect(model.checkQuery("@work | !@nope")).toEqual({ problem: undefined, unknown: ["nope"] });
+    expect(model.checkQuery("@work | !@nope")).toEqual({
+      problem: undefined,
+      unknown: ["nope"],
+    });
   });
 
   it("makes typed text lowercase and refuses what neither a Tag nor the Query holds", () => {
@@ -1142,7 +1181,7 @@ describe("a Query being typed", () => {
   });
 
   it("takes Wildcards, suggesting nothing for them and marking those that fit no Tag", () => {
-    model.add("B", Planning.Active, { tags: ["work-backlog"] });
+    model.add("B", { tags: ["work-backlog"] });
     expect(TasksModel.allowedQueryText("@*Backlog")).toBe("@*backlog");
     expect(model.suggestQueryTags("@*back")).toEqual([]);
     expect(model.checkQuery("@*backlog | @*nope*")).toEqual({

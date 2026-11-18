@@ -1,4 +1,4 @@
-import { Planning, TaskQuickAdd, isValidTag } from "../core/Core";
+import { TaskQuickAdd, isValidTag } from "../core/Core";
 import { button, make } from "../Dom";
 import { QuickAddField } from "./QuickAddField";
 import { SubtasksSection } from "./SubtasksSection";
@@ -127,7 +127,7 @@ export function newTaskDialog(model: TasksModel, host: HTMLElement): void {
       priority: quickAdd.priority(),
       tags: quickAdd.tags(),
     };
-    if (model.add(title.title, Planning.Active, extras)) {
+    if (model.add(title.title, extras)) {
       title.clear();
       description.value = "";
       enableAdd();

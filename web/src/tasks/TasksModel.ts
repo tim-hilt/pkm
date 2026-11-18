@@ -66,45 +66,20 @@ export interface PendingClose {
   closing: Closing;
 }
 
-/** The two lists, in the order they are offered, and what an empty one says. */
-export const lists = [
-  { planning: Planning.Active, title: "Active", empty: "Nothing active." },
-  {
-    planning: Planning.Backlog,
-    title: "Backlog",
-    empty: "The Backlog is empty.",
-  },
-];
-
-/** What the Tasks Context shows: Active or the Backlog, the Filters list, or a Filter's Active Tasks. */
-export type TasksList =
-  | { kind: "planning"; planning: Planning }
-  | { kind: "filters" }
-  | { kind: "filter"; id: string };
-
-const active: TasksList = { kind: "planning", planning: Planning.Active };
-const backlog: TasksList = { kind: "planning", planning: Planning.Backlog };
+/** What the Tasks Context shows: the Filters list, or the Open Tasks a Filter matches. */
+export type TasksList = { kind: "filters" } | { kind: "filter"; id: string };
 
 /** Whether `a` and `b` show the same list. */
 function sameList(a: TasksList, b: TasksList): boolean {
   return storedList(a) === storedList(b);
 }
 
-/** The list as a Device stores it: `active`, `backlog`, `filters` or `filter:<id>` (as on Apple). */
+/** The list as a Device stores it: `filters` or `filter:<id>` (as on Apple). */
 function storedList(list: TasksList): string {
-  switch (list.kind) {
-    case "planning":
-      return list.planning === Planning.Active ? "active" : "backlog";
-    case "filters":
-      return "filters";
-    case "filter":
-      return `filter:${list.id}`;
-  }
+  return list.kind === "filters" ? "filters" : `filter:${list.id}`;
 }
 
 function parseList(stored: string | null): TasksList | undefined {
-  if (stored === "active") return active;
-  if (stored === "backlog") return backlog;
   if (stored === "filters") return { kind: "filters" };
   if (stored?.startsWith("filter:")) return { kind: "filter", id: stored.slice("filter:".length) };
   return undefined;
@@ -118,14 +93,14 @@ export interface DeviceStorage {
 
 const lastListKey = "lastTasksList";
 
-/** A Filter: a Title and a Query over the Active Tasks' Tags. */
+/** A Filter: a Title and a Query over the Open Tasks' Tags. */
 export interface Filter {
   id: string;
   title: string;
   /** As the user typed it. */
   query: string;
   favorite: boolean;
-  /** How many Active Tasks the Query matches. */
+  /** How many Open Tasks the Query matches. */
   matches: number;
   /** Why the stored Query can't be read; such a Filter matches nothing until it is edited. */
   error: string | undefined;
@@ -148,7 +123,7 @@ export interface TaskEdit {
 }
 
 /**
- * The Tasks Context's state: the list being shown (Active or the Backlog),
+ * The Tasks Context's state: the list being shown (the Filters or a Filter's Tasks),
  * from the core's store, which every change is saved from. Views follow
  * `onChange`. A Close is pending, and can be Reverted, until its toast has
  * been shown for `revertWindow` milliseconds, the next Close, or `commit`. A
@@ -169,7 +144,7 @@ export class TasksModel {
   private titleMissing = false;
   /** The Tasks of the list shown, in their order, each Parent followed by its Subtasks; none for the Filters list. */
   private shown: ListedTask[] = [];
-  private shownList: TasksList = { kind: "planning", planning: Planning.Active };
+  private shownList: TasksList = { kind: "filters" };
   private all: Filter[] = [];
   private saving: Promise<void> = Promise.resolve();
   private commitTimer: ReturnType<typeof setTimeout> | undefined;
@@ -180,26 +155,30 @@ export class TasksModel {
     private readonly device?: DeviceStorage,
   ) {
     this.reload();
-    // The last list opens again, unless it is a Filter that is gone: then Active.
+    // The last list opens again, unless it is a Filter that is gone: then the start list.
     const last = parseList(device?.getItem(lastListKey) ?? null);
-    if (last && (last.kind !== "filter" || this.all.some((f) => f.id === last.id))) {
-      this.shownList = last;
-      this.reload();
-    }
+    const usable = last && (last.kind !== "filter" || this.all.some((f) => f.id === last.id));
+    this.shownList = usable ? last : this.startList;
+    this.reload();
   }
 
-  /** The Tasks bar's entries: Active, Backlog, the Favorites in the Filters list's order, Filters. */
+  /** The Tasks bar's entries: the Favorites in the Filters list's order, Filters. */
   get bar(): { title: string; list: TasksList }[] {
     return [
-      ...lists.map(({ planning, title }) => ({
-        title,
-        list: { kind: "planning" as const, planning },
-      })),
       ...this.all
         .filter((f) => f.favorite)
-        .map((f) => ({ title: f.title, list: { kind: "filter" as const, id: f.id } })),
+        .map((f) => ({
+          title: f.title,
+          list: { kind: "filter" as const, id: f.id },
+        })),
       { title: "Filters", list: { kind: "filters" as const } },
     ];
+  }
+
+  /** Where a Device with no usable last list starts: the first Favorite, or the Filters list. */
+  private get startList(): TasksList {
+    const favorite = this.all.find((f) => f.favorite);
+    return favorite ? { kind: "filter", id: favorite.id } : { kind: "filters" };
   }
 
   /** The bar's entry that shows the list shown: a Filter that isn't a Favorite is under Filters. */
@@ -225,15 +204,6 @@ export class TasksModel {
     this.device?.setItem(lastListKey, storedList(list));
   }
 
-  /** The Active list or the Backlog if one is shown; Active while Filters are, which show Active Tasks. */
-  get planning(): Planning {
-    return this.shownList.kind === "planning" ? this.shownList.planning : Planning.Active;
-  }
-
-  set planning(planning: Planning) {
-    this.list = { kind: "planning", planning };
-  }
-
   /** Every Filter, in the Filters list's order. */
   get filters(): readonly Filter[] {
     return this.all;
@@ -245,7 +215,7 @@ export class TasksModel {
     return list.kind === "filter" ? this.all.find((f) => f.id === list.id) : undefined;
   }
 
-  /** The Task on top of the edit view's stack as last saved, from either list; `undefined` if none is shown. */
+  /** The Task on top of the edit view's stack as last saved; `undefined` if none is shown. */
   get editing(): ListedTask | undefined {
     const id = this.stack.at(-1);
     return id === undefined ? undefined : this.find(id);
@@ -266,8 +236,9 @@ export class TasksModel {
   }
 
   /**
-   * Shows the edit view of the Open Task `id`, over the list it is in;
-   * `undefined` shows none. An unknown or Closed `id` shows the Active list.
+   * Shows the edit view of the Open Task `id`, over the list shown if it holds
+   * the Task, else over the first Favorite that does; `undefined` shows none.
+   * An unknown or Closed `id` shows the list a Device opens on without a last one.
    * The `id` on top of the stack stays as it is, and the one below it is popped
    * to; any other starts a stack of its own.
    */
@@ -277,18 +248,15 @@ export class TasksModel {
     this.clearStack();
     if (id !== undefined) {
       const isTask = (task: ListedTask) => task.id === id;
-      // A Task of the list shown, a Filter's too, opens over it.
-      if (this.shown.some(isTask)) {
-        this.stack = [id];
+      if (!this.find(id)) {
+        this.show(this.startList);
       } else {
-        const found = lists
-          .map(({ planning }) => ({
-            planning,
-            task: this.read({ kind: "planning", planning }).find(isTask),
-          }))
-          .find(({ task }) => task);
-        this.show({ kind: "planning", planning: found?.planning ?? Planning.Active });
-        if (found?.task) this.stack = [id];
+        const favorites = this.all
+          .filter((f) => f.favorite)
+          .map((f): TasksList => ({ kind: "filter", id: f.id }));
+        const home = [this.shownList, ...favorites].find((list) => this.read(list).some(isTask));
+        if (home) this.show(home);
+        this.stack = [id];
       }
     }
     this.reload();
@@ -311,7 +279,7 @@ export class TasksModel {
 
   /**
    * The direct Subtasks of the Open Task `id`, in list order: Open, or Done and
-   * still Revertable; never Rejected. From either list.
+   * still Revertable; never Rejected.
    */
   subtasks(id: string): ListedTask[] {
     try {
@@ -333,12 +301,17 @@ export class TasksModel {
     this.titleMissing = false;
   }
 
-  /** `id` as last saved, from either list. */
+  /** The Open Task `id` as last saved, whichever list shows it. */
   find(id: string): ListedTask | undefined {
     const isTask = (task: ListedTask) => task.id === id;
-    return (
-      this.shown.find(isTask) ??
-      lists.flatMap(({ planning }) => this.read({ kind: "planning", planning })).find(isTask)
+    return this.shown.find(isTask) ?? this.openTasks().find(isTask);
+  }
+
+  /** Every Open Task, Subtasks included. */
+  private openTasks(): ListedTask[] {
+    const { store } = this.files;
+    return [Planning.Active, Planning.Backlog].flatMap((planning) =>
+      this.listed(store.tasks(planning)),
     );
   }
 
@@ -356,14 +329,13 @@ export class TasksModel {
     this.onChange();
   }
 
-  /** Adds a Task and shows the list it landed in, unless a Filter is shown, which stays and gives the Task the Tags its Query requires. False, adding nothing, if the Title is empty or a Tag invalid. */
-  add(title: string, planning = Planning.Active, extras: NewTask = {}): boolean {
+  /** Adds a Task; in a Filter it gets the Tags the Query requires, so that it stays there. False, adding nothing, if the Title is empty or a Tag invalid. */
+  add(title: string, extras: NewTask = {}): boolean {
     const { store } = this.files;
     const { description, priority = 4, tags = [] } = extras;
     const filter = this.shownList.kind === "filter" ? this.shownList.id : undefined;
-    const create = () => store.create(title, planning, priority, tags, filter);
+    const create = () => store.create(title, Planning.Active, priority, tags, filter);
     if (!this.change(() => this.describe(create(), title, priority, description))) return false;
-    if (this.shownList.kind === "planning") this.show({ kind: "planning", planning });
     this.reload();
     this.onChange();
     return true;
@@ -411,7 +383,12 @@ export class TasksModel {
     const title = quickAdd.title();
     if (title === "") return undefined;
     const merged = [...tags, ...quickAdd.tags().filter((t) => !tags.includes(t))];
-    const edit = { title, description, priority: quickAdd.priority() ?? priority, tags: merged };
+    const edit = {
+      title,
+      description,
+      priority: quickAdd.priority() ?? priority,
+      tags: merged,
+    };
     return this.edit(task, edit) ? this.find(task.id) : undefined;
   }
 
@@ -427,23 +404,14 @@ export class TasksModel {
     if (description.trim() !== "") this.files.store.edit(id, title, description, priority, []);
   }
 
-  /** Makes a Task Active or moves it to the Backlog; it leaves the list shown. */
-  plan(task: ListedTask, planning: Planning): void {
-    this.apply(() => this.files.store.plan(task.id, planning));
-  }
-
   /**
-   * Moves a Task before `before` in the list, or, with none, to its end. Its
-   * Parent stays. In a Filter only that Filter's own order changes.
+   * Moves a Task before `before` in the Filter shown, or, with none, to its end.
+   * Its Parent stays. Only the Filter's own order changes.
    */
   moveBefore(task: ListedTask, before: ListedTask | undefined): void {
-    const { store } = this.files;
     const list = this.shownList;
-    this.apply(() =>
-      list.kind === "filter"
-        ? store.moveInFilter(list.id, task.id, before?.id)
-        : store.moveBefore(task.id, before?.id),
-    );
+    if (list.kind !== "filter") return;
+    this.apply(() => this.files.store.moveInFilter(list.id, task.id, before?.id));
   }
 
   /** Creates a Filter at the end of the Filters list. False, creating nothing, if the Title is empty or the Query can't be read. */
@@ -523,7 +491,7 @@ export class TasksModel {
     });
   }
 
-  /** The Open Tasks of both lists `task` could be Blocked by (see the store). */
+  /** The Open Tasks `task` could be Blocked by (see the store). */
   blockerCandidates(task: ListedTask): ListedTask[] {
     return this.listed(this.files.store.blockerCandidates(task.id));
   }
@@ -672,14 +640,7 @@ export class TasksModel {
 
   private read(list: TasksList): ListedTask[] {
     const { store } = this.files;
-    switch (list.kind) {
-      case "planning":
-        return this.listed(store.tasks(list.planning));
-      case "filter":
-        return this.listed(store.filterTasks(list.id));
-      case "filters":
-        return [];
-    }
+    return list.kind === "filter" ? this.listed(store.filterTasks(list.id)) : [];
   }
 
   /** The wasm `rows` as plain Tasks, freeing them. */
