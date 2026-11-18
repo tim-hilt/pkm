@@ -1310,7 +1310,6 @@ describe("a Grouped Filter", () => {
       ["home", ["Both"]],
       ["work", ["W", "Both"]],
     ]);
-    expect(model.isGrouped).toBe(true);
   });
 
   it("moves a Task in one Group only, leaving its place in other Groups", () => {
@@ -1329,7 +1328,6 @@ describe("a Grouped Filter", () => {
 
   it("is one Group without Group by", () => {
     model.list = { kind: "filter", id: model.filters[0].id };
-    expect(model.isGrouped).toBe(false);
     expect(groupsShown()).toEqual([[undefined, ["Loose", "W", "Both"]]]);
   });
 

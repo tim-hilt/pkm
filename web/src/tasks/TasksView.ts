@@ -157,8 +157,8 @@ export class TasksView {
     this.toolbar.hidden = filters;
     const rows = filters ? this.filterList() : this.taskList();
     this.list.replaceChildren(...rows);
-    // A Group's heading shows even when empty, so a Grouped Filter never says "No Open Tasks".
-    this.empty.hidden = filters ? rows.length > 0 : model.tasks.length > 0 || model.isGrouped;
+    // A Grouped Filter's headings are rows too, so it never says "No Open Tasks".
+    this.empty.hidden = rows.length > 0;
     const [heading, text] = this.emptyText(list);
     this.empty.replaceChildren(make("strong", "", [heading]), make("span", "", [text]));
     if (filters) this.empty.append(button("tasks-empty-new", "New Filter", () => this.createNew()));
@@ -266,7 +266,10 @@ export class TasksView {
     );
   }
 
-  /** The drag of the Group `tag` (none: the Tasks without a Group); blank space below the list drops at its end. */
+  /**
+   * The drag of the Group `tag` (none: the Tasks without a Group). A drop off
+   * the rows, below the list or on a heading, moves to the end of the Group.
+   */
   private dragOf(tag: string | undefined): RowDrag<ListedTask> {
     const key = tag ?? "";
     let drag = this.groupDrags.get(key);

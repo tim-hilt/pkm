@@ -4,8 +4,8 @@ import { type Filter, TasksModel } from "./TasksModel";
 import { tagLabel } from "./TagLabel";
 
 /**
- * Asks for a Title, a Query and a Group by: adds the Filter at the end of the Filters list,
- * or, given one, changes it. The Query field refuses what a Query can't hold as
+ * Asks for a Title, a Query and a Group by: adds the Filter at the end of the
+ * Filters list, or, given one, changes it. The Query field refuses what a Query can't hold as
  * it is typed, suggests Tags after `@`, shows why a Query can't be read, inline,
  * and marks Tags that don't exist, which doesn't stop saving. The Group-by field
  * (`@work @private`) suggests Tags, leaving out those listed, and shows why it

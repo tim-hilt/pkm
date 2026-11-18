@@ -4,7 +4,9 @@
  * moves the dragged item before it; below the last row, to the end of the
  * list. Touch keeps its long press for the row's menu, so a row is draggable
  * only once the mouse is pressed on it. Rows and end area attached to one
- * instance reorder among themselves only; `move` does the reordering.
+ * instance reorder among themselves only: a row is never part of an end area,
+ * so a drop on the dragged row or on another instance's row does nothing.
+ * `move` does the reordering.
  */
 export class RowDrag<T extends { id: string }> {
   private dragged: T | undefined;
@@ -22,9 +24,9 @@ export class RowDrag<T extends { id: string }> {
     });
     row.addEventListener("dragend", () => this.end());
     row.addEventListener("dragover", (event) => {
+      event.stopPropagation();
       if (!this.dragged || this.dragged.id === task.id) return;
       event.preventDefault();
-      event.stopPropagation();
       this.mark(row);
     });
     row.addEventListener("drop", (event) => {

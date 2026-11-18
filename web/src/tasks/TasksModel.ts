@@ -265,11 +265,6 @@ export class TasksModel {
     return this.shownGroups;
   }
 
-  /** Whether the Filter shown is Grouped. */
-  get isGrouped(): boolean {
-    return this.shownGroups.length > 1;
-  }
-
   /**
    * Shows the edit view of the Open Task `id`, over the list shown if it holds
    * the Task, else over the first Favorite that does; `undefined` shows none.
