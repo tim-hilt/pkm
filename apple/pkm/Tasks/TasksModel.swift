@@ -269,9 +269,22 @@ final class TasksModel {
         (try? store.blockerCandidates(id: task.id)) ?? []
     }
 
+    /// How the Filter shown is Sorted; `nil` on the Filters list.
+    var sort: FilterSort? {
+        filters.first { $0.id == list.filterID }?.sort
+    }
+
+    /// Sorts the Filter shown (see the store: Manual keeps the order shown, Priority discards it).
+    func setSort(_ sort: FilterSort) {
+        guard let id = list.filterID else { return }
+        try? store.setSort(id: id, sort: sort)
+        reload()
+    }
+
     /// Moves the row at `source` to land before the row at `destination` of `tasks`
     /// (`onMove`'s meaning); past the last row, to the end of the list. The Parent stays. A Subtask
-    /// passing a sibling also moves in its Subtask order; otherwise only the Filter's order changes.
+    /// passing a sibling also moves in its Subtask order. In a Sorted Filter, a drop out of the Task's
+    /// Priority group turns it Manual.
     func move(from source: IndexSet, to destination: Int) {
         guard let id = list.filterID, let index = source.first, index != destination else { return }
         let target = destination < tasks.count ? tasks[destination] : nil

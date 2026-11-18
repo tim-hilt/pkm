@@ -95,6 +95,7 @@ private struct TaskListView: View {
                 .listStyle(.plain)
             }
         }
+        .toolbar { ToolbarItem(placement: .primaryAction) { SortMenu() } }
         .safeAreaInset(edge: .bottom) {
             // While the edit sheet is open, its own toast shows instead.
             if let pendingClose = model.pendingClose, model.editing.isEmpty {
@@ -102,6 +103,44 @@ private struct TaskListView: View {
             }
         }
         .animation(.default, value: model.pendingClose)
+    }
+}
+
+/// The Filter's Sort: a Picker of the Sort keys, and a Direction section while the key has one.
+private struct SortMenu: View {
+    @Environment(TasksModel.self) private var model
+
+    var body: some View {
+        if let sort = model.sort {
+            Menu {
+                Picker(
+                    "Sort",
+                    selection: Binding(
+                        get: { sortKey(sort: sort) }, set: { model.setSort(sortWithKey(sort: sort, key: $0)) })
+                ) {
+                    ForEach(sortKeys(), id: \.self) { key in
+                        switch key {
+                        case .manual: Text("Manual").tag(key)
+                        case .priority: Text("Priority").tag(key)
+                        }
+                    }
+                }
+                if case .priority(let direction) = sort {
+                    Section("Direction") {
+                        Picker(
+                            "Direction",
+                            selection: Binding(get: { direction }, set: { model.setSort(.priority($0)) })
+                        ) {
+                            Text("Ascending").tag(Direction.ascending)
+                            Text("Descending").tag(Direction.descending)
+                        }
+                    }
+                }
+            } label: {
+                Label("Sort", systemImage: "arrow.up.arrow.down")
+            }
+            .accessibilityIdentifier("sort-menu")
+        }
     }
 }
 

@@ -3,8 +3,8 @@
 mod filters;
 mod migration;
 
-pub use filters::Filter;
 pub(crate) use filters::is_filter;
+pub use filters::{Direction, Filter, FilterSort, FilterSortKey};
 
 use crate::files::{DiskFiles, Files, Stamp};
 use crate::query::QueryError;

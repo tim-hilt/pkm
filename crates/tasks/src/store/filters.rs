@@ -13,6 +13,85 @@ use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::PathBuf;
 
+/// What a Filter orders by: the Sort key of a `FilterSort`. A new key is one
+/// more variant here and in `FilterSort`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterSortKey {
+    Manual,
+    Priority,
+}
+
+impl FilterSortKey {
+    /// Every key, in the order a menu lists them.
+    pub const ALL: [Self; 2] = [Self::Manual, Self::Priority];
+}
+
+/// Which end of a Sort key comes first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    /// P1 first.
+    Ascending,
+    /// P4 first.
+    Descending,
+}
+
+/// How a Filter orders its Tasks (ADR-0025). Stored as one scalar (`sort`), so
+/// key and Direction merge as a pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterSort {
+    /// By the Filter's places, see `Tasks::move_in_filter`.
+    Manual,
+    /// By Priority; Tasks of one Priority keep their Manual order.
+    Priority(Direction),
+}
+
+impl FilterSort {
+    pub fn key(self) -> FilterSortKey {
+        match self {
+            Self::Manual => FilterSortKey::Manual,
+            Self::Priority(_) => FilterSortKey::Priority,
+        }
+    }
+
+    /// This Sort with another key: the same Direction if the key stays
+    /// Priority, else the key's default (P1 first).
+    #[must_use]
+    pub fn with_key(self, key: FilterSortKey) -> Self {
+        match (key, self) {
+            (FilterSortKey::Manual, _) => Self::Manual,
+            (FilterSortKey::Priority, Self::Priority(_)) => self,
+            (FilterSortKey::Priority, Self::Manual) => Self::Priority(Direction::Ascending),
+        }
+    }
+
+    /// The file's value; an absent or unknown one is Manual (a later Sort key
+    /// must not break an older Device).
+    fn read(value: Option<&str>) -> Self {
+        match value {
+            Some("priority ascending") => Self::Priority(Direction::Ascending),
+            Some("priority descending") => Self::Priority(Direction::Descending),
+            _ => Self::Manual,
+        }
+    }
+
+    fn write(self, file: &mut Document) {
+        match self {
+            Self::Manual => file.remove("sort"),
+            Self::Priority(Direction::Ascending) => file.set_scalar("sort", "priority ascending"),
+            Self::Priority(Direction::Descending) => file.set_scalar("sort", "priority descending"),
+        }
+    }
+
+    /// The position of a Task of `priority` among the others: lower is first.
+    fn rank(self, priority: u8) -> i16 {
+        match self {
+            Self::Manual => 0,
+            Self::Priority(Direction::Ascending) => i16::from(priority),
+            Self::Priority(Direction::Descending) => -i16::from(priority),
+        }
+    }
+}
+
 /// A saved Query, as the Filters list shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Filter {
@@ -21,6 +100,7 @@ pub struct Filter {
     /// As the user typed it.
     pub query: String,
     pub favorite: bool,
+    pub sort: FilterSort,
     /// How many Open Tasks the Query matches.
     pub matches: u32,
     /// Why the stored Query can't be read (a hand edit, a newer Device); such a
@@ -140,14 +220,20 @@ impl Tasks {
 
     /// The Open Tasks the Filter `id` matches: each matched on its own Tags,
     /// Blocked ones, Subtasks and Backlog Tasks included. The Tasks with a
-    /// place come first in the Filter's order, then the others by `created`; the
-    /// Subtasks of one Parent keep their Subtask order among themselves. A
+    /// place come first in the Filter's order, then the others by `created`; if
+    /// the Filter is Sorted, then by that, Tasks of one key keeping that order;
+    /// the Subtasks of one Parent keep their Subtask order among themselves. A
     /// Query that can't be read matches nothing. Fails with `NotFound` if
     /// there is no such Filter.
     pub fn filter_rows(&self, id: &str) -> io::Result<Vec<Row>> {
         let filter = self.stored_filter(id)?;
         let nodes: Nodes = self.shown()?;
-        let found = shown_in(&nodes, &filter.filter.query, &filter.places);
+        let found = shown_in(
+            &nodes,
+            &filter.filter.query,
+            &filter.places,
+            filter.filter.sort,
+        );
         Ok(rows_of(&nodes, found))
     }
 
@@ -169,6 +255,11 @@ impl Tasks {
     /// as for Tasks (see `place`). If another Task shown has none yet, or the
     /// Subtask order refilled the rows, every Task shown gets one, in one write.
     ///
+    /// In a Sorted Filter a drop between Tasks of the moved Task's own key
+    /// keeps the Sort and places it among those. Any other drop gives every
+    /// Task shown a place in the order shown with the drop applied, and turns
+    /// the Filter Manual, in the same write.
+    ///
     /// A Subtask dropped past a sibling shown also moves in its Subtask order,
     /// to just after the last sibling it now follows, or before the first
     /// it now precedes; that writes its Task file (and those sharing its key).
@@ -176,8 +267,9 @@ impl Tasks {
     /// Filter doesn't show.
     pub fn move_in_filter(&self, id: &str, task: &str, before: Option<&str>) -> io::Result<()> {
         let filter = self.stored_filter(id)?;
+        let sort = filter.filter.sort;
         let nodes: Nodes = self.shown()?;
-        let mut shown = shown_in(&nodes, &filter.filter.query, &filter.places);
+        let mut shown = shown_in(&nodes, &filter.filter.query, &filter.places, sort);
         let from = (shown.iter().position(|n| n.task.id == task)).ok_or(io::ErrorKind::NotFound)?;
         if before == Some(task) {
             return Ok(());
@@ -192,22 +284,23 @@ impl Tasks {
         if to == from {
             return Ok(());
         }
-        let mut places: HashMap<&str, f64> = (filter.places.iter())
-            .map(|(id, p)| (id.as_str(), *p))
-            .collect();
-        let keys: Vec<Option<f64>> = (shown.iter())
-            .map(|n| places.get(n.task.id.as_str()).copied())
-            .collect();
-        let placement = place_among(&keys, to);
-        for (at, key) in placement.shifted {
-            places.insert(shown[at].task.id.as_str(), key);
-        }
-        places.insert(task, placement.position);
-        let places: Vec<(String, f64)> = places
-            .into_iter()
-            .map(|(id, p)| (id.to_owned(), p))
-            .collect();
-        self.rewrite_filter(id, |file| set_places(file, &places))?;
+        let rank = |n: &Node| sort.rank(n.task.priority);
+        let own = rank(moved);
+        let in_own_key = sort != FilterSort::Manual
+            && shown[..to].last().is_none_or(|n| rank(n) <= own)
+            && shown.get(to).is_none_or(|n| rank(n) >= own);
+        let places = if in_own_key {
+            let (group, at) = among_own_key(&shown, to, own, rank);
+            placed_at(&filter.places, &group, at, task)
+        } else {
+            placed_at(&filter.places, &shown, to, task)
+        };
+        self.rewrite_filter(id, |file| {
+            set_places(file, &places);
+            if sort != FilterSort::Manual && !in_own_key {
+                FilterSort::Manual.write(file);
+            }
+        })?;
 
         let Some(parent) = moved.task.parent.as_deref() else {
             return Ok(());
@@ -227,6 +320,32 @@ impl Tasks {
             .map_err(Error::into_io)
     }
 
+    /// Sorts the Filter `id`. Manual keeps the order shown: every Task shown
+    /// gets a place for it. Priority from Manual discards the places; a new
+    /// Direction of Priority keeps them, so the Tasks of one Priority stay in
+    /// their order. Writes no Task file. Fails with `NotFound` if there is no
+    /// such Filter.
+    pub fn set_sort(&self, id: &str, sort: FilterSort) -> io::Result<()> {
+        let filter = self.stored_filter(id)?;
+        let was = filter.filter.sort;
+        let places = match (sort, was) {
+            (FilterSort::Manual, FilterSort::Manual)
+            | (FilterSort::Priority(_), FilterSort::Priority(_)) => filter.places,
+            (FilterSort::Priority(_), FilterSort::Manual) => Vec::new(),
+            (FilterSort::Manual, FilterSort::Priority(_)) => {
+                let nodes: Nodes = self.shown()?;
+                let shown = shown_in(&nodes, &filter.filter.query, &filter.places, was);
+                (shown.iter().zip(1..))
+                    .map(|(n, place)| (n.task.id.clone(), f64::from(place)))
+                    .collect()
+            }
+        };
+        self.rewrite_filter(id, |file| {
+            set_places(file, &places);
+            sort.write(file);
+        })
+    }
+
     /// Every Open Task in the order the All Tasks Favorite keeps: by its
     /// places, then by `created`, Subtasks in their Subtask order. Without the
     /// Favorite, by `created`.
@@ -235,7 +354,12 @@ impl Tasks {
             .find(|s| s.filter.id == ALL_TASKS.id)
             .map(|s| s.places)
             .unwrap_or_default();
-        Ok(shown_in(nodes, ALL_TASKS.query, &places))
+        Ok(shown_in(
+            nodes,
+            ALL_TASKS.query,
+            &places,
+            FilterSort::Manual,
+        ))
     }
 
     /// Checks a Query text without saving: the Tags it names, Wildcards
@@ -326,16 +450,56 @@ pub(super) fn matching<'a>(found: Vec<&'a Node>, query: &str) -> Vec<&'a Node> {
 }
 
 /// The Open Tasks `query` matches in the Filter's order: by `places`, then by
-/// `created`, then by Item ID (see `in_filter_order`); then the rows of each
-/// Parent's Subtasks are refilled in their Subtask order (`in_subtask_order`).
+/// `created`, then by Item ID (see `in_filter_order`); then by `sort`, Tasks of
+/// one key keeping that order; then the rows of each Parent's Subtasks are
+/// refilled in their Subtask order (`in_subtask_order`).
 pub(super) fn shown_in<'a>(
     nodes: &'a Nodes,
     query: &str,
     places: &[(String, f64)],
+    sort: FilterSort,
 ) -> Vec<&'a Node> {
     let mut open: Vec<&Node> = nodes.values().collect();
     open.sort_by(|a, b| (a.created.cmp(&b.created)).then_with(|| a.task.id.cmp(&b.task.id)));
-    in_subtask_order(in_filter_order(matching(open, query), places))
+    let mut found = in_filter_order(matching(open, query), places);
+    found.sort_by_key(|n| sort.rank(n.task.priority)); // stable
+    in_subtask_order(found)
+}
+
+/// The Tasks of `shown` with the key of rank `own`, and where a Task of that
+/// key dropped at `to` among all of `shown` falls among them.
+fn among_own_key<'a>(
+    shown: &[&'a Node],
+    to: usize,
+    own: i16,
+    rank: impl Fn(&Node) -> i16,
+) -> (Vec<&'a Node>, usize) {
+    let at = shown[..to].iter().filter(|n| rank(n) == own).count();
+    let group = shown.iter().copied().filter(|n| rank(n) == own);
+    (group.collect(), at)
+}
+
+/// `places` with the Task `task` put at index `at` of `list` (without it):
+/// usually only it changes, see `place_among`.
+fn placed_at(
+    places: &[(String, f64)],
+    list: &[&Node],
+    at: usize,
+    task: &str,
+) -> Vec<(String, f64)> {
+    let mut places: HashMap<&str, f64> = places.iter().map(|(id, p)| (id.as_str(), *p)).collect();
+    let keys: Vec<Option<f64>> = (list.iter())
+        .map(|n| places.get(n.task.id.as_str()).copied())
+        .collect();
+    let placement = place_among(&keys, at);
+    for (at, key) in placement.shifted {
+        places.insert(list[at].task.id.as_str(), key);
+    }
+    places.insert(task, placement.position);
+    places
+        .into_iter()
+        .map(|(id, p)| (id.to_owned(), p))
+        .collect()
 }
 
 /// `found` as a Filter shows it: the Tasks with a place first, by place, then
@@ -406,6 +570,7 @@ fn stored_of(file: &Document) -> Option<Stored> {
             title: file.scalar("title")?.to_owned(),
             query: file.scalar("query")?.to_owned(),
             favorite: file.scalar("favorite") == Some("true"),
+            sort: FilterSort::read(file.scalar("sort")),
             matches: 0,
             error: None,
         },
@@ -1045,5 +1210,169 @@ mod tests {
         let f = tasks.create_filter("X", "@x").unwrap();
         tasks.move_in_filter(&f.id, &ids[3], Some(&ids[1])).unwrap();
         assert_eq!(sheet(&tasks, &ids[0]), ["s3", "s1", "s2"]);
+    }
+
+    /// "a" P3, "b" P1, "c" P3, "d" P2, "e" P1 in this Manual order, in a
+    /// Filter `@work`.
+    fn priority_fixture() -> (Arc<MemoryFiles>, Tasks, Filter, Vec<String>) {
+        let (files, tasks) = open();
+        let ids = [("a", 3), ("b", 1), ("c", 3), ("d", 2), ("e", 1)]
+            .map(|(title, priority)| {
+                let task = tasks
+                    .create(title, priority, &["work".into()], None)
+                    .unwrap();
+                stamp(&tasks, task.id)
+            })
+            .to_vec();
+        let filter = tasks.create_filter("Work", "@work").unwrap();
+        (files, tasks, filter, ids)
+    }
+
+    const ASCENDING: FilterSort = FilterSort::Priority(Direction::Ascending);
+    const DESCENDING: FilterSort = FilterSort::Priority(Direction::Descending);
+
+    #[test]
+    fn both_directions_sort_by_priority_with_ties_in_manual_order() {
+        let (_, tasks, f, ids) = priority_fixture();
+        tasks.set_sort(&f.id, ASCENDING).unwrap();
+        assert_eq!(shown(&tasks, &f), ["b", "e", "d", "a", "c"]);
+        tasks.move_in_filter(&f.id, &ids[4], Some(&ids[1])).unwrap(); // e before b
+        assert_eq!(shown(&tasks, &f), ["e", "b", "d", "a", "c"]);
+        tasks.set_sort(&f.id, DESCENDING).unwrap();
+        assert_eq!(shown(&tasks, &f), ["a", "c", "d", "e", "b"]); // groups flip only
+        assert_eq!(tasks.stored_filters().unwrap()[0].filter.sort, DESCENDING);
+    }
+
+    #[test]
+    fn a_sort_writes_no_task_file() {
+        let (files, tasks, f, ids) = priority_fixture();
+        let task = |id: &str| files.read(Path::new(&format!("Tasks/{id}.md"))).unwrap();
+        let before: Vec<_> = ids.iter().map(|id| task(id)).collect();
+        tasks.set_sort(&f.id, ASCENDING).unwrap();
+        tasks.move_in_filter(&f.id, &ids[2], Some(&ids[0])).unwrap();
+        tasks.set_sort(&f.id, FilterSort::Manual).unwrap();
+        assert_eq!(ids.iter().map(|id| task(id)).collect::<Vec<_>>(), before);
+    }
+
+    #[test]
+    fn new_newly_matching_and_reprioritised_tasks_take_their_sorted_place() {
+        let (_, tasks, f, ids) = priority_fixture();
+        tasks.set_sort(&f.id, ASCENDING).unwrap();
+        add_priority(&tasks, "f", 3, &["work"]);
+        assert_eq!(shown(&tasks, &f), ["b", "e", "d", "a", "c", "f"]);
+        let x = add_priority(&tasks, "x", 1, &[]);
+        tasks.add_tag(&x, "work").unwrap();
+        assert_eq!(shown(&tasks, &f), ["b", "e", "x", "d", "a", "c", "f"]);
+        tasks.edit(&ids[2], "c", "", 1, &[]).unwrap();
+        assert_eq!(shown(&tasks, &f), ["b", "c", "e", "x", "d", "a", "f"]);
+    }
+
+    fn add_priority(tasks: &Tasks, title: &str, priority: u8, tags: &[&str]) -> String {
+        let tags: Vec<String> = tags.iter().map(|t| (*t).to_owned()).collect();
+        stamp(
+            tasks,
+            tasks.create(title, priority, &tags, None).unwrap().id,
+        )
+    }
+
+    #[test]
+    fn a_drag_within_the_priority_group_keeps_the_sort() {
+        let (_, tasks, f, ids) = priority_fixture();
+        tasks.set_sort(&f.id, ASCENDING).unwrap();
+        tasks.move_in_filter(&f.id, &ids[2], Some(&ids[0])).unwrap(); // c before a
+        assert_eq!(shown(&tasks, &f), ["b", "e", "d", "c", "a"]);
+        tasks.move_in_filter(&f.id, &ids[2], None).unwrap(); // the end, still P3
+        assert_eq!(shown(&tasks, &f), ["b", "e", "d", "a", "c"]);
+        assert_eq!(tasks.stored_filters().unwrap()[0].filter.sort, ASCENDING);
+    }
+
+    #[test]
+    fn a_drag_across_groups_keeps_the_order_shown_and_turns_manual_in_one_write() {
+        let (files, tasks, f, ids) = priority_fixture();
+        tasks.set_sort(&f.id, ASCENDING).unwrap();
+        files.take_changes();
+        tasks.move_in_filter(&f.id, &ids[0], Some(&ids[1])).unwrap(); // a before b
+        assert_eq!(files.take_changes().len(), 1);
+        assert_eq!(shown(&tasks, &f), ["a", "b", "e", "d", "c"]);
+        assert_eq!(
+            tasks.stored_filters().unwrap()[0].filter.sort,
+            FilterSort::Manual
+        );
+        tasks.set_sort(&f.id, DESCENDING).unwrap();
+        tasks.move_in_filter(&f.id, &ids[1], None).unwrap(); // P1 b to the end
+        assert_eq!(shown(&tasks, &f), ["a", "c", "d", "e", "b"]);
+        assert_eq!(tasks.stored_filters().unwrap()[0].filter.sort, DESCENDING);
+        tasks.move_in_filter(&f.id, &ids[1], Some(&ids[3])).unwrap(); // b before d
+        assert_eq!(shown(&tasks, &f), ["a", "c", "b", "d", "e"]);
+        assert_eq!(
+            tasks.stored_filters().unwrap()[0].filter.sort,
+            FilterSort::Manual
+        );
+    }
+
+    #[test]
+    fn picking_manual_keeps_the_order_shown_and_picking_priority_clears_it() {
+        let (_, tasks, f, ids) = priority_fixture();
+        tasks.set_sort(&f.id, ASCENDING).unwrap();
+        tasks.set_sort(&f.id, FilterSort::Manual).unwrap();
+        assert_eq!(shown(&tasks, &f), ["b", "e", "d", "a", "c"]);
+        tasks.move_in_filter(&f.id, &ids[4], Some(&ids[1])).unwrap(); // e before b
+        tasks.set_sort(&f.id, ASCENDING).unwrap();
+        assert_eq!(shown(&tasks, &f), ["b", "e", "d", "a", "c"]); // places gone
+        assert!(tasks.stored_filters().unwrap()[0].places.is_empty());
+    }
+
+    #[test]
+    fn sorted_subtasks_take_their_own_priority_but_siblings_keep_their_subtask_order() {
+        let (_, tasks, _, _) = priority_fixture();
+        let p = add_priority(&tasks, "p", 4, &["work"]);
+        let s1 = tasks
+            .create_subtask(&p, "s1", 3, &["work".into()])
+            .unwrap()
+            .id;
+        stamp(&tasks, s1);
+        let s2 = tasks
+            .create_subtask(&p, "s2", 1, &["work".into()])
+            .unwrap()
+            .id;
+        stamp(&tasks, s2);
+        let f = tasks.create_filter("Work", "@work").unwrap();
+        tasks.set_sort(&f.id, ASCENDING).unwrap();
+        // The rows of s1 (P3) and s2 (P1) are refilled in Subtask order.
+        assert_eq!(
+            shown(&tasks, &f),
+            ["b", "e", "s1", "d", "a", "c", "s2", "p"]
+        );
+    }
+
+    #[test]
+    fn an_unknown_sort_reads_as_manual_and_survives_a_write() {
+        let (files, tasks, f, ids) = priority_fixture();
+        let path = format!("Filters/{}.md", f.id);
+        let text = files.read(Path::new(&path)).unwrap();
+        files
+            .write(
+                Path::new(&path),
+                &text.replace("favorite:", "sort: created ascending\nfavorite:"),
+            )
+            .unwrap();
+        assert_eq!(shown(&tasks, &f), ["a", "b", "c", "d", "e"]);
+        tasks.set_favorite(&f.id, true).unwrap();
+        tasks.move_in_filter(&f.id, &ids[4], Some(&ids[0])).unwrap();
+        let file = Document::parse(&files.read(Path::new(&path)).unwrap()).unwrap();
+        assert_eq!(file.scalar("sort"), Some("created ascending"));
+    }
+
+    #[test]
+    fn the_menu_keys_and_their_directions() {
+        assert_eq!(
+            FilterSortKey::ALL.map(|k| FilterSort::Manual.with_key(k)),
+            [FilterSort::Manual, ASCENDING]
+        );
+        assert_eq!(DESCENDING.with_key(FilterSortKey::Priority), DESCENDING);
+        assert_eq!(
+            DESCENDING.with_key(FilterSortKey::Manual).key(),
+            FilterSortKey::Manual
+        );
     }
 }

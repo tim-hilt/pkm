@@ -5,8 +5,8 @@ use std::sync::Mutex;
 
 use pkm_base::tags::{Entry as TagEntry, Suggestions as TagSuggestions, Tags};
 use pkm_tasks::{
-    Blocker, Closing, Error, Filter, QuickAdd, QuickShortcut, Row, ShortcutMeaning, TagQuery, Task,
-    Tasks,
+    Blocker, Closing, Direction, Error, Filter, FilterSort, FilterSortKey, QuickAdd, QuickShortcut,
+    Row, ShortcutMeaning, TagQuery, Task, Tasks,
 };
 
 /// Why a Task wasn't saved or the Tasks couldn't be read.
@@ -80,6 +80,46 @@ pub struct Blocker {
     pub closed: bool,
 }
 
+/// Which end of a Sort key comes first.
+#[uniffi::remote(Enum)]
+pub enum Direction {
+    Ascending,
+    Descending,
+}
+
+/// What a Sort orders by.
+#[uniffi::remote(Enum)]
+pub enum FilterSortKey {
+    Manual,
+    Priority,
+}
+
+/// How a Filter orders its Tasks, see `pkm_tasks::FilterSort`.
+#[uniffi::remote(Enum)]
+pub enum FilterSort {
+    Manual,
+    Priority(Direction),
+}
+
+/// Every Sort key, in the order a menu lists them.
+#[uniffi::export]
+pub fn sort_keys() -> Vec<FilterSortKey> {
+    FilterSortKey::ALL.to_vec()
+}
+
+/// The key of a Sort.
+#[uniffi::export]
+pub fn sort_key(sort: FilterSort) -> FilterSortKey {
+    sort.key()
+}
+
+/// `sort` with another key: the same Direction if it stays Priority, else the
+/// key's default.
+#[uniffi::export]
+pub fn sort_with_key(sort: FilterSort, key: FilterSortKey) -> FilterSort {
+    sort.with_key(key)
+}
+
 /// A Filter: a Title and a Query, see `pkm_tasks::Filter`.
 #[uniffi::remote(Record)]
 pub struct Filter {
@@ -88,6 +128,7 @@ pub struct Filter {
     /// As the user typed it.
     pub query: String,
     pub favorite: bool,
+    pub sort: FilterSort,
     /// How many Open Tasks the Query matches.
     pub matches: u32,
     /// Why the stored Query can't be read; such a Filter matches nothing.
@@ -502,6 +543,12 @@ impl TaskStore {
         before: Option<String>,
     ) -> Result<(), TasksError> {
         Ok(self.0.move_in_filter(&id, &task, before.as_deref())?)
+    }
+
+    /// Sorts a Filter; Manual keeps the order shown, Priority from Manual
+    /// discards it. No Task changes.
+    pub fn set_sort(&self, id: String, sort: FilterSort) -> Result<(), TasksError> {
+        Ok(self.0.set_sort(&id, sort)?)
     }
 
     /// Checks a Query text without saving: what is wrong with it, or which of

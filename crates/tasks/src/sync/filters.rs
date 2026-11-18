@@ -180,4 +180,21 @@ mod tests {
         assert_eq!(merge(None, &a, b.as_bytes()), None);
         assert_eq!(same_item(&a, b.as_bytes()), Some(false));
     }
+
+    #[test]
+    fn the_sort_merges_as_one_field_by_the_newer_update() {
+        let with_sort = |sort: &str, updated| {
+            let text = String::from_utf8(filter("Work", "@work", &[], updated)).unwrap();
+            text.replace("favorite:", &format!("sort: {sort}\nfavorite:"))
+                .into_bytes()
+        };
+        let base = filter("Work", "@work", &[], T0);
+        let older = with_sort("priority ascending", T1);
+        let newer = with_sort("priority descending", T2);
+        let file = merged(Some(&base), &older, &newer);
+        assert_eq!(file.scalar("sort"), Some("priority descending"));
+        let unknown = with_sort("created ascending", T2);
+        let file = merged(Some(&base), &older, &unknown);
+        assert_eq!(file.scalar("sort"), Some("created ascending"));
+    }
 }

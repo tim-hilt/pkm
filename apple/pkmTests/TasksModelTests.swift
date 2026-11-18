@@ -772,6 +772,35 @@ import Testing
         #expect(model.tasks.map(\.title) == ["one", "two", "three"])
     }
 
+    @Test func theSortMenuStateFollowsTheFilterShownAndSortsItsTasks() throws {
+        let model = try openModelWithoutFavorites()
+        for (title, priority) in [("low", 4), ("high", 1), ("mid", 2)] as [(String, UInt8)] {
+            model.add(title: title, priority: priority, tags: ["work"])
+        }
+        model.addFilter(title: "Work", query: "@work")
+        #expect(model.sort == nil)  // the Filters list has none
+        model.list = .filter(model.filters[0].id)
+        #expect(model.sort == .manual)
+        #expect(model.tasks.map(\.title) == ["low", "high", "mid"])
+
+        model.setSort(.priority(.ascending))
+        #expect(model.sort == .priority(.ascending))
+        #expect(model.tasks.map(\.title) == ["high", "mid", "low"])
+        model.setSort(.priority(.descending))
+        #expect(model.tasks.map(\.title) == ["low", "mid", "high"])
+
+        // A drag across Priorities turns the Filter Manual, keeping what is shown.
+        model.move(from: IndexSet(integer: 2), to: 0)
+        #expect(model.sort == .manual)
+        #expect(model.tasks.map(\.title) == ["high", "low", "mid"])
+    }
+
+    @Test func theSortKeysComeFromTheCore() {
+        #expect(sortKeys() == [.manual, .priority])
+        #expect(sortWithKey(sort: .manual, key: .priority) == .priority(.ascending))
+        #expect(sortWithKey(sort: .priority(.descending), key: .priority) == .priority(.descending))
+    }
+
     @Test func aTaskThatLeavesAFilterAndComesBackStartsAtTheEnd() throws {
         let model = try openModelWithoutFavorites()
         for title in ["one", "two", "three"] { model.add(title: title, tags: ["work"]) }
