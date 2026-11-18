@@ -188,6 +188,15 @@ import Testing
         #expect(try openModel().tasks.isEmpty)
     }
 
+    @Test func keepsTheDescriptionsMarkdownAsTyped() throws {
+        let model = try openModel()
+        let text = "## Shops\n- *a* [b](https://c.d)\n1. x\n1. y\n```\n`z`\n```"
+        #expect(model.add(title: "Buy milk", description: text))
+        #expect(model.tasks.map(\.description) == [text])
+        #expect(model.edit(model.tasks[0], title: "Buy milk", description: text, priority: 4, tags: []))
+        #expect(model.tasks.map(\.description) == [text])
+    }
+
     @Test func addsATaskWithADescription() throws {
         let model = try openModel()
         #expect(model.add(title: "Buy milk", description: "Two litres"))

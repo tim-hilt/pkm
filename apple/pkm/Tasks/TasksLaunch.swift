@@ -30,8 +30,17 @@ extension TasksModel {
             }
             let samples = [
                 (
-                    "Buy milk", "Two litres of oat milk, and a loaf of bread if the bakery is still open.", UInt8(1),
-                    ["home", "shopping"]
+                    "Buy milk",
+                    """
+                    Two litres of oat milk, and a loaf of bread if the bakery is still open.
+
+                    ## Shops
+                    - The **corner** [bakery](https://example.com), for *bread*
+                    - `Aldi` for the milk
+                    1. Bakery
+                    1. Aldi
+                    > Closes at six
+                    """, UInt8(1), ["home", "shopping"]
                 ),
                 ("Book the dentist", "", 2, ["health"]),
                 ("Reply to Anna's email", "About the trip", 3, []),

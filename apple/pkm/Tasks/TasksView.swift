@@ -269,19 +269,6 @@ extension ListedTask {
     }
 }
 
-/// A Task's Description. Unlabeled: macOS Forms show a label beside the field and align its text
-/// trailing, whatever `multilineTextAlignment` says.
-private struct DescriptionField: View {
-    @Binding var text: String
-
-    var body: some View {
-        TextField(text: $text, prompt: Text("Description"), axis: .vertical) { Text("Description") }
-            .labelsHidden()
-            .lineLimit(3...8)
-            .accessibilityIdentifier("task-description")
-    }
-}
-
 /// Asks for a Title and a Description; the Task is added. The sheet stays open after each
 /// Add, cleared and focused for the next Task; Cancel or swiping down ends it.
 private struct NewTaskSheet: View {
@@ -303,7 +290,8 @@ private struct NewTaskSheet: View {
             Form {
                 QuickAddField(quickAdd: quickAdd, title: $title, revision: revision, onSubmit: add)
                     .accessibilityIdentifier("task-title")
-                DescriptionField(text: $description)
+                MarkdownEditor(text: $description, placeholder: "Description")
+                    .accessibilityIdentifier("task-description")
             }
             .formStyle(.grouped)
             .navigationTitle("New Task")
@@ -397,9 +385,6 @@ private struct EditTaskForm: View {
     @State private var tags: [String]
     @State private var isPickingTags = false
     @State private var blockedBy: [Blocker]
-    @FocusState private var focus: Field?
-
-    private enum Field { case description }
 
     /// How long typing pauses before text is saved.
     private static let pause = Duration.milliseconds(500)
@@ -438,8 +423,8 @@ private struct EditTaskForm: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            DescriptionField(text: $description)
-                .focused($focus, equals: .description)
+            MarkdownEditor(text: $description, placeholder: "Description", onBlur: save)
+                .accessibilityIdentifier("task-description")
             Picker("Priority", selection: $priority) {
                 ForEach(UInt8(1)...4, id: \.self) { Text(verbatim: "P\($0)").tag($0) }
             }
@@ -500,7 +485,6 @@ private struct EditTaskForm: View {
                 }
             #endif
         }
-        .onChange(of: focus) { save() }
         .onChange(of: hasTitle) { save() }  // keeps the model's Back and Blocker rules current
         .task(id: text) {
             guard (try? await Task.sleep(for: Self.pause)) != nil else { return }
