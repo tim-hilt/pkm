@@ -78,6 +78,13 @@ import XCTest
         XCTAssertTrue(app.staticTexts["Book the dentist"].waitForExistence(timeout: 5))
     }
 
+    func testAFavoriteOpenedFromTheFiltersListIsShownByTheBar() {
+        app.buttons["Filters"].tap()
+        app.staticTexts["@backlog"].tap()
+        XCTAssertTrue(app.staticTexts["Learn Rust"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Backlog"].isSelected)
+    }
+
     func testASubtaskIsAddedFromTheSubtasksSection() {
         app.staticTexts["Book the dentist"].tap()
         XCTAssertTrue(showsForm(of: "Book the dentist"))

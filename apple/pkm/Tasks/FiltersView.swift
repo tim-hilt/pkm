@@ -21,7 +21,7 @@ struct FiltersList: View {
         } else {
             List {
                 ForEach(model.filters) { filter in
-                    NavigationLink(value: filter.id) { FilterRow(filter: filter) }
+                    row(filter)
                         .swipeActions(edge: .trailing) {
                             Button("Delete", systemImage: "trash", role: .destructive) { deleting = filter }
                             Button("Edit", systemImage: "pencil") { editing = filter }.tint(.blue)
@@ -50,6 +50,29 @@ struct FiltersList: View {
 }
 
 extension FiltersList {
+    /// Opens the Filter: pushed on top of the Filters list, or, a Favorite, shown by the bar,
+    /// which pushing would undo at once, popping back with a visible slide.
+    @ViewBuilder fileprivate func row(_ filter: Filter) -> some View {
+        if filter.favorite {
+            Button {
+                model.list = .filter(filter.id)
+            } label: {
+                HStack {
+                    FilterRow(filter: filter)
+                    #if os(iOS)
+                        Image(systemName: "chevron.forward")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    #endif
+                }
+                .contentShape(.rect)
+            }
+            .tint(.primary)
+        } else {
+            NavigationLink(value: filter.id) { FilterRow(filter: filter) }
+        }
+    }
+
     /// Marks the Filter as a Favorite, or unmarks it.
     fileprivate func favoriteButton(_ filter: Filter) -> some View {
         Button(
