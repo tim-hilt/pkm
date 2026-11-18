@@ -234,4 +234,20 @@ mod tests {
         let file = merged(Some(&base), &older, &unknown);
         assert_eq!(file.scalar("sort"), Some("created ascending"));
     }
+
+    #[test]
+    fn group_by_merges_as_one_field_by_the_newer_update() {
+        let with_group_by = |tags: &str, updated| {
+            let text = String::from_utf8(filter("Work", "@work", &[], updated)).unwrap();
+            text.replace("favorite:", &format!("group-by: {tags}\nfavorite:"))
+                .into_bytes()
+        };
+        let base = filter("Work", "@work", &[], T0);
+        let older = with_group_by("a b", T1);
+        let newer = with_group_by("b c", T2);
+        let file = merged(Some(&base), &older, &newer);
+        assert_eq!(file.scalar("group-by"), Some("b c"));
+        let file = merged(Some(&base), &older, &base);
+        assert_eq!(file.scalar("group-by"), Some("a b"));
+    }
 }

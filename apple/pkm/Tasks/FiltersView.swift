@@ -118,24 +118,29 @@ private struct FilterRow: View {
     }
 }
 
-/// Asks for a Title and a Query: adds the Filter at the end of the Filters list, or, given one,
-/// changes it. A Query that can't be read shows why, inline, and can't be saved.
+/// Asks for a Title, a Query and a Group by: adds the Filter at the end of the Filters list, or,
+/// given one, changes it. A Query that can't be read, or a Group by that isn't a list of existing
+/// Tags, shows why, inline, and can't be saved.
 struct FilterSheet: View {
     @Environment(TasksModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     private let editing: Filter?
     @State private var title: String
     @State private var query: String
+    @State private var groupBy: String
 
     init(editing: Filter? = nil) {
         self.editing = editing
         _title = State(initialValue: editing?.title ?? "")
         _query = State(initialValue: editing?.query ?? "")
+        _groupBy = State(initialValue: editing?.groupBy.map { "@\($0)" }.joined(separator: " ") ?? "")
     }
 
     private var check: QueryCheck { model.checkQuery(query) }
+    private var groupByProblem: String? { model.checkGroupBy(groupBy) }
     private var canSave: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && check.problem == nil
+            && groupByProblem == nil
     }
 
     var body: some View {
@@ -165,6 +170,21 @@ struct FilterSheet: View {
                     }
                 } footer: {
                     queryNotes
+                }
+                Section {
+                    TextField("Group by", text: $groupBy, prompt: Text(verbatim: "@work @private"))
+                        .autocorrectionDisabled()
+                        #if os(iOS)
+                            .textInputAutocapitalization(.never)
+                        #endif
+                        .onSubmit(save)
+                        .accessibilityIdentifier("filter-group-by")
+                } footer: {
+                    if let problem = groupByProblem {
+                        Text(problem)
+                            .foregroundStyle(.red)
+                            .accessibilityIdentifier("filter-group-by-error")
+                    }
                 }
             }
             .formStyle(.grouped)
@@ -203,9 +223,9 @@ struct FilterSheet: View {
         guard canSave else { return }
         let saved =
             if let editing {
-                model.editFilter(editing.id, title: title, query: query)
+                model.editFilter(editing.id, title: title, query: query, groupBy: groupBy)
             } else {
-                model.addFilter(title: title, query: query)
+                model.addFilter(title: title, query: query, groupBy: groupBy)
             }
         if saved { dismiss() }
     }

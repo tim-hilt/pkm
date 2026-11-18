@@ -815,7 +815,7 @@ import Testing
         model.list = .filter(model.filters[1].id)
         model.edit(moved, title: moved.title, description: moved.description, priority: moved.priority, tags: [])
         // Any write of the Filter's file drops the places of Tasks it no longer shows.
-        model.editFilter(model.filters[0].id, title: "Work", query: "@work")
+        model.editFilter(model.filters[0].id, title: "Work", query: "@work", groupBy: "")
         let away = model.tasks.first { $0.id == moved.id }!
         model.edit(away, title: away.title, description: away.description, priority: away.priority, tags: ["work"])
         model.list = filter
@@ -828,12 +828,35 @@ import Testing
         model.addFilter(title: "Home", query: "@home")
         let id = model.filters[0].id
 
-        #expect(model.editFilter(id, title: "Office", query: "@office"))
+        #expect(model.editFilter(id, title: "Office", query: "@office", groupBy: ""))
         #expect(model.filters.map(\.title) == ["Office", "Home"])
         #expect(model.filters[0].query == "@office")
-        #expect(!model.editFilter(id, title: " ", query: "@office"))
-        #expect(!model.editFilter(id, title: "Office", query: "@office |"))
+        #expect(!model.editFilter(id, title: " ", query: "@office", groupBy: ""))
+        #expect(!model.editFilter(id, title: "Office", query: "@office |", groupBy: ""))
         #expect(model.filters[0].query == "@office")
+    }
+
+    @Test func aGroupedFilterShowsItsGroupsAndTurnsDragsOff() throws {
+        let store = try TaskStore.open(root: root.appending(path: "Tasks").path)
+        let model = TasksModel(store: store)
+        _ = try store.create(title: "plain", priority: 4, tags: [])
+        _ = try store.create(title: "both", priority: 4, tags: ["a", "b"])
+        _ = try store.create(title: "other", priority: 4, tags: ["c"])
+        #expect(model.checkGroupBy("@a @nope") != nil)
+        #expect(model.checkGroupBy("@a @b") == nil)
+        #expect(!model.addFilter(title: "G", query: "!@c", groupBy: "@a @nope"))
+        #expect(model.addFilter(title: "G", query: "!@c", groupBy: "@b @a @c"))
+        model.list = .filter(model.filters[0].id)
+
+        #expect(model.groups.map(\.tag) == [nil, "b", "a", "c"])
+        #expect(model.groups.map { $0.tasks.map(\.title) } == [["plain"], ["both"], ["both"], []])
+        #expect(model.isGrouped)
+        model.move(from: [0], to: 1)  // off in a Grouped Filter
+        #expect(model.groups.map { $0.tasks.map(\.title) } == [["plain"], ["both"], ["both"], []])
+
+        #expect(model.editFilter(model.filters[0].id, title: "G", query: "!@c", groupBy: ""))
+        #expect(!model.isGrouped)
+        #expect(model.tasks.map(\.title) == ["plain", "both"])
     }
 
     @Test func deletingAFilterLeavesTheTasksAndLeavesItsOpenList() throws {
@@ -874,7 +897,7 @@ extension TaskStore {
         let store = try TaskStore.open(root: root)
         guard try store.filters().isEmpty else { return store }
         for (title, query) in [("All Tasks", "*"), ("Active", "!@backlog"), ("Backlog", "@backlog")] {
-            try store.setFavorite(id: store.createFilter(title: title, query: query).id, favorite: true)
+            try store.setFavorite(id: store.createFilter(title: title, query: query, groupBy: "").id, favorite: true)
         }
         return store
     }

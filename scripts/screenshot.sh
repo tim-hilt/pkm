@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: DEVICE=mac|ipad|iphone|web [SCREEN=canvas|settings|books|reader|tasks|task|filters|filter] [OUT=path] scripts/screenshot.sh
+# Usage: DEVICE=mac|ipad|iphone|web [SCREEN=canvas|settings|books|reader|tasks|task|filters|filter|grouped] [OUT=path] scripts/screenshot.sh
 # Builds the app, launches it with the sample Drawing already open
 # (-UITestingOpenSampleDrawing), or with Settings open (SCREEN=settings,
 # -UITestingOpenSettings), or with the Books Gallery over sample Books
@@ -29,7 +29,8 @@ tasks) LAUNCH_ARG=-UITestingOpenTasks WINDOW_NAME= ;;
 task) LAUNCH_ARG=-UITestingOpenTaskSheet WINDOW_NAME= ;;
 filters) LAUNCH_ARG=-UITestingOpenFilters WINDOW_NAME= ;;
 filter) LAUNCH_ARG=-UITestingOpenFilter WINDOW_NAME= ;;
-*) echo "SCREEN must be canvas, settings, books, reader, tasks, task, filters or filter" >&2; exit 2 ;;
+grouped) LAUNCH_ARG=-UITestingOpenGroupedFilter WINDOW_NAME= ;;
+*) echo "SCREEN must be canvas, settings, books, reader, tasks, task, filters, filter or grouped" >&2; exit 2 ;;
 esac
 OUT=${OUT:-/tmp/wt-$DEVICE.png}
 DERIVED=build

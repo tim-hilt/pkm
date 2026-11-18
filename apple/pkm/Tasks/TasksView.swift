@@ -64,7 +64,7 @@ private struct TaskListView: View {
 
     var body: some View {
         Group {
-            if model.tasks.isEmpty {
+            if model.tasks.isEmpty && !model.isGrouped {  // a Group's heading shows even when empty
                 ContentUnavailableView {
                     AppContext.tasks.label
                 } description: {
@@ -72,25 +72,37 @@ private struct TaskListView: View {
                 }
             } else {
                 List {
-                    ForEach(model.tasks) { task in
-                        TaskRow(task: task, onCircle: { model.toggleDone(task) })
-                            .listRowSeparator(task.id == model.tasks.first?.id ? .hidden : .automatic, edges: .top)
-                            .contentShape(Rectangle())
-                            .onTapGesture { model.startEditing(task) }
-                            .swipeActions(edge: .trailing) {
-                                if !task.done {
-                                    Button("Reject", role: .destructive) { model.close(task, as: .rejected) }
-                                }
-                            }
-                            .contextMenu {
-                                if !task.done {  // a pending Done is Reverted at its circle
-                                    Button("Reject", systemImage: "xmark.circle", role: .destructive) {
-                                        model.close(task, as: .rejected)
+                    ForEach(model.groups, id: \.tag) { group in
+                        Section {
+                            ForEach(group.tasks) { task in
+                                TaskRow(task: task, onCircle: { model.toggleDone(task) })
+                                    .listRowSeparator(
+                                        task.id == group.tasks.first?.id ? .hidden : .automatic, edges: .top
+                                    )
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { model.startEditing(task) }
+                                    .swipeActions(edge: .trailing) {
+                                        if !task.done {
+                                            Button("Reject", role: .destructive) { model.close(task, as: .rejected) }
+                                        }
                                     }
-                                }
+                                    .contextMenu {
+                                        if !task.done {  // a pending Done is Reverted at its circle
+                                            Button("Reject", systemImage: "xmark.circle", role: .destructive) {
+                                                model.close(task, as: .rejected)
+                                            }
+                                        }
+                                    }
                             }
+                            .onMove(perform: model.isGrouped ? nil : { model.move(from: $0, to: $1) })
+                        } header: {
+                            if let tag = group.tag {
+                                Text(tag)
+                                    .foregroundStyle(model.tagEntry(tag).style())
+                                    .accessibilityIdentifier("group-\(tag)")
+                            }
+                        }
                     }
-                    .onMove { model.move(from: $0, to: $1) }
                 }
                 .listStyle(.plain)
             }

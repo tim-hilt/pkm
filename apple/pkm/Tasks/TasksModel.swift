@@ -52,9 +52,14 @@ final class TasksModel {
     /// Whether the sheet can't be left or popped: the Task on top was last
     /// saved with an empty Title, which keeps the stack as it is until it has one.
     private(set) var isLeavingBlocked = false
+    /// The Groups of the Filter shown, in order: the Tasks without a Group first (no Tag), then one
+    /// per Group-by Tag, empty or not. Empty while the Filters list is shown.
+    private(set) var groups: [ListedGroup] = []
     /// The Tasks of the list shown, in their order, each followed by its Subtasks; none while the
-    /// Filters list is shown.
+    /// Filters list is shown. A Task in several Groups is in it once per Group.
     private(set) var tasks: [ListedTask] = []
+    /// Whether the Filter shown is Grouped: its drags are off.
+    var isGrouped: Bool { groups.count > 1 }
     /// Every Filter, in the Filters list's order.
     private(set) var filters: [Filter] = []
     /// Every known Tag with its Tag Color, alphabetically, whether or not a Task carries it.
@@ -115,10 +120,14 @@ final class TasksModel {
         (try? store.tasks()) ?? []
     }
 
+    /// The Groups `list` shows; none for the Filters list.
+    private func groups(in list: TasksList) -> [ListedGroup] {
+        list.filterID.flatMap { try? store.filterGroups(id: $0) } ?? []
+    }
+
     /// The Tasks `list` shows, in its order; none for the Filters list.
     private func tasks(in list: TasksList) -> [ListedTask] {
-        // Until Group by exists, a Filter is one Group.
-        list.filterID.flatMap { try? store.filterGroups(id: $0).flatMap(\.tasks) } ?? []
+        groups(in: list).flatMap(\.tasks)
     }
 
     /// The direct Subtasks of the Open Task `id`, in Subtask order: Open, or Done and still
@@ -294,9 +303,9 @@ final class TasksModel {
     /// Moves the row at `source` to land before the row at `destination` of `tasks`
     /// (`onMove`'s meaning); past the last row, to the end of the list. The Parent stays. A Subtask
     /// passing a sibling also moves in its Subtask order. In a Sorted Filter, a drop out of the Task's
-    /// Priority group turns it Manual.
+    /// Priority group turns it Manual. Does nothing in a Grouped Filter.
     func move(from source: IndexSet, to destination: Int) {
-        guard let id = list.filterID, let index = source.first, index != destination else { return }
+        guard let id = list.filterID, !isGrouped, let index = source.first, index != destination else { return }
         let target = destination < tasks.count ? tasks[destination] : nil
         try? store.moveInFilter(id: id, task: tasks[index].id, before: target?.id)
         reload()
@@ -352,18 +361,18 @@ final class TasksModel {
     }
 
     /// Creates a Filter at the end of the Filters list. False, creating nothing, if the Title is
-    /// empty or the Query can't be read (see `queryProblem`).
+    /// empty, the Query can't be read (see `checkQuery`) or the Group by is refused (see `checkGroupBy`).
     @discardableResult
-    func addFilter(title: String, query: String) -> Bool {
-        guard (try? store.createFilter(title: title, query: query)) != nil else { return false }
+    func addFilter(title: String, query: String, groupBy: String = "") -> Bool {
+        guard (try? store.createFilter(title: title, query: query, groupBy: groupBy)) != nil else { return false }
         reload()
         return true
     }
 
-    /// Changes a Filter's Title and Query. False, changing nothing, if `addFilter` would refuse them.
+    /// Changes a Filter's Title, Query and Group by. False, changing nothing, if `addFilter` would refuse them.
     @discardableResult
-    func editFilter(_ id: String, title: String, query: String) -> Bool {
-        guard (try? store.editFilter(id: id, title: title, query: query)) != nil else { return false }
+    func editFilter(_ id: String, title: String, query: String, groupBy: String) -> Bool {
+        guard (try? store.editFilter(id: id, title: title, query: query, groupBy: groupBy)) != nil else { return false }
         reload()
         return true
     }
@@ -391,6 +400,9 @@ final class TasksModel {
 
     /// What is wrong with the Query `text`, or which Tags it names that don't exist; saves nothing.
     func checkQuery(_ text: String) -> QueryCheck { store.checkQuery(text: text) }
+
+    /// Why the Group-by `text` (`@work @private`) can't be saved; `nil` if it can. Saves nothing.
+    func checkGroupBy(_ text: String) -> String? { store.checkGroupBy(text: text) }
 
     /// `text` as a Query may be typed: lowercase, without characters neither a Tag nor the Query hold.
     static func allowedQueryText(_ text: String) -> String { typedQuery(text: text) }
@@ -450,7 +462,8 @@ final class TasksModel {
             list = .filters  // reloads
             return
         }
-        tasks = tasks(in: list)
+        groups = groups(in: list)
+        tasks = groups.flatMap(\.tasks)
         allTags = store.tags()
     }
 }

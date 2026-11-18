@@ -9,7 +9,9 @@ extension TasksModel {
     /// Favorites All Tasks, Active and Backlog when
     /// launched with `-UITestingOpenTasks`, the sheet of "Buy milk" open with
     /// `-UITestingOpenTaskSheet`, and also a Filter, with the Filters list shown with
-    /// `-UITestingOpenFilters` and the Filter itself with `-UITestingOpenFilter`.
+    /// `-UITestingOpenFilters` and the Filter itself with `-UITestingOpenFilter`. With
+    /// `-UITestingOpenGroupedFilter` the Filter shown is "Projects", Grouped by `@home` and `@backlog`
+    /// (which its Query leaves empty).
     @MainActor
     static func forLaunch() -> TasksModel {
         let arguments = ProcessInfo.processInfo.arguments
@@ -20,9 +22,10 @@ extension TasksModel {
         let opensSheet = arguments.contains("-UITestingOpenTaskSheet")
         let opensFilters = arguments.contains("-UITestingOpenFilters")
         let opensFilter = arguments.contains("-UITestingOpenFilter")
-        if opensSheet || opensFilters || opensFilter || arguments.contains("-UITestingOpenTasks") {
+        let opensGrouped = arguments.contains("-UITestingOpenGroupedFilter")
+        if opensSheet || opensFilters || opensFilter || opensGrouped || arguments.contains("-UITestingOpenTasks") {
             for (title, query) in [("All Tasks", "*"), ("Active", "!@backlog"), ("Backlog", "@backlog")] {
-                guard let filter = try? store.createFilter(title: title, query: query) else { continue }
+                guard let filter = try? store.createFilter(title: title, query: query, groupBy: "") else { continue }
                 try? store.setFavorite(id: filter.id, favorite: true)
             }
             let samples = [
@@ -50,12 +53,19 @@ extension TasksModel {
                     ("Home and health", "@home | @health"), ("Shopping", "@shopping"), ("Work", "@work"),
                     ("Errands", "@errands"), ("Someday", "@someday"),
                 ] {
-                    guard let filter = try? store.createFilter(title: title, query: query) else { continue }
+                    guard let filter = try? store.createFilter(title: title, query: query, groupBy: "") else {
+                        continue
+                    }
                     try? store.setFavorite(id: filter.id, favorite: true)
                 }
             }
         }
+        var grouped: Filter?
+        if opensGrouped {
+            grouped = try? store.createFilter(title: "Projects", query: "!@backlog", groupBy: "@home @backlog")
+        }
         let model = TasksModel(store: store)
+        if let grouped { model.list = .filter(grouped.id) }
         if opensFilters { model.list = .filters }
         if opensFilter, let filter = model.filters.first { model.list = .filter(filter.id) }
         if opensSheet, let task = model.tasks.first { model.startEditing(task) }

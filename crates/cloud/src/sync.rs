@@ -3020,24 +3020,24 @@ mod tests {
             let filters = Cloud::new();
             let (phone, tablet) = (TaggingDevice::new(), TaggingDevice::new());
             let store = phone.store();
-            let work = store.create_filter("Work", "@work").unwrap();
-            let home = store.create_filter("Home", "@home").unwrap();
-            let gone = store.create_filter("Gone", "@gone").unwrap();
+            let work = store.create_filter("Work", "@work", "").unwrap();
+            let home = store.create_filter("Home", "@home", "").unwrap();
+            let gone = store.create_filter("Gone", "@gone", "").unwrap();
             phone.sync_filters(&filters);
             tablet.sync_filters(&filters);
             assert_eq!(tablet.filter_titles(), ["Work", "Home", "Gone"]);
 
             // Different fields of one Filter, a Delete of another one.
-            store.edit_filter(&work.id, "Job", "@work").unwrap();
+            store.edit_filter(&work.id, "Job", "@work", "").unwrap();
             store.delete_filter(&gone.id).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(1100));
             let other = tablet.store();
             other.set_favorite(&work.id, true).unwrap();
             other
-                .edit_filter(&gone.id, "Gone for good", "@gone")
+                .edit_filter(&gone.id, "Gone for good", "@gone", "")
                 .unwrap();
             other
-                .edit_filter(&home.id, "Home", "@home & !@wait")
+                .edit_filter(&home.id, "Home", "@home & !@wait", "")
                 .unwrap();
             for device in [&phone, &tablet, &phone] {
                 device.sync_filters(&filters);

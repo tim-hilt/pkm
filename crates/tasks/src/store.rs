@@ -115,6 +115,11 @@ pub enum Error {
     EmptyFilterTitle,
     /// The Query of a Filter can't be read.
     InvalidQuery(QueryError),
+    /// The Group by of a Filter names a Tag that doesn't exist.
+    UnknownGroupByTag(String),
+    /// The Group by of a Filter holds something that isn't a Tag: a Wildcard,
+    /// or text a Tag can't be.
+    InvalidGroupByTag(String),
     /// A Subtask only moves among its siblings: the Task to move isn't a
     /// Subtask, or the Task to move before isn't its sibling.
     NotASibling,
@@ -157,6 +162,8 @@ impl std::fmt::Display for Error {
             Self::NotASibling => f.write_str("A Subtask moves only among its siblings."),
             Self::EmptyFilterTitle => f.write_str("A Filter needs a Title."),
             Self::InvalidQuery(e) => e.fmt(f),
+            Self::UnknownGroupByTag(tag) => write!(f, "Group by: @{tag} doesn't exist."),
+            Self::InvalidGroupByTag(text) => write!(f, "Group by: “{text}” isn't a Tag."),
             Self::Io(e) => e.fmt(f),
         }
     }

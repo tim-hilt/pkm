@@ -29,7 +29,7 @@ beforeEach(async () => {
     ["Active", "!@backlog"],
     ["Backlog", "@backlog"],
   ]) {
-    files.store.setFavorite(files.store.createFilter(title, query).id, true);
+    files.store.setFavorite(files.store.createFilter(title, query, "").id, true);
   }
   await files.save();
   model = new TasksModel(files);
@@ -1012,10 +1012,10 @@ describe("Filters", () => {
   it("edits the Title and Query, with the refusals of create", () => {
     model.addFilter("Work", "@work");
     const { id } = filter("Work");
-    expect(model.editFilter(id, "Job", "@job")).toBe(true);
+    expect(model.editFilter(id, "Job", "@job", "")).toBe(true);
     expect(filter("Job")).toMatchObject({ id, query: "@job" });
-    expect(model.editFilter(id, "", "@job")).toBe(false);
-    expect(model.editFilter(id, "Job", "(@job")).toBe(false);
+    expect(model.editFilter(id, "", "@job", "")).toBe(false);
+    expect(model.editFilter(id, "Job", "(@job", "")).toBe(false);
     expect(filter("Job").query).toBe("@job");
   });
 
@@ -1224,7 +1224,7 @@ describe("Filters", () => {
     await model.syncDidChange();
     expect(filter("Work").error).toBeDefined();
     expect(filter("Work").matches).toBe(0);
-    expect(model.editFilter(filter("Work").id, "Work", "@work")).toBe(true);
+    expect(model.editFilter(filter("Work").id, "Work", "@work", "")).toBe(true);
     expect(filter("Work").error).toBeUndefined();
   });
 

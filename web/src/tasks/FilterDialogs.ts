@@ -73,7 +73,7 @@ export function filterDialog(model: TasksModel, host: HTMLElement, editing?: Fil
     event.preventDefault();
     if (save.disabled) return;
     const saved = editing
-      ? model.editFilter(editing.id, title.value, query.value)
+      ? model.editFilter(editing.id, title.value, query.value, editing.groupBy)
       : model.addFilter(title.value, query.value);
     if (saved) dialog.close();
   });

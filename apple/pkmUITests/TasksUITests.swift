@@ -122,3 +122,16 @@ import XCTest
         XCTAssertTrue(app.buttons["task-tags"].staticTexts["health"].exists)
     }
 }
+
+/// A Grouped Filter: the Tasks without a Group first, then a heading per Group-by Tag, even if empty.
+@MainActor final class GroupedFilterUITests: XCTestCase {
+    func testHeadingsShowEvenForAnEmptyGroup() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-UITestingOpenGroupedFilter"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Book the dentist"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["group-home"].exists || app.staticTexts["home"].exists)
+        XCTAssertTrue(app.staticTexts["group-backlog"].exists || app.staticTexts["backlog"].exists)
+        XCTAssertFalse(app.staticTexts["Learn Rust"].exists)
+    }
+}

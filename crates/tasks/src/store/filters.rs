@@ -1,5 +1,5 @@
 //! Filters (ADR-0024): `Filters/<id>.md` beside the Tasks folder, each a Title
-//! and a Query over the Open Tasks.
+//! and a Query over the Open Tasks, optionally Grouped by Tags (ADR-0027).
 
 use super::{
     Anchor, Error, Group, Node, Nodes, Tasks, compare_positions, end_key, in_subtask_order,
@@ -12,6 +12,7 @@ use pkm_base::item_id::ItemId;
 use pkm_base::random::Entropy;
 use std::collections::{HashMap, HashSet};
 use std::io;
+use std::iter;
 use std::path::PathBuf;
 
 /// What a Filter orders by: the Sort key of a `FilterSort`. A new key is one
@@ -102,6 +103,9 @@ pub struct Filter {
     pub query: String,
     pub favorite: bool,
     pub sort: FilterSort,
+    /// The Tags the Filter's Tasks are split by, in the order of their Groups,
+    /// without `@`; none if it isn't Grouped.
+    pub group_by: Vec<String>,
     /// How many Open Tasks the Query matches.
     pub matches: u32,
     /// Why the stored Query can't be read (a hand edit, a newer Device); such a
@@ -123,10 +127,12 @@ impl Tasks {
     pub const FILTERS_FOLDER: &'static str = "Filters";
 
     /// Creates a Filter at the end of the Filters list. The Title is trimmed and
-    /// kept to one line (as a Task's). Fails with `EmptyFilterTitle` or
-    /// `InvalidQuery` before saving anything.
-    pub fn create_filter(&self, title: &str, query: &str) -> Result<Filter, Error> {
+    /// kept to one line (as a Task's). `group_by` is typed as `@work @private`,
+    /// see `check_group_by`. Fails with `EmptyFilterTitle`, `InvalidQuery` or
+    /// a Group-by error before saving anything.
+    pub fn create_filter(&self, title: &str, query: &str, group_by: &str) -> Result<Filter, Error> {
         let title = checked(title, query)?;
+        let group_by = self.check_group_by(group_by)?;
         let positions: Vec<f64> = self.stored_filters()?.iter().map(|s| s.position).collect();
         let position = end_key(&positions);
         let mut entropy = Entropy::from_system();
@@ -140,6 +146,7 @@ impl Tasks {
             file.set_scalar("id", id.as_str());
             file.set_scalar("title", &title);
             file.set_scalar("query", query);
+            write_group_by(&mut file, &group_by);
             file.set_scalar("favorite", "false");
             file.set_scalar("position", position.to_string());
             file.set_scalar("updated", iso8601(now_ms()));
@@ -148,14 +155,23 @@ impl Tasks {
         }
     }
 
-    /// Changes the Title and Query of the Filter `id`, which keeps its place,
-    /// Favorite flag and order. Refuses what `create_filter` refuses, before
-    /// saving anything, and fails with `NotFound` if there is no such Filter.
-    pub fn edit_filter(&self, id: &str, title: &str, query: &str) -> Result<Filter, Error> {
+    /// Changes the Title, Query and Group by of the Filter `id`, which keeps its
+    /// place, Favorite flag and order. Refuses what `create_filter` refuses,
+    /// before saving anything, and fails with `NotFound` if there is no such
+    /// Filter.
+    pub fn edit_filter(
+        &self,
+        id: &str,
+        title: &str,
+        query: &str,
+        group_by: &str,
+    ) -> Result<Filter, Error> {
         let title = checked(title, query)?;
+        let group_by = self.check_group_by(group_by)?;
         self.rewrite_filter(id, |file| {
             file.set_scalar("title", &title);
             file.set_scalar("query", query);
+            write_group_by(file, &group_by);
         })?;
         Ok(self.filter(id)?)
     }
@@ -219,14 +235,17 @@ impl Tasks {
             .ok_or_else(|| io::ErrorKind::NotFound.into())
     }
 
-    /// The Groups of the Filter `id`, in display order. For now a Filter has
-    /// one Group without a Tag (even if empty) holding the Open Tasks it
-    /// matches: each matched on its own Tags, Blocked ones, Subtasks and
-    /// Backlog Tasks included. The Tasks with a place come first in the
-    /// Filter's order, then the others by `created`; if the Filter is Sorted,
-    /// then by that, Tasks of one key keeping that order; the Subtasks of one
-    /// Parent keep their Subtask order among themselves. A Query that can't be
-    /// read matches nothing. Fails with `NotFound` if there is no such Filter.
+    /// The Groups of the Filter `id`, in display order: first the one without
+    /// a Tag (even if empty) holding the Open Tasks carrying none of the
+    /// Filter's Group-by Tags, then one per Group-by Tag (even if empty) with
+    /// the Tasks carrying it, so a Task with several is in several Groups.
+    /// Open Tasks are those the Filter matches: each matched on its own Tags,
+    /// Blocked ones, Subtasks and Backlog Tasks included. In every Group the
+    /// Tasks with a place come first in the Filter's order, then the others by
+    /// `created`; if the Filter is Sorted, then by that, Tasks of one key
+    /// keeping that order; the Subtasks of one Parent keep their Subtask
+    /// order among themselves. A Query that can't be read matches nothing.
+    /// Fails with `NotFound` if there is no such Filter.
     pub fn filter_groups(&self, id: &str) -> io::Result<Vec<Group>> {
         let filter = self.stored_filter(id)?;
         let nodes: Nodes = self.shown()?;
@@ -236,10 +255,22 @@ impl Tasks {
             &filter.places,
             filter.filter.sort,
         );
-        Ok(vec![Group {
-            tag: None,
-            rows: rows_of(&nodes, found),
-        }])
+        let group_by = &filter.filter.group_by;
+        let carries = |n: &Node, tag: &String| n.task.tags.contains(tag);
+        let ungrouped = (found.iter().copied())
+            .filter(|n| !group_by.iter().any(|tag| carries(n, tag)))
+            .collect();
+        let groups = (group_by.iter()).map(|tag| {
+            let rows = found.iter().copied().filter(|n| carries(n, tag));
+            (Some(tag.clone()), rows.collect())
+        });
+        Ok(iter::once((None, ungrouped))
+            .chain(groups)
+            .map(|(tag, found)| Group {
+                tag,
+                rows: rows_of(&nodes, found),
+            })
+            .collect())
     }
 
     /// The Tags a Task needs to stay in the Filter `id` (see
@@ -359,6 +390,29 @@ impl Tasks {
         let tags = self.read_tags();
         let known: Vec<&str> = tags.names().collect();
         Ok(Query::parse(text)?.unmatched(&known))
+    }
+
+    /// Checks a Group-by text without saving: the Tags it lists, in order and
+    /// without repeats, or why it can't be read. Each Tag is typed with or
+    /// without `@`, separated by whitespace; empty text lists none. Fails with
+    /// `UnknownGroupByTag` for a Tag that doesn't exist, and
+    /// `InvalidGroupByTag` for a Wildcard or anything else that isn't a Tag.
+    pub fn check_group_by(&self, text: &str) -> Result<Vec<String>, Error> {
+        let known = self.read_tags();
+        let mut tags: Vec<String> = Vec::new();
+        for word in text.split_whitespace() {
+            let tag = word.strip_prefix('@').unwrap_or(word);
+            if !pkm_base::tag::is_valid(tag) {
+                return Err(Error::InvalidGroupByTag(word.to_owned()));
+            }
+            if !known.contains(tag) {
+                return Err(Error::UnknownGroupByTag(tag.to_owned()));
+            }
+            if !tags.iter().any(|t| t == tag) {
+                tags.push(tag.to_owned());
+            }
+        }
+        Ok(tags)
     }
 
     fn filters_folder(&self) -> PathBuf {
@@ -525,6 +579,15 @@ pub(super) fn set_places(file: &mut Document, places: &[(String, f64)]) {
     }
 }
 
+/// Writes `group_by` as one scalar of Tags separated by spaces; none, no key.
+fn write_group_by(file: &mut Document, group_by: &[String]) {
+    if group_by.is_empty() {
+        file.remove("group-by");
+    } else {
+        file.set_scalar("group-by", group_by.join(" "));
+    }
+}
+
 /// The Title, one line and not empty, and the Query, which must parse.
 fn checked(title: &str, query: &str) -> Result<String, Error> {
     let title = super::one_line(title);
@@ -561,6 +624,12 @@ fn stored_of(file: &Document) -> Option<Stored> {
             query: file.scalar("query")?.to_owned(),
             favorite: file.scalar("favorite") == Some("true"),
             sort: FilterSort::read(file.scalar("sort")),
+            group_by: (file
+                .scalar("group-by")
+                .unwrap_or_default()
+                .split_whitespace())
+            .map(str::to_owned)
+            .collect(),
             matches: 0,
             error: None,
         },
@@ -607,8 +676,10 @@ mod tests {
     fn a_new_filter_goes_at_the_end_of_the_list() {
         let (_, tasks) = open();
         assert!(tasks.filters().unwrap().is_empty());
-        let work = tasks.create_filter("Work", "@work & !@in-review").unwrap();
-        tasks.create_filter("  Home\n", "@home").unwrap();
+        let work = tasks
+            .create_filter("Work", "@work & !@in-review", "")
+            .unwrap();
+        tasks.create_filter("  Home\n", "@home", "").unwrap();
         let listed = tasks.filters().unwrap();
         assert_eq!(listed[0], work);
         assert_eq!(
@@ -622,7 +693,7 @@ mod tests {
     #[test]
     fn a_filter_is_a_file_beside_the_tasks() {
         let (files, tasks) = open();
-        let filter = tasks.create_filter("Work", "@work | @a").unwrap();
+        let filter = tasks.create_filter("Work", "@work | @a", "").unwrap();
         let text = files
             .read(Path::new(&format!("Filters/{}.md", filter.id)))
             .unwrap();
@@ -639,10 +710,10 @@ mod tests {
     fn an_empty_title_or_an_unparsable_query_is_refused_and_saves_nothing() {
         let (files, tasks) = open();
         assert!(matches!(
-            tasks.create_filter(" \n ", "@a"),
+            tasks.create_filter(" \n ", "@a", ""),
             Err(Error::EmptyFilterTitle)
         ));
-        let Err(Error::InvalidQuery(e)) = tasks.create_filter("Work", "@a &") else {
+        let Err(Error::InvalidQuery(e)) = tasks.create_filter("Work", "@a &", "") else {
             panic!("expected InvalidQuery");
         };
         assert_eq!(e.position, 4);
@@ -667,7 +738,7 @@ mod tests {
     fn deleting_a_tag_leaves_every_filters_query_as_it_is() {
         let (_, tasks) = open();
         add(&tasks, "t", &["x"]);
-        tasks.create_filter("F", "!@x & @y").unwrap();
+        tasks.create_filter("F", "!@x & @y", "").unwrap();
         tasks.remove_tag_everywhere("x").unwrap();
         tasks.forget_tag("x").unwrap();
         let filter = &tasks.filters().unwrap()[0];
@@ -681,8 +752,8 @@ mod tests {
     #[test]
     fn a_filter_is_marked_and_unmarked_as_a_favorite_keeping_its_place() {
         let (files, tasks) = open();
-        let a = tasks.create_filter("A", "@a").unwrap();
-        tasks.create_filter("B", "@b").unwrap();
+        let a = tasks.create_filter("A", "@a", "").unwrap();
+        tasks.create_filter("B", "@b", "").unwrap();
         tasks.set_favorite(&a.id, true).unwrap();
         let listed = tasks.filters().unwrap();
         assert_eq!(
@@ -706,8 +777,8 @@ mod tests {
     #[test]
     fn two_filters_may_share_a_title() {
         let (_, tasks) = open();
-        tasks.create_filter("Same", "@a").unwrap();
-        tasks.create_filter("Same", "@b").unwrap();
+        tasks.create_filter("Same", "@a", "").unwrap();
+        tasks.create_filter("Same", "@b", "").unwrap();
         assert_eq!(tasks.filters().unwrap().len(), 2);
     }
 
@@ -719,7 +790,9 @@ mod tests {
         add(&tasks, "two", &["work", "x"]);
         add(&tasks, "reviewing", &["work", "in-review"]);
         add(&tasks, "later", &["work", "backlog"]);
-        let filter = tasks.create_filter("Work", "@work & !@in-review").unwrap();
+        let filter = tasks
+            .create_filter("Work", "@work & !@in-review", "")
+            .unwrap();
         assert_eq!(
             titles(rows_of_filter(&tasks, &filter.id)),
             ["one", "two", "later"]
@@ -740,7 +813,7 @@ mod tests {
             .create_subtask(&parent, "untagged sub", 4, &[])
             .unwrap();
         tasks.remove_tag(&untagged.id, "work").unwrap();
-        let filter = tasks.create_filter("Work", "@work").unwrap();
+        let filter = tasks.create_filter("Work", "@work", "").unwrap();
         let rows = rows_of_filter(&tasks, &filter.id);
         assert_eq!(
             rows.iter()
@@ -756,10 +829,12 @@ mod tests {
     fn a_filter_requires_the_tags_of_its_and_chain() {
         let (_, tasks) = open();
         let tags_in = |id: &str| tasks.required_tags(id).unwrap();
-        let work = tasks.create_filter("F", "@work & !@review & @a").unwrap();
+        let work = tasks
+            .create_filter("F", "@work & !@review & @a", "")
+            .unwrap();
         assert_eq!(tags_in(&work.id), ["work", "a"]);
         for query in ["@a | @b", "@*x", "*"] {
-            let filter = tasks.create_filter("F", query).unwrap();
+            let filter = tasks.create_filter("F", query, "").unwrap();
             assert!(tags_in(&filter.id).is_empty());
         }
         assert!(tags_in("aaaaaaaaaaaa").is_empty()); // gone
@@ -770,7 +845,7 @@ mod tests {
         let (_, tasks) = open();
         add(&tasks, "Plain", &[]);
         add(&tasks, "Tagged", &["a"]);
-        let filter = tasks.create_filter("All", "*").unwrap();
+        let filter = tasks.create_filter("All", "*", "").unwrap();
         assert_eq!(
             titles(rows_of_filter(&tasks, &filter.id)),
             ["Plain", "Tagged"]
@@ -781,7 +856,7 @@ mod tests {
     fn a_task_leaves_the_filter_when_it_no_longer_matches() {
         let (_, tasks) = open();
         let id = add(&tasks, "t", &["work"]);
-        let filter = tasks.create_filter("Work", "@work").unwrap();
+        let filter = tasks.create_filter("Work", "@work", "").unwrap();
         assert_eq!(titles(rows_of_filter(&tasks, &filter.id)), ["t"]);
         tasks.remove_tag(&id, "work").unwrap();
         assert!(rows_of_filter(&tasks, &filter.id).is_empty());
@@ -797,7 +872,7 @@ mod tests {
     fn an_unreadable_query_matches_nothing_and_an_unknown_filter_is_not_found() {
         let (files, tasks) = open();
         add(&tasks, "t", &["work"]);
-        let filter = tasks.create_filter("Work", "@work").unwrap();
+        let filter = tasks.create_filter("Work", "@work", "").unwrap();
         let path = format!("Filters/{}.md", filter.id);
         let mut file = Document::parse(&files.read(Path::new(&path)).unwrap()).unwrap();
         file.set_scalar("query", "@work &");
@@ -820,9 +895,9 @@ mod tests {
     #[test]
     fn editing_changes_title_and_query_and_keeps_the_place() {
         let (_, tasks) = open();
-        let a = tasks.create_filter("A", "@a").unwrap();
-        tasks.create_filter("B", "@b").unwrap();
-        let edited = tasks.edit_filter(&a.id, " New\n", "@x | @y").unwrap();
+        let a = tasks.create_filter("A", "@a", "").unwrap();
+        tasks.create_filter("B", "@b", "").unwrap();
+        let edited = tasks.edit_filter(&a.id, " New\n", "@x | @y", "").unwrap();
         assert_eq!(
             (edited.title.as_str(), edited.query.as_str()),
             ("New", "@x | @y")
@@ -833,18 +908,18 @@ mod tests {
     #[test]
     fn editing_refuses_what_creating_refuses_and_saves_nothing() {
         let (_, tasks) = open();
-        let a = tasks.create_filter("A", "@a").unwrap();
+        let a = tasks.create_filter("A", "@a", "").unwrap();
         assert!(matches!(
-            tasks.edit_filter(&a.id, " ", "@a"),
+            tasks.edit_filter(&a.id, " ", "@a", ""),
             Err(Error::EmptyFilterTitle)
         ));
         assert!(matches!(
-            tasks.edit_filter(&a.id, "A", "@a |"),
+            tasks.edit_filter(&a.id, "A", "@a |", ""),
             Err(Error::InvalidQuery(_))
         ));
         assert_eq!(tasks.filters().unwrap()[0], a);
         assert!(matches!(
-            tasks.edit_filter("aaaaaaaaaaaa", "A", "@a"),
+            tasks.edit_filter("aaaaaaaaaaaa", "A", "@a", ""),
             Err(Error::Io(e)) if e.kind() == io::ErrorKind::NotFound
         ));
     }
@@ -854,7 +929,7 @@ mod tests {
         let (_, tasks) = open();
         let ids: Vec<String> = ["A", "B", "C", "D"]
             .iter()
-            .map(|t| tasks.create_filter(t, "@a").unwrap().id)
+            .map(|t| tasks.create_filter(t, "@a", "").unwrap().id)
             .collect();
         tasks.move_filter(&ids[3], Some(&ids[1])).unwrap();
         assert_eq!(names(&tasks), ["A", "D", "B", "C"]);
@@ -875,7 +950,7 @@ mod tests {
         let (files, tasks) = open();
         let ids: Vec<String> = ["A", "B", "C"]
             .iter()
-            .map(|t| tasks.create_filter(t, "@a").unwrap().id)
+            .map(|t| tasks.create_filter(t, "@a", "").unwrap().id)
             .collect();
         for id in &ids {
             let path = format!("Filters/{id}.md");
@@ -901,8 +976,8 @@ mod tests {
         let (files, tasks) = open();
         let id = add(&tasks, "t", &["work"]);
         let before = files.read(Path::new(&format!("Tasks/{id}.md"))).unwrap();
-        let a = tasks.create_filter("A", "@work").unwrap();
-        let b = tasks.create_filter("B", "@work").unwrap();
+        let a = tasks.create_filter("A", "@work", "").unwrap();
+        let b = tasks.create_filter("B", "@work", "").unwrap();
         tasks.delete_filter(&a.id).unwrap();
         assert_eq!(tasks.filters().unwrap(), [b]);
         assert!(!files.exists(Path::new(&format!("Filters/{}.md", a.id))));
@@ -922,8 +997,8 @@ mod tests {
         add(&tasks, "one", &["work"]);
         add(&tasks, "two", &["work"]);
         add(&tasks, "later", &["work", "backlog"]);
-        tasks.create_filter("Work", "@work").unwrap();
-        tasks.create_filter("None", "@nothing").unwrap();
+        tasks.create_filter("Work", "@work", "").unwrap();
+        tasks.create_filter("None", "@nothing", "").unwrap();
         let counts: Vec<u32> = tasks.filters().unwrap().iter().map(|f| f.matches).collect();
         assert_eq!(counts, [3, 0]);
     }
@@ -932,7 +1007,7 @@ mod tests {
     fn a_filter_with_an_unreadable_query_is_listed_with_its_error_and_can_be_edited() {
         let (files, tasks) = open();
         add(&tasks, "t", &["work"]);
-        let filter = tasks.create_filter("Work", "@work").unwrap();
+        let filter = tasks.create_filter("Work", "@work", "").unwrap();
         assert_eq!(filter.error, None);
         let path = format!("Filters/{}.md", filter.id);
         let mut file = Document::parse(&files.read(Path::new(&path)).unwrap()).unwrap();
@@ -941,7 +1016,7 @@ mod tests {
         let listed = &tasks.filters().unwrap()[0];
         assert!(listed.error.is_some());
         assert_eq!(listed.matches, 0);
-        let fixed = tasks.edit_filter(&filter.id, "Work", "@work").unwrap();
+        let fixed = tasks.edit_filter(&filter.id, "Work", "@work", "").unwrap();
         assert_eq!((fixed.error, fixed.matches), (None, 1));
     }
 
@@ -950,7 +1025,7 @@ mod tests {
         let ids = ["a", "b", "c", "d"]
             .map(|t| add(&tasks, t, &["work"]))
             .to_vec();
-        let filter = tasks.create_filter("Work", "@work").unwrap();
+        let filter = tasks.create_filter("Work", "@work", "").unwrap();
         (files, tasks, filter, ids)
     }
 
@@ -1016,7 +1091,7 @@ mod tests {
             .iter()
             .map(|id| files.read(Path::new(&format!("Tasks/{id}.md"))).unwrap())
             .collect();
-        let other = tasks.create_filter("Other", "@work").unwrap();
+        let other = tasks.create_filter("Other", "@work", "").unwrap();
         tasks.move_in_filter(&f.id, &ids[1], None).unwrap();
         assert_eq!(shown(&tasks, &f), ["d", "a", "c", "b"]);
         assert_eq!(shown(&tasks, &other), ["a", "b", "c", "d"]);
@@ -1040,7 +1115,7 @@ mod tests {
     #[test]
     fn unplaced_tasks_follow_the_placed_ones_by_created_then_item_id() {
         let (files, tasks) = open();
-        let f = tasks.create_filter("F", "*").unwrap();
+        let f = tasks.create_filter("F", "*", "").unwrap();
         // `x` and `y` tie.
         for (id, created) in [
             ("aaaaaaaaaaaa", "2024-03-01T00:00:00Z"),
@@ -1075,7 +1150,7 @@ mod tests {
         assert_eq!(shown(&tasks, &f), ["d", "a", "b", "c"]);
         tasks.remove_tag(&ids[3], "work").unwrap();
         // Any write of the Filter's file drops the place.
-        tasks.edit_filter(&f.id, "Work", "@work").unwrap();
+        tasks.edit_filter(&f.id, "Work", "@work", "").unwrap();
         let text = files
             .read(Path::new(&format!("Filters/{}.md", f.id)))
             .unwrap();
@@ -1100,7 +1175,7 @@ mod tests {
         tasks.move_in_filter(&f.id, &ids[3], Some(&ids[0])).unwrap();
         tasks.close(&ids[3], crate::Closing::Rejected).unwrap();
         assert_eq!(shown(&tasks, &f), ["a", "b", "c"]);
-        tasks.edit_filter(&f.id, "Renamed", "@work").unwrap();
+        tasks.edit_filter(&f.id, "Renamed", "@work", "").unwrap();
         tasks.revert();
         assert_eq!(shown(&tasks, &f), ["d", "a", "b", "c"]);
     }
@@ -1131,7 +1206,7 @@ mod tests {
         for title in ["t1", "t2", "t3"] {
             ids.push(add(&tasks, title, &["work"]));
         }
-        let filter = tasks.create_filter("Work", "@work").unwrap();
+        let filter = tasks.create_filter("Work", "@work", "").unwrap();
         (files, tasks, filter, ids)
     }
 
@@ -1154,7 +1229,7 @@ mod tests {
     #[test]
     fn a_drag_in_a_filter_passing_a_sibling_changes_the_subtask_order_everywhere() {
         let (_, tasks, f, ids) = subtask_fixture();
-        let other = tasks.create_filter("Other", "@work").unwrap();
+        let other = tasks.create_filter("Other", "@work", "").unwrap();
         // s3 passes s2: just after the last sibling it now follows.
         tasks.move_in_filter(&f.id, &ids[3], Some(&ids[2])).unwrap();
         assert_eq!(sheet(&tasks, &ids[0]), ["s1", "s3", "s2"]);
@@ -1171,7 +1246,7 @@ mod tests {
     #[test]
     fn a_drag_passing_no_sibling_changes_only_that_filters_order() {
         let (files, tasks, f, ids) = subtask_fixture();
-        let other = tasks.create_filter("Other", "@work").unwrap();
+        let other = tasks.create_filter("Other", "@work", "").unwrap();
         tasks.move_in_filter(&f.id, &ids[4], Some(&ids[2])).unwrap();
         let task = |id: &str| files.read(Path::new(&format!("Tasks/{id}.md"))).unwrap();
         let before: Vec<_> = ids.iter().map(|id| task(id)).collect();
@@ -1187,7 +1262,7 @@ mod tests {
         let (_, tasks, _, ids) = subtask_fixture();
         tasks.add_tag(&ids[1], "x").unwrap();
         tasks.add_tag(&ids[3], "x").unwrap();
-        let f = tasks.create_filter("X", "@x").unwrap();
+        let f = tasks.create_filter("X", "@x", "").unwrap();
         tasks.move_in_filter(&f.id, &ids[3], Some(&ids[1])).unwrap();
         assert_eq!(sheet(&tasks, &ids[0]), ["s3", "s1", "s2"]);
     }
@@ -1202,7 +1277,7 @@ mod tests {
                 task.id
             })
             .to_vec();
-        let filter = tasks.create_filter("Work", "@work").unwrap();
+        let filter = tasks.create_filter("Work", "@work", "").unwrap();
         (files, tasks, filter, ids)
     }
 
@@ -1303,7 +1378,7 @@ mod tests {
         let p = add_priority(&tasks, "p", 4, &["work"]);
         tasks.create_subtask(&p, "s1", 3, &["work".into()]).unwrap();
         tasks.create_subtask(&p, "s2", 1, &["work".into()]).unwrap();
-        let f = tasks.create_filter("Work", "@work").unwrap();
+        let f = tasks.create_filter("Work", "@work", "").unwrap();
         tasks.set_sort(&f.id, ASCENDING).unwrap();
         // The rows of s1 (P3) and s2 (P1) are refilled in Subtask order.
         assert_eq!(
@@ -1340,6 +1415,177 @@ mod tests {
         assert_eq!(
             DESCENDING.with_key(FilterSortKey::Manual).key(),
             FilterSortKey::Manual
+        );
+    }
+
+    /// The Filter's Groups as (Tag, Titles).
+    fn grouped(tasks: &Tasks, id: &str) -> Vec<(Option<String>, Vec<String>)> {
+        let groups = tasks.filter_groups(id).unwrap();
+        (groups.into_iter())
+            .map(|g| (g.tag, titles(g.rows)))
+            .collect()
+    }
+
+    fn group(tag: Option<&str>, titles: &[&str]) -> (Option<String>, Vec<String>) {
+        (
+            tag.map(str::to_owned),
+            titles.iter().map(|t| (*t).to_owned()).collect(),
+        )
+    }
+
+    /// "x" @work, "y" @private, "z" no Tag, "xy" both; in a Filter `*`
+    /// Grouped by `@work @private`.
+    fn group_fixture() -> (Arc<MemoryFiles>, Tasks, Filter) {
+        let (files, tasks) = open();
+        add(&tasks, "x", &["work"]);
+        add(&tasks, "y", &["private"]);
+        add(&tasks, "z", &[]);
+        add(&tasks, "xy", &["private", "work"]);
+        let f = tasks.create_filter("All", "*", "@work @private").unwrap();
+        (files, tasks, f)
+    }
+
+    #[test]
+    fn groups_follow_the_group_by_order_after_the_tasks_without_a_group() {
+        let (_, tasks, f) = group_fixture();
+        assert_eq!(
+            grouped(&tasks, &f.id),
+            [
+                group(None, &["z"]),
+                group(Some("work"), &["x", "xy"]),
+                group(Some("private"), &["y", "xy"]),
+            ]
+        );
+        assert_eq!(f.group_by, ["work", "private"]);
+    }
+
+    #[test]
+    fn an_empty_group_keeps_its_heading_even_if_the_query_excludes_its_tag() {
+        let (_, tasks) = open();
+        add(&tasks, "a", &["work"]);
+        add(&tasks, "b", &["home"]);
+        let f = tasks.create_filter("F", "!@home", "@home").unwrap();
+        assert_eq!(
+            grouped(&tasks, &f.id),
+            [group(None, &["a"]), group(Some("home"), &[])]
+        );
+    }
+
+    #[test]
+    fn a_subtask_is_grouped_by_its_own_tags_and_keeps_its_subtask_order() {
+        let (_, tasks) = open();
+        let parent = add(&tasks, "p", &["a"]);
+        tasks
+            .create_subtask(&parent, "s1", 4, &["b".into()])
+            .unwrap();
+        tasks.create_subtask(&parent, "s2", 4, &[]).unwrap();
+        tasks
+            .create_subtask(&parent, "s3", 4, &["b".into()])
+            .unwrap();
+        let f = tasks.create_filter("F", "*", "@b").unwrap();
+        assert_eq!(
+            grouped(&tasks, &f.id),
+            [group(None, &["p", "s2"]), group(Some("b"), &["s1", "s3"])]
+        );
+    }
+
+    #[test]
+    fn sort_applies_within_each_group() {
+        let (_, tasks) = open();
+        let tag = vec!["w".to_owned()];
+        tasks.create("low", 4, &tag).unwrap();
+        tasks.create("high", 1, &tag).unwrap();
+        tasks.create("plain low", 4, &[]).unwrap();
+        tasks.create("plain high", 1, &[]).unwrap();
+        let f = tasks.create_filter("F", "*", "@w").unwrap();
+        tasks.set_sort(&f.id, ASCENDING).unwrap();
+        assert_eq!(
+            grouped(&tasks, &f.id),
+            [
+                group(None, &["plain high", "plain low"]),
+                group(Some("w"), &["high", "low"]),
+            ]
+        );
+    }
+
+    #[test]
+    fn closing_a_task_removes_it_from_every_group_and_revert_brings_it_back() {
+        let (_, tasks, f) = group_fixture();
+        let xy = tasks
+            .rows()
+            .unwrap()
+            .into_iter()
+            .find(|r| r.task.title == "xy");
+        let xy = xy.unwrap().task.id;
+        tasks.close(&xy, crate::Closing::Rejected).unwrap();
+        assert_eq!(
+            grouped(&tasks, &f.id),
+            [
+                group(None, &["z"]),
+                group(Some("work"), &["x"]),
+                group(Some("private"), &["y"])
+            ]
+        );
+        tasks.revert();
+        assert_eq!(grouped(&tasks, &f.id)[1], group(Some("work"), &["x", "xy"]));
+        assert_eq!(
+            grouped(&tasks, &f.id)[2],
+            group(Some("private"), &["y", "xy"])
+        );
+    }
+
+    #[test]
+    fn group_by_is_a_scalar_of_tags_and_absent_without_one() {
+        let (files, tasks, f) = group_fixture();
+        let path = format!("Filters/{}.md", f.id);
+        let file = Document::parse(&files.read(Path::new(&path)).unwrap()).unwrap();
+        assert_eq!(file.scalar("group-by"), Some("work private"));
+        tasks.edit_filter(&f.id, "All", "*", "  ").unwrap();
+        let file = Document::parse(&files.read(Path::new(&path)).unwrap()).unwrap();
+        assert_eq!(file.scalar("group-by"), None);
+        assert_eq!(
+            grouped(&tasks, &f.id),
+            [group(None, &["x", "y", "z", "xy"])]
+        );
+    }
+
+    #[test]
+    fn group_by_text_drops_repeats_and_at_signs() {
+        let (_, tasks, f) = group_fixture();
+        let edited = tasks
+            .edit_filter(&f.id, "All", "*", "@private work  @private")
+            .unwrap();
+        assert_eq!(edited.group_by, ["private", "work"]);
+    }
+
+    #[test]
+    fn an_unknown_tag_a_wildcard_or_other_text_is_refused_and_saves_nothing() {
+        let (files, tasks, f) = group_fixture();
+        let path = format!("Filters/{}.md", f.id);
+        let before = files.read(Path::new(&path)).unwrap();
+        for (text, unknown) in [
+            ("@work @nope", true),
+            ("@wo*", false),
+            ("@Work", false),
+            ("@", false),
+        ] {
+            let refused = tasks.edit_filter(&f.id, "Other", "*", text);
+            match refused {
+                Err(Error::UnknownGroupByTag(_)) if unknown => {}
+                Err(Error::InvalidGroupByTag(_)) if !unknown => {}
+                other => panic!("{text}: {other:?}"),
+            }
+            assert!(tasks.check_group_by(text).is_err());
+        }
+        assert!(matches!(
+            tasks.create_filter("New", "*", "@nope"),
+            Err(Error::UnknownGroupByTag(_))
+        ));
+        assert_eq!(files.read(Path::new(&path)).unwrap(), before);
+        assert_eq!(files.list(Path::new("Filters")).unwrap().len(), 1);
+        assert_eq!(
+            tasks.check_group_by("@work private").unwrap(),
+            ["work", "private"]
         );
     }
 }

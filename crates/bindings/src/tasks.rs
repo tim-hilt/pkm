@@ -22,6 +22,7 @@ pub enum TasksError {
     NotASibling,
     EmptyFilterTitle,
     InvalidQuery(String),
+    InvalidGroupBy(String),
     Failed(String),
 }
 
@@ -36,7 +37,7 @@ impl std::fmt::Display for TasksError {
             Self::BlockedByLoop => Error::BlockedByLoop.fmt(f),
             Self::NotASibling => Error::NotASibling.fmt(f),
             Self::EmptyFilterTitle => Error::EmptyFilterTitle.fmt(f),
-            Self::InvalidQuery(message) => f.write_str(message),
+            Self::InvalidQuery(message) | Self::InvalidGroupBy(message) => f.write_str(message),
             Self::Failed(message) => f.write_str(message),
         }
     }
@@ -60,6 +61,9 @@ impl From<Error> for TasksError {
             Error::NotASibling => Self::NotASibling,
             Error::EmptyFilterTitle => Self::EmptyFilterTitle,
             Error::InvalidQuery(e) => Self::InvalidQuery(e.to_string()),
+            e @ (Error::UnknownGroupByTag(_) | Error::InvalidGroupByTag(_)) => {
+                Self::InvalidGroupBy(e.to_string())
+            }
             Error::Io(e) => e.into(),
         }
     }
@@ -129,6 +133,8 @@ pub struct Filter {
     pub query: String,
     pub favorite: bool,
     pub sort: FilterSort,
+    /// The Tags its Tasks are split by, in the order of the Groups, without `@`.
+    pub group_by: Vec<String>,
     /// How many Open Tasks the Query matches.
     pub matches: u32,
     /// Why the stored Query can't be read; such a Filter matches nothing.
@@ -507,19 +513,27 @@ impl TaskStore {
     }
 
     /// Creates a Filter at the end of the Filters list, refusing an empty
-    /// Title or a Query that can't be read.
-    pub fn create_filter(&self, title: String, query: String) -> Result<Filter, TasksError> {
-        Ok(self.0.create_filter(&title, &query)?)
+    /// Title, a Query that can't be read or a Group by that isn't a list of
+    /// existing Tags (`@work @private`).
+    pub fn create_filter(
+        &self,
+        title: String,
+        query: String,
+        group_by: String,
+    ) -> Result<Filter, TasksError> {
+        Ok(self.0.create_filter(&title, &query, &group_by)?)
     }
 
-    /// Changes a Filter's Title and Query, refusing what `create_filter` does.
+    /// Changes a Filter's Title, Query and Group by, refusing what
+    /// `create_filter` does.
     pub fn edit_filter(
         &self,
         id: String,
         title: String,
         query: String,
+        group_by: String,
     ) -> Result<Filter, TasksError> {
-        Ok(self.0.edit_filter(&id, &title, &query)?)
+        Ok(self.0.edit_filter(&id, &title, &query, &group_by)?)
     }
 
     /// Marks a Filter as a Favorite, or unmarks it.
@@ -587,6 +601,12 @@ impl TaskStore {
                 unknown: Vec::new(),
             },
         }
+    }
+
+    /// Checks a Group-by text without saving: why it can't be saved, if it
+    /// can't.
+    pub fn check_group_by(&self, text: String) -> Option<String> {
+        self.0.check_group_by(&text).err().map(|e| e.to_string())
     }
 
     /// The direct Subtasks of an Open Task, in either list: Open or pending
@@ -685,7 +705,9 @@ mod tests {
         let store = TaskStore::open(path("Tasks")).unwrap();
         store.create("t".into(), 4, vec!["work".into()]).unwrap();
         store.create("u".into(), 4, vec![]).unwrap();
-        let filter = store.create_filter("Work".into(), "@work".into()).unwrap();
+        let filter = store
+            .create_filter("Work".into(), "@work".into(), String::new())
+            .unwrap();
         let tasks = store
             .filter_groups(filter.id.clone())
             .unwrap()
@@ -694,14 +716,46 @@ mod tests {
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].title, "t");
         assert!(matches!(
-            store.create_filter("Work".into(), "@work &".into()),
+            store.create_filter("Work".into(), "@work &".into(), String::new()),
             Err(TasksError::InvalidQuery(_))
         ));
-        let other = store.create_filter("Other".into(), "@x".into()).unwrap();
+        let other = store
+            .create_filter("Other".into(), "@x".into(), String::new())
+            .unwrap();
         let edited = store
-            .edit_filter(other.id.clone(), "Home".into(), "@work".into())
+            .edit_filter(
+                other.id.clone(),
+                "Home".into(),
+                "@work".into(),
+                String::new(),
+            )
             .unwrap();
         assert_eq!(edited.matches, 1);
+        assert!(matches!(
+            store.edit_filter(
+                other.id.clone(),
+                "Home".into(),
+                "@work".into(),
+                "@nope".into()
+            ),
+            Err(TasksError::InvalidGroupBy(_))
+        ));
+        assert!(store.check_group_by("@work".into()).is_none());
+        assert!(store.check_group_by("@nope".into()).is_some());
+        let grouped =
+            (store.edit_filter(other.id.clone(), "Home".into(), "*".into(), "@work".into()))
+                .unwrap();
+        assert_eq!(grouped.group_by, ["work"]);
+        let groups = store.filter_groups(other.id.clone()).unwrap();
+        assert_eq!(groups[1].tag.as_deref(), Some("work"));
+        store
+            .edit_filter(
+                other.id.clone(),
+                "Home".into(),
+                "@work".into(),
+                String::new(),
+            )
+            .unwrap();
         store.move_filter(other.id.clone(), None).unwrap();
         store
             .move_filter(other.id.clone(), Some(filter.id.clone()))

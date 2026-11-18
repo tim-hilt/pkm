@@ -107,6 +107,8 @@ export interface Filter {
   query: string;
   favorite: boolean;
   sort: Sort;
+  /** The Tags its Tasks are split by, as typed: `@work @private`; empty if it isn't Grouped. */
+  groupBy: string;
   /** How many Open Tasks the Query matches. */
   matches: number;
   /** Why the stored Query can't be read; such a Filter matches nothing until it is edited. */
@@ -438,13 +440,13 @@ export class TasksModel {
   }
 
   /** Creates a Filter at the end of the Filters list. False, creating nothing, if the Title is empty or the Query can't be read. */
-  addFilter(title: string, query: string): boolean {
-    return this.apply(() => this.files.store.createFilter(title, query).free());
+  addFilter(title: string, query: string, groupBy = ""): boolean {
+    return this.apply(() => this.files.store.createFilter(title, query, groupBy).free());
   }
 
-  /** Changes a Filter's Title and Query. False, changing nothing, if `addFilter` would refuse them. */
-  editFilter(id: string, title: string, query: string): boolean {
-    return this.apply(() => this.files.store.editFilter(id, title, query).free());
+  /** Changes a Filter's Title, Query and Group by (`@work @private`). False, changing nothing, if `addFilter` would refuse them. */
+  editFilter(id: string, title: string, query: string, groupBy: string): boolean {
+    return this.apply(() => this.files.store.editFilter(id, title, query, groupBy).free());
   }
 
   /** Deletes a Filter; no Task changes. Shown, the Filters list shows instead. */
@@ -649,6 +651,7 @@ export class TasksModel {
         query: row.query,
         favorite: row.favorite,
         sort: { key: row.sortKey, direction: row.sortDirection ?? undefined },
+        groupBy: row.groupBy,
         matches: row.matches,
         error: row.error ?? undefined,
       };

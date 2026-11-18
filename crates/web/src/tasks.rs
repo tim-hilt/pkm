@@ -55,6 +55,10 @@ pub struct Filter {
     /// Which end of the key comes first; none for Manual.
     #[wasm_bindgen(js_name = sortDirection)]
     pub sort_direction: Option<Direction>,
+    /// The Tags its Tasks are split by, typed as `@work @private`; empty if
+    /// it isn't Grouped.
+    #[wasm_bindgen(js_name = groupBy)]
+    pub group_by: String,
     /// How many Open Tasks the Query matches.
     pub matches: u32,
     /// Why the stored Query can't be read; such a Filter matches nothing.
@@ -73,6 +77,10 @@ impl From<pkm_tasks::Filter> for Filter {
                 FilterSort::Manual => None,
                 FilterSort::Priority(direction) => Some(direction.into()),
             },
+            group_by: (f.group_by.iter())
+                .map(|tag| format!("@{tag}"))
+                .collect::<Vec<_>>()
+                .join(" "),
             matches: f.matches,
             error: f.error,
         }
@@ -561,20 +569,33 @@ impl TaskStore {
     }
 
     /// Creates a Filter at the end of the Filters list, refusing an empty
-    /// Title or a Query that can't be read.
+    /// Title, a Query that can't be read or a Group by that isn't a list of
+    /// existing Tags (`@work @private`).
     #[wasm_bindgen(js_name = createFilter)]
-    pub fn create_filter(&self, title: &str, query: &str) -> Result<Filter, JsError> {
+    pub fn create_filter(
+        &self,
+        title: &str,
+        query: &str,
+        group_by: &str,
+    ) -> Result<Filter, JsError> {
         self.tasks
-            .create_filter(title, query)
+            .create_filter(title, query, group_by)
             .map(Into::into)
             .map_err(error)
     }
 
-    /// Changes a Filter's Title and Query, refusing what `createFilter` does.
+    /// Changes a Filter's Title, Query and Group by, refusing what
+    /// `createFilter` does.
     #[wasm_bindgen(js_name = editFilter)]
-    pub fn edit_filter(&self, id: &str, title: &str, query: &str) -> Result<Filter, JsError> {
+    pub fn edit_filter(
+        &self,
+        id: &str,
+        title: &str,
+        query: &str,
+        group_by: &str,
+    ) -> Result<Filter, JsError> {
         self.tasks
-            .edit_filter(id, title, query)
+            .edit_filter(id, title, query, group_by)
             .map(Into::into)
             .map_err(error)
     }
