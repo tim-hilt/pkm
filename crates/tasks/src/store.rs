@@ -78,6 +78,14 @@ pub struct Task {
     pub blocked_by: Vec<Blocker>,
 }
 
+/// The rows of a Filter under one heading: those of the Tag `tag`, or, if
+/// `None`, those of no Group.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Group {
+    pub tag: Option<String>,
+    pub rows: Vec<Row>,
+}
+
 /// A Task as one row of a flat list, with what its markers show.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Row {

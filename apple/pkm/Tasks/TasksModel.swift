@@ -117,7 +117,8 @@ final class TasksModel {
 
     /// The Tasks `list` shows, in its order; none for the Filters list.
     private func tasks(in list: TasksList) -> [ListedTask] {
-        list.filterID.flatMap { try? store.filterTasks(id: $0) } ?? []
+        // Until Group by exists, a Filter is one Group.
+        list.filterID.flatMap { try? store.filterGroups(id: $0).flatMap(\.tasks) } ?? []
     }
 
     /// The direct Subtasks of the Open Task `id`, in Subtask order: Open, or Done and still

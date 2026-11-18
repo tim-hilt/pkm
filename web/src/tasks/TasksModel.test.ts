@@ -506,7 +506,10 @@ describe("order and moving", () => {
     model.moveBefore(task("c"), task("a"));
     await model.saved();
     expect(
-      (await TaskFiles.open(storage)).store.filterTasks(model.filters[0].id).map((t) => t.title),
+      (await TaskFiles.open(storage)).store
+        .filterGroups(model.filters[0].id)
+        .flatMap((g) => g.takeTasks())
+        .map((t) => t.title),
     ).toEqual(["c", "a", "b"]);
   });
 });

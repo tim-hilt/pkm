@@ -1,7 +1,9 @@
 //! Filters (ADR-0024): `Filters/<id>.md` beside the Tasks folder, each a Title
 //! and a Query over the Open Tasks.
 
-use super::{Anchor, Error, Node, Nodes, Row, Tasks, compare_positions, end_key, in_subtask_order};
+use super::{
+    Anchor, Error, Group, Node, Nodes, Tasks, compare_positions, end_key, in_subtask_order,
+};
 use super::{place, place_among, rows_of};
 use crate::query::{Query, QueryError};
 use pkm_base::clock::{iso8601, now_ms};
@@ -217,14 +219,15 @@ impl Tasks {
             .ok_or_else(|| io::ErrorKind::NotFound.into())
     }
 
-    /// The Open Tasks the Filter `id` matches: each matched on its own Tags,
-    /// Blocked ones, Subtasks and Backlog Tasks included. The Tasks with a
-    /// place come first in the Filter's order, then the others by `created`; if
-    /// the Filter is Sorted, then by that, Tasks of one key keeping that order;
-    /// the Subtasks of one Parent keep their Subtask order among themselves. A
-    /// Query that can't be read matches nothing. Fails with `NotFound` if
-    /// there is no such Filter.
-    pub fn filter_rows(&self, id: &str) -> io::Result<Vec<Row>> {
+    /// The Groups of the Filter `id`, in display order. For now a Filter has
+    /// one Group without a Tag (even if empty) holding the Open Tasks it
+    /// matches: each matched on its own Tags, Blocked ones, Subtasks and
+    /// Backlog Tasks included. The Tasks with a place come first in the
+    /// Filter's order, then the others by `created`; if the Filter is Sorted,
+    /// then by that, Tasks of one key keeping that order; the Subtasks of one
+    /// Parent keep their Subtask order among themselves. A Query that can't be
+    /// read matches nothing. Fails with `NotFound` if there is no such Filter.
+    pub fn filter_groups(&self, id: &str) -> io::Result<Vec<Group>> {
         let filter = self.stored_filter(id)?;
         let nodes: Nodes = self.shown()?;
         let found = shown_in(
@@ -233,7 +236,10 @@ impl Tasks {
             &filter.places,
             filter.filter.sort,
         );
-        Ok(rows_of(&nodes, found))
+        Ok(vec![Group {
+            tag: None,
+            rows: rows_of(&nodes, found),
+        }])
     }
 
     /// The Tags a Task needs to stay in the Filter `id` (see
@@ -569,7 +575,7 @@ fn stored_of(file: &Document) -> Option<Stored> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Files, MemoryFiles};
+    use crate::{Files, MemoryFiles, Row};
     use std::path::Path;
     use std::sync::Arc;
 
@@ -586,6 +592,15 @@ mod tests {
 
     fn titles(rows: Vec<Row>) -> Vec<String> {
         rows.into_iter().map(|r| r.task.title).collect()
+    }
+
+    /// The rows of the Filter's only Group, which has no Tag.
+    fn rows_of_filter(tasks: &Tasks, id: &str) -> Vec<Row> {
+        let mut groups = tasks.filter_groups(id).unwrap();
+        assert_eq!(groups.len(), 1);
+        let group = groups.remove(0);
+        assert_eq!(group.tag, None);
+        group.rows
     }
 
     #[test]
@@ -706,7 +721,7 @@ mod tests {
         add(&tasks, "later", &["work", "backlog"]);
         let filter = tasks.create_filter("Work", "@work & !@in-review").unwrap();
         assert_eq!(
-            titles(tasks.filter_rows(&filter.id).unwrap()),
+            titles(rows_of_filter(&tasks, &filter.id)),
             ["one", "two", "later"]
         );
     }
@@ -726,7 +741,7 @@ mod tests {
             .unwrap();
         tasks.remove_tag(&untagged.id, "work").unwrap();
         let filter = tasks.create_filter("Work", "@work").unwrap();
-        let rows = tasks.filter_rows(&filter.id).unwrap();
+        let rows = rows_of_filter(&tasks, &filter.id);
         assert_eq!(
             rows.iter()
                 .map(|r| r.task.title.as_str())
@@ -757,7 +772,7 @@ mod tests {
         add(&tasks, "Tagged", &["a"]);
         let filter = tasks.create_filter("All", "*").unwrap();
         assert_eq!(
-            titles(tasks.filter_rows(&filter.id).unwrap()),
+            titles(rows_of_filter(&tasks, &filter.id)),
             ["Plain", "Tagged"]
         );
     }
@@ -767,15 +782,15 @@ mod tests {
         let (_, tasks) = open();
         let id = add(&tasks, "t", &["work"]);
         let filter = tasks.create_filter("Work", "@work").unwrap();
-        assert_eq!(titles(tasks.filter_rows(&filter.id).unwrap()), ["t"]);
+        assert_eq!(titles(rows_of_filter(&tasks, &filter.id)), ["t"]);
         tasks.remove_tag(&id, "work").unwrap();
-        assert!(tasks.filter_rows(&filter.id).unwrap().is_empty());
+        assert!(rows_of_filter(&tasks, &filter.id).is_empty());
         tasks.add_tag(&id, "work").unwrap();
         tasks.add_tag(&id, "backlog").unwrap();
-        assert_eq!(titles(tasks.filter_rows(&filter.id).unwrap()), ["t"]);
+        assert_eq!(titles(rows_of_filter(&tasks, &filter.id)), ["t"]);
         tasks.add_tag(&id, "x").unwrap();
         tasks.remove_tag(&id, "work").unwrap();
-        assert!(tasks.filter_rows(&filter.id).unwrap().is_empty());
+        assert!(rows_of_filter(&tasks, &filter.id).is_empty());
     }
 
     #[test]
@@ -788,8 +803,8 @@ mod tests {
         file.set_scalar("query", "@work &");
         files.write(Path::new(&path), &file.render()).unwrap();
         assert_eq!(tasks.filters().unwrap().len(), 1);
-        assert!(tasks.filter_rows(&filter.id).unwrap().is_empty());
-        let missing = tasks.filter_rows("aaaaaaaaaaaa").unwrap_err();
+        assert!(rows_of_filter(&tasks, &filter.id).is_empty());
+        let missing = tasks.filter_groups("aaaaaaaaaaaa").unwrap_err();
         assert_eq!(missing.kind(), io::ErrorKind::NotFound);
     }
 
@@ -940,7 +955,7 @@ mod tests {
     }
 
     fn shown(tasks: &Tasks, filter: &Filter) -> Vec<String> {
-        titles(tasks.filter_rows(&filter.id).unwrap())
+        titles(rows_of_filter(tasks, &filter.id))
     }
 
     #[test]

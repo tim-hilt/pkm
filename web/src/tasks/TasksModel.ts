@@ -664,7 +664,13 @@ export class TasksModel {
 
   private read(list: TasksList): ListedTask[] {
     const { store } = this.files;
-    return list.kind === "filter" ? this.listed(store.filterTasks(list.id)) : [];
+    if (list.kind !== "filter") return [];
+    // Until Group by exists, a Filter is one Group.
+    return store.filterGroups(list.id).flatMap((group) => {
+      const rows = group.takeTasks();
+      group.free();
+      return this.listed(rows);
+    });
   }
 
   /** The wasm `rows` as plain Tasks, freeing them. */

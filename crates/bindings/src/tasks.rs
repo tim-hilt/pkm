@@ -169,6 +169,14 @@ pub struct TagSuggestions {
     pub create: bool,
 }
 
+/// The Tasks a Filter shows under one heading, see `pkm_tasks::Group`.
+#[derive(uniffi::Record)]
+pub struct ListedGroup {
+    /// The Tag the Group is headed by; none for the Tasks of no Group.
+    pub tag: Option<String>,
+    pub tasks: Vec<ListedTask>,
+}
+
 /// A Task as the lists show it, one row of a flat list, see
 /// `pkm_tasks::Task` (named apart from Swift's `Task`).
 #[derive(uniffi::Record)]
@@ -534,9 +542,17 @@ impl TaskStore {
         Ok(self.0.filters()?)
     }
 
-    /// The Open Tasks a Filter matches, in its order.
-    pub fn filter_tasks(&self, id: String) -> Result<Vec<ListedTask>, TasksError> {
-        Ok(self.listed_rows(self.0.filter_rows(&id)?))
+    /// A Filter's Groups in display order, each with the Open Tasks it shows.
+    pub fn filter_groups(&self, id: String) -> Result<Vec<ListedGroup>, TasksError> {
+        Ok(self
+            .0
+            .filter_groups(&id)?
+            .into_iter()
+            .map(|g| ListedGroup {
+                tag: g.tag,
+                tasks: self.listed_rows(g.rows),
+            })
+            .collect())
     }
 
     /// Moves a Task before another in a Filter's own order, or to its end.
@@ -670,7 +686,11 @@ mod tests {
         store.create("t".into(), 4, vec!["work".into()]).unwrap();
         store.create("u".into(), 4, vec![]).unwrap();
         let filter = store.create_filter("Work".into(), "@work".into()).unwrap();
-        let tasks = store.filter_tasks(filter.id.clone()).unwrap();
+        let tasks = store
+            .filter_groups(filter.id.clone())
+            .unwrap()
+            .remove(0)
+            .tasks;
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].title, "t");
         assert!(matches!(
@@ -694,9 +714,14 @@ mod tests {
         store
             .move_in_filter(filter.id.clone(), first.id.clone(), None)
             .unwrap();
-        let order: Vec<String> = (store.filter_tasks(filter.id.clone()).unwrap().into_iter())
-            .map(|t| t.title)
-            .collect();
+        let order: Vec<String> = (store
+            .filter_groups(filter.id.clone())
+            .unwrap()
+            .remove(0)
+            .tasks
+            .into_iter())
+        .map(|t| t.title)
+        .collect();
         assert_eq!(order.last().map(String::as_str), Some("a"));
         store.delete_filter(other.id).unwrap();
         assert_eq!(store.filters().unwrap().len(), 1);

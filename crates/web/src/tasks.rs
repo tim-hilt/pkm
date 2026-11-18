@@ -255,6 +255,23 @@ impl Default for TaskQuickAdd {
     }
 }
 
+/// The Tasks a Filter shows under one heading.
+#[wasm_bindgen(getter_with_clone)]
+pub struct ListedGroup {
+    /// The Tag the Group is headed by; none for the Tasks of no Group.
+    pub tag: Option<String>,
+    tasks: Vec<ListedTask>,
+}
+
+#[wasm_bindgen]
+impl ListedGroup {
+    /// The Tasks shown, handed over once (a second call gets none).
+    #[wasm_bindgen(js_name = takeTasks)]
+    pub fn take_tasks(&mut self) -> Vec<ListedTask> {
+        std::mem::take(&mut self.tasks)
+    }
+}
+
 /// A Task as the lists show it, one row of a flat list.
 #[wasm_bindgen(getter_with_clone)]
 pub struct ListedTask {
@@ -586,10 +603,17 @@ impl TaskStore {
         Ok(found.into_iter().map(Into::into).collect())
     }
 
-    /// The Open Tasks a Filter matches, in its order.
-    #[wasm_bindgen(js_name = filterTasks)]
-    pub fn filter_tasks(&self, id: &str) -> Result<Vec<ListedTask>, JsError> {
-        Ok(self.listed(self.tasks.filter_rows(id).map_err(error)?))
+    /// A Filter's Groups in display order, each with the Open Tasks it shows.
+    #[wasm_bindgen(js_name = filterGroups)]
+    pub fn filter_groups(&self, id: &str) -> Result<Vec<ListedGroup>, JsError> {
+        let groups = self.tasks.filter_groups(id).map_err(error)?;
+        Ok(groups
+            .into_iter()
+            .map(|g| ListedGroup {
+                tag: g.tag,
+                tasks: self.listed(g.rows),
+            })
+            .collect())
     }
 
     /// Moves a Task before another in a Filter's own order, or to its end.

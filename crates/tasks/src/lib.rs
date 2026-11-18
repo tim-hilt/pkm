@@ -15,5 +15,5 @@ pub use files::{DiskFiles, Files, Listed, MemoryFiles, Stamp};
 pub use query::{Query, QueryError, typed as typed_query, unfinished_tag};
 pub use quick_add::{QuickAdd, QuickShortcut, ShortcutMeaning, TagQuery};
 pub use store::{
-    Blocker, Closing, Direction, Error, Filter, FilterSort, FilterSortKey, Row, Task, Tasks,
+    Blocker, Closing, Direction, Error, Filter, FilterSort, FilterSortKey, Group, Row, Task, Tasks,
 };
