@@ -26,6 +26,7 @@ const DEFAULT_PRIORITY: u8 = 4;
 const TAGS: &str = "tags";
 const BLOCKED_BY: &str = "blocked-by";
 const CREATED: &str = "created";
+const SUBTASK_POSITION: &str = "subtask-position";
 
 /// How a Task is Closed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,6 +111,16 @@ pub enum Error {
     /// Subtask, or the Task to move before isn't its sibling.
     NotASibling,
     Io(io::Error),
+}
+
+impl Error {
+    /// As an `io::Error`, for the callers that have no other kind.
+    fn into_io(self) -> io::Error {
+        match self {
+            Self::Io(e) => e,
+            other => io::Error::other(other.to_string()),
+        }
+    }
 }
 
 impl From<io::Error> for Error {
@@ -213,10 +224,10 @@ impl Tasks {
         self.insert(&NewTask::checked(title, priority, &tags)?, None)
     }
 
-    /// `create` for a Subtask directly below the Open Task `parent`, after its
-    /// other Subtasks, which is its place in All Tasks too. It starts with its
-    /// Parent's Tags (later changes to either leave the other alone). Fails
-    /// with `NotFound` if there is no such Open Task.
+    /// `create` for a Subtask of the Open Task `parent`, at the end of its
+    /// Subtask order. It starts with its Parent's Tags (later changes to either
+    /// leave the other alone). Fails with `NotFound` if there is no such Open
+    /// Task.
     pub fn create_subtask(
         &self,
         parent: &str,
@@ -229,18 +240,10 @@ impl Tasks {
         let mut all = parent.task.tags.clone();
         all.extend_from_slice(tags);
         let new = NewTask::checked(title, priority, &all)?;
-        // After the Parent's last Subtask at any depth, so the list keeps the tree order.
-        let order = self.all_in_order(&nodes)?;
-        let subtree = open_subtree(&nodes, &parent.task.id, &ranks(&order));
-        let last = subtree
-            .last()
-            .map_or(parent.task.id.as_str(), ItemId::as_str);
-        let before = order
-            .get(index_below(&order, last))
-            .map(|n| n.task.id.clone());
-        let task = self.insert(&new, Some(&parent.task.id))?;
-        self.move_in_all_tasks(&self.load()?, &task.id, before.as_deref())?;
-        Ok(task)
+        let keys: Vec<f64> = (subtask_order(&nodes, &parent.task.id).iter())
+            .filter_map(|n| n.subtask_position)
+            .collect();
+        self.insert(&new, Some((&parent.task.id, end_key(&keys))))
     }
 
     /// Now in ms, but at least a second after the last Task created here, so
@@ -254,9 +257,10 @@ impl Tasks {
         next(last) as f64 * 1000.0
     }
 
-    /// Saves a new Task under a fresh Item ID. No Filter is written: a Task
-    /// without a place follows the placed ones by `created`.
-    fn insert(&self, new: &NewTask, parent: Option<&str>) -> Result<Task, Error> {
+    /// Saves a new Task under a fresh Item ID, as a Subtask with its Subtask
+    /// position if it has a Parent. No Filter is written: a Task without a place
+    /// follows the placed ones by `created`.
+    fn insert(&self, new: &NewTask, parent: Option<(&str, f64)>) -> Result<Task, Error> {
         let mut entropy = Entropy::from_system();
         loop {
             let id = ItemId::new(&mut entropy);
@@ -264,8 +268,9 @@ impl Tasks {
             file.set_scalar("id", id.as_str());
             file.set_scalar("title", &new.title);
             file.set_scalar("priority", new.priority.to_string());
-            if let Some(parent) = parent {
+            if let Some((parent, position)) = parent {
                 file.set_scalar("parent", parent);
+                file.set_scalar(SUBTASK_POSITION, position.to_string());
             }
             set_list(&mut file, TAGS, new.tags.clone());
             let now = self.next_created();
@@ -322,39 +327,57 @@ impl Tasks {
         })
     }
 
-    /// Moves the Open Subtask `id` before its sibling `before`, or after its
-    /// last sibling if that is `None`; `before` is the Subtask itself: nothing
-    /// changes. At the end it lands below the last sibling's own Subtasks, so
-    /// the list keeps the tree order. Fails with `NotFound` for an unknown
-    /// Task and `NotASibling` for a top-level Task or a `before` that isn't a
-    /// sibling, before saving anything.
+    /// Moves the Open Subtask `id` before its sibling `before` in its Subtask
+    /// order, or after its last sibling if that is `None`; `before` is the
+    /// Subtask itself: nothing changes. Usually only its file is written, as
+    /// for Tasks (see `place`). Fails with `NotFound` for an unknown Task and
+    /// `NotASibling` for a top-level Task or a `before` that isn't a sibling,
+    /// before saving anything.
     pub fn move_subtask(&self, id: &str, before: Option<&str>) -> Result<Task, Error> {
         let nodes = self.load()?;
         let moved = nodes.get(id).ok_or(io::ErrorKind::NotFound)?;
         let parent = moved.task.parent.as_deref().ok_or(Error::NotASibling)?;
-        if before == Some(id) {
-            return Ok(moved.task.clone());
+        if before != Some(id) {
+            let anchor = before.map_or(Anchor::End, Anchor::Before);
+            self.place_subtask(&nodes, moved, parent, anchor)?;
         }
-        let mut list = self.all_in_order(&nodes)?;
-        list.retain(|n| n.task.id != id);
-        let siblings: Vec<&Node> = (list.iter().copied())
-            .filter(|n| n.task.parent.as_deref() == Some(parent))
-            .collect();
-        let before = match before {
-            Some(before) if siblings.iter().any(|n| n.task.id == before) => Some(before),
-            Some(_) => return Err(Error::NotASibling),
-            None => {
-                let Some(last) = siblings.last() else {
-                    return Ok(moved.task.clone());
-                };
-                let tail = open_subtree(&nodes, &last.task.id, &ranks(&list));
-                let end = tail.last().map_or(last.task.id.as_str(), ItemId::as_str);
-                list.get(index_below(&list, end))
-                    .map(|n| n.task.id.as_str())
-            }
-        };
-        self.move_in_all_tasks(&nodes, id, before)?;
         Ok(moved.task.clone())
+    }
+
+    /// Puts the Subtask `moved` of `parent` at `anchor` among its siblings in
+    /// the Subtask order, writing the Task files whose keys change.
+    fn place_subtask(
+        &self,
+        nodes: &Nodes,
+        moved: &Node,
+        parent: &str,
+        anchor: Anchor,
+    ) -> Result<(), Error> {
+        let mut siblings = subtask_order(nodes, parent);
+        let from = siblings.iter().position(|n| n.task.id == moved.task.id);
+        siblings.retain(|n| n.task.id != moved.task.id);
+        let index_of =
+            |id: &str| (siblings.iter().position(|n| n.task.id == id)).ok_or(Error::NotASibling);
+        let at = match anchor {
+            Anchor::End => siblings.len(),
+            Anchor::Before(id) => index_of(id)?,
+            Anchor::After(id) => index_of(id)? + 1,
+        };
+        if from == Some(at) {
+            return Ok(());
+        }
+        let keys: Vec<Option<f64>> = siblings.iter().map(|n| n.subtask_position).collect();
+        let placement = place_among(&keys, at);
+        for (at, key) in placement.shifted {
+            self.set_subtask_position(&siblings[at].task.id, key)?;
+        }
+        self.set_subtask_position(&moved.task.id, placement.position)
+    }
+
+    fn set_subtask_position(&self, id: &str, position: f64) -> Result<(), Error> {
+        let key = position.to_string();
+        self.modify(id, |file| file.set_scalar(SUBTASK_POSITION, key))
+            .map(drop)
     }
 
     /// Closes the Open Task `id` and its Open Subtasks as one pending change:
@@ -367,7 +390,7 @@ impl Tasks {
         let nodes = self.load()?;
         nodes.get(id.as_str()).ok_or(io::ErrorKind::NotFound)?;
         *self.pending() = Some(Pending {
-            ids: open_subtree(&nodes, id.as_str(), &HashMap::new()),
+            ids: open_subtree(&nodes, id.as_str()),
             closing,
         });
         Ok(())
@@ -581,17 +604,11 @@ impl Tasks {
     }
 
     /// The direct Subtasks of the Open Task `parent`, as
-    /// `rows` shows them: Open or pending Done, never Rejected, in their order.
-    /// Empty for a Task that has none or isn't there.
+    /// `rows` shows them: Open or pending Done, never Rejected, in their
+    /// Subtask order. Empty for a Task that has none or isn't there.
     pub fn subtasks(&self, parent: &str) -> io::Result<Vec<Row>> {
         let nodes = self.shown()?;
-        let order = self.all_in_order(&nodes)?;
-        let ranks = ranks(&order);
-        let mut found: Vec<&Node> = (nodes.values())
-            .filter(|n| n.task.parent.as_deref() == Some(parent))
-            .collect();
-        found.sort_by_key(|n| rank(&ranks, &n.task.id));
-        Ok(rows_of(&nodes, found))
+        Ok(rows_of(&nodes, subtask_order(&nodes, parent)))
     }
 
     /// Every Task as the lists show it: repaired, with the pending Close
@@ -648,10 +665,7 @@ impl Tasks {
     /// Rewrites the Task `id` as a migration does: `updated` stays, so that
     /// Devices migrating at once write the same bytes.
     fn migrate(&self, id: &ItemId, change: impl FnOnce(&mut Document)) -> io::Result<()> {
-        let (mut file, _) = self.read_open(id).map_err(|e| match e {
-            Error::Io(e) => e,
-            other => io::Error::other(other.to_string()),
-        })?;
+        let (mut file, _) = self.read_open(id).map_err(Error::into_io)?;
         change(&mut file);
         self.write(id, &file, Overwrite::Yes)
     }
@@ -726,6 +740,10 @@ pub(crate) struct Node {
     pub(crate) task: Task,
     /// When it was created (ISO 8601 UTC); `None` only until `load` gives it one.
     pub(crate) created: Option<String>,
+    /// Its fractional key in its Subtask order; `None` for a Task that has
+    /// none (a top-level one, or a Subtask another tool wrote), which follows
+    /// the keyed siblings.
+    pub(crate) subtask_position: Option<f64>,
     /// The IDs the file lists, whether or not such a Task exists.
     blocked_by: Vec<String>,
 }
@@ -773,6 +791,9 @@ fn node_of(file: &Document) -> Option<Node> {
     Some(Node {
         task,
         created: file.scalar(CREATED).map(str::to_owned),
+        subtask_position: (file.scalar(SUBTASK_POSITION))
+            .and_then(|p| p.parse().ok())
+            .filter(|p: &f64| p.is_finite()),
         blocked_by: blockers_of(file),
     })
 }
@@ -877,20 +898,8 @@ fn waits_for(nodes: &Nodes, from: &str, target: &str) -> bool {
     false
 }
 
-/// Where each Task of an ordered list is, by ID.
-fn ranks<'a>(order: &[&'a Node]) -> HashMap<&'a str, usize> {
-    (order.iter().enumerate())
-        .map(|(at, n)| (n.task.id.as_str(), at))
-        .collect()
-}
-
-/// The place of `id` in `ranks`; after every Task in it if it isn't.
-fn rank(ranks: &HashMap<&str, usize>, id: &str) -> usize {
-    ranks.get(id).copied().unwrap_or(usize::MAX)
-}
-
-/// `root`, then its Subtasks at any depth, each Parent's in the order of `ranks`.
-fn open_subtree(nodes: &Nodes, root: &str, ranks: &HashMap<&str, usize>) -> Vec<ItemId> {
+/// `root`, then its Subtasks at any depth.
+fn open_subtree(nodes: &Nodes, root: &str) -> Vec<ItemId> {
     let mut ids = vec![root.to_owned()];
     let mut next = 0;
     while next < ids.len() {
@@ -902,8 +911,49 @@ fn open_subtree(nodes: &Nodes, root: &str, ranks: &HashMap<&str, usize>) -> Vec<
                 .map(|n| n.task.id.clone()),
         );
     }
-    ids[1..].sort_by(|a, b| rank(ranks, a).cmp(&rank(ranks, b)).then_with(|| a.cmp(b)));
     ids.iter().filter_map(|id| ItemId::parse(id)).collect()
+}
+
+/// The direct Subtasks of `parent` in their Subtask order: by key, those
+/// without one last, then by Item ID.
+fn subtask_order<'a>(nodes: &'a Nodes, parent: &str) -> Vec<&'a Node> {
+    let mut found: Vec<&Node> = (nodes.values())
+        .filter(|n| n.task.parent.as_deref() == Some(parent))
+        .collect();
+    found.sort_by(|a, b| by_subtask_order(a, b));
+    found
+}
+
+fn by_subtask_order(a: &Node, b: &Node) -> Ordering {
+    let key = |n: &Node| n.subtask_position.unwrap_or(f64::INFINITY);
+    compare_positions(key(a), key(b)).then_with(|| a.task.id.cmp(&b.task.id))
+}
+
+/// `list` with the rows the Subtasks of each Parent take refilled with them in
+/// their Subtask order; no other row moves. This is how a Filter, which
+/// decides the rows, keeps the one Subtask order.
+pub(super) fn in_subtask_order(mut list: Vec<&Node>) -> Vec<&Node> {
+    let mut rows: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (at, node) in list.iter().enumerate() {
+        if let Some(parent) = node.task.parent.as_deref() {
+            rows.entry(parent).or_default().push(at);
+        }
+    }
+    for rows in rows.into_values() {
+        let mut siblings: Vec<&Node> = rows.iter().map(|&at| list[at]).collect();
+        siblings.sort_by(|a, b| by_subtask_order(a, b));
+        for (at, node) in rows.into_iter().zip(siblings) {
+            list[at] = node;
+        }
+    }
+    list
+}
+
+/// Where the Subtask `place_subtask` places goes among its siblings.
+enum Anchor<'a> {
+    End,
+    Before(&'a str),
+    After(&'a str),
 }
 
 /// `found` as Rows, with the markers counted over all `nodes`.
@@ -928,13 +978,6 @@ fn rows_of(nodes: &Nodes, found: Vec<&Node>) -> Vec<Row> {
 /// The key after the last of `keys`.
 fn end_key(keys: &[f64]) -> f64 {
     keys.last().map_or(1.0, |k| k + 1.0)
-}
-
-/// Where in `list` a Task goes to land right below the Task `above`.
-fn index_below(list: &[&Node], above: &str) -> usize {
-    list.iter()
-        .position(|n| n.task.id == above)
-        .map_or(0, |at| at + 1)
 }
 
 /// A new fractional key for an entry, and the entries that had to move for
@@ -971,6 +1014,22 @@ fn place(keys: &[f64], at: usize) -> Placement {
         shifted: (0..run)
             .map(|n| (at + n, prev + step * (n + 2) as f64))
             .collect(),
+    }
+}
+
+/// `place` for entries that may not have a usable run of keys: where one has
+/// no key, or they are out of order (a Filter refilled with Subtasks), every
+/// entry is numbered anew, 1, 2, 3 ... with the new one at index `at`.
+fn place_among(keys: &[Option<f64>], at: usize) -> Placement {
+    let ascending: Option<Vec<f64>> = keys.iter().copied().collect();
+    match ascending.filter(|k| k.is_sorted()) {
+        Some(keys) => place(&keys, at),
+        None => Placement {
+            position: (at + 1) as f64,
+            shifted: (0..keys.len())
+                .map(|i| (i, (i + 1 + usize::from(i >= at)) as f64))
+                .collect(),
+        },
     }
 }
 
@@ -1934,31 +1993,43 @@ mod tests {
         );
     }
 
-    /// A raw Task file with a place in the All Tasks Favorite, as Sync could
-    /// leave several Tasks with one place.
-    fn raw_positioned(dir: &Scratch, id: &str, position: f64) {
-        raw(dir, id, "active", None);
-        let path = dir.0.parent().unwrap().join("Filters/tasksall2222.md");
-        let mut favorite = Document::parse(&fs::read_to_string(&path).unwrap()).unwrap();
-        let mut places = favorite.list("places").unwrap_or_default().to_vec();
-        places.push(format!("{id} {position}"));
-        favorite.set("places", Value::List(places));
-        fs::write(path, favorite.render()).unwrap();
+    /// A raw Subtask file with the Subtask position `key`, as Sync could leave
+    /// several Subtasks with one key.
+    fn raw_subtask(dir: &Scratch, id: &str, parent: &str, key: &str) {
+        let text = format!(
+            "---\nid: {id}\ntitle: {id}\nparent: {parent}\nsubtask-position: {key}\nupdated: 2000-01-01T00:00:00Z\n---\n"
+        );
+        fs::write(dir.0.join(format!("{id}.md")), text).unwrap();
     }
 
     #[test]
-    fn a_subtask_moved_to_the_end_lands_below_a_tie() {
+    fn a_subtask_moved_among_equal_keys_lands_in_place_and_the_others_shift() {
         let dir = Scratch::new();
         let tasks = dir.store();
-        let (p, q) = ("aaaaaaaaaaaa", "bbbbbbbbbbbb");
-        raw_positioned(&dir, p, 1.0);
-        raw_positioned(&dir, q, 1.0);
-        raw_positioned(&dir, "cccccccccccc", 1.0);
-        let one = tasks.create_subtask(p, "one", 4, &[]).unwrap();
-        tasks.create_subtask(p, "two", 4, &[]).unwrap();
-        assert_eq!(titles(&tasks), [p, "one", "two", q, "cccccccccccc"]);
-        tasks.move_subtask(&one.id, None).unwrap();
-        assert_eq!(titles(&dir.store()), [p, "two", "one", q, "cccccccccccc"]);
+        let parent = tasks.create("p", 4, &[], None).unwrap();
+        let [b, c, d] = ["bbbbbbbbbbbb", "cccccccccccc", "dddddddddddd"];
+        for id in [b, c, d] {
+            raw_subtask(&dir, id, &parent.id, "1");
+        }
+        assert_eq!(subtask_titles(&tasks, &parent), [b, c, d]);
+        tasks.move_subtask(d, Some(c)).unwrap();
+        assert_eq!(subtask_titles(&dir.store(), &parent), [b, d, c]);
+        tasks.move_subtask(b, None).unwrap();
+        assert_eq!(subtask_titles(&dir.store(), &parent), [d, c, b]);
+    }
+
+    #[test]
+    fn a_subtask_without_a_key_follows_the_keyed_ones_and_gets_one_on_a_move() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let parent = tasks.create("p", 4, &[], None).unwrap();
+        let (a, b) = ("aaaaaaaaaaaa", "bbbbbbbbbbbb");
+        raw(&dir, a, "active", Some(&parent.id));
+        raw_subtask(&dir, b, &parent.id, "7");
+        let last = subtask(&tasks, &parent, "last");
+        assert_eq!(subtask_titles(&tasks, &parent), [b, "last", a]);
+        tasks.move_subtask(&last.id, Some(b)).unwrap();
+        assert_eq!(subtask_titles(&tasks, &parent), ["last", b, a]);
     }
 
     fn subtask_titles(tasks: &Tasks, parent: &Task) -> Vec<String> {
@@ -1978,18 +2049,6 @@ mod tests {
         assert_eq!(subtask_titles(&tasks, &a), ["x", "y", "z"]);
         tasks.move_subtask(&y.id, Some(&y.id)).unwrap();
         assert_eq!(subtask_titles(&dir.store(), &a), ["x", "y", "z"]);
-        assert_eq!(titles(&tasks), ["a", "x", "y", "z", "b", "c"]);
-    }
-
-    #[test]
-    fn a_subtask_moved_to_the_end_lands_below_the_last_siblings_subtasks() {
-        let dir = Scratch::new();
-        let (tasks, [a, ..]) = move_fixture(&dir);
-        let x = subtask(&tasks, &a, "x");
-        let y = subtask(&tasks, &a, "y");
-        subtask(&tasks, &y, "y1");
-        tasks.move_subtask(&x.id, None).unwrap();
-        assert_eq!(titles(&tasks), ["a", "y", "y1", "x", "b", "c"]);
     }
 
     #[test]
@@ -2078,7 +2137,7 @@ mod tests {
     }
 
     #[test]
-    fn a_subtask_lands_directly_below_its_parent_and_a_task_at_the_end() {
+    fn a_new_task_or_subtask_follows_the_others_by_created() {
         let dir = Scratch::new();
         let tasks = dir.store();
         let parent = tasks.create("p", 4, &[], None).unwrap();
@@ -2092,7 +2151,7 @@ mod tests {
             .into_iter()
             .map(|r| r.task.title)
             .collect();
-        assert_eq!(rows, ["p", "child", "grandchild", "next", "last"]);
+        assert_eq!(rows, ["p", "next", "child", "grandchild", "last"]);
     }
 
     fn two_tasks(tasks: &Tasks) -> (Task, Task) {

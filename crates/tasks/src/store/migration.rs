@@ -4,7 +4,8 @@
 //!
 //! - A Task in the Backlog (or under one) gets the Tag `backlog`; `state`,
 //!   `position` and `order` leave its file, `created` joins it (from the
-//!   History, else the file's modification time), `updated` stays. Closed
+//!   History, else the file's modification time), `updated` stays. A Subtask
+//!   gets its `subtask-position` numbered from its siblings' old order. Closed
 //!   Tasks' files are Deleted, then the History.
 //! - All Tasks, Active and Backlog are created as Favorites with fixed IDs, so
 //!   that Devices migrating before they Sync end with one set. Their places
@@ -18,7 +19,9 @@
 //! run starts over from the files that are still legacy.
 
 use super::filters::{Stored, in_filter_order, matching, set_places};
-use super::{CREATED, Node, Nodes, Overwrite, Tasks, end_key, modified, node_of, repair};
+use super::{
+    CREATED, Node, Nodes, Overwrite, SUBTASK_POSITION, Tasks, end_key, modified, node_of, repair,
+};
 use super::{set_list, tags_of};
 use crate::query::Query;
 use pkm_base::clock::{iso8601, now_ms};
@@ -92,8 +95,10 @@ impl Tasks {
         let (open, closed) = self.read_legacy()?;
         let [active, backlog] = list_orders(&open);
         self.migrate_filters(&active, &backlog)?;
+        let subtask_keys = subtask_keys(&[&active, &backlog]);
         for task in &open {
-            self.migrate_task(task)?;
+            let key = subtask_keys.get(task.node.task.id.as_str());
+            self.migrate_task(task, key.copied())?;
         }
         let logs = self.files.list(&history(&self.root)).unwrap_or_default();
         let paths = (closed.iter().map(|id| self.path(id)))
@@ -264,8 +269,9 @@ impl Tasks {
         self.files.write(&path, &file.render())
     }
 
-    /// Rewrites one Task file as the new format has it; `updated` stays.
-    fn migrate_task(&self, task: &Legacy) -> io::Result<()> {
+    /// Rewrites one Task file as the new format has it, a Subtask with its
+    /// `subtask_key`; `updated` stays.
+    fn migrate_task(&self, task: &Legacy, subtask_key: Option<f64>) -> io::Result<()> {
         let mut file = task.doc.clone();
         for key in ["state", "position", "order"] {
             file.remove(key);
@@ -274,6 +280,9 @@ impl Tasks {
             && file.scalar(CREATED).is_none()
         {
             file.set_scalar(CREATED, created);
+        }
+        if let Some(key) = subtask_key {
+            file.set_scalar(SUBTASK_POSITION, key.to_string());
         }
         let mut tags = tags_of(&file);
         if task.backlog && !tags.iter().any(|t| t == BACKLOG) {
@@ -294,6 +303,22 @@ fn numbered(ids: &[String]) -> Vec<(String, f64)> {
     (ids.iter().enumerate())
         .map(|(n, id)| (id.clone(), (n + 1) as f64))
         .collect()
+}
+
+/// The `subtask-position` of each Subtask, by Item ID: 1, 2, 3 ... among its
+/// siblings in the order of the old `lists`. A Parent's Subtasks are all in
+/// the Parent's list.
+fn subtask_keys<'a>(lists: &[&[&'a Legacy]]) -> HashMap<&'a str, f64> {
+    let mut counts: HashMap<&str, f64> = HashMap::new();
+    let mut keys = HashMap::new();
+    for task in lists.iter().copied().flatten() {
+        if let Some(parent) = task.node.task.parent.as_deref() {
+            let count = counts.entry(parent).or_default();
+            *count += 1.0;
+            keys.insert(task.node.task.id.as_str(), *count);
+        }
+    }
+    keys
 }
 
 /// The Active and the Backlog list of an old version, each in its order.
@@ -663,5 +688,42 @@ mod tests {
         let tasks = Tasks::open_in(device(), "Tasks");
         assert_eq!(tasks.filters().unwrap().len(), 3);
         assert!(tasks.rows().unwrap().is_empty());
+    }
+
+    #[test]
+    fn subtasks_are_numbered_from_their_siblings_old_order() {
+        let files = device();
+        legacy(&files, "aaaaaaaaaaaa", "backlog", "");
+        legacy(
+            &files,
+            "bbbbbbbbbbbb",
+            "active",
+            "parent: aaaaaaaaaaaa\nposition: 9\n",
+        );
+        legacy(
+            &files,
+            "cccccccccccc",
+            "active",
+            "parent: aaaaaaaaaaaa\nposition: 3\n",
+        );
+        legacy(
+            &files,
+            "dddddddddddd",
+            "active",
+            "parent: aaaaaaaaaaaa\norder: 1\n",
+        );
+        let tasks = Tasks::open_in(files.clone(), "Tasks");
+        let key = |id: &str| {
+            file(&files, &format!("Tasks/{id}.md"))
+                .scalar(SUBTASK_POSITION)
+                .map(str::to_owned)
+        };
+        assert_eq!(key("aaaaaaaaaaaa"), None);
+        assert_eq!(
+            ["cccccccccccc", "bbbbbbbbbbbb", "dddddddddddd"].map(key),
+            [Some("1".into()), Some("2".into()), Some("3".into())]
+        );
+        let sheet = ids(tasks.subtasks("aaaaaaaaaaaa").unwrap());
+        assert_eq!(sheet, ["cccccccccccc", "bbbbbbbbbbbb", "dddddddddddd"]);
     }
 }

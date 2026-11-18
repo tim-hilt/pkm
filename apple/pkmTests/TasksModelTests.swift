@@ -526,6 +526,17 @@ import Testing
         #expect(try openModel().subtasks(of: p.id).map(\.title) == ["x", "y", "z"])
     }
 
+    @Test func aSubtaskDraggedPastASiblingInAFilterChangesTheSheetOrder() throws {
+        let model = try openModel()
+        model.add(title: "p")
+        let p = model.tasks[0]
+        for title in ["x", "y"] { model.addSubtask(title: title, under: p) }
+        #expect(model.tasks.map(\.title) == ["p", "x", "y"])
+        model.move(from: [2], to: 1)
+        #expect(model.tasks.map(\.title) == ["p", "y", "x"])
+        #expect(model.subtasks(of: p.id).map(\.title) == ["y", "x"])
+    }
+
     @Test func aTaskIsBlockedWhileATaskItIsBlockedByIsOpen() throws {
         let model = try openModel()
         for title in ["a", "b"] { model.add(title: title) }

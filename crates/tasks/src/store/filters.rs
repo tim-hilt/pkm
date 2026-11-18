@@ -2,7 +2,8 @@
 //! and a Query over the Open Tasks.
 
 use super::migration::ALL_TASKS;
-use super::{Error, Node, Nodes, Row, Tasks, compare_positions, end_key, place, rows_of};
+use super::{Anchor, Error, Node, Nodes, Row, Tasks, compare_positions, end_key, in_subtask_order};
+use super::{place, place_among, rows_of};
 use crate::query::{Query, QueryError};
 use pkm_base::clock::{iso8601, now_ms};
 use pkm_base::front_matter::{Document, Value};
@@ -139,7 +140,8 @@ impl Tasks {
 
     /// The Open Tasks the Filter `id` matches: each matched on its own Tags,
     /// Blocked ones, Subtasks and Backlog Tasks included. The Tasks with a
-    /// place come first in the Filter's order, then the others by `created`. A
+    /// place come first in the Filter's order, then the others by `created`; the
+    /// Subtasks of one Parent keep their Subtask order among themselves. A
     /// Query that can't be read matches nothing. Fails with `NotFound` if
     /// there is no such Filter.
     pub fn filter_rows(&self, id: &str) -> io::Result<Vec<Row>> {
@@ -163,54 +165,19 @@ impl Tasks {
 
     /// Moves the Task `task` before the Task `before` in the Filter `id`, or
     /// to the end of it if that is `None`; a drop where it already is changes
-    /// nothing. Only the Filter's file is written; the Task files stay.
-    /// Usually only the moved Task gets a place, as for Tasks (see `place`).
-    /// If another Task shown has none yet, every Task shown gets one, in one
-    /// write. Fails with `NotFound` for an unknown Filter, or a `task` or
-    /// `before` the Filter doesn't show.
+    /// nothing. Usually only the moved Task gets a place in the Filter's file,
+    /// as for Tasks (see `place`). If another Task shown has none yet, or the
+    /// Subtask order refilled the rows, every Task shown gets one, in one write.
+    ///
+    /// A Subtask dropped past a sibling shown also moves in its Subtask order,
+    /// to just after the last sibling it now follows, or before the first
+    /// it now precedes; that writes its Task file (and those sharing its key).
+    /// Fails with `NotFound` for an unknown Filter, or a `task` or `before` the
+    /// Filter doesn't show.
     pub fn move_in_filter(&self, id: &str, task: &str, before: Option<&str>) -> io::Result<()> {
         let filter = self.stored_filter(id)?;
         let nodes: Nodes = self.shown()?;
-        self.reorder(&filter, &filter.filter.query, &nodes, task, before)
-    }
-
-    /// Every Open Task in the order the All Tasks Favorite keeps: by its
-    /// places, then by `created`. Without the Favorite, by `created`.
-    pub(super) fn all_in_order<'a>(&self, nodes: &'a Nodes) -> io::Result<Vec<&'a Node>> {
-        let places = (self.stored_filters()?.into_iter())
-            .find(|s| s.filter.id == ALL_TASKS.id)
-            .map(|s| s.places)
-            .unwrap_or_default();
-        Ok(shown_in(nodes, ALL_TASKS.query, &places))
-    }
-
-    /// `reorder` in the All Tasks Favorite; where the user Deleted that, the
-    /// order stays as it is.
-    pub(super) fn move_in_all_tasks(
-        &self,
-        nodes: &Nodes,
-        task: &str,
-        before: Option<&str>,
-    ) -> io::Result<()> {
-        let Some(filter) =
-            (self.stored_filters()?.into_iter()).find(|s| s.filter.id == ALL_TASKS.id)
-        else {
-            return Ok(());
-        };
-        self.reorder(&filter, ALL_TASKS.query, nodes, task, before)
-    }
-
-    /// Puts `task` before `before` (or last) among the Tasks `query` matches,
-    /// in the places of `filter`, and saves them there.
-    fn reorder(
-        &self,
-        filter: &Stored,
-        query: &str,
-        nodes: &Nodes,
-        task: &str,
-        before: Option<&str>,
-    ) -> io::Result<()> {
-        let mut shown = shown_in(nodes, query, &filter.places);
+        let mut shown = shown_in(&nodes, &filter.filter.query, &filter.places);
         let from = (shown.iter().position(|n| n.task.id == task)).ok_or(io::ErrorKind::NotFound)?;
         if before == Some(task) {
             return Ok(());
@@ -228,27 +195,47 @@ impl Tasks {
         let mut places: HashMap<&str, f64> = (filter.places.iter())
             .map(|(id, p)| (id.as_str(), *p))
             .collect();
-        // In order, as placed Tasks show first by place.
-        let keys: Option<Vec<f64>> = (shown.iter())
+        let keys: Vec<Option<f64>> = (shown.iter())
             .map(|n| places.get(n.task.id.as_str()).copied())
             .collect();
-        if let Some(keys) = keys {
-            let placement = place(&keys, to);
-            for (at, key) in placement.shifted {
-                places.insert(shown[at].task.id.as_str(), key);
-            }
-            places.insert(task, placement.position);
-        } else {
-            shown.insert(to, moved);
-            places = (shown.iter().enumerate())
-                .map(|(n, node)| (node.task.id.as_str(), (n + 1) as f64))
-                .collect();
+        let placement = place_among(&keys, to);
+        for (at, key) in placement.shifted {
+            places.insert(shown[at].task.id.as_str(), key);
         }
+        places.insert(task, placement.position);
         let places: Vec<(String, f64)> = places
             .into_iter()
             .map(|(id, p)| (id.to_owned(), p))
             .collect();
-        self.rewrite_filter(&filter.filter.id, |file| set_places(file, &places))
+        self.rewrite_filter(id, |file| set_places(file, &places))?;
+
+        let Some(parent) = moved.task.parent.as_deref() else {
+            return Ok(());
+        };
+        let is_sibling = |n: &&&Node| n.task.parent.as_deref() == Some(parent);
+        let passed = shown[..from].iter().filter(is_sibling).count()
+            != shown[..to].iter().filter(is_sibling).count();
+        let follows = shown[..to].iter().rfind(is_sibling);
+        let precedes = shown[to..].iter().find(is_sibling);
+        let anchor = match (follows, precedes) {
+            _ if !passed => return Ok(()),
+            (Some(n), _) => Anchor::After(&n.task.id),
+            (None, Some(n)) => Anchor::Before(&n.task.id),
+            (None, None) => return Ok(()),
+        };
+        self.place_subtask(&nodes, moved, parent, anchor)
+            .map_err(Error::into_io)
+    }
+
+    /// Every Open Task in the order the All Tasks Favorite keeps: by its
+    /// places, then by `created`, Subtasks in their Subtask order. Without the
+    /// Favorite, by `created`.
+    pub(super) fn all_in_order<'a>(&self, nodes: &'a Nodes) -> io::Result<Vec<&'a Node>> {
+        let places = (self.stored_filters()?.into_iter())
+            .find(|s| s.filter.id == ALL_TASKS.id)
+            .map(|s| s.places)
+            .unwrap_or_default();
+        Ok(shown_in(nodes, ALL_TASKS.query, &places))
     }
 
     /// Checks a Query text without saving: the Tags it names, Wildcards
@@ -339,7 +326,8 @@ pub(super) fn matching<'a>(found: Vec<&'a Node>, query: &str) -> Vec<&'a Node> {
 }
 
 /// The Open Tasks `query` matches in the Filter's order: by `places`, then by
-/// `created`, then by Item ID (see `in_filter_order`).
+/// `created`, then by Item ID (see `in_filter_order`); then the rows of each
+/// Parent's Subtasks are refilled in their Subtask order (`in_subtask_order`).
 pub(super) fn shown_in<'a>(
     nodes: &'a Nodes,
     query: &str,
@@ -347,7 +335,7 @@ pub(super) fn shown_in<'a>(
 ) -> Vec<&'a Node> {
     let mut open: Vec<&Node> = nodes.values().collect();
     open.sort_by(|a, b| (a.created.cmp(&b.created)).then_with(|| a.task.id.cmp(&b.task.id)));
-    in_filter_order(matching(open, query), places)
+    in_subtask_order(in_filter_order(matching(open, query), places))
 }
 
 /// `found` as a Filter shows it: the Tasks with a place first, by place, then
@@ -448,8 +436,11 @@ mod tests {
 
     fn add(tasks: &Tasks, title: &str, tags: &[&str]) -> String {
         let tags: Vec<String> = tags.iter().map(|t| (*t).to_owned()).collect();
-        let id = tasks.create(title, 4, &tags, None).unwrap().id;
-        // Created within one second, Tasks would tie on `created`: one second apart.
+        stamp(tasks, tasks.create(title, 4, &tags, None).unwrap().id)
+    }
+
+    /// Created within one second, Tasks would tie on `created`: one second apart.
+    fn stamp(tasks: &Tasks, id: String) -> String {
         static ADDED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = ADDED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let created = iso8601(1_700_000_000_000.0 + n as f64 * 1000.0);
@@ -980,5 +971,79 @@ mod tests {
         assert_eq!(shown(&tasks, &f), ["a", "b", "c", "d"]);
         tasks.move_in_filter(&f.id, &ids[3], Some(&ids[2])).unwrap();
         assert_eq!(shown(&tasks, &f), ["a", "b", "d", "c"]);
+    }
+
+    /// Tasks "p", "s1", "s2", "s3" (the Subtasks of p), "t1", "t2", "t3" in
+    /// this order, all tagged `work`, and a Filter `@work`.
+    fn subtask_fixture() -> (Arc<MemoryFiles>, Tasks, Filter, Vec<String>) {
+        let (files, tasks) = open();
+        let p = add(&tasks, "p", &["work"]);
+        let mut ids = vec![p.clone()];
+        for title in ["s1", "s2", "s3"] {
+            let id = tasks.create_subtask(&p, title, 4, &[]).unwrap().id;
+            ids.push(stamp(&tasks, id));
+        }
+        for title in ["t1", "t2", "t3"] {
+            ids.push(add(&tasks, title, &["work"]));
+        }
+        let filter = tasks.create_filter("Work", "@work").unwrap();
+        (files, tasks, filter, ids)
+    }
+
+    fn sheet(tasks: &Tasks, parent: &str) -> Vec<String> {
+        titles(tasks.subtasks(parent).unwrap())
+    }
+
+    #[test]
+    fn siblings_take_the_rows_the_filter_gives_them_in_subtask_order() {
+        let (_, tasks, f, ids) = subtask_fixture();
+        tasks.move_in_filter(&f.id, &ids[4], Some(&ids[2])).unwrap();
+        tasks.move_in_filter(&f.id, &ids[5], Some(&ids[3])).unwrap();
+        assert_eq!(shown(&tasks, &f), ["p", "s1", "t1", "s2", "t2", "s3", "t3"]);
+        // The sheet reorders the Subtasks; the Filter keeps its rows for them.
+        tasks.move_subtask(&ids[3], Some(&ids[1])).unwrap();
+        assert_eq!(sheet(&tasks, &ids[0]), ["s3", "s1", "s2"]);
+        assert_eq!(shown(&tasks, &f), ["p", "s3", "t1", "s1", "t2", "s2", "t3"]);
+    }
+
+    #[test]
+    fn a_drag_in_a_filter_passing_a_sibling_changes_the_subtask_order_everywhere() {
+        let (_, tasks, f, ids) = subtask_fixture();
+        let other = tasks.create_filter("Other", "@work").unwrap();
+        // s3 passes s2: just after the last sibling it now follows.
+        tasks.move_in_filter(&f.id, &ids[3], Some(&ids[2])).unwrap();
+        assert_eq!(sheet(&tasks, &ids[0]), ["s1", "s3", "s2"]);
+        assert_eq!(shown(&tasks, &other)[..4], ["p", "s1", "s3", "s2"]);
+        // To the front: before the first sibling it now precedes.
+        tasks.move_in_filter(&f.id, &ids[3], Some(&ids[1])).unwrap();
+        assert_eq!(sheet(&tasks, &ids[0]), ["s3", "s1", "s2"]);
+        // To the end.
+        tasks.move_in_filter(&f.id, &ids[3], None).unwrap();
+        assert_eq!(sheet(&tasks, &ids[0]), ["s1", "s2", "s3"]);
+        assert_eq!(shown(&tasks, &f)[6], "s3");
+    }
+
+    #[test]
+    fn a_drag_passing_no_sibling_changes_only_that_filters_order() {
+        let (files, tasks, f, ids) = subtask_fixture();
+        let other = tasks.create_filter("Other", "@work").unwrap();
+        tasks.move_in_filter(&f.id, &ids[4], Some(&ids[2])).unwrap();
+        let task = |id: &str| files.read(Path::new(&format!("Tasks/{id}.md"))).unwrap();
+        let before: Vec<_> = ids.iter().map(|id| task(id)).collect();
+        tasks.move_in_filter(&f.id, &ids[2], Some(&ids[4])).unwrap();
+        assert_eq!(shown(&tasks, &f)[..4], ["p", "s1", "s2", "t1"]);
+        assert_eq!(sheet(&tasks, &ids[0]), ["s1", "s2", "s3"]);
+        assert_eq!(ids.iter().map(|id| task(id)).collect::<Vec<_>>(), before);
+        assert_eq!(shown(&tasks, &other)[..4], ["p", "s1", "s2", "s3"]);
+    }
+
+    #[test]
+    fn a_drag_passing_a_sibling_hidden_from_the_filter_follows_the_shown_ones() {
+        let (_, tasks, _, ids) = subtask_fixture();
+        tasks.add_tag(&ids[1], "x").unwrap();
+        tasks.add_tag(&ids[3], "x").unwrap();
+        let f = tasks.create_filter("X", "@x").unwrap();
+        tasks.move_in_filter(&f.id, &ids[3], Some(&ids[1])).unwrap();
+        assert_eq!(sheet(&tasks, &ids[0]), ["s3", "s1", "s2"]);
     }
 }

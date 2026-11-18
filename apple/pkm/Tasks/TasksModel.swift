@@ -270,8 +270,8 @@ final class TasksModel {
     }
 
     /// Moves the row at `source` to land before the row at `destination` of `tasks`
-    /// (`onMove`'s meaning); past the last row, to the end of the list. The Parent stays. Only the
-    /// Filter's own order changes.
+    /// (`onMove`'s meaning); past the last row, to the end of the list. The Parent stays. A Subtask
+    /// passing a sibling also moves in its Subtask order; otherwise only the Filter's order changes.
     func move(from source: IndexSet, to destination: Int) {
         guard let id = list.filterID, let index = source.first, index != destination else { return }
         let target = destination < tasks.count ? tasks[destination] : nil
