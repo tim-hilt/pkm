@@ -51,7 +51,7 @@ _Avoid_: Undo, Reopen, restore
 ### Order
 
 **Manual order**:
-The order the user drags a Filter's Tasks into; Tasks not yet dragged follow at the end.
+The order the user drags a Filter's Tasks into, each Group's apart; Tasks not yet dragged follow at the end.
 _Avoid_: Custom order, position
 
 **Subtask order**:
@@ -61,6 +61,14 @@ _Avoid_: Sibling order, child order
 **Sort**:
 A Filter's automatic order by a **Sort key** (for now only Priority) in a **Direction** (Ascending or Descending), Subtasks by their own; Tasks with the same Sort key keep their Manual order, and Subtasks of one Parent always keep their Subtask order. A Filter is either **Sorted** or in Manual order; dragging a Task to a different Sort key puts it in Manual order.
 _Avoid_: View, sort order, arrangement
+
+**Group by**:
+A Filter's ordered list of Tags splitting its Tasks into Groups, one per Tag, after the Tasks carrying none of them; independent of its Sort. It names only existing Tags: Delete a Tag takes it out of every Group by.
+_Avoid_: Project, Section, Category
+
+**Group**:
+The Tasks of a Filter carrying one Tag of its Group by, under that Tag's heading, which shows even with no Tasks. A Task carrying several is in each of their Groups, and is dragged only within one.
+_Avoid_: Project, Section, bucket
 
 ### Filters
 
