@@ -186,9 +186,10 @@ final class TasksModel {
     func add(
         title: String, description: String = "", planning: Planning = .active, priority: UInt8 = 4, tags: [String] = []
     ) -> Bool {
-        let required = list.filterID.flatMap { try? store.filterRequiredTags(id: $0) } ?? []
-        let tags = tags + required.filter { !tags.contains($0) }
-        guard let task = try? store.create(title: title, planning: planning, priority: priority, tags: tags) else {
+        guard
+            let task = try? store.create(
+                title: title, planning: planning, priority: priority, tags: tags, filter: list.filterID)
+        else {
             return false
         }
         describe(task, description)

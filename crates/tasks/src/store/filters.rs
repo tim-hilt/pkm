@@ -149,12 +149,16 @@ impl Tasks {
         Ok(rows_of(&nodes, found))
     }
 
-    /// The Tags a Task created in the Filter `id` starts with, so that it stays
-    /// in the Filter (see `Query::required_tags`); none if the Query can't be
-    /// read. Fails with `NotFound` if there is no such Filter.
-    pub fn filter_required_tags(&self, id: &str) -> io::Result<Vec<String>> {
-        let filter = self.stored_filter(id)?;
-        Ok(Query::parse(&filter.filter.query).map_or_else(|_| Vec::new(), |q| q.required_tags()))
+    /// The Tags a Task created in the Filter `id` gets, see `create`; none if
+    /// there is no such Filter or its Query can't be read.
+    pub(super) fn required_tags(&self, id: &str) -> io::Result<Vec<String>> {
+        let stored = self
+            .stored_filters()?
+            .into_iter()
+            .find(|s| s.filter.id == id);
+        Ok((stored.and_then(|s| Query::parse(&s.filter.query).ok()))
+            .map(|q| q.required_tags())
+            .unwrap_or_default())
     }
 
     /// Moves the Task `task` before the Task `before` in the Filter `id`, or
@@ -301,9 +305,8 @@ impl Tasks {
         change(&mut file);
         // Not `shown`: a Task pending Rejected keeps its place, to be Reverted.
         let nodes = self.load()?;
-        let shown: HashSet<&str> = nodes
-            .values()
-            .filter(|n| matches(file.scalar("query").unwrap_or_default(), n))
+        let query = file.scalar("query").unwrap_or_default();
+        let shown: HashSet<&str> = (matching(nodes.values().collect(), query).into_iter())
             .map(|n| n.task.id.as_str())
             .collect();
         let mut places = places_of(&file);
@@ -349,12 +352,8 @@ pub(super) fn matching<'a>(found: Vec<&'a Node>, query: &str) -> Vec<&'a Node> {
         .collect()
 }
 
-fn matches(query: &str, node: &Node) -> bool {
-    Query::parse(query).is_ok_and(|q| q.matches(&node.task.tags))
-}
-
-/// The Open Tasks `query` matches in the Filter's order, which `places` give
-/// (see `in_filter_order`).
+/// The Open Tasks `query` matches in the Filter's order: by `places`, then by
+/// `created`, then by Item ID (see `in_filter_order`).
 pub(super) fn shown_in<'a>(
     nodes: &'a Nodes,
     query: &str,
@@ -365,19 +364,14 @@ pub(super) fn shown_in<'a>(
     in_filter_order(matching(open, query), places)
 }
 
-/// `found` as a Filter shows it: the Tasks with a place first, by place (equal
-/// places keep the order of `found`), then the rest by `created`, then Item ID.
+/// `found` as a Filter shows it: the Tasks with a place first, by place, then
+/// the rest; equal places and the rest keep the order of `found`.
 pub(super) fn in_filter_order<'a>(found: Vec<&'a Node>, places: &[(String, f64)]) -> Vec<&'a Node> {
     let places: HashMap<&str, f64> = places.iter().map(|(id, p)| (id.as_str(), *p)).collect();
-    let (mut placed, mut unplaced): (Vec<&Node>, Vec<&Node>) =
+    let (mut placed, unplaced): (Vec<&Node>, Vec<&Node>) =
         (found.into_iter()).partition(|n| places.contains_key(n.task.id.as_str()));
     placed
         .sort_by(|a, b| compare_positions(places[a.task.id.as_str()], places[b.task.id.as_str()]));
-    unplaced.sort_by(|a, b| {
-        a.created
-            .cmp(&b.created)
-            .then_with(|| a.task.id.cmp(&b.task.id))
-    });
     placed.extend(unplaced);
     placed
 }
@@ -468,7 +462,7 @@ mod tests {
 
     fn add(tasks: &Tasks, title: &str, planning: Planning, tags: &[&str]) -> String {
         let tags: Vec<String> = tags.iter().map(|t| (*t).to_owned()).collect();
-        let id = tasks.create(title, planning, 4, &tags).unwrap().id;
+        let id = tasks.create(title, planning, 4, &tags, None).unwrap().id;
         // Created within one second, Tasks would tie on `created`: one second apart.
         static ADDED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = ADDED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -639,16 +633,22 @@ mod tests {
     }
 
     #[test]
-    fn a_filter_gives_the_tags_its_query_requires() {
+    fn a_task_created_in_a_filter_gets_the_tags_its_query_requires() {
         let (_, tasks) = open();
-        let id = |query| tasks.create_filter("F", query).unwrap().id;
-        let work = id("@work & !@review");
-        assert_eq!(tasks.filter_required_tags(&work).unwrap(), ["work"]);
+        let tags_in = |filter: Option<&str>| {
+            let tags = ["x".to_owned(), "work".to_owned()];
+            (tasks
+                .create("t", Planning::Active, 4, &tags, filter)
+                .unwrap())
+            .tags
+        };
+        let work = tasks.create_filter("F", "@work & !@review & @a").unwrap();
+        assert_eq!(tags_in(Some(&work.id)), ["x", "work", "a"]);
         for query in ["@a | @b", "@*x", "*"] {
-            assert!(tasks.filter_required_tags(&id(query)).unwrap().is_empty());
+            let filter = tasks.create_filter("F", query).unwrap();
+            assert_eq!(tags_in(Some(&filter.id)), ["x", "work"]);
         }
-        let missing = tasks.filter_required_tags("aaaaaaaaaaaa").unwrap_err();
-        assert_eq!(missing.kind(), io::ErrorKind::NotFound);
+        assert_eq!(tags_in(Some("aaaaaaaaaaaa")), ["x", "work"]); // gone
     }
 
     #[test]

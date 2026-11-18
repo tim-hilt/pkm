@@ -2952,7 +2952,7 @@ mod tests {
             let (phone, tablet) = (TaggingDevice::new(), TaggingDevice::new());
             let store = phone.store();
             let milk = store
-                .create("Milk", pkm_tasks::Planning::Active, 4, &[])
+                .create("Milk", pkm_tasks::Planning::Active, 4, &[], None)
                 .unwrap();
             store.add_tag(&milk.id, "home").unwrap();
             store.add_tag(&milk.id, "work").unwrap();
@@ -2988,8 +2988,8 @@ mod tests {
             let store = phone.store();
             let planning = pkm_tasks::Planning::Active;
             let (milk, eggs) = (
-                store.create("Milk", planning, 4, &[]).unwrap(),
-                store.create("Eggs", planning, 4, &[]).unwrap(),
+                store.create("Milk", planning, 4, &[], None).unwrap(),
+                store.create("Eggs", planning, 4, &[], None).unwrap(),
             );
             store.add_tag(&milk.id, "work").unwrap();
             store.set_tag_color("work", Some("#d0021b")).unwrap();

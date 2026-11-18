@@ -1,9 +1,6 @@
 import { TaskStore } from "../core/Core";
 import type { FileStorage } from "../storage/FileStorage";
 
-/** What old versions kept beside the Tasks. */
-const historyFolder = "Tasks/.history";
-
 const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 
 /**
@@ -11,8 +8,8 @@ const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
  * files in memory; this opens it from what is saved and saves what it
  * changed: the Task files, the file that says the lists were migrated, the
  * Tags (`Tags/tags.json`) and the Filters (`Filters/<id>.md`); a file the store
- * removed is removed. The History folder
- * old versions kept (`Tasks/.history`) is Deleted on open.
+ * removed is removed. The History old versions kept (`Tasks/.history`) is
+ * read too, for the store's migration, which Deletes it.
  */
 export class TaskFiles {
   /** The writes in progress: each save waits for the one before. */
@@ -23,11 +20,11 @@ export class TaskFiles {
     private readonly storage: FileStorage,
   ) {}
 
+  /** Opens the store and saves what its migration changed, if anything. */
   static async open(storage: FileStorage): Promise<TaskFiles> {
-    for (const { name } of await storage.files(historyFolder)) {
-      await storage.remove(`${historyFolder}/${name}`);
-    }
-    return new TaskFiles(await load(storage), storage);
+    const files = new TaskFiles(await load(storage), storage);
+    await files.save();
+    return files;
   }
 
   /** The store; a new one after `reload`. */
@@ -81,7 +78,7 @@ export class TaskFiles {
   }
 }
 
-/** A store opened on the Task files, the Tags and the Filters; it migrates what an old version left. */
+/** A store opened on the Task files, the Tags and the Filters; it migrates what an old version left, the History included. */
 async function load(storage: FileStorage): Promise<TaskStore> {
   const folder = TaskStore.folder();
   const paths: string[] = [];
@@ -95,6 +92,7 @@ async function load(storage: FileStorage): Promise<TaskStore> {
     }
   };
   await take(folder, (name) => name.endsWith(".md") || name === TaskStore.migratedFile());
+  await take(`${folder}/.history`, (name) => name.endsWith(".log"));
   await take("Tags", (name) => name === "tags.json");
   await take(TaskStore.filtersFolder(), (name) => name.endsWith(".md"));
   return new TaskStore(paths, texts);

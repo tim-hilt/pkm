@@ -379,15 +379,20 @@ impl TaskStore {
     }
 
     /// Creates a Task with a Priority and Tags, refusing an empty Title or an
-    /// invalid Tag.
+    /// invalid Tag. Created in the Filter `filter`, it also gets the Tags its
+    /// Query requires, so that it stays there.
     pub fn create(
         &self,
         title: String,
         planning: Planning,
         priority: u8,
         tags: Vec<String>,
+        filter: Option<String>,
     ) -> Result<ListedTask, TasksError> {
-        Ok(self.listed(self.0.create(&title, planning, priority, &tags)?))
+        let task = self
+            .0
+            .create(&title, planning, priority, &tags, filter.as_deref())?;
+        Ok(self.listed(task))
     }
 
     /// `create` for a Subtask under a Task; it follows its top-level Task's
@@ -521,11 +526,6 @@ impl TaskStore {
         Ok(self.listed_rows(self.0.filter_rows(&id)?))
     }
 
-    /// The Tags a Task created in a Filter starts with, so that it stays there.
-    pub fn filter_required_tags(&self, id: String) -> Result<Vec<String>, TasksError> {
-        Ok(self.0.filter_required_tags(&id)?)
-    }
-
     /// Moves a Task before another in a Filter's own order, or to its end.
     pub fn move_in_filter(
         &self,
@@ -604,7 +604,7 @@ mod tests {
         let path = |name: &str| dir.join(name).to_string_lossy().into_owned();
         let store = TaskStore::open(path("Tasks")).unwrap();
         let task = store
-            .create("t".into(), Planning::Active, 4, vec![])
+            .create("t".into(), Planning::Active, 4, vec![], None)
             .unwrap();
         store.add_tag(task.id.clone(), "home".into()).unwrap();
         let task = store.add_tag(task.id, "work".into()).unwrap();
@@ -633,7 +633,7 @@ mod tests {
         let path = |name: &str| dir.join(name).to_string_lossy().into_owned();
         let store = TaskStore::open(path("Tasks")).unwrap();
         let task = store
-            .create("t".into(), Planning::Active, 4, vec![])
+            .create("t".into(), Planning::Active, 4, vec![], None)
             .unwrap();
         store.add_tag(task.id.clone(), "home".into()).unwrap();
         store.add_tag(task.id, "work".into()).unwrap();
@@ -659,10 +659,10 @@ mod tests {
             store.delete_filter(favorite.id).unwrap(); // the migration's
         }
         store
-            .create("t".into(), Planning::Active, 4, vec!["work".into()])
+            .create("t".into(), Planning::Active, 4, vec!["work".into()], None)
             .unwrap();
         store
-            .create("u".into(), Planning::Active, 4, vec![])
+            .create("u".into(), Planning::Active, 4, vec![], None)
             .unwrap();
         let filter = store.create_filter("Work".into(), "@work".into()).unwrap();
         let tasks = store.filter_tasks(filter.id.clone()).unwrap();
@@ -685,10 +685,10 @@ mod tests {
         store.set_favorite(other.id.clone(), true).unwrap();
         assert!(store.filters().unwrap()[0].favorite);
         let first = store
-            .create("a".into(), Planning::Active, 4, vec!["work".into()])
+            .create("a".into(), Planning::Active, 4, vec!["work".into()], None)
             .unwrap();
         store
-            .create("b".into(), Planning::Active, 4, vec!["work".into()])
+            .create("b".into(), Planning::Active, 4, vec!["work".into()], None)
             .unwrap();
         store
             .move_in_filter(filter.id.clone(), first.id.clone(), None)

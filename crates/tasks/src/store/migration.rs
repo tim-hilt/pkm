@@ -3,11 +3,14 @@
 //! Favorites.
 //!
 //! - A Task in the Backlog (or under one) gets the Tag `backlog`; `state`,
-//!   `position` and `order` leave its file, `updated` stays. Closed Tasks'
-//!   files are Deleted.
+//!   `position` and `order` leave its file, `created` joins it (from the
+//!   History, else the file's modification time), `updated` stays. Closed
+//!   Tasks' files are Deleted, then the History.
 //! - All Tasks, Active and Backlog are created as Favorites with fixed IDs, so
 //!   that Devices migrating before they Sync end with one set. Their places
-//!   come from the old lists' orders.
+//!   come from the old lists' orders. They are stamped as never `updated`, so
+//!   that a Device creating them anew (a new install) loses every merge
+//!   against an edit made elsewhere.
 //! - Each other Filter keeps showing what it showed, in the order it showed
 //!   it: `& !@backlog` joins its Query and its order becomes its places.
 //!
@@ -51,6 +54,15 @@ pub(crate) const BACKLOG_LIST: Favorite = Favorite {
 /// What a Query gets to keep an existing Filter from showing the Backlog.
 const NOT_BACKLOG: &str = " & !@backlog";
 
+/// The `updated` of a Favorite the migration creates: older than any edit.
+const NEVER_UPDATED: &str = "1970-01-01T00:00:00Z";
+
+/// Where old versions kept the History (ADR-0022): `<device>-<yyyy-mm>.log`
+/// files of `<time> <event> <id>` lines, from every Device.
+fn history(root: &Path) -> PathBuf {
+    root.join(".history")
+}
+
 /// Whose presence says this Device migrated. A hidden file in the Tasks
 /// folder: Sync leaves it on the Device.
 pub(super) fn marker(root: &Path) -> PathBuf {
@@ -80,8 +92,11 @@ impl Tasks {
         for task in &open {
             self.migrate_task(task)?;
         }
-        for id in closed {
-            match self.files.remove(&self.path(&id)) {
+        let logs = self.files.list(&history(&self.root)).unwrap_or_default();
+        let paths = (closed.iter().map(|id| self.path(id)))
+            .chain(logs.into_iter().map(|l| history(&self.root).join(l.name)));
+        for path in paths {
+            match self.files.remove(&path) {
                 Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
                 _ => {}
             }
@@ -89,11 +104,33 @@ impl Tasks {
         self.files.write(&marker(&self.root), "")
     }
 
+    /// When each Task was created, by Item ID, from the History's `created`
+    /// lines; the earliest wins.
+    fn created_in_history(&self) -> HashMap<String, String> {
+        let folder = history(&self.root);
+        let mut times: HashMap<String, String> = HashMap::new();
+        let logs = self.files.list(&folder).unwrap_or_default();
+        for text in logs
+            .iter()
+            .filter_map(|l| self.files.read(&folder.join(&l.name)).ok())
+        {
+            for line in text.lines() {
+                if let [time, "created", id] = line.split(' ').collect::<Vec<_>>()[..]
+                    && times.get(id).is_none_or(|t| time < t.as_str())
+                {
+                    times.insert(id.to_owned(), time.to_owned());
+                }
+            }
+        }
+        times
+    }
+
     /// The Open Task files of an old version (Subtasks planned as their
     /// top-level Task is), and the IDs of the Closed ones.
     fn read_legacy(&self) -> io::Result<(Vec<Legacy>, Vec<ItemId>)> {
         let mut docs = Vec::new();
         let mut closed = Vec::new();
+        let logged = self.created_in_history();
         for listed in self.files.list(&self.root)? {
             let Some(id) = listed.name.strip_suffix(".md").and_then(ItemId::parse) else {
                 continue;
@@ -111,7 +148,10 @@ impl Tasks {
                     let Some(mut node) = node_of(&doc).filter(|n| n.task.id == id.as_str()) else {
                         continue;
                     };
-                    node.created.get_or_insert_with(|| modified(listed.stamp));
+                    if node.created.is_none() {
+                        let created = logged.get(id.as_str()).cloned();
+                        node.created = created.or_else(|| Some(modified(listed.stamp)));
+                    }
                     docs.push((doc, node));
                 }
                 _ => {}
@@ -195,7 +235,7 @@ impl Tasks {
         file.set_scalar("favorite", "true");
         file.set_scalar("position", position.to_string());
         set_places(&mut file, &numbered(order));
-        file.set_scalar("updated", iso8601(now_ms()));
+        file.set_scalar("updated", NEVER_UPDATED);
         self.files
             .write(&self.filter_path(&filter_id(favorite.id)), &file.render())
     }
@@ -486,6 +526,71 @@ mod tests {
             file(&files, "Filters/wwwwwwwwwwww.md").scalar("query"),
             Some("(@work) & !@backlog")
         );
+    }
+
+    #[test]
+    fn a_filters_unplaced_tasks_keep_actives_order_not_their_creation() {
+        let files = device();
+        let work = |position, created| {
+            format!("position: {position}\ncreated: {created}\ntags:\n  - work\n")
+        };
+        legacy(
+            &files,
+            "aaaaaaaaaaaa",
+            "active",
+            &work(2, "2001-01-01T00:00:00Z"),
+        );
+        legacy(
+            &files,
+            "bbbbbbbbbbbb",
+            "active",
+            &work(1, "2002-01-01T00:00:00Z"),
+        );
+        filter(&files, "wwwwwwwwwwww", "@work", &[]);
+        let tasks = Tasks::open_in(files, "Tasks");
+        assert_eq!(shown(&tasks, "wwwwwwwwwwww"), "ba");
+    }
+
+    #[test]
+    fn created_comes_from_the_history_which_is_then_deleted() {
+        let files = device();
+        legacy(&files, "aaaaaaaaaaaa", "active", "");
+        legacy(&files, "bbbbbbbbbbbb", "active", "");
+        let history = Path::new("Tasks/.history/pppppppppppp-2023-11.log");
+        let lines = "2023-11-14T22:13:20Z created aaaaaaaaaaaa\n2023-11-15T00:00:00Z moved-to-backlog aaaaaaaaaaaa\n";
+        files.load(history, lines.into());
+        Tasks::open_in(files.clone(), "Tasks");
+        let created = |id| {
+            file(&files, &format!("Tasks/{id}.md"))
+                .scalar("created")
+                .map(str::to_owned)
+        };
+        assert_eq!(
+            created("aaaaaaaaaaaa").as_deref(),
+            Some("2023-11-14T22:13:20Z")
+        );
+        assert!(created("bbbbbbbbbbbb").is_some()); // the modification time
+        assert!(!files.exists(history));
+    }
+
+    #[test]
+    fn a_new_devices_favorites_lose_to_edits_made_elsewhere() {
+        let phone = legacy_device();
+        let tasks = Tasks::open_in(phone.clone(), "Tasks");
+        tasks.edit_filter(ACTIVE.id, "Now", ACTIVE.query).unwrap();
+        let path = format!("Filters/{}.md", ACTIVE.id);
+        let read = |files: &MemoryFiles| files.read(Path::new(&path)).unwrap();
+        // Edited a while before the tablet joins.
+        let mut edited = file(&phone, &path);
+        edited.set_scalar("updated", "2020-01-01T00:00:00Z");
+        phone.write(Path::new(&path), &edited.render()).unwrap();
+        let tablet = device();
+        Tasks::open_in(tablet.clone(), "Tasks");
+        let merged =
+            crate::sync::filters::merge(None, read(&tablet).as_bytes(), read(&phone).as_bytes());
+        let merged = Document::parse(std::str::from_utf8(&merged.unwrap()).unwrap()).unwrap();
+        assert_eq!(merged.scalar("title"), Some("Now"));
+        assert_eq!(merged.list("places"), file(&phone, &path).list("places"));
     }
 
     #[test]
