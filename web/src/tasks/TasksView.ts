@@ -146,7 +146,7 @@ export class TasksView {
       case "filters":
         return ["Filters", "No Filters yet."];
       case "filter":
-        return ["Tasks", "No Active Tasks match."];
+        return ["Tasks", "No Open Tasks match."];
     }
   }
 

@@ -2932,7 +2932,7 @@ mod tests {
             /// The Tags with their Tag Colors, as the store lists them.
             fn tags(&self) -> Vec<(String, Option<String>)> {
                 let store = self.store();
-                let _ = store.rows(pkm_tasks::Planning::Active); // reads what Sync brought
+                let _ = store.rows(); // reads what Sync brought
                 store
                     .tags()
                     .list()
@@ -2951,9 +2951,7 @@ mod tests {
             let (tags, tasks) = (Cloud::new(), Cloud::new());
             let (phone, tablet) = (TaggingDevice::new(), TaggingDevice::new());
             let store = phone.store();
-            let milk = store
-                .create("Milk", pkm_tasks::Planning::Active, 4, &[], None)
-                .unwrap();
+            let milk = store.create("Milk", 4, &[], None).unwrap();
             store.add_tag(&milk.id, "home").unwrap();
             store.add_tag(&milk.id, "work").unwrap();
             phone.sync(&tags, &tasks);
@@ -2986,10 +2984,9 @@ mod tests {
             let (tags, tasks) = (Cloud::new(), Cloud::new());
             let (phone, tablet) = (TaggingDevice::new(), TaggingDevice::new());
             let store = phone.store();
-            let planning = pkm_tasks::Planning::Active;
             let (milk, eggs) = (
-                store.create("Milk", planning, 4, &[], None).unwrap(),
-                store.create("Eggs", planning, 4, &[], None).unwrap(),
+                store.create("Milk", 4, &[], None).unwrap(),
+                store.create("Eggs", 4, &[], None).unwrap(),
             );
             store.add_tag(&milk.id, "work").unwrap();
             store.set_tag_color("work", Some("#d0021b")).unwrap();
@@ -3008,7 +3005,7 @@ mod tests {
                 assert_eq!(device.tags(), [tag("work", None)]);
                 let tagged: Vec<_> = device
                     .store()
-                    .rows(planning)
+                    .rows()
                     .unwrap()
                     .into_iter()
                     .filter(|r| r.task.tags.contains(&"work".to_owned()))

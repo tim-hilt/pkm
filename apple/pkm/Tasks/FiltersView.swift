@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The Filters list: each Filter with its Query and how many Active Tasks it matches, opening on
+/// The Filters list: each Filter with its Query and how many Open Tasks it matches, opening on
 /// tap and ordered by dragging; swiping a row (a context menu on the Mac) marks it as a Favorite,
 /// edits or Deletes it, the latter after a confirmation. An empty list offers to create one.
 struct FiltersList: View {
@@ -58,7 +58,7 @@ extension FiltersList {
     }
 }
 
-/// A Filter's Title, its Query (or why it can't be read), and the count of Active Tasks it matches.
+/// A Filter's Title, its Query (or why it can't be read), and the count of Open Tasks it matches.
 private struct FilterRow: View {
     let filter: Filter
 
@@ -89,7 +89,7 @@ private struct FilterRow: View {
                 Text(filter.matches, format: .number)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
-                    .accessibilityLabel("\(filter.matches) Active Tasks")
+                    .accessibilityLabel("\(filter.matches) Open Tasks")
             }
         }
     }

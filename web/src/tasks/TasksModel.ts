@@ -1,6 +1,5 @@
 import {
   Closing,
-  Planning,
   type TaskQuickAdd,
   isValidTag,
   stripForbiddenTagCharacters,
@@ -15,7 +14,6 @@ export interface ListedTask {
   title: string;
   /** 1 (highest) to 4. */
   priority: number;
-  planning: Planning;
   /** Plain text; empty if none. */
   description: string;
   /** In the order they were added. */
@@ -310,9 +308,7 @@ export class TasksModel {
   /** Every Open Task, Subtasks included. */
   private openTasks(): ListedTask[] {
     const { store } = this.files;
-    return [Planning.Active, Planning.Backlog].flatMap((planning) =>
-      this.listed(store.tasks(planning)),
-    );
+    return this.listed(store.tasks());
   }
 
   /**
@@ -334,7 +330,7 @@ export class TasksModel {
     const { store } = this.files;
     const { description, priority = 4, tags = [] } = extras;
     const filter = this.shownList.kind === "filter" ? this.shownList.id : undefined;
-    const create = () => store.create(title, Planning.Active, priority, tags, filter);
+    const create = () => store.create(title, priority, tags, filter);
     if (!this.change(() => this.describe(create(), title, priority, description))) return false;
     this.reload();
     this.onChange();
@@ -651,7 +647,6 @@ export class TasksModel {
         id: row.id,
         title: row.title,
         priority: row.priority,
-        planning: row.planning,
         description: row.description,
         tags: tags.map((tag) => tag.name),
         tagColors: Object.fromEntries(

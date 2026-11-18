@@ -1464,17 +1464,6 @@
         }
       }
     },
-    "No Active Tasks match.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No Active Tasks match."
-          }
-        }
-      }
-    },
     "No Drawings": {
       "extractionState": "manual",
       "localizations": {
@@ -1493,6 +1482,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "No Filters yet."
+          }
+        }
+      }
+    },
+    "No Open Tasks match.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Open Tasks match."
           }
         }
       }

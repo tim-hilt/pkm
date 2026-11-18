@@ -12,7 +12,7 @@ struct TasksView: View {
         Group {
             switch model.barEntry {
             case .filter:
-                TaskListView(emptyText: "No Active Tasks match.")
+                TaskListView(emptyText: "No Open Tasks match.")
             case .filters:
                 FiltersList { isAddingFilter = true }
             }
@@ -40,7 +40,7 @@ struct TasksView: View {
             .toolbar { ToolbarItem(placement: .principal) { TasksBar() } }
         #endif
         .navigationDestination(for: String.self) { id in
-            TaskListView(emptyText: "No Active Tasks match.")
+            TaskListView(emptyText: "No Open Tasks match.")
                 .addButton("New Task", identifier: "add-task") { isAdding = true }
                 .navigationTitle(model.filters.first { $0.id == id }?.title ?? "")
                 #if os(iOS)

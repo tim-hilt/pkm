@@ -10,11 +10,6 @@ use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 
 mirror_enum!(
-    /// Where an Open Task is planned.
-    Planning in pkm_tasks::Planning { Active, Backlog }
-);
-
-mirror_enum!(
     /// How a Task is Closed.
     Closing in pkm_tasks::Closing { Done, Rejected }
 );
@@ -35,7 +30,7 @@ pub struct Filter {
     /// As the user typed it.
     pub query: String,
     pub favorite: bool,
-    /// How many Active Tasks the Query matches.
+    /// How many Open Tasks the Query matches.
     pub matches: u32,
     /// Why the stored Query can't be read; such a Filter matches nothing.
     pub error: Option<String>,
@@ -237,7 +232,6 @@ pub struct ListedTask {
     pub title: String,
     /// 1 (highest) to 4.
     pub priority: u8,
-    pub planning: Planning,
     /// Plain text; empty if none.
     pub description: String,
     /// The Parent's ID, if it is a Subtask.
@@ -290,7 +284,6 @@ impl ListedTask {
             id: t.id,
             title: t.title,
             priority: t.priority,
-            planning: t.planning.into(),
             description: t.description,
             parent: t.parent,
             parent_title: row.parent_title,
@@ -370,33 +363,23 @@ impl TaskStore {
         self.files.read(Path::new(path)).ok()
     }
 
-    /// Makes a Task Active or moves it to the Backlog, at the end of that list.
-    pub fn plan(&self, id: &str, planning: Planning) -> Result<(), JsError> {
-        self.tasks
-            .plan(id, planning.into())
-            .map(drop)
-            .map_err(error)
-    }
-
     /// Creates a Task with a Priority and Tags, refusing an empty Title or an
     /// invalid Tag; its Item ID. Created in the Filter `filter`, it also gets
     /// the Tags its Query requires, so that it stays there.
     pub fn create(
         &self,
         title: &str,
-        planning: Planning,
         priority: u8,
         tags: Vec<String>,
         filter: Option<String>,
     ) -> Result<String, JsError> {
         self.tasks
-            .create(title, planning.into(), priority, &tags, filter.as_deref())
+            .create(title, priority, &tags, filter.as_deref())
             .map(|task| task.id)
             .map_err(error)
     }
 
-    /// `create` for a Subtask under a Task; it follows its top-level Task's
-    /// Active or Backlog.
+    /// `create` for a Subtask under a Task; it starts with its Parent's Tags.
     #[wasm_bindgen(js_name = createSubtask)]
     pub fn create_subtask(
         &self,
@@ -408,16 +391,6 @@ impl TaskStore {
         self.tasks
             .create_subtask(parent, title, priority, &tags)
             .map(|task| task.id)
-            .map_err(error)
-    }
-
-    /// Moves a Task before `before` in its list, or to the end of it; its
-    /// Parent stays. See `pkm_tasks::Tasks::move_before`.
-    #[wasm_bindgen(js_name = moveBefore)]
-    pub fn move_before(&self, id: &str, before: Option<String>) -> Result<(), JsError> {
-        self.tasks
-            .move_before(id, before.as_deref())
-            .map(drop)
             .map_err(error)
     }
 
@@ -541,9 +514,9 @@ impl TaskStore {
         self.tasks.forget_tag(tag).map_err(error)
     }
 
-    /// The Open Tasks planned as `planning`, Subtasks included, in their manual order.
-    pub fn tasks(&self, planning: Planning) -> Result<Vec<ListedTask>, JsError> {
-        Ok(self.listed(self.tasks.rows(planning.into()).map_err(error)?))
+    /// Every Open Task, Subtasks included, in the order of All Tasks.
+    pub fn tasks(&self) -> Result<Vec<ListedTask>, JsError> {
+        Ok(self.listed(self.tasks.rows().map_err(error)?))
     }
 
     /// Creates a Filter at the end of the Filters list, refusing an empty
@@ -589,7 +562,7 @@ impl TaskStore {
         Ok(found.into_iter().map(Into::into).collect())
     }
 
-    /// The Active Tasks a Filter matches, as `tasks` lists Active.
+    /// The Open Tasks a Filter matches, in its order.
     #[wasm_bindgen(js_name = filterTasks)]
     pub fn filter_tasks(&self, id: &str) -> Result<Vec<ListedTask>, JsError> {
         Ok(self.listed(self.tasks.filter_rows(id).map_err(error)?))

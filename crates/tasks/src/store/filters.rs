@@ -1,8 +1,8 @@
 //! Filters (ADR-0024): `Filters/<id>.md` beside the Tasks folder, each a Title
 //! and a Query over the Open Tasks.
 
+use super::migration::ALL_TASKS;
 use super::{Error, Node, Nodes, Row, Tasks, compare_positions, end_key, place, rows_of};
-use crate::Planning;
 use crate::query::{Query, QueryError};
 use pkm_base::clock::{iso8601, now_ms};
 use pkm_base::front_matter::{Document, Value};
@@ -174,44 +174,30 @@ impl Tasks {
         self.reorder(&filter, &filter.filter.query, &nodes, task, before)
     }
 
-    /// The Open Tasks planned as `planning`, in the order its Favorite keeps:
-    /// by its places, then by `created`. Without the Favorite, by `created`.
-    pub(super) fn planned<'a>(
-        &self,
-        nodes: &'a Nodes,
-        planning: Planning,
-    ) -> io::Result<Vec<&'a Node>> {
-        let favorite = planning.favorite();
+    /// Every Open Task in the order the All Tasks Favorite keeps: by its
+    /// places, then by `created`. Without the Favorite, by `created`.
+    pub(super) fn all_in_order<'a>(&self, nodes: &'a Nodes) -> io::Result<Vec<&'a Node>> {
         let places = (self.stored_filters()?.into_iter())
-            .find(|s| s.filter.id == favorite.id)
+            .find(|s| s.filter.id == ALL_TASKS.id)
             .map(|s| s.places)
             .unwrap_or_default();
-        Ok(shown_in(nodes, favorite.query, &places))
+        Ok(shown_in(nodes, ALL_TASKS.query, &places))
     }
 
-    /// Every Open Task in the order of the app's lists: Active, then Backlog.
-    pub(super) fn in_app_order<'a>(&self, nodes: &'a Nodes) -> io::Result<Vec<&'a Node>> {
-        let mut order = self.planned(nodes, Planning::Active)?;
-        order.extend(self.planned(nodes, Planning::Backlog)?);
-        Ok(order)
-    }
-
-    /// `reorder` in the app's list `planning`, kept in its Favorite; where the
-    /// user Deleted that, the order stays as it is.
-    pub(super) fn move_in_list(
+    /// `reorder` in the All Tasks Favorite; where the user Deleted that, the
+    /// order stays as it is.
+    pub(super) fn move_in_all_tasks(
         &self,
-        planning: Planning,
         nodes: &Nodes,
         task: &str,
         before: Option<&str>,
     ) -> io::Result<()> {
-        let favorite = planning.favorite();
         let Some(filter) =
-            (self.stored_filters()?.into_iter()).find(|s| s.filter.id == favorite.id)
+            (self.stored_filters()?.into_iter()).find(|s| s.filter.id == ALL_TASKS.id)
         else {
             return Ok(());
         };
-        self.reorder(&filter, favorite.query, nodes, task, before)
+        self.reorder(&filter, ALL_TASKS.query, nodes, task, before)
     }
 
     /// Puts `task` before `before` (or last) among the Tasks `query` matches,
@@ -460,9 +446,9 @@ mod tests {
         (files, tasks)
     }
 
-    fn add(tasks: &Tasks, title: &str, planning: Planning, tags: &[&str]) -> String {
+    fn add(tasks: &Tasks, title: &str, tags: &[&str]) -> String {
         let tags: Vec<String> = tags.iter().map(|t| (*t).to_owned()).collect();
-        let id = tasks.create(title, planning, 4, &tags, None).unwrap().id;
+        let id = tasks.create(title, 4, &tags, None).unwrap().id;
         // Created within one second, Tasks would tie on `created`: one second apart.
         static ADDED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = ADDED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -527,7 +513,7 @@ mod tests {
     #[test]
     fn checking_a_query_names_its_unknown_tags_or_its_error_and_saves_nothing() {
         let (files, tasks) = open();
-        add(&tasks, "t", Planning::Active, &["work"]);
+        add(&tasks, "t", &["work"]);
         assert_eq!(
             tasks.check_query("@work & !@nope | @x"),
             Ok(vec!["nope".into(), "x".into()])
@@ -541,7 +527,7 @@ mod tests {
     #[test]
     fn deleting_a_tag_leaves_every_filters_query_as_it_is() {
         let (_, tasks) = open();
-        add(&tasks, "t", Planning::Active, &["x"]);
+        add(&tasks, "t", &["x"]);
         tasks.create_filter("F", "!@x & @y").unwrap();
         tasks.remove_tag_everywhere("x").unwrap();
         tasks.forget_tag("x").unwrap();
@@ -589,16 +575,11 @@ mod tests {
     #[test]
     fn a_filter_shows_the_open_tasks_its_query_matches_the_backlog_included() {
         let (_, tasks) = open();
-        add(&tasks, "one", Planning::Active, &["work"]);
-        add(&tasks, "skipped", Planning::Active, &["home"]);
-        add(&tasks, "two", Planning::Active, &["work", "x"]);
-        add(
-            &tasks,
-            "reviewing",
-            Planning::Active,
-            &["work", "in-review"],
-        );
-        add(&tasks, "later", Planning::Backlog, &["work"]);
+        add(&tasks, "one", &["work"]);
+        add(&tasks, "skipped", &["home"]);
+        add(&tasks, "two", &["work", "x"]);
+        add(&tasks, "reviewing", &["work", "in-review"]);
+        add(&tasks, "later", &["work", "backlog"]);
         let filter = tasks.create_filter("Work", "@work & !@in-review").unwrap();
         assert_eq!(
             titles(tasks.filter_rows(&filter.id).unwrap()),
@@ -609,9 +590,9 @@ mod tests {
     #[test]
     fn tasks_are_matched_on_their_own_tags_blocked_and_subtasks_included() {
         let (_, tasks) = open();
-        let parent = add(&tasks, "parent", Planning::Active, &["work"]);
-        let blocker = add(&tasks, "blocker", Planning::Active, &[]);
-        let blocked = add(&tasks, "blocked", Planning::Active, &["work"]);
+        let parent = add(&tasks, "parent", &["work"]);
+        let blocker = add(&tasks, "blocker", &[]);
+        let blocked = add(&tasks, "blocked", &["work"]);
         tasks.add_blocker(&blocked, &blocker).unwrap();
         tasks
             .create_subtask(&parent, "sub", 4, &["work".to_owned()])
@@ -637,10 +618,7 @@ mod tests {
         let (_, tasks) = open();
         let tags_in = |filter: Option<&str>| {
             let tags = ["x".to_owned(), "work".to_owned()];
-            (tasks
-                .create("t", Planning::Active, 4, &tags, filter)
-                .unwrap())
-            .tags
+            (tasks.create("t", 4, &tags, filter).unwrap()).tags
         };
         let work = tasks.create_filter("F", "@work & !@review & @a").unwrap();
         assert_eq!(tags_in(Some(&work.id)), ["x", "work", "a"]);
@@ -654,8 +632,8 @@ mod tests {
     #[test]
     fn a_star_filter_shows_tasks_with_and_without_tags() {
         let (_, tasks) = open();
-        add(&tasks, "Plain", Planning::Active, &[]);
-        add(&tasks, "Tagged", Planning::Active, &["a"]);
+        add(&tasks, "Plain", &[]);
+        add(&tasks, "Tagged", &["a"]);
         let filter = tasks.create_filter("All", "*").unwrap();
         assert_eq!(
             titles(tasks.filter_rows(&filter.id).unwrap()),
@@ -666,13 +644,13 @@ mod tests {
     #[test]
     fn a_task_leaves_the_filter_when_it_no_longer_matches() {
         let (_, tasks) = open();
-        let id = add(&tasks, "t", Planning::Active, &["work"]);
+        let id = add(&tasks, "t", &["work"]);
         let filter = tasks.create_filter("Work", "@work").unwrap();
         assert_eq!(titles(tasks.filter_rows(&filter.id).unwrap()), ["t"]);
         tasks.remove_tag(&id, "work").unwrap();
         assert!(tasks.filter_rows(&filter.id).unwrap().is_empty());
         tasks.add_tag(&id, "work").unwrap();
-        tasks.plan(&id, Planning::Backlog).unwrap();
+        tasks.add_tag(&id, "backlog").unwrap();
         assert_eq!(titles(tasks.filter_rows(&filter.id).unwrap()), ["t"]);
         tasks.add_tag(&id, "x").unwrap();
         tasks.remove_tag(&id, "work").unwrap();
@@ -682,7 +660,7 @@ mod tests {
     #[test]
     fn an_unreadable_query_matches_nothing_and_an_unknown_filter_is_not_found() {
         let (files, tasks) = open();
-        add(&tasks, "t", Planning::Active, &["work"]);
+        add(&tasks, "t", &["work"]);
         let filter = tasks.create_filter("Work", "@work").unwrap();
         let path = format!("Filters/{}.md", filter.id);
         let mut file = Document::parse(&files.read(Path::new(&path)).unwrap()).unwrap();
@@ -785,7 +763,7 @@ mod tests {
     #[test]
     fn deleting_a_filter_leaves_every_task_file_untouched() {
         let (files, tasks) = open();
-        let id = add(&tasks, "t", Planning::Active, &["work"]);
+        let id = add(&tasks, "t", &["work"]);
         let before = files.read(Path::new(&format!("Tasks/{id}.md"))).unwrap();
         let a = tasks.create_filter("A", "@work").unwrap();
         let b = tasks.create_filter("B", "@work").unwrap();
@@ -805,9 +783,9 @@ mod tests {
     #[test]
     fn a_filter_counts_the_open_tasks_it_matches() {
         let (_, tasks) = open();
-        add(&tasks, "one", Planning::Active, &["work"]);
-        add(&tasks, "two", Planning::Active, &["work"]);
-        add(&tasks, "later", Planning::Backlog, &["work"]);
+        add(&tasks, "one", &["work"]);
+        add(&tasks, "two", &["work"]);
+        add(&tasks, "later", &["work", "backlog"]);
         tasks.create_filter("Work", "@work").unwrap();
         tasks.create_filter("None", "@nothing").unwrap();
         let counts: Vec<u32> = tasks.filters().unwrap().iter().map(|f| f.matches).collect();
@@ -817,7 +795,7 @@ mod tests {
     #[test]
     fn a_filter_with_an_unreadable_query_is_listed_with_its_error_and_can_be_edited() {
         let (files, tasks) = open();
-        add(&tasks, "t", Planning::Active, &["work"]);
+        add(&tasks, "t", &["work"]);
         let filter = tasks.create_filter("Work", "@work").unwrap();
         assert_eq!(filter.error, None);
         let path = format!("Filters/{}.md", filter.id);
@@ -834,7 +812,7 @@ mod tests {
     fn order_fixture() -> (Arc<MemoryFiles>, Tasks, Filter, Vec<String>) {
         let (files, tasks) = open();
         let ids = ["a", "b", "c", "d"]
-            .map(|t| add(&tasks, t, Planning::Active, &["work"]))
+            .map(|t| add(&tasks, t, &["work"]))
             .to_vec();
         let filter = tasks.create_filter("Work", "@work").unwrap();
         (files, tasks, filter, ids)
@@ -862,7 +840,7 @@ mod tests {
     #[test]
     fn moving_an_unknown_task_or_before_one_not_shown_is_not_found() {
         let (_, tasks, f, ids) = order_fixture();
-        let other = add(&tasks, "e", Planning::Active, &["home"]);
+        let other = add(&tasks, "e", &["home"]);
         for (task, before) in [
             ("aaaaaaaaaaaa", None),
             (other.as_str(), None),
@@ -906,10 +884,7 @@ mod tests {
         tasks.move_in_filter(&f.id, &ids[1], None).unwrap();
         assert_eq!(shown(&tasks, &f), ["d", "a", "c", "b"]);
         assert_eq!(shown(&tasks, &other), ["a", "b", "c", "d"]);
-        assert_eq!(
-            titles(tasks.rows(Planning::Active).unwrap()),
-            ["a", "b", "c", "d"]
-        );
+        assert_eq!(titles(tasks.rows().unwrap()), ["a", "b", "c", "d"]);
         let tasks_after: Vec<String> = ids
             .iter()
             .map(|id| files.read(Path::new(&format!("Tasks/{id}.md"))).unwrap())
@@ -921,8 +896,8 @@ mod tests {
     fn tasks_without_a_place_follow_the_placed_ones_in_the_order_created() {
         let (_, tasks, f, ids) = order_fixture();
         tasks.move_in_filter(&f.id, &ids[2], Some(&ids[0])).unwrap();
-        add(&tasks, "e", Planning::Active, &["work"]);
-        add(&tasks, "f", Planning::Active, &["work"]);
+        add(&tasks, "e", &["work"]);
+        add(&tasks, "f", &["work"]);
         assert_eq!(shown(&tasks, &f), ["c", "a", "b", "d", "e", "f"]);
     }
 

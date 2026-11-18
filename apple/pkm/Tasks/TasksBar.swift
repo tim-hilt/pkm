@@ -25,14 +25,14 @@ struct TasksBar: View {
                 }
                 .onChange(of: model.barEntry, initial: true) { scroll.scrollTo(model.barEntry, anchor: .center) }
             }
-            .accessibilityIdentifier("tasks-planning")
+            .accessibilityIdentifier("tasks-lists")
         #else
             Picker("List", selection: Binding(get: { model.barEntry }, set: { model.list = $0 })) {
                 ForEach(model.bar, id: \.self) { label($0).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .accessibilityIdentifier("tasks-planning")
+            .accessibilityIdentifier("tasks-lists")
         #endif
     }
 

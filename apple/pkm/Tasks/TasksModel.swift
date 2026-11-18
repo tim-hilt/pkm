@@ -112,7 +112,7 @@ final class TasksModel {
 
     /// Every Open Task, Subtasks included.
     private func openTasks() -> [ListedTask] {
-        [Planning.active, .backlog].flatMap { (try? store.tasks(planning: $0)) ?? [] }
+        (try? store.tasks()) ?? []
     }
 
     /// The Tasks `list` shows, in its order; none for the Filters list.
@@ -183,7 +183,7 @@ final class TasksModel {
     ) -> Bool {
         guard
             let task = try? store.create(
-                title: title, planning: .active, priority: priority, tags: tags, filter: list.filterID)
+                title: title, priority: priority, tags: tags, filter: list.filterID)
         else {
             return false
         }

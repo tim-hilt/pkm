@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { type Core, Closing, Planning, TaskQuickAdd, loadCore } from "../core/Core";
+import { type Core, Closing, TaskQuickAdd, loadCore } from "../core/Core";
 import { MemoryStorage } from "../storage/MemoryStorage";
 import { TaskFiles } from "./TaskFiles";
 import { type ListedTask, TasksModel } from "./TasksModel";
@@ -30,14 +30,13 @@ describe("the Tasks list", () => {
     expect(model.tasks).toEqual([]);
   });
 
-  it("adds a Task, Active by default, with Priority 4 and no Tags", () => {
+  it("adds a Task with Priority 4 and no Tags", () => {
     expect(model.add("Buy milk")).toBe(true);
     expect(first()).toMatchObject({
       title: "Buy milk",
       priority: 4,
       description: "",
       tags: [],
-      planning: Planning.Active,
     });
   });
 
@@ -781,7 +780,7 @@ describe("Sync", () => {
     model.add("Mine");
     await model.saved();
     const other = await TaskFiles.open(new MemoryStorage());
-    other.store.create("Theirs", Planning.Active, 4, []);
+    other.store.create("Theirs", 4, []);
     const [path] = other.store
       .takeChanges()
       .filter((p) => p.startsWith("Tasks/") && p.endsWith(".md"));

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { Closing, type Core, Planning, loadCore } from "../core/Core";
+import { Closing, type Core, loadCore } from "../core/Core";
 import { DrawingStore } from "../drawings/gallery/DrawingStore";
 import { MemoryStorage } from "../storage/MemoryStorage";
 import { TaskFiles } from "../tasks/TaskFiles";
@@ -59,14 +59,14 @@ async function device(tabs?: MemoryTabGroup): Promise<Device> {
 /** Creates a Task on the Device, as the app does, and saves it. */
 async function createTask(device: Device, title: string): Promise<void> {
   const files = await TaskFiles.open(device.storage);
-  files.store.create(title, Planning.Active, 4, []);
+  files.store.create(title, 4, []);
   await files.save();
   device.cloud.localChange();
 }
 
 async function titles(device: Device): Promise<string[]> {
   const files = await TaskFiles.open(device.storage);
-  const rows = files.store.tasks(Planning.Active);
+  const rows = files.store.tasks();
   const found = rows.map((row) => row.title);
   rows.forEach((row) => row.free());
   return found;
@@ -106,7 +106,7 @@ describe("the Tasks folders", () => {
     expect(await titles(browser)).toEqual(["Buy milk"]);
 
     const files = await TaskFiles.open(tablet.storage);
-    const [row] = files.store.tasks(Planning.Active);
+    const [row] = files.store.tasks();
     files.store.close(row.id, Closing.Done);
     row.free();
     files.store.commit();
@@ -122,8 +122,8 @@ describe("the Tasks folders", () => {
     const browser = await device();
     const tablet = await device();
     const files = await TaskFiles.open(browser.storage);
-    files.store.create("Buy milk", Planning.Active, 4, []);
-    const [row] = files.store.tasks(Planning.Active);
+    files.store.create("Buy milk", 4, []);
+    const [row] = files.store.tasks();
     files.store.addTag(row.id, "errand");
     row.free();
     await files.save();

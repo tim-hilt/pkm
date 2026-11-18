@@ -5,8 +5,8 @@ use std::sync::Mutex;
 
 use pkm_base::tags::{Entry as TagEntry, Suggestions as TagSuggestions, Tags};
 use pkm_tasks::{
-    Blocker, Closing, Error, Filter, Planning, QuickAdd, QuickShortcut, Row, ShortcutMeaning,
-    TagQuery, Task, Tasks,
+    Blocker, Closing, Error, Filter, QuickAdd, QuickShortcut, Row, ShortcutMeaning, TagQuery, Task,
+    Tasks,
 };
 
 /// Why a Task wasn't saved or the Tasks couldn't be read.
@@ -15,7 +15,6 @@ use pkm_tasks::{
 pub enum TasksError {
     EmptyTitle,
     InvalidTag,
-    SubtaskNotPlannable,
     BlockedByItself,
     BlockedByParent,
     BlockedBySubtask,
@@ -31,7 +30,6 @@ impl std::fmt::Display for TasksError {
         match self {
             Self::EmptyTitle => Error::EmptyTitle.fmt(f),
             Self::InvalidTag => Error::InvalidTag.fmt(f),
-            Self::SubtaskNotPlannable => Error::SubtaskNotPlannable.fmt(f),
             Self::BlockedByItself => Error::BlockedByItself.fmt(f),
             Self::BlockedByParent => Error::BlockedByParent.fmt(f),
             Self::BlockedBySubtask => Error::BlockedBySubtask.fmt(f),
@@ -55,7 +53,6 @@ impl From<Error> for TasksError {
         match e {
             Error::EmptyTitle => Self::EmptyTitle,
             Error::InvalidTag => Self::InvalidTag,
-            Error::SubtaskNotPlannable => Self::SubtaskNotPlannable,
             Error::BlockedByItself => Self::BlockedByItself,
             Error::BlockedByParent => Self::BlockedByParent,
             Error::BlockedBySubtask => Self::BlockedBySubtask,
@@ -66,13 +63,6 @@ impl From<Error> for TasksError {
             Error::Io(e) => e.into(),
         }
     }
-}
-
-/// Where an Open Task is planned.
-#[uniffi::remote(Enum)]
-pub enum Planning {
-    Active,
-    Backlog,
 }
 
 /// How a Task is Closed.
@@ -98,7 +88,7 @@ pub struct Filter {
     /// As the user typed it.
     pub query: String,
     pub favorite: bool,
-    /// How many Active Tasks the Query matches.
+    /// How many Open Tasks the Query matches.
     pub matches: u32,
     /// Why the stored Query can't be read; such a Filter matches nothing.
     pub error: Option<String>,
@@ -146,7 +136,6 @@ pub struct ListedTask {
     pub title: String,
     /// 1 (highest) to 4.
     pub priority: u8,
-    pub planning: Planning,
     /// Plain text; empty if none.
     pub description: String,
     /// In the order they were added, each with its Tag Color.
@@ -177,7 +166,6 @@ impl ListedTask {
             id: t.id,
             title: t.title,
             priority: t.priority,
-            planning: t.planning,
             description: t.description,
             tags: tags.collect(),
             done: t.done,
@@ -337,21 +325,6 @@ impl TaskStore {
         Ok(Self(Tasks::open(root)?))
     }
 
-    /// Makes a Task Active or moves it to the Backlog, at the end of that list.
-    pub fn plan(&self, id: String, planning: Planning) -> Result<ListedTask, TasksError> {
-        Ok(self.listed(self.0.plan(&id, planning)?))
-    }
-
-    /// Moves a Task before `before` in its list, or to the end of it; its
-    /// Parent stays. See `pkm_tasks::Tasks::move_before`.
-    pub fn move_before(
-        &self,
-        id: String,
-        before: Option<String>,
-    ) -> Result<ListedTask, TasksError> {
-        Ok(self.listed(self.0.move_before(&id, before.as_deref())?))
-    }
-
     /// Moves a Subtask before its sibling `before`, or after its last sibling;
     /// its Parent stays. See `pkm_tasks::Tasks::move_subtask`.
     pub fn move_subtask(
@@ -384,19 +357,15 @@ impl TaskStore {
     pub fn create(
         &self,
         title: String,
-        planning: Planning,
         priority: u8,
         tags: Vec<String>,
         filter: Option<String>,
     ) -> Result<ListedTask, TasksError> {
-        let task = self
-            .0
-            .create(&title, planning, priority, &tags, filter.as_deref())?;
+        let task = self.0.create(&title, priority, &tags, filter.as_deref())?;
         Ok(self.listed(task))
     }
 
-    /// `create` for a Subtask under a Task; it follows its top-level Task's
-    /// Active or Backlog.
+    /// `create` for a Subtask under a Task; it starts with its Parent's Tags.
     pub fn create_subtask(
         &self,
         parent: String,
@@ -479,10 +448,9 @@ impl TaskStore {
         self.0.tags().list()
     }
 
-    /// The Open Tasks planned as `planning`, Subtasks included, in their
-    /// manual order.
-    pub fn tasks(&self, planning: Planning) -> Result<Vec<ListedTask>, TasksError> {
-        Ok(self.listed_rows(self.0.rows(planning)?))
+    /// Every Open Task, Subtasks included, in the order of All Tasks.
+    pub fn tasks(&self) -> Result<Vec<ListedTask>, TasksError> {
+        Ok(self.listed_rows(self.0.rows()?))
     }
 
     /// Creates a Filter at the end of the Filters list, refusing an empty
@@ -521,7 +489,7 @@ impl TaskStore {
         Ok(self.0.filters()?)
     }
 
-    /// The Active Tasks a Filter matches, as `tasks` lists Active.
+    /// The Open Tasks a Filter matches, in its order.
     pub fn filter_tasks(&self, id: String) -> Result<Vec<ListedTask>, TasksError> {
         Ok(self.listed_rows(self.0.filter_rows(&id)?))
     }
@@ -603,9 +571,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pkm-bindings-{}", std::process::id()));
         let path = |name: &str| dir.join(name).to_string_lossy().into_owned();
         let store = TaskStore::open(path("Tasks")).unwrap();
-        let task = store
-            .create("t".into(), Planning::Active, 4, vec![], None)
-            .unwrap();
+        let task = store.create("t".into(), 4, vec![], None).unwrap();
         store.add_tag(task.id.clone(), "home".into()).unwrap();
         let task = store.add_tag(task.id, "work".into()).unwrap();
         assert_eq!(colors(&task), [("home", None), ("work", None)]);
@@ -613,17 +579,14 @@ mod tests {
         store
             .set_tag_color("work".into(), Some("#d0021b".into()))
             .unwrap();
-        let listed = store.tasks(Planning::Active).unwrap();
+        let listed = store.tasks().unwrap();
         assert_eq!(
             colors(&listed[0]),
             [("home", None), ("work", Some("#d0021b"))]
         );
 
         store.set_tag_color("work".into(), None).unwrap();
-        assert_eq!(
-            colors(&store.tasks(Planning::Active).unwrap()[0])[1],
-            ("work", None)
-        );
+        assert_eq!(colors(&store.tasks().unwrap()[0])[1], ("work", None));
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -632,9 +595,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pkm-bindings-del-{}", std::process::id()));
         let path = |name: &str| dir.join(name).to_string_lossy().into_owned();
         let store = TaskStore::open(path("Tasks")).unwrap();
-        let task = store
-            .create("t".into(), Planning::Active, 4, vec![], None)
-            .unwrap();
+        let task = store.create("t".into(), 4, vec![], None).unwrap();
         store.add_tag(task.id.clone(), "home".into()).unwrap();
         store.add_tag(task.id, "work".into()).unwrap();
         store
@@ -643,7 +604,7 @@ mod tests {
 
         store.delete_tag("work".into()).unwrap();
 
-        let listed = store.tasks(Planning::Active).unwrap();
+        let listed = store.tasks().unwrap();
         assert_eq!(colors(&listed[0]), [("home", None)]);
         let names: Vec<_> = store.tags().into_iter().map(|t| t.name).collect();
         assert_eq!(names, ["home"]);
@@ -659,11 +620,9 @@ mod tests {
             store.delete_filter(favorite.id).unwrap(); // the migration's
         }
         store
-            .create("t".into(), Planning::Active, 4, vec!["work".into()], None)
+            .create("t".into(), 4, vec!["work".into()], None)
             .unwrap();
-        store
-            .create("u".into(), Planning::Active, 4, vec![], None)
-            .unwrap();
+        store.create("u".into(), 4, vec![], None).unwrap();
         let filter = store.create_filter("Work".into(), "@work".into()).unwrap();
         let tasks = store.filter_tasks(filter.id.clone()).unwrap();
         assert_eq!(tasks.len(), 1);
@@ -685,10 +644,10 @@ mod tests {
         store.set_favorite(other.id.clone(), true).unwrap();
         assert!(store.filters().unwrap()[0].favorite);
         let first = store
-            .create("a".into(), Planning::Active, 4, vec!["work".into()], None)
+            .create("a".into(), 4, vec!["work".into()], None)
             .unwrap();
         store
-            .create("b".into(), Planning::Active, 4, vec!["work".into()], None)
+            .create("b".into(), 4, vec!["work".into()], None)
             .unwrap();
         store
             .move_in_filter(filter.id.clone(), first.id.clone(), None)
@@ -699,7 +658,7 @@ mod tests {
         assert_eq!(order.last().map(String::as_str), Some("a"));
         store.delete_filter(other.id).unwrap();
         assert_eq!(store.filters().unwrap().len(), 1);
-        assert_eq!(store.tasks(Planning::Active).unwrap().len(), 4);
+        assert_eq!(store.tasks().unwrap().len(), 4);
 
         let problem = store.check_query("@a & (".into()).problem.unwrap();
         assert_eq!(

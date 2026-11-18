@@ -18,7 +18,7 @@
 //! run starts over from the files that are still legacy.
 
 use super::filters::{Stored, in_filter_order, matching, set_places};
-use super::{BACKLOG, CREATED, Node, Nodes, Overwrite, Tasks, end_key, modified, node_of, repair};
+use super::{CREATED, Node, Nodes, Overwrite, Tasks, end_key, modified, node_of, repair};
 use super::{set_list, tags_of};
 use crate::query::Query;
 use pkm_base::clock::{iso8601, now_ms};
@@ -50,6 +50,9 @@ pub(crate) const BACKLOG_LIST: Favorite = Favorite {
     title: "Backlog",
     query: "@backlog",
 };
+
+/// The Tag a Task in the Backlog gets.
+const BACKLOG: &str = "backlog";
 
 /// What a Query gets to keep an existing Filter from showing the Backlog.
 const NOT_BACKLOG: &str = " & !@backlog";
@@ -354,7 +357,7 @@ fn list_orders(tasks: &[Legacy]) -> [Vec<&Legacy>; 2] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Files, MemoryFiles, Planning, Row};
+    use crate::{Files, MemoryFiles, Row};
     use std::sync::Arc;
 
     const UPDATED: &str = "2000-01-01T00:00:00Z";
@@ -446,8 +449,7 @@ mod tests {
         legacy(&files, "bbbbbbbbbbbb", "active", "parent: aaaaaaaaaaaa\n");
         legacy(&files, "cccccccccccc", "active", "parent: bbbbbbbbbbbb\n");
         let tasks = Tasks::open_in(files, "Tasks");
-        assert!(tasks.rows(Planning::Active).unwrap().is_empty());
-        assert_eq!(tasks.rows(Planning::Backlog).unwrap().len(), 3);
+        assert_eq!(tasks.rows().unwrap().len(), 3);
     }
 
     #[test]
@@ -469,10 +471,7 @@ mod tests {
         assert_eq!(shown(&tasks, ALL_TASKS.id), "bac");
         assert_eq!(shown(&tasks, ACTIVE.id), "ba");
         assert_eq!(shown(&tasks, BACKLOG_LIST.id), "c");
-        assert_eq!(
-            ids(tasks.rows(Planning::Active).unwrap())[0],
-            "bbbbbbbbbbbb"
-        );
+        assert_eq!(ids(tasks.rows().unwrap())[0], "bbbbbbbbbbbb");
     }
 
     #[test]
@@ -663,6 +662,6 @@ mod tests {
     fn a_new_device_starts_with_the_three_favorites_and_no_tasks() {
         let tasks = Tasks::open_in(device(), "Tasks");
         assert_eq!(tasks.filters().unwrap().len(), 3);
-        assert!(tasks.rows(Planning::Active).unwrap().is_empty());
+        assert!(tasks.rows().unwrap().is_empty());
     }
 }

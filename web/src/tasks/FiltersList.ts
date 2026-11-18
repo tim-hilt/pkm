@@ -5,7 +5,7 @@ import type { Filter } from "./TasksModel";
 
 /**
  * The rows of the Filters list: each Filter with its Title, its Query (or why
- * it can't be read) and how many Active Tasks it matches. A row opens the
+ * it can't be read) and how many Open Tasks it matches. A row opens the
  * Filter; its menu (right click, long press) marks it as a Favorite (starred), edits or Deletes it; rows are
  * dragged to reorder, by the `drag` of the view.
  */
@@ -39,7 +39,7 @@ export function filterRows(
     const line = make("div", "task-line", [open]);
     if (filter.error === undefined) {
       const count = make("span", "filter-count", [String(filter.matches)]);
-      count.setAttribute("aria-label", `${filter.matches} Active Tasks`);
+      count.setAttribute("aria-label", `${filter.matches} Open Tasks`);
       line.append(count);
     }
     const row = make("li", "task-row", [line]);
