@@ -625,6 +625,33 @@ pub fn toggle_inline(text: &str, start: u32, end: u32, kind: Inline) -> TextEdit
     }
 }
 
+/// The references of the Images a text shows, in text order (fenced code shows
+/// none).
+pub fn image_targets(text: &str) -> Vec<String> {
+    let description = parse_description(text);
+    let images = description.blocks.iter().filter(|b| b.kind == Block::Image);
+    images.map(|b| b.target.clone()).collect()
+}
+
+/// The edit that puts the Image `reference` on a line of its own, replacing the
+/// selection `start..end`; the caret ends on the line after it.
+pub fn insert_image(text: &str, start: u32, end: u32, reference: &str) -> TextEdit {
+    let units: Vec<u16> = text.encode_utf16().collect();
+    let end = end.min(units.len() as u32);
+    let start = start.min(end);
+    let newline = u16::from(b'\n');
+    let before = start > 0 && units[start as usize - 1] != newline;
+    let after = units.get(end as usize) != Some(&newline);
+    let replacement = format!(
+        "{}![]({reference}){}",
+        if before { "\n" } else { "" },
+        if after { "\n" } else { "" }
+    );
+    // Past an existing line break there is nothing to add.
+    let caret = start + utf16_len(&replacement) + u32::from(!after);
+    TextEdit::replace(start, end, replacement, caret)
+}
+
 /// A run of `*` that may still be closed by a later run; `left` of its
 /// markers are unmatched, the innermost ones used first.
 #[derive(Clone, Copy)]
@@ -658,6 +685,31 @@ fn closing_backticks(chars: &[char], from: usize, len: usize) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_image_goes_on_a_line_of_its_own() {
+        let apply = |text: &str, start, end| {
+            let edit = insert_image(text, start, end, "a.png");
+            let (s, e) = (edit.start as usize, edit.end as usize);
+            let units: Vec<u16> = text.encode_utf16().collect();
+            let mut out = String::from_utf16_lossy(&units[..s]);
+            out += &edit.replacement;
+            out += &String::from_utf16_lossy(&units[e..]);
+            (out, edit.selection_start)
+        };
+        assert_eq!(apply("", 0, 0), ("![](a.png)\n".to_string(), 11));
+        assert_eq!(apply("ab", 1, 1), ("a\n![](a.png)\nb".to_string(), 13));
+        assert_eq!(apply("a\nb", 2, 2), ("a\n![](a.png)\nb".to_string(), 13));
+        assert_eq!(apply("a\n\nb", 2, 2), ("a\n![](a.png)\nb".to_string(), 13));
+        assert_eq!(apply("a😀b", 0, 3), ("![](a.png)\nb".to_string(), 11));
+    }
+
+    #[test]
+    fn image_targets_lists_the_shown_images_in_order() {
+        let text = "![](a.png)\ntext ![](no.png)\n```\n![](code.png)\n```\n![alt](b.jpg)";
+        assert_eq!(image_targets(text), ["a.png", "b.jpg"]);
+        assert!(image_targets("no images").is_empty());
+    }
 
     #[test]
     fn row_preview_strips_block_markers() {

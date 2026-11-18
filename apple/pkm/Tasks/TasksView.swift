@@ -291,7 +291,7 @@ private struct NewTaskSheet: View {
             Form {
                 QuickAddField(quickAdd: quickAdd, title: $title, revision: revision, onSubmit: add)
                     .accessibilityIdentifier("task-title")
-                MarkdownEditor(text: $description, placeholder: "Description")
+                MarkdownEditor(text: $description, placeholder: "Description", images: model.images)
                     .accessibilityIdentifier("task-description")
             }
             .formStyle(.grouped)
@@ -424,7 +424,7 @@ private struct EditTaskForm: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            MarkdownEditor(text: $description, placeholder: "Description", onBlur: save)
+            MarkdownEditor(text: $description, placeholder: "Description", images: model.images, onBlur: save)
                 .accessibilityIdentifier("task-description")
             Picker("Priority", selection: $priority) {
                 ForEach(UInt8(1)...4, id: \.self) { Text(verbatim: "P\($0)").tag($0) }

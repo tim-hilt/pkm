@@ -19,13 +19,24 @@ pub struct Listed {
     pub stamp: Stamp,
 }
 
-/// Text files in folders. Folders exist as far as files are in them.
+/// Files in folders. Folders exist as far as files are in them.
 pub trait Files: Send + Sync + Debug {
-    /// The file's text; `NotFound` if there is no such file.
-    fn read(&self, path: &Path) -> io::Result<String>;
+    /// The file's bytes; `NotFound` if there is no such file.
+    fn read_bytes(&self, path: &Path) -> io::Result<Vec<u8>>;
 
     /// Replaces the file, making its folders. It is never seen half written.
-    fn write(&self, path: &Path, text: &str) -> io::Result<()>;
+    fn write_bytes(&self, path: &Path, bytes: &[u8]) -> io::Result<()>;
+
+    /// The file's text; `NotFound` if there is no such file.
+    fn read(&self, path: &Path) -> io::Result<String> {
+        String::from_utf8(self.read_bytes(path)?)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    }
+
+    /// Replaces the file as `write_bytes` does.
+    fn write(&self, path: &Path, text: &str) -> io::Result<()> {
+        self.write_bytes(path, text.as_bytes())
+    }
 
     fn exists(&self, path: &Path) -> bool;
 
@@ -41,19 +52,19 @@ pub trait Files: Send + Sync + Debug {
 pub struct DiskFiles;
 
 impl Files for DiskFiles {
-    fn read(&self, path: &Path) -> io::Result<String> {
-        fs::read_to_string(path)
+    fn read_bytes(&self, path: &Path) -> io::Result<Vec<u8>> {
+        fs::read(path)
     }
 
     /// Goes through a hidden scratch file, so a crash leaves no torn file and
     /// Sync never sees half of one.
-    fn write(&self, path: &Path, text: &str) -> io::Result<()> {
+    fn write_bytes(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
         let name = path.file_name().unwrap_or_default().to_string_lossy();
         let scratch = path.with_file_name(format!(".{name}.tmp"));
         if let Some(folder) = path.parent() {
             fs::create_dir_all(folder)?;
         }
-        fs::write(&scratch, text)
+        fs::write(&scratch, bytes)
             .and_then(|()| fs::rename(&scratch, path))
             .inspect_err(|_| drop(fs::remove_file(&scratch)))
     }
@@ -91,9 +102,9 @@ impl Files for DiskFiles {
 
 #[derive(Debug, Default)]
 struct Memory {
-    /// Each file's text, and when it was last written: a count of writes, so
+    /// Each file's bytes, and when it was last written: a count of writes, so
     /// that it never repeats.
-    files: BTreeMap<PathBuf, (String, u128)>,
+    files: BTreeMap<PathBuf, (Vec<u8>, u128)>,
     writes: u128,
     /// Files written since `take_changes`.
     changed: BTreeSet<PathBuf>,
@@ -111,10 +122,15 @@ impl MemoryFiles {
 
     /// Puts a file there as it was saved before; not counted as a change.
     pub fn load(&self, path: &Path, text: String) {
+        self.load_bytes(path, text.into_bytes());
+    }
+
+    /// `load` for a file that is no text.
+    pub fn load_bytes(&self, path: &Path, bytes: Vec<u8>) {
         let mut memory = self.memory();
         memory.writes += 1;
         let written = memory.writes;
-        memory.files.insert(path.to_owned(), (text, written));
+        memory.files.insert(path.to_owned(), (bytes, written));
     }
 
     /// The files written since the last call, each once, sorted.
@@ -126,16 +142,16 @@ impl MemoryFiles {
 }
 
 impl Files for MemoryFiles {
-    fn read(&self, path: &Path) -> io::Result<String> {
+    fn read_bytes(&self, path: &Path) -> io::Result<Vec<u8>> {
         self.memory()
             .files
             .get(path)
-            .map(|(text, _)| text.clone())
+            .map(|(bytes, _)| bytes.clone())
             .ok_or_else(|| io::ErrorKind::NotFound.into())
     }
 
-    fn write(&self, path: &Path, text: &str) -> io::Result<()> {
-        self.load(path, text.to_owned());
+    fn write_bytes(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+        self.load_bytes(path, bytes.to_owned());
         self.memory().changed.insert(path.to_owned());
         Ok(())
     }
@@ -159,10 +175,10 @@ impl Files for MemoryFiles {
             .files
             .iter()
             .filter(|(path, _)| path.parent() == Some(folder))
-            .filter_map(|(path, (text, written))| {
+            .filter_map(|(path, (bytes, written))| {
                 Some(Listed {
                     name: path.file_name()?.to_str()?.to_owned(),
-                    stamp: (*written, text.len() as u64),
+                    stamp: (*written, bytes.len() as u64),
                 })
             })
             .collect())

@@ -1,6 +1,7 @@
 //! The Tasks store: a folder of `<id>.md` files.
 
 mod filters;
+mod images;
 
 pub(crate) use filters::is_filter;
 use filters::shown_in;
@@ -1099,16 +1100,16 @@ mod tests {
     use super::*;
 
     /// A fresh, empty folder that removes itself.
-    struct Scratch(PathBuf);
+    pub(super) struct Scratch(pub(super) PathBuf);
 
     impl Scratch {
-        fn new() -> Self {
+        pub(super) fn new() -> Self {
             let mut entropy = Entropy::from_system();
             let dir = std::env::temp_dir().join(format!("pkm-tasks-{}", ItemId::new(&mut entropy)));
             Self(dir.join("Tasks"))
         }
 
-        fn store(&self) -> Tasks {
+        pub(super) fn store(&self) -> Tasks {
             Tasks::open(&self.0).unwrap()
         }
 

@@ -132,3 +132,16 @@ pub fn toggle_inline(text: String, start: u32, end: u32, kind: Inline) -> TextEd
 pub fn row_preview(text: String) -> String {
     pkm_base::markdown::row_preview(&text)
 }
+
+/// The references of the Images a text shows, in text order.
+#[uniffi::export]
+pub fn image_targets(text: String) -> Vec<String> {
+    pkm_base::markdown::image_targets(&text)
+}
+
+/// The edit that puts the Image `reference` on a line of its own, replacing
+/// the selection `start..end`.
+#[uniffi::export]
+pub fn insert_image(text: String, start: u32, end: u32, reference: String) -> TextEdit {
+    pkm_base::markdown::insert_image(&text, start, end, &reference)
+}

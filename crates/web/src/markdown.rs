@@ -197,3 +197,9 @@ pub fn toggle_inline(text: &str, start: u32, end: u32, kind: Inline) -> TextEdit
 pub fn row_preview(text: &str) -> String {
     pkm_base::markdown::row_preview(text)
 }
+
+/// The references of the Images a text shows, in text order.
+#[wasm_bindgen(js_name = imageTargets)]
+pub fn image_targets(text: &str) -> Vec<String> {
+    pkm_base::markdown::image_targets(text)
+}

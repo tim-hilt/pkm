@@ -1,4 +1,6 @@
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 
 extension TasksModel {
     /// The Tasks folder in the app's Documents, which Files and Finder show.
@@ -48,7 +50,10 @@ extension TasksModel {
                 ("Book the dentist", "", 2, ["health"]),
                 ("Reply to Anna's email", "About the trip", 3, []),
             ]
-            for (title, description, priority, tags) in samples {
+            for (title, var description, priority, tags) in samples {
+                if title == "Buy milk", let reference = (try? store.addImage(bytes: sampleImage())) {
+                    description += "\n![](\(reference))\nThe shopping list"
+                }
                 if let task = try? store.create(title: title, priority: 4, tags: []) {
                     _ = try? store.edit(
                         id: task.id, title: title, description: description, priority: priority, addTags: [])
@@ -83,6 +88,25 @@ extension TasksModel {
         if opensFilter, let filter = model.filters.first { model.list = .filter(filter.id) }
         if opensSheet, let task = model.tasks.first { model.startEditing(task) }
         return model
+    }
+
+    /// A PNG of a gradient, for a sample Description's Image.
+    private static func sampleImage() -> Data {
+        let (width, height) = (600, 200)
+        let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let colors = [
+            CGColor(red: 0.2, green: 0.5, blue: 1, alpha: 1), CGColor(red: 1, green: 0.5, blue: 0.2, alpha: 1),
+        ]
+        context.drawLinearGradient(
+            CGGradient(colorsSpace: nil, colors: colors as CFArray, locations: nil)!, start: .zero,
+            end: CGPoint(x: width, y: height), options: [])
+        let png = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(png, UTType.png.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, context.makeImage()!, nil)
+        CGImageDestinationFinalize(destination)
+        return png as Data
     }
 
     private static func temporaryFolder() -> URL {

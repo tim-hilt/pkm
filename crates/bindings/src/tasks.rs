@@ -380,6 +380,17 @@ impl TaskStore {
         Ok(Self(Tasks::open(root)?))
     }
 
+    /// Keeps a PNG, JPEG, GIF or WebP beside the Tasks; its reference. See
+    /// `pkm_tasks::Tasks::add_image`.
+    pub fn add_image(&self, bytes: Vec<u8>) -> Result<String, TasksError> {
+        Ok(self.0.add_image(&bytes)?)
+    }
+
+    /// The bytes of the Image a reference names.
+    pub fn read_image(&self, reference: String) -> Result<Vec<u8>, TasksError> {
+        Ok(self.0.read_image(&reference)?)
+    }
+
     /// Moves a Subtask before its sibling `before`, or after its last sibling;
     /// its Parent stays. See `pkm_tasks::Tasks::move_subtask`.
     pub fn move_subtask(

@@ -10,6 +10,9 @@ extension NSAttributedString.Key {
     /// What to draw in place of the characters it covers, when it is as long as they are: a bullet
     /// for `-`, the number a list has reached. The text itself stays as typed.
     static let markerDisplay = NSAttributedString.Key("pkm.markerDisplay")
+    /// The `NSTextAttachment` to draw in place of the character it covers, the first of an Image's
+    /// line, whose other characters are hidden. The text itself stays as typed.
+    static let imageDisplay = NSAttributedString.Key("pkm.imageDisplay")
 }
 
 /// Live Preview: styles a Description from the core's parse. Every line is rendered but the raw
@@ -22,8 +25,9 @@ enum MarkdownStyler {
     }
 
     /// Replaces the attributes of `text` with its styling for a caret at `caret` (UTF-16); without
-    /// one, as while the text isn't being edited, every line is rendered.
-    static func style(_ text: NSMutableAttributedString, caret: Int?) {
+    /// one, as while the text isn't being edited, every line is rendered. An Image shows, once
+    /// rendered, as what `images` draws for it.
+    static func style(_ text: NSMutableAttributedString, caret: Int?, images: ImageAttachments? = nil) {
         let source = text.string
         let all = NSRange(location: 0, length: text.length)
         text.beginEditing()
@@ -54,8 +58,15 @@ enum MarkdownStyler {
             let marker = NSRange(block.markerStart, block.markerEnd)
             let hidden = !isRaw(line)
             switch block.kind {
-            case .paragraph, .image:
+            case .paragraph:
                 break
+            case .image:
+                guard hidden, line.length > 0, let attachment = images?.attachment(for: block.target) else { break }
+                fade(line, hidden: true)
+                text.addAttribute(.imageDisplay, value: attachment, range: NSRange(location: line.location, length: 1))
+                #if canImport(UIKit)
+                    text.addAttribute(.accessibilityTextCustom, value: String(localized: "Image"), range: line)
+                #endif
             case .heading:
                 text.addAttribute(.font, value: headingFont(level: Int(block.level)), range: line)
                 #if canImport(UIKit)
@@ -142,16 +153,21 @@ extension NSRange {
     }
 }
 
-/// Draws what `markerDisplay` asks for in place of the text, which stays as typed.
+/// Draws what `markerDisplay` and `imageDisplay` ask for in place of the text, which stays as typed.
 final class MarkerDisplay: NSObject, NSTextContentStorageDelegate {
     func textContentStorage(_ storage: NSTextContentStorage, textParagraphWith range: NSRange) -> NSTextParagraph? {
         guard let source = storage.textStorage else { return nil }
         let paragraph = NSMutableAttributedString(attributedString: source.attributedSubstring(from: range))
         var changed = false
-        paragraph.enumerateAttribute(.markerDisplay, in: NSRange(location: 0, length: paragraph.length)) {
-            value, run, _ in
+        let all = NSRange(location: 0, length: paragraph.length)
+        paragraph.enumerateAttribute(.markerDisplay, in: all) { value, run, _ in
             guard let shown = value as? String, shown.utf16.count == run.length else { return }
             paragraph.replaceCharacters(in: run, with: shown)
+            changed = true
+        }
+        paragraph.enumerateAttribute(.imageDisplay, in: all) { value, run, _ in
+            guard let attachment = value as? NSTextAttachment else { return }
+            paragraph.replaceCharacters(in: run, with: NSAttributedString(attachment: attachment))
             changed = true
         }
         return changed ? NSTextParagraph(attributedString: paragraph) : nil

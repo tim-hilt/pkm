@@ -225,6 +225,18 @@ final class TasksModel {
         return true
     }
 
+    /// Keeps a picture beside the Tasks, as PNG unless it is a PNG, JPEG, GIF or WebP; the
+    /// reference for the Description. Nil if it is no image.
+    func addImage(_ picture: Data) -> String? {
+        StoredImage.bytes(of: picture).flatMap { try? store.addImage(bytes: $0) }
+    }
+
+    /// The bytes of the Image `reference` names.
+    func image(_ reference: String) -> Data? { try? store.readImage(reference: reference) }
+
+    /// What the Description editor keeps its Images with.
+    var images: ImageSource { ImageSource(add: addImage, read: image) }
+
     /// Gives a Task just created its Description, if any.
     private func describe(_ task: ListedTask, _ description: String) {
         guard !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }

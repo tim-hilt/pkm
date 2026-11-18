@@ -412,6 +412,18 @@ impl TaskStore {
         self.files.read(Path::new(path)).ok()
     }
 
+    /// Keeps a PNG, JPEG, GIF or WebP beside the Tasks; its reference.
+    #[wasm_bindgen(js_name = addImage)]
+    pub fn add_image(&self, bytes: &[u8]) -> Result<String, JsError> {
+        Ok(self.tasks.add_image(bytes)?)
+    }
+
+    /// The bytes of the Image a reference names.
+    #[wasm_bindgen(js_name = readImage)]
+    pub fn read_image(&self, reference: &str) -> Result<Vec<u8>, JsError> {
+        Ok(self.tasks.read_image(reference)?)
+    }
+
     /// Creates a Task with a Priority and Tags, refusing an empty Title or an
     /// invalid Tag; its Item ID.
     pub fn create(&self, title: &str, priority: u8, tags: Vec<String>) -> Result<String, JsError> {

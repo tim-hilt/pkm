@@ -32,7 +32,7 @@ extension CanvasMetalView {
     #if os(macOS)
         /// Makes the Canvas take drops of images.
         func enableImageInput() {
-            registerForDraggedTypes([.fileURL, .png, .tiff])
+            registerForDraggedTypes(PictureInput.droppedTypes)
         }
 
         /// Edit > Paste (⌘V) while the Canvas has the keyboard: at the mouse
@@ -42,47 +42,21 @@ extension CanvasMetalView {
             let point = pointerLocation
             // Elements first: Excalidraw's clipboard is text.
             if pasteElementsFromPasteboard(at: point) { return }
-            let sources = Self.imageSources(in: .general)
+            let sources = PictureInput.pictures(in: .general)
             Task { await insertImages(from: sources, at: point) }
         }
 
         override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
-            Self.hasImages(in: sender.draggingPasteboard) ? .copy : []
+            PictureInput.hasPictures(in: sender.draggingPasteboard) ? .copy : []
         }
 
         override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
-            let sources = Self.imageSources(in: sender.draggingPasteboard)
+            let sources = PictureInput.pictures(in: sender.draggingPasteboard)
             guard !sources.isEmpty else { return false }
             let point = convert(sender.draggingLocation, from: nil)
             Task { await insertImages(from: sources, at: point) }
             return true
         }
-
-        /// The images on a pasteboard: the files copied or dragged from the
-        /// Finder if they are images, else the picture itself (what a
-        /// screenshot is).
-        fileprivate static func imageSources(in pasteboard: NSPasteboard) -> [Data] {
-            let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: imageFiles) as? [URL] ?? []
-            let files = urls.compactMap { try? Data(contentsOf: $0) }
-            if !files.isEmpty { return files }
-            return pictureTypes.lazy.compactMap { pasteboard.data(forType: $0) }.first.map { [$0] } ?? []
-        }
-
-        /// Whether `imageSources(in:)` finds anything, without reading it:
-        /// asked on every drag movement and menu validation.
-        fileprivate static func hasImages(in pasteboard: NSPasteboard) -> Bool {
-            pasteboard.canReadObject(forClasses: [NSURL.self], options: imageFiles)
-                || pasteboard.availableType(from: pictureTypes) != nil
-        }
-
-        /// Files that are images, of a pasteboard.
-        private static let imageFiles: [NSPasteboard.ReadingOptionKey: Any] = [
-            .urlReadingFileURLsOnly: true,
-            .urlReadingContentsConformToTypes: [UTType.image.identifier],
-        ]
-
-        /// The picture itself on a pasteboard, best first.
-        private static let pictureTypes: [NSPasteboard.PasteboardType] = [.png, .tiff]
     #else
         /// Makes the Canvas take drops and pastes of images.
         func enableImageInput() {
@@ -101,21 +75,8 @@ extension CanvasMetalView {
             let point = contextMenuPoint
             Task {
                 if await pasteElements(from: itemProviders, at: point) { return }
-                await insertImages(from: await Self.imageData(of: itemProviders), at: point)
+                await insertImages(from: await PictureInput.pictures(of: itemProviders), at: point)
             }
-        }
-
-        fileprivate static func imageData(of providers: [NSItemProvider]) async -> [Data] {
-            var sources: [Data] = []
-            for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
-                let data = await withCheckedContinuation { continuation in
-                    provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
-                        continuation.resume(returning: data)
-                    }
-                }
-                if let data { sources.append(data) }
-            }
-            return sources
         }
     #endif
 }
@@ -128,7 +89,7 @@ extension CanvasMetalView {
             switch item.action {
             case #selector(copy(_:)), #selector(cut(_:)): canCopy
             case #selector(paste(_:)):
-                NSPasteboard.general.availableType(from: [.string]) != nil || Self.hasImages(in: .general)
+                NSPasteboard.general.availableType(from: [.string]) != nil || PictureInput.hasPictures(in: .general)
             default: true
             }
         }
@@ -148,7 +109,7 @@ extension CanvasMetalView {
         func dropInteraction(_ interaction: UIDropInteraction, performDrop session: any UIDropSession) {
             let point = session.location(in: self)
             let providers = session.items.map(\.itemProvider)
-            Task { await insertImages(from: await Self.imageData(of: providers), at: point) }
+            Task { await insertImages(from: await PictureInput.pictures(of: providers), at: point) }
         }
     }
 #endif

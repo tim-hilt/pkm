@@ -28,6 +28,17 @@ import Testing
         #expect(model.tasks.map(\.priority) == [1])
     }
 
+    @Test func aPictureIsKeptAsAnImageAndReadBack() throws {
+        let model = try openModel()
+        let png = TestImages.png(width: 2, height: 2, color: { _, _ in TestImages.blue })
+        let reference = try #require(model.addImage(png))
+        #expect(reference.hasSuffix(".png"))
+        #expect(model.image(reference) == png)
+        #expect(FileManager.default.fileExists(atPath: root.appending(path: "Tasks/\(reference)").path))
+        #expect(model.addImage(Data("text".utf8)) == nil)
+        #expect(model.image("missing.png") == nil)
+    }
+
     @Test func aTaskIsAddedWithTheTagsOfQuickAddCreatingNewOnes() throws {
         let model = try openModel()
         let quickAdd = TaskQuickAdd()
