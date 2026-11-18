@@ -836,7 +836,7 @@ import Testing
         #expect(model.filters[0].query == "@office")
     }
 
-    @Test func aGroupedFilterShowsItsGroupsAndTurnsDragsOff() throws {
+    @Test func aGroupedFilterShowsItsGroupsAndAGroupTakesItsOwnDrags() throws {
         let store = try TaskStore.open(root: root.appending(path: "Tasks").path)
         let model = TasksModel(store: store)
         _ = try store.create(title: "plain", priority: 4, tags: [])
@@ -851,12 +851,26 @@ import Testing
         #expect(model.groups.map(\.tag) == [nil, "b", "a", "c"])
         #expect(model.groups.map { $0.tasks.map(\.title) } == [["plain"], ["both"], ["both"], []])
         #expect(model.isGrouped)
-        model.move(from: [0], to: 1)  // off in a Grouped Filter
-        #expect(model.groups.map { $0.tasks.map(\.title) } == [["plain"], ["both"], ["both"], []])
 
         #expect(model.editFilter(model.filters[0].id, title: "G", query: "!@c", groupBy: ""))
         #expect(!model.isGrouped)
         #expect(model.tasks.map(\.title) == ["plain", "both"])
+    }
+
+    @Test func aDragInOneGroupPassesItsGroupAndLeavesTheOthers() throws {
+        let store = try TaskStore.open(root: root.appending(path: "Tasks").path)
+        let model = TasksModel(store: store)
+        for title in ["p", "q"] { _ = try store.create(title: title, priority: 4, tags: []) }
+        for title in ["x", "y"] { _ = try store.create(title: title, priority: 4, tags: ["a", "b"]) }
+        #expect(model.addFilter(title: "G", query: "*", groupBy: "@a @b"))
+        model.list = .filter(model.filters[0].id)
+
+        model.move(in: "a", from: [1], to: 0)
+        #expect(model.groups.map { $0.tasks.map(\.title) } == [["p", "q"], ["y", "x"], ["x", "y"]])
+        model.move(in: nil, from: [0], to: 2)
+        #expect(model.groups.map { $0.tasks.map(\.title) } == [["q", "p"], ["y", "x"], ["x", "y"]])
+        model.move(in: "c", from: [0], to: 1)  // no such Group
+        #expect(model.groups.map { $0.tasks.map(\.title) } == [["q", "p"], ["y", "x"], ["x", "y"]])
     }
 
     @Test func deletingAFilterLeavesTheTasksAndLeavesItsOpenList() throws {

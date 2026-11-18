@@ -569,14 +569,18 @@ impl TaskStore {
             .collect())
     }
 
-    /// Moves a Task before another in a Filter's own order, or to its end.
+    /// Moves a Task before another in a Group of a Filter (none: among the Tasks
+    /// without a Group), or to its end. Only that Group's order changes.
     pub fn move_in_filter(
         &self,
         id: String,
+        group: Option<String>,
         task: String,
         before: Option<String>,
     ) -> Result<(), TasksError> {
-        Ok(self.0.move_in_filter(&id, &task, before.as_deref())?)
+        Ok(self
+            .0
+            .move_in_filter(&id, group.as_deref(), &task, before.as_deref())?)
     }
 
     /// Sorts a Filter; Manual keeps the order shown, Priority from Manual
@@ -766,7 +770,7 @@ mod tests {
         let first = store.create("a".into(), 4, vec!["work".into()]).unwrap();
         store.create("b".into(), 4, vec!["work".into()]).unwrap();
         store
-            .move_in_filter(filter.id.clone(), first.id.clone(), None)
+            .move_in_filter(filter.id.clone(), None, first.id.clone(), None)
             .unwrap();
         let order: Vec<String> = (store
             .filter_groups(filter.id.clone())

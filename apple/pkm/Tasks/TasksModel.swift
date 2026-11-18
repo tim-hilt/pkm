@@ -58,7 +58,7 @@ final class TasksModel {
     /// The Tasks of the list shown, in their order, each followed by its Subtasks; none while the
     /// Filters list is shown. A Task in several Groups is in it once per Group.
     private(set) var tasks: [ListedTask] = []
-    /// Whether the Filter shown is Grouped: its drags are off.
+    /// Whether the Filter shown is Grouped.
     var isGrouped: Bool { groups.count > 1 }
     /// Every Filter, in the Filters list's order.
     private(set) var filters: [Filter] = []
@@ -300,14 +300,16 @@ final class TasksModel {
         reload()
     }
 
-    /// Moves the row at `source` to land before the row at `destination` of `tasks`
-    /// (`onMove`'s meaning); past the last row, to the end of the list. The Parent stays. A Subtask
-    /// passing a sibling also moves in its Subtask order. In a Sorted Filter, a drop out of the Task's
-    /// Priority group turns it Manual. Does nothing in a Grouped Filter.
-    func move(from source: IndexSet, to destination: Int) {
-        guard let id = list.filterID, !isGrouped, let index = source.first, index != destination else { return }
-        let target = destination < tasks.count ? tasks[destination] : nil
-        try? store.moveInFilter(id: id, task: tasks[index].id, before: target?.id)
+    /// Moves the row at `source` to land before the row at `destination` of the Group `tag` (none:
+    /// the Tasks without a Group; `onMove`'s meaning); past its last row, to the end of it. Only
+    /// that Group's order changes. The Parent stays. A Subtask passing a sibling also moves in its
+    /// Subtask order. In a Sorted Filter, a drop out of the Task's Priority group turns it Manual.
+    func move(in tag: String? = nil, from source: IndexSet, to destination: Int) {
+        guard let id = list.filterID, let rows = groups.first(where: { $0.tag == tag })?.tasks,
+            let index = source.first, index != destination
+        else { return }
+        let target = destination < rows.count ? rows[destination] : nil
+        try? store.moveInFilter(id: id, group: tag, task: rows[index].id, before: target?.id)
         reload()
     }
 

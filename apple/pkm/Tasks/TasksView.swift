@@ -57,7 +57,7 @@ struct TasksView: View {
 }
 
 /// The Tasks of the list shown (`model.tasks`) as rows with their actions, and the toast of a
-/// pending Close. Dragging orders only the Filter shown.
+/// pending Close. Dragging orders only the Group of the row.
 private struct TaskListView: View {
     @Environment(TasksModel.self) private var model
     let emptyText: LocalizedStringKey
@@ -94,7 +94,8 @@ private struct TaskListView: View {
                                         }
                                     }
                             }
-                            .onMove(perform: model.isGrouped ? nil : { model.move(from: $0, to: $1) })
+                            // A drop lands within the Section: no target outside the row's Group.
+                            .onMove { model.move(in: group.tag, from: $0, to: $1) }
                         } header: {
                             if let tag = group.tag {
                                 Text(tag)

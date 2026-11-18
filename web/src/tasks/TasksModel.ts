@@ -428,7 +428,7 @@ export class TasksModel {
   moveBefore(task: ListedTask, before: ListedTask | undefined): void {
     const list = this.shownList;
     if (list.kind !== "filter") return;
-    this.apply(() => this.files.store.moveInFilter(list.id, task.id, before?.id));
+    this.apply(() => this.files.store.moveInFilter(list.id, undefined, task.id, before?.id));
   }
 
   /**

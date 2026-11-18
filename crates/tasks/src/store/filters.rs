@@ -10,7 +10,7 @@ use pkm_base::clock::{iso8601, now_ms};
 use pkm_base::front_matter::{Document, Value};
 use pkm_base::item_id::ItemId;
 use pkm_base::random::Entropy;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io;
 use std::iter;
 use std::path::PathBuf;
@@ -113,12 +113,15 @@ pub struct Filter {
     pub error: Option<String>,
 }
 
+/// A Filter's own order (ADR-0027): per Group, by its Tag (none for the Tasks
+/// without a Group), a place per Task ID, see `in_filter_order`.
+pub(super) type Places = HashMap<Option<String>, Vec<(String, f64)>>;
+
 /// A Filter with its place in the Filters list.
 pub(super) struct Stored {
     pub(super) filter: Filter,
     pub(super) position: f64,
-    /// The Filter's own order: a place per Task ID, see `in_filter_order`.
-    pub(super) places: Vec<(String, f64)>,
+    pub(super) places: Places,
 }
 
 impl Tasks {
@@ -156,7 +159,9 @@ impl Tasks {
     }
 
     /// Changes the Title, Query and Group by of the Filter `id`, which keeps its
-    /// place, Favorite flag and order. Refuses what `create_filter` refuses,
+    /// place, Favorite flag and order. A Tag newly in Group by starts its Group
+    /// in the order the Filter showed before; one taken out loses its Group's
+    /// order. Refuses what `create_filter` refuses,
     /// before saving anything, and fails with `NotFound` if there is no such
     /// Filter.
     pub fn edit_filter(
@@ -168,10 +173,14 @@ impl Tasks {
     ) -> Result<Filter, Error> {
         let title = checked(title, query)?;
         let group_by = self.check_group_by(group_by)?;
+        let seeds = self.seeded_places(id, query, &group_by)?;
         self.rewrite_filter(id, |file| {
             file.set_scalar("title", &title);
             file.set_scalar("query", query);
             write_group_by(file, &group_by);
+            let mut places = places_of(file);
+            places.extend(seeds);
+            set_places(file, &places);
         })?;
         Ok(self.filter(id)?)
     }
@@ -249,23 +258,8 @@ impl Tasks {
     pub fn filter_groups(&self, id: &str) -> io::Result<Vec<Group>> {
         let filter = self.stored_filter(id)?;
         let nodes: Nodes = self.shown()?;
-        let found = shown_in(
-            &nodes,
-            &filter.filter.query,
-            &filter.places,
-            filter.filter.sort,
-        );
-        let group_by = &filter.filter.group_by;
-        let carries = |n: &Node, tag: &String| n.task.tags.contains(tag);
-        let ungrouped = (found.iter().copied())
-            .filter(|n| !group_by.iter().any(|tag| carries(n, tag)))
-            .collect();
-        let groups = (group_by.iter()).map(|tag| {
-            let rows = found.iter().copied().filter(|n| carries(n, tag));
-            (Some(tag.clone()), rows.collect())
-        });
-        Ok(iter::once((None, ungrouped))
-            .chain(groups)
+        Ok(shown_groups(&nodes, &filter)
+            .into_iter()
             .map(|(tag, found)| Group {
                 tag,
                 rows: rows_of(&nodes, found),
@@ -286,27 +280,38 @@ impl Tasks {
             .unwrap_or_default())
     }
 
-    /// Moves the Task `task` before the Task `before` in the Filter `id`, or
-    /// to the end of it if that is `None`; a drop where it already is changes
-    /// nothing. Usually only the moved Task gets a place in the Filter's file,
-    /// as for Tasks (see `place`). If another Task shown has none yet, or the
-    /// Subtask order refilled the rows, every Task shown gets one, in one write.
+    /// Moves the Task `task` before the Task `before` in the Group `group` of
+    /// the Filter `id` (none: among the Tasks without a Group), or to the end
+    /// of it if `before` is `None`; a drop where it already is changes nothing.
+    /// Only that Group's order changes. Usually only the moved Task gets a
+    /// place in the Filter's file, as for Tasks (see `place`). If another Task
+    /// shown in the Group has none yet, or the Subtask order refilled the
+    /// rows, every Task shown in it gets one, in one write.
     ///
     /// In a Sorted Filter a drop between Tasks of the moved Task's own key
     /// keeps the Sort and places it among those. Any other drop gives every
-    /// Task shown a place in the order shown with the drop applied, and turns
-    /// the Filter Manual, in the same write.
+    /// Task shown in every Group a place in the order shown with the drop
+    /// applied, and turns the Filter Manual, in the same write.
     ///
     /// A Subtask dropped past a sibling shown also moves in its Subtask order,
     /// to just after the last sibling it now follows, or before the first
     /// it now precedes; that writes its Task file (and those sharing its key).
-    /// Fails with `NotFound` for an unknown Filter, or a `task` or `before` the
-    /// Filter doesn't show.
-    pub fn move_in_filter(&self, id: &str, task: &str, before: Option<&str>) -> io::Result<()> {
-        let filter = self.stored_filter(id)?;
+    /// Fails with `NotFound` for an unknown Filter, a `group` the Filter
+    /// doesn't have, or a `task` or `before` the Group doesn't show.
+    pub fn move_in_filter(
+        &self,
+        id: &str,
+        group: Option<&str>,
+        task: &str,
+        before: Option<&str>,
+    ) -> io::Result<()> {
+        let mut filter = self.stored_filter(id)?;
         let sort = filter.filter.sort;
         let nodes: Nodes = self.shown()?;
-        let mut shown = shown_in(&nodes, &filter.filter.query, &filter.places, sort);
+        let mut groups = shown_groups(&nodes, &filter);
+        let group_at = (groups.iter().position(|(tag, _)| tag.as_deref() == group))
+            .ok_or(io::ErrorKind::NotFound)?;
+        let (group_tag, mut shown) = groups.remove(group_at);
         let from = (shown.iter().position(|n| n.task.id == task)).ok_or(io::ErrorKind::NotFound)?;
         if before == Some(task) {
             return Ok(());
@@ -326,15 +331,26 @@ impl Tasks {
         let in_own_key = sort != FilterSort::Manual
             && shown[..to].last().is_none_or(|n| rank(n) <= own)
             && shown.get(to).is_none_or(|n| rank(n) >= own);
-        let places = if in_own_key {
-            let (group, at) = among_own_key(&shown, to, own, rank);
-            placed_at(&filter.places, &group, at, task)
+        let own_places = filter.places.remove(&group_tag).unwrap_or_default();
+        let moved_places = if in_own_key {
+            let (own_key, at) = among_own_key(&shown, to, own, rank);
+            placed_at(&own_places, &own_key, at, task)
         } else {
-            placed_at(&filter.places, &shown, to, task)
+            placed_at(&own_places, &shown, to, task)
         };
+        let turns_manual = sort != FilterSort::Manual && !in_own_key;
+        let mut places = filter.places;
+        if turns_manual {
+            places.extend(
+                groups
+                    .iter()
+                    .map(|(tag, rows)| (tag.clone(), numbered(rows))),
+            );
+        }
+        places.insert(group_tag, moved_places);
         self.rewrite_filter(id, |file| {
             set_places(file, &places);
-            if sort != FilterSort::Manual && !in_own_key {
+            if turns_manual {
                 FilterSort::Manual.write(file);
             }
         })?;
@@ -358,7 +374,7 @@ impl Tasks {
     }
 
     /// Sorts the Filter `id`. Manual keeps the order shown: every Task shown
-    /// gets a place for it. Priority from Manual discards the places; a new
+    /// in every Group gets a place for it. Priority from Manual discards the places; a new
     /// Direction of Priority keeps them, so the Tasks of one Priority stay in
     /// their order. Writes no Task file. Fails with `NotFound` if there is no
     /// such Filter.
@@ -368,12 +384,11 @@ impl Tasks {
         let places = match (sort, was) {
             (FilterSort::Manual, FilterSort::Manual)
             | (FilterSort::Priority(_), FilterSort::Priority(_)) => filter.places,
-            (FilterSort::Priority(_), FilterSort::Manual) => Vec::new(),
+            (FilterSort::Priority(_), FilterSort::Manual) => Places::new(),
             (FilterSort::Manual, FilterSort::Priority(_)) => {
                 let nodes: Nodes = self.shown()?;
-                let shown = shown_in(&nodes, &filter.filter.query, &filter.places, was);
-                (shown.iter().zip(1..))
-                    .map(|(n, place)| (n.task.id.clone(), f64::from(place)))
+                (shown_groups(&nodes, &filter).into_iter())
+                    .map(|(tag, rows)| (tag, numbered(&rows)))
                     .collect()
             }
         };
@@ -415,6 +430,43 @@ impl Tasks {
         Ok(tags)
     }
 
+    /// The places of the Groups `group_by` adds to the Filter `id`, so that each
+    /// starts in the order the Filter showed before (a Task of several Groups
+    /// at its first place); Tasks it didn't show follow in the order created.
+    fn seeded_places(&self, id: &str, query: &str, group_by: &[String]) -> io::Result<Places> {
+        let filter = self.stored_filter(id)?;
+        let added: Vec<&String> = (group_by.iter())
+            .filter(|tag| !filter.filter.group_by.contains(tag))
+            .collect();
+        if added.is_empty() {
+            return Ok(Places::new());
+        }
+        let nodes: Nodes = self.shown()?;
+        let mut shown_at: HashMap<&str, usize> = HashMap::new();
+        for (_, rows) in shown_groups(&nodes, &filter) {
+            for n in rows {
+                let next = shown_at.len();
+                shown_at.entry(n.task.id.as_str()).or_insert(next);
+            }
+        }
+        let mut found = matching(by_creation(&nodes), query);
+        found.sort_by_key(|n| {
+            shown_at
+                .get(n.task.id.as_str())
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
+        Ok(added
+            .into_iter()
+            .map(|tag| {
+                let members: Vec<&Node> = (found.iter().copied())
+                    .filter(|n| is_in_group(n, Some(tag), group_by))
+                    .collect();
+                (Some(tag.clone()), numbered(&members))
+            })
+            .collect())
+    }
+
     fn filters_folder(&self) -> PathBuf {
         let beside = self.root.parent().unwrap_or(std::path::Path::new(""));
         beside.join(Self::FILTERS_FOLDER)
@@ -435,7 +487,8 @@ impl Tasks {
     }
 
     /// Applies `change` to the file of the Filter `id`, drops the places of
-    /// Tasks it no longer shows (ADR-0024) and stamps it `updated`; a change
+    /// Tasks it no longer shows in their Group and of Groups no longer in its
+    /// Group by (ADR-0024, ADR-0027) and stamps it `updated`; a change
     /// that leaves the file as it was writes nothing, as for Tasks. Fails with
     /// `NotFound` if there is no such Filter.
     fn rewrite_filter(&self, id: &str, change: impl FnOnce(&mut Document)) -> io::Result<()> {
@@ -447,11 +500,19 @@ impl Tasks {
         // Not `shown`: a Task pending Rejected keeps its place, to be Reverted.
         let nodes = self.load()?;
         let query = file.scalar("query").unwrap_or_default();
-        let shown: HashSet<&str> = (matching(nodes.values().collect(), query).into_iter())
-            .map(|n| n.task.id.as_str())
+        let shown: HashMap<&str, &Node> = (matching(nodes.values().collect(), query).into_iter())
+            .map(|n| (n.task.id.as_str(), n))
             .collect();
+        let group_by = group_by_of(&file);
         let mut places = places_of(&file);
-        places.retain(|(task, _)| shown.contains(task.as_str()));
+        places.retain(|group, _| group.as_ref().is_none_or(|tag| group_by.contains(tag)));
+        for (group, list) in &mut places {
+            list.retain(|(task, _)| {
+                (shown.get(task.as_str()))
+                    .is_some_and(|n| is_in_group(n, group.as_deref(), &group_by))
+            });
+        }
+        places.retain(|_, list| !list.is_empty());
         set_places(&mut file, &places);
         if file.render() == before {
             return Ok(());
@@ -493,21 +554,72 @@ pub(super) fn matching<'a>(found: Vec<&'a Node>, query: &str) -> Vec<&'a Node> {
         .collect()
 }
 
-/// The Open Tasks `query` matches in the Filter's order: by `places`, then by
-/// `created`, then by Item ID (see `in_filter_order`); then by `sort`, Tasks of
-/// one key keeping that order; then the rows of each Parent's Subtasks are
-/// refilled in their Subtask order (`in_subtask_order`).
+/// The Open Tasks in the order created, then by Item ID: the base order of
+/// every list a Filter shows.
+fn by_creation(nodes: &Nodes) -> Vec<&Node> {
+    let mut open: Vec<&Node> = nodes.values().collect();
+    open.sort_by(|a, b| (a.created.cmp(&b.created)).then_with(|| a.task.id.cmp(&b.task.id)));
+    open
+}
+
+/// The Open Tasks `query` matches in the Filter's order, see `ordered`.
 pub(super) fn shown_in<'a>(
     nodes: &'a Nodes,
     query: &str,
     places: &[(String, f64)],
     sort: FilterSort,
 ) -> Vec<&'a Node> {
-    let mut open: Vec<&Node> = nodes.values().collect();
-    open.sort_by(|a, b| (a.created.cmp(&b.created)).then_with(|| a.task.id.cmp(&b.task.id)));
-    let mut found = in_filter_order(matching(open, query), places);
+    ordered(matching(by_creation(nodes), query), places, sort)
+}
+
+/// `found` (in the order created) in the Filter's order: by `places`, then by
+/// `created`, then by Item ID (see `in_filter_order`); then by `sort`, Tasks of
+/// one key keeping that order; then the rows of each Parent's Subtasks are
+/// refilled in their Subtask order (`in_subtask_order`).
+fn ordered<'a>(found: Vec<&'a Node>, places: &[(String, f64)], sort: FilterSort) -> Vec<&'a Node> {
+    let mut found = in_filter_order(found, places);
     found.sort_by_key(|n| sort.rank(n.task.priority)); // stable
     in_subtask_order(found)
+}
+
+/// Whether `node` belongs to the Group `group` of a Filter Grouped by
+/// `group_by`: it carries the Tag, or (none) carries none of them.
+fn is_in_group(node: &Node, group: Option<&str>, group_by: &[String]) -> bool {
+    let carries = |tag: &str| node.task.tags.iter().any(|t| t == tag);
+    match group {
+        Some(tag) => carries(tag),
+        None => !group_by.iter().any(|tag| carries(tag)),
+    }
+}
+
+/// The Groups of a Filter in display order, each with the Tasks it shows in
+/// that Group's own order: first the Group without a Tag, then one per
+/// Group-by Tag.
+fn shown_groups<'a>(nodes: &'a Nodes, filter: &Stored) -> Vec<(Option<String>, Vec<&'a Node>)> {
+    let Filter {
+        query,
+        sort,
+        group_by,
+        ..
+    } = &filter.filter;
+    let found = matching(by_creation(nodes), query);
+    let tags = group_by.iter().cloned().map(Some);
+    (iter::once(None).chain(tags))
+        .map(|group| {
+            let members = (found.iter().copied())
+                .filter(|n| is_in_group(n, group.as_deref(), group_by))
+                .collect();
+            let places = filter.places.get(&group).map_or(&[][..], Vec::as_slice);
+            (group, ordered(members, places, *sort))
+        })
+        .collect()
+}
+
+/// Places 1, 2, 3 ... for `list`, in its order.
+fn numbered(list: &[&Node]) -> Vec<(String, f64)> {
+    (list.iter().zip(1..))
+        .map(|(n, place)| (n.task.id.clone(), f64::from(place)))
+        .collect()
 }
 
 /// The Tasks of `shown` with the key of rank `own`, and where a Task of that
@@ -558,25 +670,49 @@ pub(super) fn in_filter_order<'a>(found: Vec<&'a Node>, places: &[(String, f64)]
     placed
 }
 
-/// The `<task-id> <position>` entries of `places`; unreadable ones are skipped.
-fn places_of(file: &Document) -> Vec<(String, f64)> {
-    (file.list("places").unwrap_or_default().iter())
-        .filter_map(|entry| {
-            let (task, position) = entry.split_once(' ')?;
-            Some((task.to_owned(), position.parse().ok()?))
-        })
-        .collect()
+/// The `places` entries, `<task-id> <position>` for the Tasks without a Group
+/// and `<tag> <task-id> <position>` for a Group; unreadable ones are skipped.
+fn places_of(file: &Document) -> Places {
+    let mut places = Places::new();
+    for entry in file.list("places").unwrap_or_default() {
+        let fields: Vec<&str> = entry.split_whitespace().collect();
+        let (group, task, position) = match fields[..] {
+            [task, position] => (None, task, position),
+            [tag, task, position] => (Some(tag.to_owned()), task, position),
+            _ => continue,
+        };
+        if let Ok(position) = position.parse() {
+            places
+                .entry(group)
+                .or_default()
+                .push((task.to_owned(), position));
+        }
+    }
+    places
 }
 
-/// Writes `places`, in Task ID order so equal orders give equal files; none, no key.
-pub(super) fn set_places(file: &mut Document, places: &[(String, f64)]) {
-    let mut entries: Vec<String> = places.iter().map(|(id, p)| format!("{id} {p}")).collect();
+/// Writes `places`, sorted so equal orders give equal files; none, no key.
+pub(super) fn set_places(file: &mut Document, places: &Places) {
+    let mut entries: Vec<String> = (places.iter())
+        .flat_map(|(group, list)| {
+            let prefix = group
+                .as_ref()
+                .map_or(String::new(), |tag| format!("{tag} "));
+            list.iter().map(move |(id, p)| format!("{prefix}{id} {p}"))
+        })
+        .collect();
     entries.sort();
     if entries.is_empty() {
         file.remove("places");
     } else {
         file.set("places", Value::List(entries));
     }
+}
+
+/// The Tags a Filter file Groups by, in order.
+fn group_by_of(file: &Document) -> Vec<String> {
+    let text = file.scalar("group-by").unwrap_or_default();
+    text.split_whitespace().map(str::to_owned).collect()
 }
 
 /// Writes `group_by` as one scalar of Tags separated by spaces; none, no key.
@@ -624,12 +760,7 @@ fn stored_of(file: &Document) -> Option<Stored> {
             query: file.scalar("query")?.to_owned(),
             favorite: file.scalar("favorite") == Some("true"),
             sort: FilterSort::read(file.scalar("sort")),
-            group_by: (file
-                .scalar("group-by")
-                .unwrap_or_default()
-                .split_whitespace())
-            .map(str::to_owned)
-            .collect(),
+            group_by: group_by_of(file),
             matches: 0,
             error: None,
         },
@@ -1036,15 +1167,23 @@ mod tests {
     #[test]
     fn a_task_moves_before_another_in_a_filter_or_to_the_end() {
         let (_, tasks, f, ids) = order_fixture();
-        tasks.move_in_filter(&f.id, &ids[3], Some(&ids[1])).unwrap();
+        tasks
+            .move_in_filter(&f.id, None, &ids[3], Some(&ids[1]))
+            .unwrap();
         assert_eq!(shown(&tasks, &f), ["a", "d", "b", "c"]);
-        tasks.move_in_filter(&f.id, &ids[3], Some(&ids[0])).unwrap();
+        tasks
+            .move_in_filter(&f.id, None, &ids[3], Some(&ids[0]))
+            .unwrap();
         assert_eq!(shown(&tasks, &f), ["d", "a", "b", "c"]);
-        tasks.move_in_filter(&f.id, &ids[3], None).unwrap();
+        tasks.move_in_filter(&f.id, None, &ids[3], None).unwrap();
         assert_eq!(shown(&tasks, &f), ["a", "b", "c", "d"]);
-        tasks.move_in_filter(&f.id, &ids[0], Some(&ids[2])).unwrap();
+        tasks
+            .move_in_filter(&f.id, None, &ids[0], Some(&ids[2]))
+            .unwrap();
         assert_eq!(shown(&tasks, &f), ["b", "a", "c", "d"]);
-        tasks.move_in_filter(&f.id, &ids[0], Some(&ids[0])).unwrap();
+        tasks
+            .move_in_filter(&f.id, None, &ids[0], Some(&ids[0]))
+            .unwrap();
         assert_eq!(shown(&tasks, &f), ["b", "a", "c", "d"]);
     }
 
@@ -1057,11 +1196,11 @@ mod tests {
             (other.as_str(), None),
             (ids[0].as_str(), Some(other.as_str())),
         ] {
-            let e = tasks.move_in_filter(&f.id, task, before).unwrap_err();
+            let e = tasks.move_in_filter(&f.id, None, task, before).unwrap_err();
             assert_eq!(e.kind(), io::ErrorKind::NotFound);
         }
         let e = tasks
-            .move_in_filter("aaaaaaaaaaaa", &ids[0], None)
+            .move_in_filter("aaaaaaaaaaaa", None, &ids[0], None)
             .unwrap_err();
         assert_eq!(e.kind(), io::ErrorKind::NotFound);
     }
@@ -1072,11 +1211,16 @@ mod tests {
         let path = format!("Filters/{}.md", f.id);
         assert_eq!(
             places_of(&Document::parse(&files.read(Path::new(&path)).unwrap()).unwrap()),
-            []
+            Places::new()
         );
-        tasks.move_in_filter(&f.id, &ids[3], Some(&ids[0])).unwrap();
+        tasks
+            .move_in_filter(&f.id, None, &ids[3], Some(&ids[0]))
+            .unwrap();
         let file = Document::parse(&files.read(Path::new(&path)).unwrap()).unwrap();
-        let mut placed: Vec<String> = places_of(&file).into_iter().map(|(id, _)| id).collect();
+        let mut placed: Vec<String> = (places_of(&file).remove(&None).unwrap())
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
         placed.sort();
         let mut all = ids.clone();
         all.sort();
@@ -1086,13 +1230,15 @@ mod tests {
     #[test]
     fn later_moves_write_the_filter_file_only_and_leave_actives_order() {
         let (files, tasks, f, ids) = order_fixture();
-        tasks.move_in_filter(&f.id, &ids[3], Some(&ids[0])).unwrap();
+        tasks
+            .move_in_filter(&f.id, None, &ids[3], Some(&ids[0]))
+            .unwrap();
         let tasks_before: Vec<String> = ids
             .iter()
             .map(|id| files.read(Path::new(&format!("Tasks/{id}.md"))).unwrap())
             .collect();
         let other = tasks.create_filter("Other", "@work", "").unwrap();
-        tasks.move_in_filter(&f.id, &ids[1], None).unwrap();
+        tasks.move_in_filter(&f.id, None, &ids[1], None).unwrap();
         assert_eq!(shown(&tasks, &f), ["d", "a", "c", "b"]);
         assert_eq!(shown(&tasks, &other), ["a", "b", "c", "d"]);
         assert_eq!(titles(tasks.rows().unwrap()), ["a", "b", "c", "d"]);
@@ -1106,7 +1252,9 @@ mod tests {
     #[test]
     fn tasks_without_a_place_follow_the_placed_ones_in_the_order_created() {
         let (_, tasks, f, ids) = order_fixture();
-        tasks.move_in_filter(&f.id, &ids[2], Some(&ids[0])).unwrap();
+        tasks
+            .move_in_filter(&f.id, None, &ids[2], Some(&ids[0]))
+            .unwrap();
         add(&tasks, "e", &["work"]);
         add(&tasks, "f", &["work"]);
         assert_eq!(shown(&tasks, &f), ["c", "a", "b", "d", "e", "f"]);
@@ -1138,7 +1286,7 @@ mod tests {
             ]
         );
         tasks
-            .move_in_filter(&f.id, "aaaaaaaaaaaa", Some("bbbbbbbbbbbb"))
+            .move_in_filter(&f.id, None, "aaaaaaaaaaaa", Some("bbbbbbbbbbbb"))
             .unwrap();
         assert_eq!(shown(&tasks, &f)[0], "aaaaaaaaaaaa");
     }
@@ -1146,7 +1294,9 @@ mod tests {
     #[test]
     fn places_of_tasks_no_longer_shown_are_dropped_so_a_returning_task_starts_at_the_end() {
         let (files, tasks, f, ids) = order_fixture();
-        tasks.move_in_filter(&f.id, &ids[3], Some(&ids[0])).unwrap();
+        tasks
+            .move_in_filter(&f.id, None, &ids[3], Some(&ids[0]))
+            .unwrap();
         assert_eq!(shown(&tasks, &f), ["d", "a", "b", "c"]);
         tasks.remove_tag(&ids[3], "work").unwrap();
         // Any write of the Filter's file drops the place.
@@ -1164,15 +1314,19 @@ mod tests {
         let (files, tasks, f, ids) = order_fixture();
         let path = format!("Filters/{}.md", f.id);
         let before = files.read(Path::new(&path)).unwrap();
-        tasks.move_in_filter(&f.id, &ids[1], Some(&ids[2])).unwrap();
-        tasks.move_in_filter(&f.id, &ids[3], None).unwrap();
+        tasks
+            .move_in_filter(&f.id, None, &ids[1], Some(&ids[2]))
+            .unwrap();
+        tasks.move_in_filter(&f.id, None, &ids[3], None).unwrap();
         assert_eq!(files.read(Path::new(&path)).unwrap(), before);
     }
 
     #[test]
     fn a_task_pending_rejected_keeps_its_place_to_be_reverted() {
         let (_, tasks, f, ids) = order_fixture();
-        tasks.move_in_filter(&f.id, &ids[3], Some(&ids[0])).unwrap();
+        tasks
+            .move_in_filter(&f.id, None, &ids[3], Some(&ids[0]))
+            .unwrap();
         tasks.close(&ids[3], crate::Closing::Rejected).unwrap();
         assert_eq!(shown(&tasks, &f), ["a", "b", "c"]);
         tasks.edit_filter(&f.id, "Renamed", "@work", "").unwrap();
@@ -1189,7 +1343,9 @@ mod tests {
         file.set("places", Value::List(tied));
         files.write(Path::new(&path), &file.render()).unwrap();
         assert_eq!(shown(&tasks, &f), ["a", "b", "c", "d"]);
-        tasks.move_in_filter(&f.id, &ids[3], Some(&ids[2])).unwrap();
+        tasks
+            .move_in_filter(&f.id, None, &ids[3], Some(&ids[2]))
+            .unwrap();
         assert_eq!(shown(&tasks, &f), ["a", "b", "d", "c"]);
     }
 
@@ -1217,8 +1373,12 @@ mod tests {
     #[test]
     fn siblings_take_the_rows_the_filter_gives_them_in_subtask_order() {
         let (_, tasks, f, ids) = subtask_fixture();
-        tasks.move_in_filter(&f.id, &ids[4], Some(&ids[2])).unwrap();
-        tasks.move_in_filter(&f.id, &ids[5], Some(&ids[3])).unwrap();
+        tasks
+            .move_in_filter(&f.id, None, &ids[4], Some(&ids[2]))
+            .unwrap();
+        tasks
+            .move_in_filter(&f.id, None, &ids[5], Some(&ids[3]))
+            .unwrap();
         assert_eq!(shown(&tasks, &f), ["p", "s1", "t1", "s2", "t2", "s3", "t3"]);
         // The sheet reorders the Subtasks; the Filter keeps its rows for them.
         tasks.move_subtask(&ids[3], Some(&ids[1])).unwrap();
@@ -1231,14 +1391,18 @@ mod tests {
         let (_, tasks, f, ids) = subtask_fixture();
         let other = tasks.create_filter("Other", "@work", "").unwrap();
         // s3 passes s2: just after the last sibling it now follows.
-        tasks.move_in_filter(&f.id, &ids[3], Some(&ids[2])).unwrap();
+        tasks
+            .move_in_filter(&f.id, None, &ids[3], Some(&ids[2]))
+            .unwrap();
         assert_eq!(sheet(&tasks, &ids[0]), ["s1", "s3", "s2"]);
         assert_eq!(shown(&tasks, &other)[..4], ["p", "s1", "s3", "s2"]);
         // To the front: before the first sibling it now precedes.
-        tasks.move_in_filter(&f.id, &ids[3], Some(&ids[1])).unwrap();
+        tasks
+            .move_in_filter(&f.id, None, &ids[3], Some(&ids[1]))
+            .unwrap();
         assert_eq!(sheet(&tasks, &ids[0]), ["s3", "s1", "s2"]);
         // To the end.
-        tasks.move_in_filter(&f.id, &ids[3], None).unwrap();
+        tasks.move_in_filter(&f.id, None, &ids[3], None).unwrap();
         assert_eq!(sheet(&tasks, &ids[0]), ["s1", "s2", "s3"]);
         assert_eq!(shown(&tasks, &f)[6], "s3");
     }
@@ -1247,10 +1411,14 @@ mod tests {
     fn a_drag_passing_no_sibling_changes_only_that_filters_order() {
         let (files, tasks, f, ids) = subtask_fixture();
         let other = tasks.create_filter("Other", "@work", "").unwrap();
-        tasks.move_in_filter(&f.id, &ids[4], Some(&ids[2])).unwrap();
+        tasks
+            .move_in_filter(&f.id, None, &ids[4], Some(&ids[2]))
+            .unwrap();
         let task = |id: &str| files.read(Path::new(&format!("Tasks/{id}.md"))).unwrap();
         let before: Vec<_> = ids.iter().map(|id| task(id)).collect();
-        tasks.move_in_filter(&f.id, &ids[2], Some(&ids[4])).unwrap();
+        tasks
+            .move_in_filter(&f.id, None, &ids[2], Some(&ids[4]))
+            .unwrap();
         assert_eq!(shown(&tasks, &f)[..4], ["p", "s1", "s2", "t1"]);
         assert_eq!(sheet(&tasks, &ids[0]), ["s1", "s2", "s3"]);
         assert_eq!(ids.iter().map(|id| task(id)).collect::<Vec<_>>(), before);
@@ -1263,7 +1431,9 @@ mod tests {
         tasks.add_tag(&ids[1], "x").unwrap();
         tasks.add_tag(&ids[3], "x").unwrap();
         let f = tasks.create_filter("X", "@x", "").unwrap();
-        tasks.move_in_filter(&f.id, &ids[3], Some(&ids[1])).unwrap();
+        tasks
+            .move_in_filter(&f.id, None, &ids[3], Some(&ids[1]))
+            .unwrap();
         assert_eq!(sheet(&tasks, &ids[0]), ["s3", "s1", "s2"]);
     }
 
@@ -1289,7 +1459,9 @@ mod tests {
         let (_, tasks, f, ids) = priority_fixture();
         tasks.set_sort(&f.id, ASCENDING).unwrap();
         assert_eq!(shown(&tasks, &f), ["b", "e", "d", "a", "c"]);
-        tasks.move_in_filter(&f.id, &ids[4], Some(&ids[1])).unwrap(); // e before b
+        tasks
+            .move_in_filter(&f.id, None, &ids[4], Some(&ids[1]))
+            .unwrap(); // e before b
         assert_eq!(shown(&tasks, &f), ["e", "b", "d", "a", "c"]);
         tasks.set_sort(&f.id, DESCENDING).unwrap();
         assert_eq!(shown(&tasks, &f), ["a", "c", "d", "e", "b"]); // groups flip only
@@ -1302,7 +1474,9 @@ mod tests {
         let task = |id: &str| files.read(Path::new(&format!("Tasks/{id}.md"))).unwrap();
         let before: Vec<_> = ids.iter().map(|id| task(id)).collect();
         tasks.set_sort(&f.id, ASCENDING).unwrap();
-        tasks.move_in_filter(&f.id, &ids[2], Some(&ids[0])).unwrap();
+        tasks
+            .move_in_filter(&f.id, None, &ids[2], Some(&ids[0]))
+            .unwrap();
         tasks.set_sort(&f.id, FilterSort::Manual).unwrap();
         assert_eq!(ids.iter().map(|id| task(id)).collect::<Vec<_>>(), before);
     }
@@ -1329,9 +1503,11 @@ mod tests {
     fn a_drag_within_the_priority_group_keeps_the_sort() {
         let (_, tasks, f, ids) = priority_fixture();
         tasks.set_sort(&f.id, ASCENDING).unwrap();
-        tasks.move_in_filter(&f.id, &ids[2], Some(&ids[0])).unwrap(); // c before a
+        tasks
+            .move_in_filter(&f.id, None, &ids[2], Some(&ids[0]))
+            .unwrap(); // c before a
         assert_eq!(shown(&tasks, &f), ["b", "e", "d", "c", "a"]);
-        tasks.move_in_filter(&f.id, &ids[2], None).unwrap(); // the end, still P3
+        tasks.move_in_filter(&f.id, None, &ids[2], None).unwrap(); // the end, still P3
         assert_eq!(shown(&tasks, &f), ["b", "e", "d", "a", "c"]);
         assert_eq!(tasks.stored_filters().unwrap()[0].filter.sort, ASCENDING);
     }
@@ -1341,7 +1517,9 @@ mod tests {
         let (files, tasks, f, ids) = priority_fixture();
         tasks.set_sort(&f.id, ASCENDING).unwrap();
         files.take_changes();
-        tasks.move_in_filter(&f.id, &ids[0], Some(&ids[1])).unwrap(); // a before b
+        tasks
+            .move_in_filter(&f.id, None, &ids[0], Some(&ids[1]))
+            .unwrap(); // a before b
         assert_eq!(files.take_changes().len(), 1);
         assert_eq!(shown(&tasks, &f), ["a", "b", "e", "d", "c"]);
         assert_eq!(
@@ -1349,10 +1527,12 @@ mod tests {
             FilterSort::Manual
         );
         tasks.set_sort(&f.id, DESCENDING).unwrap();
-        tasks.move_in_filter(&f.id, &ids[1], None).unwrap(); // P1 b to the end
+        tasks.move_in_filter(&f.id, None, &ids[1], None).unwrap(); // P1 b to the end
         assert_eq!(shown(&tasks, &f), ["a", "c", "d", "e", "b"]);
         assert_eq!(tasks.stored_filters().unwrap()[0].filter.sort, DESCENDING);
-        tasks.move_in_filter(&f.id, &ids[1], Some(&ids[3])).unwrap(); // b before d
+        tasks
+            .move_in_filter(&f.id, None, &ids[1], Some(&ids[3]))
+            .unwrap(); // b before d
         assert_eq!(shown(&tasks, &f), ["a", "c", "b", "d", "e"]);
         assert_eq!(
             tasks.stored_filters().unwrap()[0].filter.sort,
@@ -1366,7 +1546,9 @@ mod tests {
         tasks.set_sort(&f.id, ASCENDING).unwrap();
         tasks.set_sort(&f.id, FilterSort::Manual).unwrap();
         assert_eq!(shown(&tasks, &f), ["b", "e", "d", "a", "c"]);
-        tasks.move_in_filter(&f.id, &ids[4], Some(&ids[1])).unwrap(); // e before b
+        tasks
+            .move_in_filter(&f.id, None, &ids[4], Some(&ids[1]))
+            .unwrap(); // e before b
         tasks.set_sort(&f.id, ASCENDING).unwrap();
         assert_eq!(shown(&tasks, &f), ["b", "e", "d", "a", "c"]); // places gone
         assert!(tasks.stored_filters().unwrap()[0].places.is_empty());
@@ -1400,7 +1582,9 @@ mod tests {
             .unwrap();
         assert_eq!(shown(&tasks, &f), ["a", "b", "c", "d", "e"]);
         tasks.set_favorite(&f.id, true).unwrap();
-        tasks.move_in_filter(&f.id, &ids[4], Some(&ids[0])).unwrap();
+        tasks
+            .move_in_filter(&f.id, None, &ids[4], Some(&ids[0]))
+            .unwrap();
         let file = Document::parse(&files.read(Path::new(&path)).unwrap()).unwrap();
         assert_eq!(file.scalar("sort"), Some("created ascending"));
     }
@@ -1587,5 +1771,197 @@ mod tests {
             tasks.check_group_by("@work private").unwrap(),
             ["work", "private"]
         );
+    }
+
+    /// The ID of the Task titled `title`.
+    fn id_of(tasks: &Tasks, title: &str) -> String {
+        let rows = tasks.rows().unwrap();
+        rows.into_iter()
+            .find(|r| r.task.title == title)
+            .unwrap()
+            .task
+            .id
+    }
+
+    fn drag(tasks: &Tasks, f: &Filter, group: Option<&str>, task: &str, before: Option<&str>) {
+        let (task, before) = (id_of(tasks, task), before.map(|b| id_of(tasks, b)));
+        tasks
+            .move_in_filter(&f.id, group, &task, before.as_deref())
+            .unwrap();
+    }
+
+    #[test]
+    fn a_drag_in_one_group_leaves_the_same_task_in_its_other_groups() {
+        let (files, tasks, f) = group_fixture();
+        drag(&tasks, &f, Some("work"), "xy", Some("x"));
+        assert_eq!(grouped(&tasks, &f.id)[1], group(Some("work"), &["xy", "x"]));
+        assert_eq!(
+            grouped(&tasks, &f.id)[2],
+            group(Some("private"), &["y", "xy"])
+        );
+        let text = files
+            .read(Path::new(&format!("Filters/{}.md", f.id)))
+            .unwrap();
+        let file = Document::parse(&text).unwrap();
+        let entries = file.list("places").unwrap();
+        assert!(
+            entries.iter().all(|e| e.starts_with("work ")),
+            "{entries:?}"
+        );
+    }
+
+    #[test]
+    fn a_drag_among_the_tasks_without_a_group_orders_them() {
+        let (_, tasks) = open();
+        add(&tasks, "a", &[]);
+        add(&tasks, "b", &[]);
+        add(&tasks, "w", &["work"]);
+        let f = tasks.create_filter("F", "*", "@work").unwrap();
+        drag(&tasks, &f, None, "b", Some("a"));
+        assert_eq!(
+            grouped(&tasks, &f.id),
+            [group(None, &["b", "a"]), group(Some("work"), &["w"])]
+        );
+    }
+
+    #[test]
+    fn a_drag_with_a_group_that_doesnt_show_the_task_is_not_found() {
+        let (_, tasks, f) = group_fixture();
+        let (x, y, z) = (id_of(&tasks, "x"), id_of(&tasks, "y"), id_of(&tasks, "z"));
+        for (group, task, before) in [
+            (Some("private"), &x, None),
+            (Some("work"), &x, Some(&y)),
+            (None, &x, None),
+            (Some("home"), &x, None),
+            (Some("work"), &z, None),
+        ] {
+            let e = tasks
+                .move_in_filter(&f.id, group, task, before.map(String::as_str))
+                .unwrap_err();
+            assert_eq!(e.kind(), io::ErrorKind::NotFound, "{group:?}");
+        }
+    }
+
+    #[test]
+    fn a_drop_among_one_priority_in_a_group_keeps_the_sort_and_any_other_turns_manual() {
+        let (_, tasks) = open();
+        let tag = vec!["w".to_owned()];
+        tasks.create("p1", 1, &tag).unwrap();
+        tasks.create("a4", 4, &tag).unwrap();
+        tasks.create("b4", 4, &tag).unwrap();
+        tasks.create("plain1", 1, &[]).unwrap();
+        tasks.create("plain4", 4, &[]).unwrap();
+        let f = tasks.create_filter("F", "*", "@w").unwrap();
+        tasks.set_sort(&f.id, ASCENDING).unwrap();
+        drag(&tasks, &f, Some("w"), "b4", Some("a4"));
+        assert_eq!(tasks.filters().unwrap()[0].sort, ASCENDING);
+        assert_eq!(
+            grouped(&tasks, &f.id)[1],
+            group(Some("w"), &["p1", "b4", "a4"])
+        );
+        drag(&tasks, &f, Some("w"), "b4", Some("p1"));
+        assert_eq!(tasks.filters().unwrap()[0].sort, FilterSort::Manual);
+        assert_eq!(
+            grouped(&tasks, &f.id),
+            [
+                group(None, &["plain1", "plain4"]),
+                group(Some("w"), &["b4", "p1", "a4"])
+            ]
+        );
+    }
+
+    #[test]
+    fn manual_from_priority_keeps_the_order_shown_in_every_group() {
+        let (_, tasks) = open();
+        let tag = vec!["w".to_owned()];
+        tasks.create("low", 4, &tag).unwrap();
+        tasks.create("high", 1, &tag).unwrap();
+        tasks.create("plain low", 4, &[]).unwrap();
+        tasks.create("plain high", 1, &[]).unwrap();
+        let f = tasks.create_filter("F", "*", "@w").unwrap();
+        tasks.set_sort(&f.id, ASCENDING).unwrap();
+        tasks.set_sort(&f.id, FilterSort::Manual).unwrap();
+        assert_eq!(
+            grouped(&tasks, &f.id),
+            [
+                group(None, &["plain high", "plain low"]),
+                group(Some("w"), &["high", "low"]),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_new_group_starts_in_the_order_shown_before_and_one_taken_out_starts_over() {
+        let (_, tasks) = open();
+        add(&tasks, "a", &["w"]);
+        add(&tasks, "b", &["w"]);
+        add(&tasks, "c", &["w"]);
+        let f = tasks.create_filter("F", "*", "").unwrap();
+        drag(&tasks, &f, None, "c", Some("a"));
+        tasks.edit_filter(&f.id, "F", "*", "@w").unwrap();
+        assert_eq!(
+            grouped(&tasks, &f.id)[1],
+            group(Some("w"), &["c", "a", "b"])
+        );
+        drag(&tasks, &f, Some("w"), "b", Some("c"));
+        tasks.edit_filter(&f.id, "F", "*", "").unwrap();
+        tasks.edit_filter(&f.id, "F", "*", "@w").unwrap();
+        // Started over: neither the Group's drag nor the old Filter order stays.
+        assert_eq!(
+            grouped(&tasks, &f.id)[1],
+            group(Some("w"), &["a", "b", "c"])
+        );
+    }
+
+    #[test]
+    fn places_go_when_a_task_leaves_its_group_or_the_group_leaves_group_by() {
+        let (files, tasks, f) = group_fixture();
+        drag(&tasks, &f, Some("work"), "xy", Some("x"));
+        drag(&tasks, &f, Some("private"), "xy", Some("y"));
+        let places = || {
+            let text = files
+                .read(Path::new(&format!("Filters/{}.md", f.id)))
+                .unwrap();
+            places_of(&Document::parse(&text).unwrap())
+        };
+        let xy = id_of(&tasks, "xy");
+        tasks.remove_tag(&xy, "private").unwrap();
+        drag(&tasks, &f, Some("work"), "xy", None); // a write of the Filter's file
+        let places = places();
+        assert!(
+            places[&Some("work".to_owned())]
+                .iter()
+                .any(|(id, _)| *id == xy)
+        );
+        assert!(
+            places[&Some("private".to_owned())]
+                .iter()
+                .all(|(id, _)| *id != xy)
+        );
+        tasks.edit_filter(&f.id, "All", "*", "@private").unwrap();
+        assert!(!places_of_group(&files, &f, "work"));
+    }
+
+    fn places_of_group(files: &MemoryFiles, f: &Filter, tag: &str) -> bool {
+        let text = files
+            .read(Path::new(&format!("Filters/{}.md", f.id)))
+            .unwrap();
+        places_of(&Document::parse(&text).unwrap()).contains_key(&Some(tag.to_owned()))
+    }
+
+    #[test]
+    fn revert_puts_a_task_back_at_its_old_place_in_each_group() {
+        let (_, tasks, f) = group_fixture();
+        drag(&tasks, &f, Some("work"), "xy", Some("x"));
+        drag(&tasks, &f, Some("private"), "xy", Some("y"));
+        let xy = id_of(&tasks, "xy");
+        tasks.close(&xy, crate::Closing::Rejected).unwrap();
+        tasks
+            .edit_filter(&f.id, "Renamed", "*", "@work @private")
+            .unwrap();
+        tasks.revert();
+        let groups = grouped(&tasks, &f.id);
+        assert_eq!(groups[1], group(Some("work"), &["xy", "x"]));
+        assert_eq!(groups[2], group(Some("private"), &["xy", "y"]));
     }
 }

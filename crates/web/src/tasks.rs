@@ -637,16 +637,18 @@ impl TaskStore {
             .collect())
     }
 
-    /// Moves a Task before another in a Filter's own order, or to its end.
+    /// Moves a Task before another in a Group of a Filter (none: among the Tasks
+    /// without a Group), or to its end. Only that Group's order changes.
     #[wasm_bindgen(js_name = moveInFilter)]
     pub fn move_in_filter(
         &self,
         id: &str,
+        group: Option<String>,
         task: &str,
         before: Option<String>,
     ) -> Result<(), JsError> {
         self.tasks
-            .move_in_filter(id, task, before.as_deref())
+            .move_in_filter(id, group.as_deref(), task, before.as_deref())
             .map_err(error)
     }
 
