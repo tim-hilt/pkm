@@ -4,6 +4,7 @@ import { filterDialog, deleteFilterDialog } from "./FilterDialogs";
 import { filterRows } from "./FiltersList";
 import { RowDrag } from "./RowDrag";
 import { RowMenu, type RowMenuItem } from "./RowMenu";
+import { tagLabel } from "./TagLabel";
 import { taskLine } from "./TaskRow";
 import { type TaskPlaces, editTaskDialog, newTaskDialog } from "./TaskDialogs";
 import { type Filter, type ListedTask, type TasksList, type TasksModel } from "./TasksModel";
@@ -153,9 +154,10 @@ export class TasksView {
       ...(opened ? [make("h2", "tasks-filter-title", [opened.title])] : []),
     );
     this.toolbar.hidden = filters;
-    const rows = filters ? this.filterList() : model.tasks.map((task) => this.row(task));
+    const rows = filters ? this.filterList() : this.taskList();
     this.list.replaceChildren(...rows);
-    this.empty.hidden = rows.length > 0;
+    // A Group's heading shows even when empty, so a Grouped Filter never says "No Open Tasks".
+    this.empty.hidden = filters ? rows.length > 0 : model.tasks.length > 0 || model.isGrouped;
     const [heading, text] = this.emptyText(list);
     this.empty.replaceChildren(make("strong", "", [heading]), make("span", "", [text]));
     if (filters) this.empty.append(button("tasks-empty-new", "New Filter", () => this.createNew()));
@@ -192,6 +194,21 @@ export class TasksView {
       case "filter":
         return ["Tasks", "No Open Tasks match."];
     }
+  }
+
+  /** The Tasks without a Group, then each Group's heading (its Tag in its Tag Color) and Tasks. */
+  private taskList(): HTMLElement[] {
+    const { model } = this;
+    // Dragging within a Group is not there yet: only a flat list reorders.
+    const draggable = !model.isGrouped;
+    return model.groups.flatMap(({ tag, color, tasks }) => {
+      const rows = tasks.map((task) => this.row(task, draggable));
+      if (tag === undefined) return rows;
+      const heading = make("li", "tasks-group-heading", [tagLabel(tag, color)]);
+      heading.setAttribute("role", "heading");
+      heading.setAttribute("aria-level", "3");
+      return [heading, ...rows];
+    });
   }
 
   private filterList(): HTMLElement[] {
@@ -249,12 +266,12 @@ export class TasksView {
     );
   }
 
-  private row(task: ListedTask): HTMLElement {
+  private row(task: ListedTask, draggable: boolean): HTMLElement {
     const { line, open } = taskLine(task, this.model, () => this.places.open(task.id));
     open.setAttribute("aria-haspopup", "menu");
     const row = make("li", "task-row", [line]);
     this.menu.attach(row, () => this.menuItems(task), open);
-    this.drag.attachRow(row, task);
+    if (draggable) this.drag.attachRow(row, task);
     return row;
   }
 

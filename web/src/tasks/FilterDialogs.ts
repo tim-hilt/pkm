@@ -4,11 +4,13 @@ import { type Filter, TasksModel } from "./TasksModel";
 import { tagLabel } from "./TagLabel";
 
 /**
- * Asks for a Title and a Query: adds the Filter at the end of the Filters list,
+ * Asks for a Title, a Query and a Group by: adds the Filter at the end of the Filters list,
  * or, given one, changes it. The Query field refuses what a Query can't hold as
  * it is typed, suggests Tags after `@`, shows why a Query can't be read, inline,
- * and marks Tags that don't exist, which doesn't stop saving. Save is off while
- * the Title is empty or the Query can't be read.
+ * and marks Tags that don't exist, which doesn't stop saving. The Group-by field
+ * (`@work @private`) suggests Tags, leaving out those listed, and shows why it
+ * can't be saved, inline. Save is off while the Title is empty or the Query or
+ * Group by is refused.
  */
 export function filterDialog(model: TasksModel, host: HTMLElement, editing?: Filter): void {
   const title = textInput(editing?.title ?? "");
@@ -23,13 +25,31 @@ export function filterDialog(model: TasksModel, host: HTMLElement, editing?: Fil
   // The email keyboard has "@" beside the space bar, as for Tags.
   query.inputMode = "email";
   const suggestions = make("ul", "tasks-query-suggestions");
+  const groupBy = textInput(editing?.groupBy ?? "");
+  groupBy.setAttribute("aria-label", "Group by");
+  groupBy.placeholder = "@work @private";
+  groupBy.autocapitalize = "none";
+  groupBy.spellcheck = false;
+  groupBy.setAttribute("autocorrect", "off");
+  groupBy.inputMode = "email";
+  const groupBySuggestions = make("ul", "tasks-query-suggestions");
+  const groupByNote = make("p", "tasks-query-note error");
+  groupByNote.setAttribute("role", "status");
   const note = make("p", "tasks-query-note");
   note.setAttribute("role", "status");
   const save = confirmButton(editing ? "Save" : "Add");
   const { dialog, form } = modal(
     host,
     editing ? "Edit Filter" : "New Filter",
-    [field("Title", title), field("Query", query), suggestions, note],
+    [
+      field("Title", title),
+      field("Query", query),
+      suggestions,
+      note,
+      field("Group by", groupBy),
+      groupBySuggestions,
+      groupByNote,
+    ],
     [button("", "Cancel", () => dialog.close()), save],
   );
 
@@ -45,13 +65,22 @@ export function filterDialog(model: TasksModel, host: HTMLElement, editing?: Fil
       note.textContent = `Unknown: ${unknown.map((tag) => `@${tag}`).join(", ")}`;
       note.hidden = false;
     }
+    suggest(suggestions, query, model.suggestQueryTags(query.value));
+    const refused = model.checkGroupBy(groupBy.value);
+    groupByNote.hidden = refused === undefined;
+    groupByNote.textContent = refused ?? "";
+    save.disabled ||= refused !== undefined;
+    suggest(groupBySuggestions, groupBy, model.suggestGroupByTags(groupBy.value));
+  };
+  /** Fills `list` with a button per Tag, each completing the Tag being typed in `input`. */
+  const suggest = (list: HTMLElement, input: HTMLInputElement, tags: string[]) => {
     const colors = new Map(model.allTags.map((t) => [t.name, t.color]));
-    suggestions.replaceChildren(
-      ...model.suggestQueryTags(query.value).map((tag) => {
+    list.replaceChildren(
+      ...tags.map((tag) => {
         const pick = button("tasks-query-suggestion", "", () => {
-          query.value = TasksModel.completingQuery(query.value, tag);
+          input.value = TasksModel.completingQuery(input.value, tag);
           show();
-          query.focus();
+          input.focus();
         });
         pick.append(tagLabel(tag, colors.get(tag)));
         // Keeps the focus in the field.
@@ -73,8 +102,8 @@ export function filterDialog(model: TasksModel, host: HTMLElement, editing?: Fil
     event.preventDefault();
     if (save.disabled) return;
     const saved = editing
-      ? model.editFilter(editing.id, title.value, query.value, editing.groupBy)
-      : model.addFilter(title.value, query.value);
+      ? model.editFilter(editing.id, title.value, query.value, groupBy.value)
+      : model.addFilter(title.value, query.value, groupBy.value);
     if (saved) dialog.close();
   });
   show();

@@ -36,6 +36,15 @@ export interface ListedTask {
   blockedBy: Blocker[];
 }
 
+/** The Tasks a Filter shows under one heading. */
+export interface TaskGroup {
+  /** The Group-by Tag heading it; `undefined` for the Tasks without a Group, which have no heading. */
+  tag: string | undefined;
+  /** The Tag Color (`#rrggbb`) of `tag`; `undefined` is Default. */
+  color: string | undefined;
+  tasks: ListedTask[];
+}
+
 /** What a new Task has besides its Title. */
 export interface NewTask {
   /** Plain text; none if omitted. */
@@ -151,7 +160,9 @@ export class TasksModel {
   private stack: string[] = [];
   /** Whether the Task on top was last saved with an empty Title, which keeps the stack as it is. */
   private titleMissing = false;
-  /** The Tasks of the list shown, in their order; none for the Filters list. */
+  /** The Groups of the list shown, in order; none for the Filters list. */
+  private shownGroups: TaskGroup[] = [];
+  /** The Tasks of `shownGroups`, one after another. */
   private shown: ListedTask[] = [];
   private shownList: TasksList = { kind: "filters" };
   private all: Filter[] = [];
@@ -240,8 +251,23 @@ export class TasksModel {
     return this.titleMissing;
   }
 
+  /** The Tasks of the list shown, in their order, one per Group they are in; none for the Filters list. */
   get tasks(): readonly ListedTask[] {
     return this.shown;
+  }
+
+  /**
+   * The Groups of the Filter shown: the Tasks without a Group first, then one
+   * per Group-by Tag, empty or not. A Filter without Group by is one Group.
+   * None for the Filters list.
+   */
+  get groups(): readonly TaskGroup[] {
+    return this.shownGroups;
+  }
+
+  /** Whether the Filter shown is Grouped. */
+  get isGrouped(): boolean {
+    return this.shownGroups.length > 1;
   }
 
   /**
@@ -263,7 +289,9 @@ export class TasksModel {
         const favorites = this.all
           .filter((f) => f.favorite)
           .map((f): TasksList => ({ kind: "filter", id: f.id }));
-        const home = [this.shownList, ...favorites].find((list) => this.read(list).some(isTask));
+        const home = [this.shownList, ...favorites].find((list) =>
+          this.read(list).some((group) => group.tasks.some(isTask)),
+        );
         if (home) this.show(home);
         this.stack = [id];
       }
@@ -464,6 +492,11 @@ export class TasksModel {
     this.apply(() => this.files.store.moveFilter(filter.id, before?.id));
   }
 
+  /** Why the Group-by `text` (`@work @private`) can't be saved; `undefined` if it can. Saves nothing. */
+  checkGroupBy(text: string): string | undefined {
+    return this.files.store.checkGroupBy(text) ?? undefined;
+  }
+
   /** What is wrong with the Query `text`, or which Tags it names that don't exist; saves nothing. */
   checkQuery(text: string): QueryCheck {
     const found = this.files.store.checkQuery(text);
@@ -486,6 +519,18 @@ export class TasksModel {
   suggestQueryTags(text: string): string[] {
     const word = unfinishedQueryTag(text);
     return word === undefined ? [] : this.suggestTags(word, []).matches;
+  }
+
+  /** The known Tags to suggest for the Tag being typed at the end of the Group-by `text`, leaving out those already listed; none if it doesn't end in one. */
+  suggestGroupByTags(text: string): string[] {
+    const word = unfinishedQueryTag(text);
+    if (word === undefined) return [];
+    const listed = text
+      .slice(0, text.length - word.length - 1)
+      .split(/\s+/)
+      .map((tag) => tag.replace(/^@+/, ""))
+      .filter((tag) => tag !== "");
+    return this.suggestTags(word, listed).matches;
   }
 
   /** The Query `text` with the Tag being typed at its end completed to `tag`. */
@@ -662,17 +707,23 @@ export class TasksModel {
     if (list.kind === "filter" && !this.all.some((f) => f.id === list.id)) {
       this.shownList = { kind: "filters" };
     }
-    this.shown = this.read(this.shownList);
+    this.shownGroups = this.read(this.shownList);
+    this.shown = this.shownGroups.flatMap((group) => group.tasks);
   }
 
-  private read(list: TasksList): ListedTask[] {
+  private read(list: TasksList): TaskGroup[] {
     const { store } = this.files;
     if (list.kind !== "filter") return [];
-    // The Groups' rows one after another: the web shows no headings yet.
-    return store.filterGroups(list.id).flatMap((group) => {
+    const colors = new Map(this.allTags.map((tag) => [tag.name, tag.color]));
+    return store.filterGroups(list.id).map((group) => {
+      const tag = group.tag ?? undefined;
       const rows = group.takeTasks();
       group.free();
-      return this.listed(rows);
+      return {
+        tag,
+        color: tag === undefined ? undefined : colors.get(tag),
+        tasks: this.listed(rows),
+      };
     });
   }
 

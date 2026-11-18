@@ -687,6 +687,13 @@ impl TaskStore {
         }
     }
 
+    /// Checks a Group-by text without saving: why it can't be saved, if it
+    /// can't.
+    #[wasm_bindgen(js_name = checkGroupBy)]
+    pub fn check_group_by(&self, text: &str) -> Option<String> {
+        self.tasks.check_group_by(text).err().map(|e| e.to_string())
+    }
+
     /// The direct Subtasks of an Open Task, in either list: Open or pending
     /// Done, in their manual order.
     pub fn subtasks(&self, parent: &str) -> Result<Vec<ListedTask>, JsError> {

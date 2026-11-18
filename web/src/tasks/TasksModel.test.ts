@@ -1284,3 +1284,59 @@ describe("a Query being typed", () => {
     expect(model.filters[0].query).toBe("!@work");
   });
 });
+
+describe("a Grouped Filter", () => {
+  const groupsShown = () => model.groups.map((g) => [g.tag, g.tasks.map((t) => t.title)]);
+
+  beforeEach(() => {
+    deleteFavorites();
+    model.add("Loose");
+    model.add("W", { tags: ["work"] });
+    model.add("Both", { tags: ["work", "home"] });
+    model.setTagColor("work", "#112233");
+    model.addFilter("All", "*");
+  });
+
+  it("shows the Tasks without a Group first, then a Group per Tag with its Tag Color, empty ones too", () => {
+    expect(model.addFilter("Grouped", "*", "@home @work")).toBe(true);
+    model.list = { kind: "filter", id: model.filters.find((f) => f.title === "Grouped")!.id };
+    expect(model.groups.map((g) => [g.tag, g.color])).toEqual([
+      [undefined, undefined],
+      ["home", undefined],
+      ["work", "#112233"],
+    ]);
+    expect(groupsShown()).toEqual([
+      [undefined, ["Loose"]],
+      ["home", ["Both"]],
+      ["work", ["W", "Both"]],
+    ]);
+    expect(model.isGrouped).toBe(true);
+  });
+
+  it("is one Group without Group by", () => {
+    model.list = { kind: "filter", id: model.filters[0].id };
+    expect(model.isGrouped).toBe(false);
+    expect(groupsShown()).toEqual([[undefined, ["Loose", "W", "Both"]]]);
+  });
+
+  it("checks Group by without saving, and refuses an unknown Tag", () => {
+    expect(model.checkGroupBy("@work @home")).toBeUndefined();
+    expect(model.checkGroupBy("@nope")).toMatch(/nope/);
+    expect(model.addFilter("Bad", "*", "@nope")).toBe(false);
+    expect(model.filters.some((f) => f.title === "Bad")).toBe(false);
+  });
+
+  it("suggests Tags for Group by, leaving out those listed", () => {
+    expect(model.suggestGroupByTags("@w")).toEqual(["work"]);
+    expect(model.suggestGroupByTags("@work @")).toEqual(["home"]);
+    expect(model.suggestGroupByTags("@work ")).toEqual([]);
+  });
+
+  it("edits Group by, clearing it with empty text", () => {
+    const { id } = model.filters[0];
+    expect(model.editFilter(id, "All", "*", "@work")).toBe(true);
+    expect(model.filters.find((f) => f.id === id)!.groupBy).toBe("@work");
+    expect(model.editFilter(id, "All", "*", "")).toBe(true);
+    expect(model.filters.find((f) => f.id === id)!.groupBy).toBe("");
+  });
+});
