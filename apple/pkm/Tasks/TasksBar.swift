@@ -17,6 +17,7 @@ struct TasksBar: View {
                                 label(entry)
                             }
                             .buttonStyle(.bordered)
+                            .background(.background, in: .capsule)
                             .tint(entry == model.barEntry ? .accentColor : .secondary)
                             .id(entry)
                             .accessibilityAddTraits(entry == model.barEntry ? .isSelected : [])
