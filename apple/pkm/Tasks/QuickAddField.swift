@@ -87,10 +87,15 @@ struct QuickAddField: View {
             .padding(.horizontal, -5)  // the editor's own inset, to line up with the other fields
             .focused($isFocused)
             #if os(iOS)
-                // "@" beside the space bar for Tag shortcuts, without the `#` Quick Add doesn't use.
-                .keyboardType(.emailAddress)
                 .textInputAutocapitalization(.sentences)
                 .autocorrectionDisabled(false)
+                .toolbar {
+                    // "@" for Tag shortcuts; the mail keyboard's would shrink the space bar.
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Button("@") { text.replaceSelection(&selection, withCharacters: "@") }
+                        Spacer()
+                    }
+                }
             #endif
             .onAppear {
                 draw()
