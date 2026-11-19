@@ -16,7 +16,6 @@ const presentation: Record<Context, { title: string; icon: string; placeholder?:
   notes: {
     title: "Notes",
     icon: icon('<path d="M6 3h9l4 4v14H6zM15 3v4h4M9 12h7M9 16h7"/>'),
-    placeholder: "Coming soon",
   },
   drawings: {
     title: "Drawings",

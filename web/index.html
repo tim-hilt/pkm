@@ -1500,6 +1500,86 @@
           bottom: calc(var(--tasks-bar) + 12px);
         }
       }
+      /* The Notes Context: the list beside the editor; on a narrow window one over the other. */
+      .notes {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        color: var(--control-ink);
+        background: var(--island-fill);
+      }
+      .notes-side {
+        flex: none;
+        width: 300px;
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid var(--divider);
+      }
+      .notes-side .tasks-scroll {
+        padding: 0 8px 96px;
+      }
+      .notes-detail {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .notes-bar {
+        flex: none;
+        display: flex;
+        justify-content: space-between;
+        padding: max(12px, env(safe-area-inset-top)) 16px 8px;
+      }
+      .notes-bar .tasks-back:first-child {
+        visibility: hidden;
+      }
+      .notes-editor {
+        flex: 1;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 0 16px 16px;
+      }
+      .notes-title {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        font-weight: 600;
+      }
+      .notes-title:empty::before {
+        content: attr(data-placeholder);
+        opacity: 0.5;
+      }
+      .notes-title:not(:focus) .md-marker {
+        display: none;
+      }
+      .notes-editor .tasks-description {
+        flex: 1;
+      }
+      .note-open[aria-current] {
+        font-weight: 600;
+      }
+      .note-open {
+        display: flex;
+        flex-direction: column;
+        text-align: left;
+      }
+      .note-none {
+        opacity: 0.5;
+      }
+      @media (max-width: 599px), (max-height: 499px) and (max-width: 999px) {
+        .notes-side {
+          width: 100%;
+          border-right: 0;
+        }
+        .notes:not(.has-open) .notes-detail,
+        .notes.has-open .notes-side {
+          display: none;
+        }
+        .notes-bar .tasks-back:first-child {
+          visibility: visible;
+        }
+      }
       .row-menu {
         position: fixed;
         z-index: 2;

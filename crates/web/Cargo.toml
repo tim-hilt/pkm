@@ -1,6 +1,6 @@
 # The core as WebAssembly for the web app (ADR-0014): hand-written
 # `wasm-bindgen` exports mirroring the UniFFI surface of `crates/bindings`.
-# Depends on the core, on the Tasks, on the cloud crate without its `native` feature (ADR-0016)
+# Depends on the core, on the Tasks, on the Notes, on the cloud crate without its `native` feature (ADR-0016)
 # and on `wasm-bindgen`.
 [package]
 name = "pkm-web"
@@ -16,4 +16,5 @@ pkm-base = { path = "../base" }
 pkm-drawing = { path = "../drawing" }
 pkm-cloud = { path = "../cloud", default-features = false }
 pkm-tasks = { path = "../tasks" }
+pkm-notes = { path = "../notes" }
 wasm-bindgen = "0.2"

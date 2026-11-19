@@ -18,6 +18,9 @@ import { requestPersistenceOnFirstCall } from "./storage/PersistentStorage";
 import type { Excalifont } from "./drawings/text/Excalifont";
 import { browserHistory } from "./navigation/browserHistory";
 import { Navigation } from "./navigation/Navigation";
+import { NoteFiles } from "./notes/NoteFiles";
+import { NotesModel } from "./notes/NotesModel";
+import { NotesView } from "./notes/NotesView";
 import { Shell } from "./shell/Shell";
 import { TaskFiles } from "./tasks/TaskFiles";
 import { TasksModel } from "./tasks/TasksModel";
@@ -72,6 +75,7 @@ export async function startApp(
       close: () => navigation.closeItem(),
     }).element,
   );
+  shell.pane("notes").append(new NotesView(new NotesModel(await NoteFiles.open(storage))).element);
   const pane = shell.pane("drawings");
 
   let canvas: { drawing: OpenDrawing; stop: () => void } | undefined;

@@ -131,6 +131,7 @@ mirror_enum!(
 );
 
 mod markdown;
+mod notes;
 mod tasks;
 
 /// Modifier keys as a bit set: shift 1, ctrl 2, alt 4, meta 8.
