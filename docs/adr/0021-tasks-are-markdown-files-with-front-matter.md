@@ -1,6 +1,6 @@
 # Tasks are Markdown files with front matter, merged three-way
 
-> Superseded in part: `state` and `position` by ADR-0025, Closed Tasks and the Device cache by ADR-0026.
+> Superseded in part: `state` and `position` by ADR-0025, Closed Tasks and the Device cache by ADR-0026. Amended for Notes' Bodies by ADR-0032.
 
 Builds on ADR-0019 (Item IDs) and ADR-0020 (a folder and merge hook per Context).
 

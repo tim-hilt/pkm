@@ -18,11 +18,11 @@ _Avoid_: Rich text, styling, markup
 
 **Description**:
 Markdown text the user writes about a Task, as in a Note: headings, Inline formatting, lists, links, images, code blocks and quotes.
+_Avoid_: Note (that is a Context of its own), body, details
 
 **Image**:
 A picture pasted into a Description, kept beside its Task and Deleted with it, or once no Task's Description shows it any more.
 _Avoid_: Attachment, picture, file
-_Avoid_: Note (that is a Context of its own), body, details
 
 **Priority**:
 How urgent a Task is: P1 (highest) to P4, the default.
