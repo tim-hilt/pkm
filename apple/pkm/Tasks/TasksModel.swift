@@ -41,10 +41,13 @@ final class TasksModel {
     /// The list shown; this Device opens on it again.
     var list: TasksList = .filters {
         didSet {
+            isPushed = false
             defaults?.set(list.stored, forKey: Self.lastListKey)
             reload()
         }
     }
+    /// Whether the Filter shown was opened from the Filters list, which a Favorite can be too.
+    private var isPushed = false
     /// The Tasks of the open sheet's stack, by id, first opened first: a Blocker
     /// or Subtask opened from a Task is pushed on it. Empty when no sheet is open. Over the
     /// list shown, which opening a Blocker never changes.
@@ -158,19 +161,21 @@ final class TasksModel {
         filters.first(where: \.favorite).map { .filter($0.id) } ?? .filters
     }
 
-    /// The bar's entry that shows the list shown: a Filter that isn't a Favorite is under Filters.
+    /// The bar's entry that shows the list shown: a Filter opened from the Filters list, or that
+    /// isn't a Favorite, is under Filters.
     var barEntry: TasksList {
-        bar.contains(list) ? list : .filters
+        !isPushed && bar.contains(list) ? list : .filters
     }
 
     /// The Filter open on top of the Filters list, as the navigation path; going back leaves
-    /// it. A Favorite is no part of it.
+    /// it. A Favorite opened from the bar is no part of it.
     var openFilterPath: [String] {
         get { if case .filter(let id) = list, barEntry == .filters { [id] } else { [] } }
         set {
             if let id = newValue.last {
                 list = .filter(id)
-            } else if case .filter = list {
+                isPushed = true
+            } else if !openFilterPath.isEmpty {
                 list = .filters
             }
         }

@@ -702,14 +702,17 @@ import Testing
         #expect(model.bar == [.filter(ids[0]), .filters])
     }
 
-    @Test func aFilterOpenedFromTheFiltersListIsUnderFiltersUnlessItIsAFavorite() throws {
+    @Test func aFilterIsUnderFiltersUnlessItIsAFavoriteOpenedFromTheBar() throws {
         let model = try openModelWithoutFavorites()
         model.addFilter(title: "A", query: "@a")
         let id = model.filters[0].id
         model.list = .filter(id)
         #expect(model.barEntry == .filters)
         model.setFavorite(id, to: true)
+        model.list = .filter(id)
         #expect(model.barEntry == .filter(id))
+        model.openFilterPath = [id]
+        #expect(model.barEntry == .filters, "a Favorite opened from the Filters list")
     }
 
     @Test func aFilterOpenOnTopOfTheFiltersListIsTheNavigationPathAndGoingBackLeavesIt() throws {
@@ -722,8 +725,12 @@ import Testing
         model.openFilterPath = []
         #expect(model.list == .filters)
         model.setFavorite(id, to: true)
+        model.openFilterPath = [id]
+        #expect(model.openFilterPath == [id], "a Favorite is pushed too")
         model.list = .filter(id)
-        #expect(model.openFilterPath.isEmpty, "a Favorite is shown by the bar, not pushed")
+        #expect(model.openFilterPath.isEmpty, "a Favorite opened from the bar is not pushed")
+        model.openFilterPath = []
+        #expect(model.list == .filter(id), "popping nothing leaves the bar's Favorite")
     }
 
     @Test func eachDeviceOpensTheLastListElseTheFirstFavoriteElseTheFiltersList() throws {

@@ -78,11 +78,12 @@ import XCTest
         XCTAssertTrue(app.staticTexts["Book the dentist"].waitForExistence(timeout: 5))
     }
 
-    func testAFavoriteOpenedFromTheFiltersListIsShownByTheBar() {
+    func testAFavoriteOpenedFromTheFiltersListIsPushedOnIt() {
         app.buttons["Filters"].tap()
         app.staticTexts["@backlog"].tap()
         XCTAssertTrue(app.staticTexts["Learn Rust"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Backlog"].isSelected)
+        app.navigationBars["Backlog"].buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.staticTexts["@backlog"].waitForExistence(timeout: 5))
     }
 
     func testASubtaskIsAddedFromTheSubtasksSection() {

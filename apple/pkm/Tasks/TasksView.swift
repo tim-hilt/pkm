@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The Tasks Context: the Filters and the Tasks they match, as Todoist-style rows. A Filter
-/// opens on top of the Filters list, unless it is a Favorite, which the bar shows directly.
+/// opens on top of the Filters list; a Favorite opened from the bar is shown directly.
 struct TasksView: View {
     @Environment(TasksModel.self) private var model
     @State private var isAdding = false
