@@ -53,6 +53,10 @@ export class OpfsStorage implements FileStorage {
     await writable.close();
   }
 
+  async makeFolder(path: string): Promise<void> {
+    await this.directory(path, true);
+  }
+
   async remove(path: string): Promise<void> {
     const { parent, name } = split(path);
     const directory = await this.directory(parent, false);

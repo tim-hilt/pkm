@@ -144,6 +144,14 @@ impl Files for DiskFiles {
     }
 }
 
+/// Where `path`, in or at `from`, is after `from` is renamed to `to`.
+fn moved_to(path: &Path, from: &Path, to: &Path) -> PathBuf {
+    match path.strip_prefix(from) {
+        Ok(rest) if !rest.as_os_str().is_empty() => to.join(rest),
+        _ => to.to_owned(),
+    }
+}
+
 #[derive(Debug, Default)]
 struct Memory {
     /// Each file's bytes, and when it was last written: a count of writes, so
@@ -264,7 +272,7 @@ impl Files for MemoryFiles {
         }
         for path in moved {
             let held = memory.files.remove(&path);
-            let target = to.join(path.strip_prefix(from).unwrap_or(&path));
+            let target = moved_to(&path, from, to);
             memory.writes += 1;
             let written = memory.writes;
             if let Some((bytes, _)) = held {
@@ -274,9 +282,7 @@ impl Files for MemoryFiles {
         }
         for path in folders {
             memory.folders.remove(&path);
-            memory
-                .folders
-                .insert(to.join(path.strip_prefix(from).unwrap_or(&path)));
+            memory.folders.insert(moved_to(&path, from, to));
         }
         Ok(())
     }
@@ -313,6 +319,24 @@ mod tests {
             .collect();
         assert_eq!(names, ["a.md"]);
         assert!(files.list(Path::new("Elsewhere")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn renaming_a_file_leaves_no_folder_of_its_name() {
+        let files = MemoryFiles::default();
+        files.write(Path::new("Notes/a.md"), "a").unwrap();
+        files.make_folder(Path::new("Notes/Work")).unwrap();
+        files
+            .rename(Path::new("Notes/a.md"), Path::new("Notes/Work/a.md"))
+            .unwrap();
+        assert_eq!(files.read(Path::new("Notes/Work/a.md")).unwrap(), "a");
+        assert_eq!(files.list_folders(Path::new("Notes")).unwrap(), ["Work"]);
+        assert!(
+            files
+                .list_folders(Path::new("Notes/Work"))
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

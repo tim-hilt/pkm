@@ -6,6 +6,8 @@ import type { FileInfo, FileStorage } from "./FileStorage";
  */
 export class MemoryStorage implements FileStorage {
   private readonly contents = new Map<string, { bytes: Uint8Array; modified: number }>();
+  /** Folders made empty; the ones files are in need no entry. */
+  private readonly made = new Set<string>();
   private last = 0;
 
   constructor(private readonly clock: () => number = Date.now) {}
@@ -24,7 +26,7 @@ export class MemoryStorage implements FileStorage {
   async folders(folder: string): Promise<string[]> {
     const prefix = `${folder}/`;
     const found = new Set<string>();
-    for (const path of this.contents.keys()) {
+    for (const path of [...this.contents.keys(), ...[...this.made].map((p) => `${p}/`)]) {
       const [first, ...rest] = path.slice(prefix.length).split("/");
       if (path.startsWith(prefix) && rest.length > 0) found.add(first);
     }
@@ -41,10 +43,17 @@ export class MemoryStorage implements FileStorage {
     this.contents.set(path, { bytes: bytes.slice(), modified: this.last });
   }
 
+  async makeFolder(path: string): Promise<void> {
+    this.made.add(path);
+  }
+
   async remove(path: string): Promise<void> {
     this.contents.delete(path);
-    for (const other of this.contents.keys()) {
-      if (other.startsWith(`${path}/`)) this.contents.delete(other);
+    this.made.delete(path);
+    for (const other of [...this.contents.keys(), ...this.made]) {
+      if (!other.startsWith(`${path}/`)) continue;
+      this.contents.delete(other);
+      this.made.delete(other);
     }
   }
 }

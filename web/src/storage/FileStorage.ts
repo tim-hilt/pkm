@@ -19,6 +19,8 @@ export interface FileStorage {
   read(path: string): Promise<Uint8Array | undefined>;
   /** Writes the file whole or not at all, making its folders. Sets its modification time to now. */
   write(path: string, bytes: Uint8Array): Promise<void>;
+  /** Makes the folder and the ones above it, empty; one there already is as wanted. */
+  makeFolder(path: string): Promise<void>;
   /** Removes a file, or a folder with all it holds; nothing happens if it is not there. */
   remove(path: string): Promise<void>;
 }

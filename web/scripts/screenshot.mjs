@@ -74,8 +74,16 @@ async function seedFavorites(page) {
   }
 }
 
-/** Writes Notes through the UI; the last stays open. */
+/** Makes two Folders and writes Notes in the second through the UI; the last stays open. */
 async function seedNotes(page) {
+  for (const name of ["Personal", "Work"]) {
+    await page.click(".notes-tree .notes-bar button");
+    await page.fill("input[aria-label=Name]", name);
+    await page.keyboard.press("Enter");
+    await page.waitForSelector(".tasks-dialog", { state: "detached" });
+    const back = page.locator(".notes-nav button"); // Narrow: the Folder's Notes cover the outline.
+    if (name === "Personal" && (await back.isVisible())) await back.click();
+  }
   for (const [title, body] of [
     ["", "Buy oat milk\nand bread"],
     ["Reading list", "## Next up\n- `Rust` in **Action**\n> Read a little every day"],
