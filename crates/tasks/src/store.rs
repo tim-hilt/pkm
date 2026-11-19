@@ -6,6 +6,7 @@ mod images;
 pub(crate) use filters::is_filter;
 use filters::shown_in;
 pub use filters::{Direction, Filter, FilterSort, FilterSortKey};
+pub(crate) use images::{is_image, is_image_file};
 
 use crate::files::{DiskFiles, Files};
 use crate::query::QueryError;

@@ -174,7 +174,8 @@ impl Merge for BookStates {
     }
 }
 
-/// Tasks: `<id>.md` files, merged three-way by field (ADR-0021). A file that
+/// Tasks: `<id>.md` files, merged three-way by field (ADR-0021), and the
+/// Images beside them, transferred unchanged (ADR-0029). A file that
 /// isn't a Task is left where it is, and two versions that can't merge are
 /// not both kept: one Task has one file.
 pub struct Tasks;
@@ -199,6 +200,10 @@ impl Merge for Tasks {
 
     fn same_item(&self, a: &[u8], b: &[u8]) -> Option<bool> {
         tasks::same_item(a, b)
+    }
+
+    fn accepts(&self, file: &str) -> bool {
+        tasks::accepts(file)
     }
 
     fn transfers_unparseable(&self) -> bool {

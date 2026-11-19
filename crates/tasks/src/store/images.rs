@@ -67,10 +67,20 @@ impl Tasks {
     }
 
     fn image_path(&self, reference: &str) -> Option<PathBuf> {
-        let (id, extension) = reference.split_once('.')?;
-        ItemId::parse(id)?;
-        matches!(extension, "png" | "jpg" | "gif" | "webp").then(|| self.root.join(reference))
+        is_image_file(reference).then(|| self.root.join(reference))
     }
+}
+
+/// Whether `bytes` are a PNG, JPEG, GIF or WebP.
+pub(crate) fn is_image(bytes: &[u8]) -> bool {
+    extension(bytes).is_some()
+}
+
+/// Whether a file name is an Image's: `<id>.<ext>` with a kept format's extension.
+pub(crate) fn is_image_file(name: &str) -> bool {
+    name.split_once('.').is_some_and(|(id, extension)| {
+        ItemId::parse(id).is_some() && matches!(extension, "png" | "jpg" | "gif" | "webp")
+    })
 }
 
 #[cfg(test)]

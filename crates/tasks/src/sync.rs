@@ -8,10 +8,13 @@
 //! differing properties take the newer side's. Bytes that are no Task are no
 //! Item: `merge` and `same_item` say none. Filters merge by the same rules
 //! (see `filters`).
+//!
+//! Image files (`store::images`) are Items too, but are transferred and never
+//! merged: an Image's file never changes after it is added.
 
 pub mod filters;
 
-use crate::store::is_task;
+use crate::store::{is_image, is_image_file, is_task};
 use pkm_base::front_matter::{Document, Value};
 use std::cmp::Ordering;
 
@@ -36,7 +39,11 @@ const TASK: Kind = Kind {
 
 /// What `local` and `remote` merge to, given the Item's bytes at the last Sync
 /// (none if there was none); none if either isn't a Task or they differ in id.
+/// Two Images merge only if they are the same bytes.
 pub fn merge(base: Option<&[u8]>, local: &[u8], remote: &[u8]) -> Option<Vec<u8>> {
+    if is_image(local) && is_image(remote) {
+        return (local == remote).then(|| local.to_vec());
+    }
     merge_kind(&TASK, base, local, remote)
 }
 
@@ -77,14 +84,24 @@ fn merge_kind(kind: &Kind, base: Option<&[u8]>, local: &[u8], remote: &[u8]) -> 
     Some(merged.render().into_bytes())
 }
 
-/// Whether `bytes` are a Task.
-pub fn is_item(bytes: &[u8]) -> bool {
-    parse(bytes).is_some()
+/// Whether a file of this name is a Task's or an Image's.
+pub fn accepts(file: &str) -> bool {
+    !file.starts_with('.') && (file.ends_with(".md") || is_image_file(file))
 }
 
-/// Whether two Tasks are one Task: they share an id. None if either isn't a Task.
+/// Whether `bytes` are a Task or an Image.
+pub fn is_item(bytes: &[u8]) -> bool {
+    is_image(bytes) || parse(bytes).is_some()
+}
+
+/// Whether two Tasks are one Task: they share an id; two Images, if they are
+/// the same bytes. None if either isn't a Task or an Image, or they differ in kind.
 pub fn same_item(a: &[u8], b: &[u8]) -> Option<bool> {
-    Some(parse(a)?.scalar("id") == parse(b)?.scalar("id"))
+    match (is_image(a), is_image(b)) {
+        (true, true) => Some(a == b),
+        (false, false) => Some(parse(a)?.scalar("id") == parse(b)?.scalar("id")),
+        _ => None,
+    }
 }
 
 fn parse(bytes: &[u8]) -> Option<Document> {
@@ -210,6 +227,36 @@ mod tests {
             list("blocked-by", blocked),
         )
         .into_bytes()
+    }
+
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n rest";
+    const GIF: &[u8] = b"GIF89a rest";
+
+    #[test]
+    fn images_are_items_that_transfer_and_never_merge() {
+        assert!(is_item(PNG));
+        assert_eq!(merge(None, PNG, PNG).unwrap(), PNG);
+        assert_eq!(merge(Some(PNG), PNG, GIF), None);
+        assert_eq!(same_item(PNG, PNG), Some(true));
+        assert_eq!(same_item(PNG, GIF), Some(false));
+        // An Image is no Task, and the other way round.
+        assert_eq!(same_item(PNG, &task("Milk", 4, &[], &[], "t")), None);
+        assert_eq!(merge(None, PNG, &task("Milk", 4, &[], &[], "t")), None);
+    }
+
+    #[test]
+    fn only_tasks_and_images_files_are_accepted() {
+        for file in ["aaaaaaaaaaaa.md", "aaaaaaaaaaaa.png", "aaaaaaaaaaaa.webp"] {
+            assert!(accepts(file), "{file}");
+        }
+        for file in [
+            ".aaaaaaaaaaaa.png",
+            "notes.png",
+            "aaaaaaaaaaaa.tiff",
+            "a.txt",
+        ] {
+            assert!(!accepts(file), "{file}");
+        }
     }
 
     const T0: &str = "2024-01-01T00:00:00Z";

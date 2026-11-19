@@ -2837,6 +2837,26 @@ mod tests {
         }
 
         #[test]
+        fn an_image_added_on_one_device_arrives_and_deleting_it_deletes_it_everywhere() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            let png = b"\x89PNG\r\n\x1a\n pixels";
+            phone.write_task("aaaaaaaaaaaa.png", png);
+            phone.write_task("notes.png", png); // no Image of the Tasks
+
+            phone.sync_tasks(&cloud);
+            tablet.sync_tasks(&cloud);
+            assert_eq!(tablet.read_task("aaaaaaaaaaaa.png").unwrap(), png);
+            assert!(cloud.read("notes.png").is_none());
+
+            tablet.remove_task("aaaaaaaaaaaa.png");
+            tablet.sync_tasks(&cloud);
+            phone.sync_tasks(&cloud);
+            assert!(cloud.read("aaaaaaaaaaaa.png").is_none());
+            assert!(phone.read_task("aaaaaaaaaaaa.png").is_none());
+        }
+
+        #[test]
         fn tasks_sync_alongside_drawings_and_books() {
             let (drawings, books, tasks) = (Cloud::new(), Cloud::new(), Cloud::new());
             let (phone, tablet) = (Device::new(), Device::new());
