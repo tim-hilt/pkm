@@ -8,9 +8,9 @@ use filters::shown_in;
 pub use filters::{Direction, Filter, FilterSort, FilterSortKey};
 pub(crate) use images::{is_image, is_image_file};
 
-use crate::files::{DiskFiles, Files};
 use crate::query::QueryError;
 use pkm_base::clock::{iso8601, now_ms};
+use pkm_base::files::{DiskFiles, Files};
 use pkm_base::front_matter::{Document, Value};
 use pkm_base::item_id::ItemId;
 use pkm_base::markdown::image_targets;
@@ -2362,7 +2362,7 @@ mod tests {
 
     #[test]
     fn tasks_live_on_any_files() {
-        let files = Arc::new(crate::files::MemoryFiles::default());
+        let files = Arc::new(pkm_base::files::MemoryFiles::default());
         let tasks = Tasks::open_in(files.clone(), "Tasks");
         let task = tasks.create("Buy milk", 4, &[]).unwrap();
         tasks.add_tag(&task.id, "home").unwrap();

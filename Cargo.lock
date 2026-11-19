@@ -538,6 +538,7 @@ dependencies = [
  "pkm-books",
  "pkm-cloud",
  "pkm-drawing",
+ "pkm-notes",
  "pkm-tasks",
  "uniffi",
 ]
@@ -568,6 +569,13 @@ dependencies = [
 
 [[package]]
 name = "pkm-drawing"
+version = "0.1.0"
+dependencies = [
+ "pkm-base",
+]
+
+[[package]]
+name = "pkm-notes"
 version = "0.1.0"
 dependencies = [
  "pkm-base",

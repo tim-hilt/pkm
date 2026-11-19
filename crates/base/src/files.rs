@@ -1,4 +1,4 @@
-//! Where the Tasks live: the little the store needs of a file system. The disk
+//! Where a Context's files live: the little a store needs of a file system. The disk
 //! is one (`DiskFiles`); memory is the other (`MemoryFiles`), for clients
 //! whose storage can't be reached synchronously, like the browser's.
 

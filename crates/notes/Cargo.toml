@@ -1,0 +1,10 @@
+# The Notes Context: Notes written in Markdown, kept as files.
+[package]
+name = "pkm-notes"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Front matter, Item IDs, Markdown, the clock and the file seam.
+pkm-base = { path = "../base" }

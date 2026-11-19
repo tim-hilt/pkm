@@ -5,13 +5,12 @@
 //! plain Rust with no FFI concerns; foreign-language clients go through
 //! `pkm-bindings`.
 
-mod files;
 mod query;
 mod quick_add;
 mod store;
 pub mod sync;
 
-pub use files::{DiskFiles, Files, Listed, MemoryFiles, Stamp};
+pub use pkm_base::files::{DiskFiles, Files, Listed, MemoryFiles, Stamp};
 pub use query::{Query, QueryError, typed as typed_query, unfinished_tag};
 pub use quick_add::{QuickAdd, QuickShortcut, ShortcutMeaning, TagQuery};
 pub use store::{

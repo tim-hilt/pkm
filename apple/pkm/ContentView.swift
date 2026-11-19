@@ -9,6 +9,8 @@ struct ContentView: View {
     @Environment(LibraryModel.self) private var library
     @Environment(CloudBackingModel.self) private var cloud
     @Environment(TasksModel.self) private var tasks
+    @Environment(NotesModel.self) private var notes
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.scenePhase) private var scenePhase
     /// An iPhone opens into the detail; its sidebar is one step back.
     @State private var column = NavigationSplitViewColumn.detail
@@ -95,10 +97,17 @@ extension ContentView {
         #endif
     }
 
-    /// What is pushed in the detail: only Tasks pushes by path, the others by link.
+    /// What is pushed in the detail: Tasks and, where the editor doesn't fit beside the list,
+    /// Notes push by path, the others by link.
     private var path: Binding<[String]> {
-        guard navigation.destination == .context(.tasks) else { return .constant([]) }
-        return Binding(get: { tasks.openFilterPath }, set: { tasks.openFilterPath = $0 })
+        switch navigation.destination {
+        case .context(.tasks):
+            return Binding(get: { tasks.openFilterPath }, set: { tasks.openFilterPath = $0 })
+        case .context(.notes) where NotesLayout.pushes(sizeClass):
+            return Binding(get: { notes.openID.map { [$0] } ?? [] }, set: { notes.openID = $0.last })
+        default:
+            return .constant([])
+        }
     }
 
     @ViewBuilder private var detail: some View {
@@ -107,6 +116,7 @@ extension ContentView {
         case .context(.drawings): GalleryView(gallery: gallery)
         case .context(.tasks): TasksView()
         case .context(.books): BooksView()
+        case .context(.notes): NotesView()
         case .context(let context): ComingSoonView(context: context)
         }
     }
@@ -137,7 +147,7 @@ extension AppNavigation {
     /// The navigation for this launch. The `-UITesting…` launch arguments
     /// (temporary stores, `make screenshot`) start on Drawings (Books for
     /// `-UITestingOpenBooks` and `-UITestingOpenReader`, Tasks for `-UITestingOpenTasks`
-    /// and `-UITestingOpenTaskSheet`) and leave the Device's last AppContext alone.
+    /// and `-UITestingOpenTaskSheet`, Notes for `-UITestingOpenNotes` and `-UITestingOpenNote`) and leave the Device's last AppContext alone.
     @MainActor
     static func forLaunch() -> AppNavigation {
         guard ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("-UITesting") }) else {
@@ -149,6 +159,8 @@ extension AppNavigation {
             navigation.selected = .drawings
         } else if arguments.contains("-UITestingOpenTasks") || arguments.contains("-UITestingOpenTaskSheet") {
             navigation.selected = .tasks
+        } else if arguments.contains("-UITestingOpenNotes") || arguments.contains("-UITestingOpenNote") {
+            navigation.selected = .notes
         } else if arguments.contains("-UITestingOpenBooks") || arguments.contains("-UITestingOpenReader") {
             navigation.selected = .books
         }

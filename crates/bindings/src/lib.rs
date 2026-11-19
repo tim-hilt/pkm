@@ -3,6 +3,7 @@
 
 mod books;
 mod markdown;
+mod notes;
 mod tasks;
 
 use std::convert::Infallible;
