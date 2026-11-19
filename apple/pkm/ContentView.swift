@@ -104,7 +104,7 @@ extension ContentView {
         case .context(.tasks):
             return Binding(get: { tasks.openFilterPath }, set: { tasks.openFilterPath = $0 })
         case .context(.notes) where NotesLayout.pushes(sizeClass):
-            return Binding(get: { notes.openID.map { [$0] } ?? [] }, set: { notes.openID = $0.last })
+            return Binding(get: { notes.pushedPath }, set: { notes.pushedPath = $0 })
         default:
             return .constant([])
         }

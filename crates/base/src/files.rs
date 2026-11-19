@@ -45,6 +45,20 @@ pub trait Files: Send + Sync + Debug {
 
     /// The files directly in `folder`; none if there is no such folder.
     fn list(&self, folder: &Path) -> io::Result<Vec<Listed>>;
+
+    /// The names of the folders directly in `folder`, empty ones too; none
+    /// if there is no such folder.
+    fn list_folders(&self, folder: &Path) -> io::Result<Vec<String>>;
+
+    /// Makes the folder and the ones above it; one there already is as wanted.
+    fn make_folder(&self, folder: &Path) -> io::Result<()>;
+
+    /// Moves a file or folder with all in it to `to`, whose folder exists.
+    fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
+
+    /// Deletes the folder with everything in it; one that is gone already is
+    /// as wanted.
+    fn remove_folder(&self, folder: &Path) -> io::Result<()>;
 }
 
 /// The real file system.
@@ -98,6 +112,36 @@ impl Files for DiskFiles {
         }
         Ok(listed)
     }
+
+    fn list_folders(&self, folder: &Path) -> io::Result<Vec<String>> {
+        let items = match fs::read_dir(folder) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            items => items?,
+        };
+        let mut names = Vec::new();
+        for item in items {
+            let item = item?;
+            if item.file_type()?.is_dir() {
+                names.extend(item.file_name().to_str().map(str::to_owned));
+            }
+        }
+        Ok(names)
+    }
+
+    fn make_folder(&self, folder: &Path) -> io::Result<()> {
+        fs::create_dir_all(folder)
+    }
+
+    fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+        fs::rename(from, to)
+    }
+
+    fn remove_folder(&self, folder: &Path) -> io::Result<()> {
+        match fs::remove_dir_all(folder) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -108,6 +152,8 @@ struct Memory {
     writes: u128,
     /// Files written since `take_changes`.
     changed: BTreeSet<PathBuf>,
+    /// Folders made without a file in them (yet).
+    folders: BTreeSet<PathBuf>,
 }
 
 /// Files in memory, which remember what changed so that a client can save it
@@ -184,6 +230,70 @@ impl Files for MemoryFiles {
             })
             .collect())
     }
+
+    fn list_folders(&self, folder: &Path) -> io::Result<Vec<String>> {
+        let memory = self.memory();
+        let holding = memory.files.keys().filter_map(|path| path.parent());
+        let made = memory.folders.iter().map(PathBuf::as_path);
+        Ok(holding
+            .chain(made)
+            .filter_map(|dir| dir.strip_prefix(folder).ok()?.components().next())
+            .map(|name| name.as_os_str().to_string_lossy().into_owned())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect())
+    }
+
+    fn make_folder(&self, folder: &Path) -> io::Result<()> {
+        self.memory().folders.insert(folder.to_owned());
+        Ok(())
+    }
+
+    fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+        let mut memory = self.memory();
+        let moved: Vec<_> = (memory.files.keys())
+            .filter(|path| path.starts_with(from))
+            .cloned()
+            .collect();
+        let folders: Vec<_> = (memory.folders.iter())
+            .filter(|path| path.starts_with(from))
+            .cloned()
+            .collect();
+        if moved.is_empty() && folders.is_empty() {
+            return Err(io::ErrorKind::NotFound.into());
+        }
+        for path in moved {
+            let held = memory.files.remove(&path);
+            let target = to.join(path.strip_prefix(from).unwrap_or(&path));
+            memory.writes += 1;
+            let written = memory.writes;
+            if let Some((bytes, _)) = held {
+                memory.files.insert(target.clone(), (bytes, written));
+            }
+            memory.changed.extend([path, target]);
+        }
+        for path in folders {
+            memory.folders.remove(&path);
+            memory
+                .folders
+                .insert(to.join(path.strip_prefix(from).unwrap_or(&path)));
+        }
+        Ok(())
+    }
+
+    fn remove_folder(&self, folder: &Path) -> io::Result<()> {
+        let mut memory = self.memory();
+        let gone: Vec<_> = (memory.files.keys())
+            .filter(|path| path.starts_with(folder))
+            .cloned()
+            .collect();
+        for path in gone {
+            memory.files.remove(&path);
+            memory.changed.insert(path);
+        }
+        memory.folders.retain(|path| !path.starts_with(folder));
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -254,5 +364,36 @@ mod tests {
         assert!(files.take_changes().is_empty());
         assert_eq!(files.read(Path::new("Tasks/a.md")).unwrap(), "a!");
         assert_eq!(files.read(Path::new("Tasks/old.md")).unwrap(), "old");
+    }
+
+    #[test]
+    fn memory_folders_exist_when_made_or_holding_files() {
+        let files = MemoryFiles::default();
+        files.write(Path::new("N/a/x.md"), "x").unwrap();
+        files.write(Path::new("N/y.md"), "y").unwrap();
+        files.make_folder(Path::new("N/b/c")).unwrap();
+        let root = files.list_folders(Path::new("N")).unwrap();
+        assert_eq!(root, ["a", "b"]);
+        assert_eq!(files.list_folders(Path::new("N/b")).unwrap(), ["c"]);
+        assert!(files.list_folders(Path::new("N/a")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn memory_renames_and_removes_folders_with_their_files() {
+        let files = MemoryFiles::default();
+        files.write(Path::new("N/a/x.md"), "x").unwrap();
+        files.make_folder(Path::new("N/a/e")).unwrap();
+        files.take_changes();
+        files.rename(Path::new("N/a"), Path::new("N/b")).unwrap();
+        assert_eq!(files.read(Path::new("N/b/x.md")).unwrap(), "x");
+        assert_eq!(files.list_folders(Path::new("N/b")).unwrap(), ["e"]);
+        assert!(!files.exists(Path::new("N/a/x.md")));
+        assert_eq!(
+            files.take_changes(),
+            [Path::new("N/a/x.md"), Path::new("N/b/x.md")]
+        );
+        files.remove_folder(Path::new("N/b")).unwrap();
+        assert!(files.list_folders(Path::new("N")).unwrap().is_empty());
+        files.remove_folder(Path::new("N/b")).unwrap();
     }
 }

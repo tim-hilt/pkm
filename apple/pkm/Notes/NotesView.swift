@@ -1,40 +1,168 @@
 import SwiftUI
 
-/// The Notes Context: the list of Notes, newest changed first, and the open Note's editor, beside
-/// the list where there is room (Mac, iPad) and pushed over it on an iPhone. A Note is Deleted by
-/// swipe, context menu or ⌫ on the Mac, asking first when its Body has text.
+/// The Notes Context: the Folder tree, the selected Folder's Notes (newest changed first) and the
+/// open Note's editor, side by side where there is room (Mac, iPad); on an iPhone each is pushed
+/// over the last.
 struct NotesView: View {
+    @Environment(NotesModel.self) private var model
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    var body: some View {
+        if NotesLayout.pushes(sizeClass) {
+            FolderTree()
+                .navigationDestination(for: String.self) { route in
+                    if route.hasPrefix("/") {
+                        NoteList().navigationTitle(FolderTree.name(ofPath: String(route.dropFirst())))
+                    } else {
+                        NoteEditor(id: route).id(route)
+                    }
+                }
+        } else {
+            HStack(spacing: 0) {
+                FolderTree().frame(width: 220)
+                Divider()
+                NoteList().frame(width: 300)
+                Divider()
+                if let id = model.openID {
+                    NoteEditor(id: id).id(id)
+                } else {
+                    ContentUnavailableView("No Note Selected", systemImage: "note.text")
+                }
+            }
+        }
+    }
+}
+
+enum NotesLayout {
+    /// Whether the columns are pushed over each other rather than shown side by side.
+    static func pushes(_ sizeClass: UserInterfaceSizeClass?) -> Bool { sizeClass == .compact }
+}
+
+/// The Folders as an outline under the top level, which is selectable too. New Folder in the
+/// toolbar and context menu, Rename and Delete in the context menu, Return renames on the Mac.
+private struct FolderTree: View {
+    @Environment(NotesModel.self) private var model
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var naming: Naming?
+    @State private var name = ""
+    @State private var problem: FolderNameError?
+    @State private var deleting: Folder?
+
+    /// What the name field of the alert is for.
+    private enum Naming: Equatable {
+        case create(inside: String)
+        case rename(String)
+
+        var title: LocalizedStringKey { if case .create = self { "New Folder" } else { "Rename Folder" } }
+        var button: LocalizedStringKey { if case .create = self { "Create" } else { "Rename" } }
+    }
+
+    static func name(ofPath path: String) -> String {
+        path.isEmpty ? String(localized: "Notes") : String(path.split(separator: "/").last ?? "")
+    }
+
+    var body: some View {
+        List(selection: NotesLayout.pushes(sizeClass) ? .constant(nil) : selection) {
+            row(path: "", title: "Notes", systemImage: "tray")
+            OutlineGroup(model.tree, id: \.path, children: \.children) { folder in
+                row(path: folder.path, title: folder.name, systemImage: "folder")
+            }
+        }
+        .toolbar {
+            ToolbarItem {
+                Button("New Folder", systemImage: "folder.badge.plus") { ask(.create(inside: model.folderPath)) }
+                    .accessibilityIdentifier("add-folder")
+            }
+        }
+        #if os(macOS)
+            .onKeyPress(.return) {
+                guard !model.folderPath.isEmpty else { return .ignored }
+                ask(.rename(model.folderPath))
+                return .handled
+            }
+        #endif
+        .alert(
+            naming?.title ?? "", isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } }),
+            presenting: naming
+        ) { target in
+            TextField("Name", text: $name)
+            Button(target.button) { commit(target) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            if let problem { Text(Self.reason(problem)) }
+        }
+        .confirmationDialog(
+            deleting.map { "Delete “\($0.name)”?" } ?? "",
+            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+            presenting: deleting
+        ) { folder in
+            Button("Delete", role: .destructive) { model.deleteFolder(folder.path) }
+        } message: { folder in
+            Text(model.summary(ofFolder: folder.path))
+        }
+        .accessibilityIdentifier("folder-tree")
+    }
+
+    private var selection: Binding<String?> {
+        Binding(get: { model.folderPath }, set: { model.folderPath = $0 ?? "" })
+    }
+
+    private func row(path: String, title: String, systemImage: String) -> some View {
+        Group {
+            if NotesLayout.pushes(sizeClass) {
+                NavigationLink(value: NotesModel.route(to: path)) { Label(title, systemImage: systemImage) }
+            } else {
+                Label(title, systemImage: systemImage)
+            }
+        }
+        .tag(path)
+        .contextMenu {
+            Button("New Folder", systemImage: "folder.badge.plus") { ask(.create(inside: path)) }
+            if !path.isEmpty {
+                Button("Rename", systemImage: "pencil") { ask(.rename(path)) }
+                Button("Delete", systemImage: "trash", role: .destructive) { deleting = model.folder(at: path) }
+            }
+        }
+    }
+
+    private func ask(_ target: Naming) {
+        problem = nil
+        if case .rename(let path) = target { name = Self.name(ofPath: path) } else { name = "" }
+        naming = target
+    }
+
+    /// Applies the name; a refused one asks again, with the reason.
+    private func commit(_ target: Naming) {
+        do {
+            switch target {
+            case .create(let parent): try model.addFolder(named: name, in: parent)
+            case .rename(let path): try model.renameFolder(path, to: name)
+            }
+        } catch let error as FolderNameError {
+            problem = error
+            Task { naming = target }
+        } catch {}
+    }
+
+    private static func reason(_ error: FolderNameError) -> LocalizedStringKey {
+        switch error {
+        case .Empty: "The name is empty."
+        case .HasSlash: "The name can't contain a /."
+        case .Hidden: "The name can't start with a dot."
+        case .Taken: "A Folder of that name is already there."
+        case .Failed(let message): LocalizedStringKey(message)
+        }
+    }
+}
+
+/// The Notes of the selected Folder. A Note is Deleted by swipe, context menu or ⌫ on the Mac,
+/// asking first when its Body has text.
+private struct NoteList: View {
     @Environment(NotesModel.self) private var model
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var deleting: ListedNote?
 
     var body: some View {
-        Group {
-            if NotesLayout.pushes(sizeClass) {
-                list
-            } else {
-                HStack(spacing: 0) {
-                    list.frame(width: 300)
-                    Divider()
-                    if let id = model.openID {
-                        NoteEditor(id: id).id(id)
-                    } else {
-                        ContentUnavailableView("No Note Selected", systemImage: "note.text")
-                    }
-                }
-            }
-        }
-        .navigationDestination(for: String.self) { NoteEditor(id: $0).id($0) }
-        .addButton("New Note", identifier: "add-note") { model.add() }
-        .confirmationDialog(
-            "Delete this Note?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
-            presenting: deleting
-        ) { row in
-            Button("Delete", role: .destructive) { model.delete(id: row.id) }
-        }
-    }
-
-    @ViewBuilder private var list: some View {
         List(selection: NotesLayout.pushes(sizeClass) ? .constant(nil) : Bindable(model).openID) {
             ForEach(model.rows, id: \.id) { row in
                 Group {
@@ -59,6 +187,13 @@ struct NotesView: View {
                 if let id = model.openID, let row = model.rows.first(where: { $0.id == id }) { ask(row) }
             }
         #endif
+        .addButton("New Note", identifier: "add-note") { model.add() }
+        .confirmationDialog(
+            "Delete this Note?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+            presenting: deleting
+        ) { row in
+            Button("Delete", role: .destructive) { model.delete(id: row.id) }
+        }
         .accessibilityIdentifier("notes-list")
     }
 
@@ -66,11 +201,6 @@ struct NotesView: View {
     private func ask(_ row: ListedNote) {
         if model.confirmsDelete(id: row.id) { deleting = row } else { model.delete(id: row.id) }
     }
-}
-
-enum NotesLayout {
-    /// Whether the editor is pushed over the list rather than shown beside it.
-    static func pushes(_ sizeClass: UserInterfaceSizeClass?) -> Bool { sizeClass == .compact }
 }
 
 /// A Note in the list: its Title formatted, or the Body's first line, or "New Note".

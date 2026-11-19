@@ -11,7 +11,7 @@ extension NotesModel {
     static func forLaunch() -> NotesModel {
         let arguments = ProcessInfo.processInfo.arguments
         guard arguments.contains(where: { $0.hasPrefix("-UITesting") }) else {
-            return NotesModel(store: openOrTemporary(documentsFolder))
+            return NotesModel(store: openOrTemporary(documentsFolder), defaults: .standard)
         }
         let store = openOrTemporary(temporaryFolder())
         let opensNote = arguments.contains("-UITestingOpenNote")
@@ -32,8 +32,15 @@ extension NotesModel {
                 ("", "Buy oat milk\nand bread"),
             ]
             for (title, body) in samples.reversed() {
-                guard let note = try? store.create() else { continue }
+                guard let note = try? store.create(folder: "") else { continue }
                 _ = try? store.edit(id: note.id, title: title, body: body)
+            }
+        }
+        _ = try? store.createFolder(parent: "", name: "Recipes")
+        if let work = try? store.createFolder(parent: "", name: "Work") {
+            _ = try? store.createFolder(parent: work, name: "Plans")
+            if let note = try? store.create(folder: work) {
+                _ = try? store.edit(id: note.id, title: "Weekly review", body: "")
             }
         }
         let model = NotesModel(store: store)

@@ -1,6 +1,7 @@
-//! The Notes store: a folder of `<id>.md` files, each with the front matter
-//! `id`, `title` and `updated` and the Body as the file's body.
+//! The Notes store: `<id>.md` files in nested folders, each with the front
+//! matter `id`, `title` and `updated` and the Body as the file's body.
 
+use crate::folder::{Counts, Folder, FolderError, check_name, is_visible_name};
 use pkm_base::clock::{iso8601, now_ms};
 use pkm_base::files::{DiskFiles, Files};
 use pkm_base::front_matter::Document;
@@ -9,7 +10,7 @@ use pkm_base::markdown::row_preview;
 use pkm_base::random::Entropy;
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 const TITLE: &str = "title";
@@ -62,27 +63,29 @@ impl Notes {
         }
     }
 
-    /// Saves a new, empty Note under a fresh Item ID.
-    pub fn create(&self) -> io::Result<Note> {
+    /// Saves a new, empty Note under a fresh Item ID in `folder` (a path,
+    /// empty for the top level); `NotFound` if there is no such Folder.
+    pub fn create(&self, folder: &str) -> io::Result<Note> {
+        let dir = self.dir(folder)?;
         let mut entropy = Entropy::from_system();
         loop {
             let id = ItemId::new(&mut entropy);
-            if self.files.exists(&self.path(&id)) {
+            if self.find(id.as_str()).is_ok() {
                 continue;
             }
             let mut file = Document::default();
             file.set_scalar("id", id.as_str());
             file.set_scalar(TITLE, "");
             file.set_scalar(UPDATED, iso8601(now_ms()));
-            self.files.write(&self.path(&id), &file.render())?;
+            self.files
+                .write(&dir.join(file_name(&id)), &file.render())?;
             return Ok(note_of(&file, &id));
         }
     }
 
-    /// The Note `id`; `NotFound` if there is none.
+    /// The Note `id`, wherever it is; `NotFound` if there is none.
     pub fn read(&self, id: &str) -> io::Result<Note> {
-        let id = ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?;
-        let file = self.read_file(&id)?;
+        let (id, _, file) = self.find(id)?;
         Ok(note_of(&file, &id))
     }
 
@@ -91,26 +94,23 @@ impl Notes {
     /// writes nothing, so that saving as the user types keeps Sync quiet.
     /// `NotFound` if there is no such Note.
     pub fn edit(&self, id: &str, title: &str, body: &str) -> io::Result<Note> {
-        let id = ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?;
-        let mut file = self.read_file(&id)?;
+        let (id, path, mut file) = self.find(id)?;
         let before = file.render();
         file.set_scalar(TITLE, title.replace(['\r', '\n'], " "));
         file.body = body.to_owned();
         if file.render() != before {
             file.set_scalar(UPDATED, iso8601(now_ms()));
-            self.files.write(&self.path(&id), &file.render())?;
+            self.files.write(&path, &file.render())?;
         }
         Ok(note_of(&file, &id))
     }
 
     /// Deletes the Note `id`; one that is gone already is as wanted.
     pub fn delete(&self, id: &str) -> io::Result<()> {
-        let Some(id) = ItemId::parse(id) else {
-            return Ok(());
-        };
-        match self.files.remove(&self.path(&id)) {
-            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
-            _ => Ok(()),
+        match self.find(id) {
+            Ok((_, path, _)) => self.files.remove(&path),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
         }
     }
 
@@ -126,41 +126,185 @@ impl Notes {
         }
     }
 
-    /// Every Note, newest `updated` first. Files that are no Note (other
-    /// extensions, hidden ones, `.md` without an `id` of their name) are
-    /// skipped.
-    pub fn list(&self) -> io::Result<Vec<Row>> {
-        let mut rows = Vec::new();
-        for listed in self.files.list(&self.root)? {
-            let Some(id) = (listed.name.strip_suffix(".md")).and_then(ItemId::parse) else {
-                continue;
-            };
-            let Ok(file) = self.read_file(&id) else {
-                continue;
-            };
-            let note = note_of(&file, &id);
-            rows.push(Row {
-                preview: row_preview(&note.body),
-                id: note.id,
-                title: note.title,
-                updated: file.scalar(UPDATED).unwrap_or_default().to_owned(),
-            });
-        }
+    /// The Notes directly in `folder`, newest `updated` first. Files that
+    /// are no Note (other extensions, hidden ones, `.md` without an `id` of
+    /// their name) are skipped.
+    pub fn list(&self, folder: &str) -> io::Result<Vec<Row>> {
+        let mut rows: Vec<_> = (self.notes_in(&self.dir(folder)?)?.into_iter())
+            .map(|(id, file)| {
+                let note = note_of(&file, &id);
+                Row {
+                    preview: row_preview(&note.body),
+                    id: note.id,
+                    title: note.title,
+                    updated: file.scalar(UPDATED).unwrap_or_default().to_owned(),
+                }
+            })
+            .collect();
         rows.sort_by(|a, b| b.updated.cmp(&a.updated).then_with(|| a.id.cmp(&b.id)));
         Ok(rows)
     }
 
-    /// The file of the Note `id`; `NotFound` if it is none, which includes a
-    /// file whose front matter names another `id`.
-    fn read_file(&self, id: &ItemId) -> io::Result<Document> {
-        let text = self.files.read(&self.path(id))?;
-        Document::parse(&text)
-            .filter(|file| file.scalar("id") == Some(id.as_str()))
-            .ok_or_else(|| io::ErrorKind::NotFound.into())
+    /// The Folders at the top level, each with the Folders in it, by name
+    /// (ignoring case).
+    pub fn folders(&self) -> io::Result<Vec<Folder>> {
+        self.folders_in(&self.root, "")
     }
 
-    fn path(&self, id: &ItemId) -> PathBuf {
-        self.root.join(format!("{id}.md"))
+    /// Makes the Folder `name` in `parent` (a path, empty for the top level)
+    /// and returns its path.
+    pub fn create_folder(&self, parent: &str, name: &str) -> Result<String, FolderError> {
+        let name = check_name(name)?;
+        let dir = self.dir(parent)?;
+        self.check_free(&dir, name, None)?;
+        self.files.make_folder(&dir.join(name))?;
+        Ok(join(parent, name))
+    }
+
+    /// Renames the Folder at `path` and returns its new path.
+    pub fn rename_folder(&self, path: &str, name: &str) -> Result<String, FolderError> {
+        let name = check_name(name)?;
+        let dir = self.dir(path)?;
+        let (parent, old) = path.rsplit_once('/').unwrap_or(("", path));
+        if old.is_empty() {
+            return Err(io::Error::from(io::ErrorKind::InvalidInput).into());
+        }
+        let parent_dir = self.dir(parent)?;
+        self.check_free(&parent_dir, name, Some(old))?;
+        if name != old {
+            self.files.rename(&dir, &parent_dir.join(name))?;
+        }
+        Ok(join(parent, name))
+    }
+
+    /// Deletes the Folder at `path` with everything in it; one that is gone
+    /// already is as wanted.
+    pub fn delete_folder(&self, path: &str) -> io::Result<()> {
+        if path.is_empty() {
+            return Err(io::ErrorKind::InvalidInput.into());
+        }
+        match self.dir(path) {
+            Ok(dir) => self.files.remove_folder(&dir),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// The Notes and Folders in the Folder at `path`, all the way down: what
+    /// Deleting it would Delete.
+    pub fn count(&self, path: &str) -> io::Result<Counts> {
+        let mut counts = Counts {
+            notes: 0,
+            folders: 0,
+        };
+        let mut pending = vec![self.dir(path)?];
+        while let Some(dir) = pending.pop() {
+            counts.notes += self.notes_in(&dir)?.len() as u32;
+            let inner = self.subfolders(&dir)?;
+            counts.folders += inner.len() as u32;
+            pending.extend(inner.iter().map(|name| dir.join(name)));
+        }
+        Ok(counts)
+    }
+
+    /// The directory of the Folder `path`; `NotFound` if there is none, or
+    /// `path` names something hidden or climbing up.
+    fn dir(&self, path: &str) -> io::Result<PathBuf> {
+        let mut dir = self.root.clone();
+        if path.is_empty() {
+            return Ok(dir);
+        }
+        for name in path.split('/') {
+            if !is_visible_name(name) || !self.files.list_folders(&dir)?.iter().any(|n| n == name) {
+                return Err(io::ErrorKind::NotFound.into());
+            }
+            dir.push(name);
+        }
+        Ok(dir)
+    }
+
+    /// The names of the visible Folders directly in `dir`.
+    fn subfolders(&self, dir: &Path) -> io::Result<Vec<String>> {
+        let mut names = self.files.list_folders(dir)?;
+        names.retain(|name| is_visible_name(name));
+        Ok(names)
+    }
+
+    fn folders_in(&self, dir: &Path, path: &str) -> io::Result<Vec<Folder>> {
+        let mut names = self.subfolders(dir)?;
+        names.sort_by_cached_key(|name| (name.to_lowercase(), name.clone()));
+        names
+            .into_iter()
+            .map(|name| {
+                let path = join(path, &name);
+                Ok(Folder {
+                    folders: self.folders_in(&dir.join(&name), &path)?,
+                    name,
+                    path,
+                })
+            })
+            .collect()
+    }
+
+    /// `Taken` if `dir` holds a Folder `name` in other case or not, other
+    /// than `except` itself.
+    fn check_free(&self, dir: &Path, name: &str, except: Option<&str>) -> Result<(), FolderError> {
+        let lower = name.to_lowercase();
+        let taken = (self.subfolders(dir)?.iter())
+            .any(|other| Some(other.as_str()) != except && other.to_lowercase() == lower);
+        if taken {
+            Err(FolderError::Taken)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Every Note directly in `dir`, with its file.
+    fn notes_in(&self, dir: &Path) -> io::Result<Vec<(ItemId, Document)>> {
+        let mut notes = Vec::new();
+        for listed in self.files.list(dir)? {
+            let Some(id) = (listed.name.strip_suffix(".md")).and_then(ItemId::parse) else {
+                continue;
+            };
+            if let Some(file) = self.read_file(&dir.join(&listed.name), &id) {
+                notes.push((id, file));
+            }
+        }
+        Ok(notes)
+    }
+
+    /// The Note `id`, found in whichever Folder it is: its Item ID, path and
+    /// file; `NotFound` if there is none.
+    fn find(&self, id: &str) -> io::Result<(ItemId, PathBuf, Document)> {
+        let id = ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?;
+        let mut pending = vec![self.root.clone()];
+        while let Some(dir) = pending.pop() {
+            let path = dir.join(file_name(&id));
+            if let Some(file) = self.read_file(&path, &id) {
+                return Ok((id, path, file));
+            }
+            pending.extend(self.subfolders(&dir)?.iter().map(|name| dir.join(name)));
+        }
+        Err(io::ErrorKind::NotFound.into())
+    }
+
+    /// The Note file at `path`, none if it is none, which includes a file
+    /// whose front matter names another `id`.
+    fn read_file(&self, path: &Path, id: &ItemId) -> Option<Document> {
+        let text = self.files.read(path).ok()?;
+        Document::parse(&text).filter(|file| file.scalar("id") == Some(id.as_str()))
+    }
+}
+
+fn file_name(id: &ItemId) -> String {
+    format!("{id}.md")
+}
+
+fn join(parent: &str, name: &str) -> String {
+    if parent.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{parent}/{name}")
     }
 }
 
@@ -194,8 +338,9 @@ mod tests {
         }
 
         fn write(&self, name: &str, text: &str) {
-            fs::create_dir_all(&self.0).unwrap();
-            fs::write(self.0.join(name), text).unwrap();
+            let path = self.0.join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, text).unwrap();
         }
 
         fn text(&self, id: &str) -> String {
@@ -221,7 +366,7 @@ mod tests {
     fn a_created_note_is_empty_and_kept_as_a_file_named_by_its_id() {
         let scratch = Scratch::new();
         let notes = scratch.store();
-        let note = notes.create().unwrap();
+        let note = notes.create("").unwrap();
         assert_eq!((note.title.as_str(), note.body.as_str()), ("", ""));
         assert_eq!(notes.read(&note.id).unwrap(), note);
         let text = scratch.text(&note.id);
@@ -233,7 +378,7 @@ mod tests {
     fn an_edit_keeps_title_and_body_as_typed_in_the_file() {
         let scratch = Scratch::new();
         let notes = scratch.store();
-        let id = notes.create().unwrap().id;
+        let id = notes.create("").unwrap().id;
         let body = "# Heading\n\n  - **bold**: x \n";
         let edited = notes.edit(&id, "A *Title*: here ", body).unwrap();
         assert_eq!(edited.title, "A *Title*: here ");
@@ -246,7 +391,7 @@ mod tests {
     fn a_title_stays_one_line() {
         let scratch = Scratch::new();
         let notes = scratch.store();
-        let id = notes.create().unwrap().id;
+        let id = notes.create("").unwrap().id;
         assert_eq!(notes.edit(&id, "a\nb\r\nc", "").unwrap().title, "a b  c");
     }
 
@@ -260,9 +405,9 @@ mod tests {
             &note_file(id, "old", "2020-01-01T00:00:00Z", "x\n"),
         );
         notes.edit(id, "old", "x\n").unwrap();
-        assert_eq!(notes.list().unwrap()[0].updated, "2020-01-01T00:00:00Z");
+        assert_eq!(notes.list("").unwrap()[0].updated, "2020-01-01T00:00:00Z");
         notes.edit(id, "new", "x\n").unwrap();
-        assert!(notes.list().unwrap()[0].updated.as_str() > "2020-01-01T00:00:00Z");
+        assert!(notes.list("").unwrap()[0].updated.as_str() > "2020-01-01T00:00:00Z");
     }
 
     #[test]
@@ -282,7 +427,7 @@ mod tests {
                 "\n## First line\nmore\n",
             ),
         );
-        let rows = notes.list().unwrap();
+        let rows = notes.list("").unwrap();
         let shown: Vec<_> = rows
             .iter()
             .map(|r| (&r.id[..1], &r.title[..], &r.preview[..]))
@@ -295,12 +440,12 @@ mod tests {
     fn a_note_with_nothing_in_it_is_discarded() {
         let scratch = Scratch::new();
         let notes = scratch.store();
-        let empty = notes.create().unwrap().id;
-        let blank = notes.create().unwrap().id;
+        let empty = notes.create("").unwrap().id;
+        let blank = notes.create("").unwrap().id;
         notes.edit(&blank, " ", "\n").unwrap();
-        let titled = notes.create().unwrap().id;
+        let titled = notes.create("").unwrap().id;
         notes.edit(&titled, "T", "").unwrap();
-        let written = notes.create().unwrap().id;
+        let written = notes.create("").unwrap().id;
         notes.edit(&written, "", "text").unwrap();
         for id in [&empty, &blank, &titled, &written] {
             notes.discard_if_empty(id).unwrap();
@@ -314,9 +459,9 @@ mod tests {
     fn a_deleted_note_is_gone() {
         let scratch = Scratch::new();
         let notes = scratch.store();
-        let id = notes.create().unwrap().id;
+        let id = notes.create("").unwrap().id;
         notes.delete(&id).unwrap();
-        assert!(notes.list().unwrap().is_empty());
+        assert!(notes.list("").unwrap().is_empty());
         assert_eq!(notes.read(&id).unwrap_err().kind(), io::ErrorKind::NotFound);
         assert_eq!(
             notes.edit(&id, "", "").unwrap_err().kind(),
@@ -329,7 +474,7 @@ mod tests {
     fn files_that_are_no_note_are_skipped() {
         let scratch = Scratch::new();
         let notes = scratch.store();
-        let kept = notes.create().unwrap().id;
+        let kept = notes.create("").unwrap().id;
         let note = note_file("cccccccccccc", "x", "2020-01-01T00:00:00Z", "");
         scratch.write("cccccccccccc.txt", &note);
         scratch.write(".cccccccccccc.md", &note);
@@ -337,7 +482,137 @@ mod tests {
         scratch.write("eeeeeeeeeeee.md", "just text");
         scratch.write("ffffffffffff.md", &note);
         fs::create_dir_all(scratch.0.join("Folder")).unwrap();
-        let ids: Vec<_> = notes.list().unwrap().into_iter().map(|r| r.id).collect();
+        let ids: Vec<_> = notes.list("").unwrap().into_iter().map(|r| r.id).collect();
         assert_eq!(ids, [kept]);
+    }
+
+    fn names(folders: &[Folder]) -> Vec<&str> {
+        folders.iter().map(|f| f.name.as_str()).collect()
+    }
+
+    #[test]
+    fn folders_nest_and_empty_ones_stay() {
+        let scratch = Scratch::new();
+        let notes = scratch.store();
+        let work = notes.create_folder("", "Work").unwrap();
+        let inner = notes.create_folder(&work, "Plans").unwrap();
+        assert_eq!(inner, "Work/Plans");
+        notes.create_folder("", "archive").unwrap();
+        notes.create_folder("", "Books").unwrap();
+        let tree = notes.folders().unwrap();
+        assert_eq!(names(&tree), ["archive", "Books", "Work"]);
+        assert_eq!(names(&tree[2].folders), ["Plans"]);
+        assert_eq!(tree[2].folders[0].path, "Work/Plans");
+        assert!(scratch.0.join("Work/Plans").is_dir());
+        assert!(matches!(
+            notes.create_folder("Nope", "x"),
+            Err(FolderError::Io(e)) if e.kind() == io::ErrorKind::NotFound
+        ));
+    }
+
+    #[test]
+    fn folder_names_are_refused_with_a_reason() {
+        let scratch = Scratch::new();
+        let notes = scratch.store();
+        notes.create_folder("", "Work").unwrap();
+        assert!(matches!(
+            notes.create_folder("", " "),
+            Err(FolderError::Empty)
+        ));
+        assert!(matches!(
+            notes.create_folder("", "a/b"),
+            Err(FolderError::HasSlash)
+        ));
+        assert!(matches!(
+            notes.create_folder("", ".x"),
+            Err(FolderError::Hidden)
+        ));
+        assert!(matches!(
+            notes.create_folder("", "WORK"),
+            Err(FolderError::Taken)
+        ));
+        notes.create_folder("Work", "work").unwrap();
+        notes.create_folder("", "Home").unwrap();
+        assert!(matches!(
+            notes.rename_folder("Home", "wOrK"),
+            Err(FolderError::Taken)
+        ));
+        assert_eq!(notes.rename_folder("Home", "HOME").unwrap(), "HOME");
+        assert_eq!(
+            notes.rename_folder("Home", "").unwrap_err().to_string(),
+            "The name is empty."
+        );
+    }
+
+    #[test]
+    fn a_renamed_folder_keeps_its_notes_which_are_found_by_id() {
+        let scratch = Scratch::new();
+        let notes = scratch.store();
+        let work = notes.create_folder("", "Work").unwrap();
+        let id = notes.create(&work).unwrap().id;
+        notes.edit(&id, "Plan", "x").unwrap();
+        assert_eq!(notes.list("").unwrap().len(), 0);
+        let path = notes.rename_folder(&work, "Job").unwrap();
+        assert_eq!(path, "Job");
+        assert_eq!(notes.list("Job").unwrap()[0].id, id);
+        assert_eq!(notes.read(&id).unwrap().title, "Plan");
+        assert!(matches!(notes.list("Work"), Err(e) if e.kind() == io::ErrorKind::NotFound));
+    }
+
+    #[test]
+    fn a_folder_lists_only_its_own_notes() {
+        let scratch = Scratch::new();
+        let notes = scratch.store();
+        let top = notes.create("").unwrap().id;
+        notes.create_folder("", "A").unwrap();
+        let inner = notes.create("A").unwrap().id;
+        let ids = |folder| -> Vec<String> {
+            notes
+                .list(folder)
+                .unwrap()
+                .into_iter()
+                .map(|r| r.id)
+                .collect()
+        };
+        assert_eq!((ids(""), ids("A")), (vec![top], vec![inner]));
+        for bad in ["../x", ".h", "A//B", "A/.."] {
+            assert!(notes.list(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn deleting_a_folder_deletes_everything_in_it_and_counts_say_what() {
+        let scratch = Scratch::new();
+        let notes = scratch.store();
+        notes.create_folder("", "A").unwrap();
+        notes.create_folder("A", "B").unwrap();
+        notes.create_folder("A/B", "C").unwrap();
+        let a = notes.create("A").unwrap().id;
+        let b = notes.create("A/B").unwrap().id;
+        let kept = notes.create("").unwrap().id;
+        scratch.write("A/B/photo.png", "not a note");
+        assert_eq!(
+            notes.count("A").unwrap(),
+            Counts {
+                notes: 2,
+                folders: 2
+            }
+        );
+        assert_eq!(
+            notes.count("A/B/C").unwrap(),
+            Counts {
+                notes: 0,
+                folders: 0
+            }
+        );
+        notes.delete_folder("A").unwrap();
+        for id in [a, b] {
+            assert_eq!(notes.read(&id).unwrap_err().kind(), io::ErrorKind::NotFound);
+        }
+        assert!(!scratch.0.join("A").exists());
+        assert!(notes.folders().unwrap().is_empty());
+        assert!(scratch.exists(&kept));
+        notes.delete_folder("A").unwrap();
+        assert!(notes.delete_folder("").is_err());
     }
 }

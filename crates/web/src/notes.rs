@@ -97,7 +97,7 @@ impl NoteStore {
 
     /// Saves a new, empty Note.
     pub fn create(&self) -> Result<Note, JsError> {
-        self.notes.create().map(Into::into).map_err(error)
+        self.notes.create("").map(Into::into).map_err(error)
     }
 
     pub fn read(&self, id: &str) -> Result<Note, JsError> {
@@ -123,7 +123,7 @@ impl NoteStore {
 
     /// Every Note, newest `updated` first.
     pub fn notes(&self) -> Result<Vec<ListedNote>, JsError> {
-        let rows = self.notes.list().map_err(error)?;
+        let rows = self.notes.list("").map_err(error)?;
         Ok(rows.into_iter().map(Into::into).collect())
     }
 }
