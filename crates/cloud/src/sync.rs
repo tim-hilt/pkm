@@ -1053,6 +1053,22 @@ mod tests {
         }
 
         #[test]
+        fn drawings_in_a_cloud_subdirectory_are_left_alone() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            fs::create_dir(cloud.dir.0.join("Old")).unwrap();
+            cloud.write("Old/Sketch.excalidraw", b"one");
+
+            for _ in 0..2 {
+                assert!(phone.sync(&cloud).is_empty());
+                assert!(tablet.sync(&cloud).is_empty());
+            }
+
+            assert_eq!(cloud.read("Old/Sketch.excalidraw").unwrap(), b"one");
+            assert!(phone.files().is_empty());
+        }
+
+        #[test]
         fn nothing_half_written_is_left_on_either_side() {
             let cloud = Cloud::new();
             let (phone, tablet) = (Device::new(), Device::new());

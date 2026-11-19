@@ -2,8 +2,8 @@
 //! directory storage: the stand-in cloud of tests, later iCloud Drive.
 //!
 //! A storage is plain remote file storage: named blobs in one folder and its
-//! subdirectories (ADR-0031), no
-//! transactions, no server logic. Everything above it is in the Sync engine.
+//! subdirectories (ADR-0031), no transactions, no server logic. Everything
+//! above it is in the Sync engine.
 
 use std::fmt;
 #[cfg(feature = "native")]
@@ -116,26 +116,17 @@ pub(crate) fn is_plain(segment: &str) -> bool {
 }
 
 #[cfg(feature = "native")]
-/// The segments of `path`, if each is plain, see `Storage`.
-pub(crate) fn segments(path: &str) -> io::Result<Vec<&str>> {
-    let segments: Vec<_> = path.split('/').collect();
-    if segments
-        .iter()
-        .all(|s| !s.is_empty() && !s.starts_with('.'))
-    {
-        Ok(segments)
+/// Checks that every segment of `path`, a blob name or directory path, is
+/// plain, see `Storage`.
+pub(crate) fn check_path(path: &str) -> io::Result<()> {
+    if path.split('/').all(is_plain) {
+        Ok(())
     } else {
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("{path:?} is not a blob name"),
         ))
     }
-}
-
-#[cfg(feature = "native")]
-/// Checks that `path` is a plain blob name or directory path, see `Storage`.
-pub(crate) fn check_path(path: &str) -> io::Result<()> {
-    segments(path).map(drop)
 }
 
 #[cfg(feature = "native")]

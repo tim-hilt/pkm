@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: [SCREEN=filters|filter|favorites] [OUT=path] [WIDTH=1280] [HEIGHT=800] scripts/screenshot-web.sh
+# Usage: [SCREEN=filters|filter|favorites|notes] [OUT=path] [WIDTH=1280] [HEIGHT=800] scripts/screenshot-web.sh
 # Serves the web app's dev server and captures the Gallery with Playwright's
 # Chromium (WebGPU on) into $OUT (default /tmp/wt-web.png). The wasm must be
 # built (`make web-wasm`); `make screenshot DEVICE=web` does it first.

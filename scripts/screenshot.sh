@@ -47,7 +47,8 @@ esac
 
 if [ "$DEVICE" = mac ]; then
     # A locked screen shows no app windows, so there is nothing to capture.
-    if ioreg -n Root -d1 | grep -q '"CGSSessionScreenIsLocked"=Yes'; then
+    # Not `grep -q`: quitting early would fail `ioreg` with SIGPIPE, and so the pipe.
+    if ioreg -n Root -d1 | grep '"CGSSessionScreenIsLocked"=Yes' >/dev/null; then
         echo "error: the screen is locked; unlock it to take a Mac screenshot" >&2
         exit 1
     fi

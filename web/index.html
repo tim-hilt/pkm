@@ -1516,7 +1516,7 @@
         border-right: 1px solid var(--divider);
       }
       .notes-side .tasks-scroll {
-        padding: 0 8px 96px;
+        padding: max(12px, env(safe-area-inset-top)) 8px 96px;
       }
       .notes-detail {
         flex: 1;
@@ -1576,8 +1576,19 @@
         .notes.has-open .notes-side {
           display: none;
         }
+        .notes-bar {
+          /* Right of the shell's sidebar button. */
+          padding-left: calc(max(4px, env(safe-area-inset-left)) + 52px);
+        }
         .notes-bar .tasks-back:first-child {
           visibility: visible;
+        }
+        .notes-side .tasks-scroll {
+          padding-top: var(--shell-top);
+        }
+        /* Without the Tasks' bottom bar. */
+        .notes .tasks-new {
+          bottom: max(20px, env(safe-area-inset-bottom));
         }
       }
       .row-menu {

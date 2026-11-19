@@ -439,9 +439,11 @@ impl Engine {
 
     async fn list_remote(&self) -> io::Result<HashMap<String, String>> {
         match self.ask(Request::ListCloud).await? {
+            // The listing goes into subdirectories (ADR-0031); a Context's
+            // Items are only the blobs at its top.
             Response::Cloud(blobs) => Ok(blobs
                 .into_iter()
-                .filter(|blob| self.merge.accepts(&blob.name))
+                .filter(|blob| !blob.name.contains('/') && self.merge.accepts(&blob.name))
                 .map(|blob| (blob.name, blob.marker))
                 .collect()),
             _ => Err(unexpected()),

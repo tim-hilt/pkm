@@ -17,7 +17,7 @@ const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" s
  */
 export class NotesView {
   readonly element = make("main", "notes");
-  private readonly list = make("ul", "notes-list");
+  private readonly list = make("ul", "tasks-list");
   private readonly empty = make("div", "tasks-empty", [
     make("strong", "", ["No Notes"]),
     make("span", "", ["Tap + to write one."]),

@@ -1,13 +1,13 @@
-// Usage: [SCREEN=filters|filter|favorites] node scripts/screenshot.mjs [out.png] [url-path]
+// Usage: [SCREEN=filters|filter|favorites|notes] node scripts/screenshot.mjs [out.png] [url-path]
 // SCREEN=filters shows the Filters list, SCREEN=filter one Filter's Tasks, SCREEN=favorites the Filters list with many Favorites, over
-// Tasks and Filters it first makes through the UI.
+// Tasks and Filters it first makes through the UI. SCREEN=notes shows Notes it makes so, the last one open.
 // Serves nothing itself: expects the dev server on $PORT (default 3000).
 // Captures the page with Playwright's Chromium, WebGPU on.
 import { chromium } from "playwright-core";
 
 const out = process.argv[2] ?? "/tmp/wt-web.png";
 const screen = process.env.SCREEN ?? "";
-const path = process.argv[3] ?? (screen ? "/tasks" : "/drawings");
+const path = process.argv[3] ?? (screen === "notes" ? "/notes" : screen ? "/tasks" : "/drawings");
 const port = process.env.PORT ?? "3000";
 const width = Number(process.env.WIDTH ?? 1280);
 const height = Number(process.env.HEIGHT ?? 800);
@@ -25,6 +25,7 @@ try {
     await seedFilters(page, screen === "filter");
   }
   if (screen === "favorites") await seedFavorites(page);
+  if (screen === "notes") await seedNotes(page);
   await page.waitForTimeout(1500);
   await page.screenshot({ path: out });
   console.log(out);
@@ -70,5 +71,18 @@ async function seedFavorites(page) {
   for (const title of ["Work", "Home or Garden", "Reading list", "Errands", "Side project"]) {
     await page.click(`.task-open:has-text('${title}')`, { button: "right" });
     await page.click("[role=menuitem]:has-text('Favorite')");
+  }
+}
+
+/** Writes Notes through the UI; the last stays open. */
+async function seedNotes(page) {
+  for (const [title, body] of [
+    ["", "Buy oat milk\nand bread"],
+    ["Reading list", "## Next up\n- `Rust` in **Action**\n> Read a little every day"],
+  ]) {
+    await page.click(".notes .tasks-new");
+    await page.keyboard.type(title);
+    await page.click(".notes-editor .tasks-description");
+    await page.keyboard.type(body);
   }
 }

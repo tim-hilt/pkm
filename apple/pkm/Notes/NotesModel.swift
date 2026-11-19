@@ -31,9 +31,8 @@ final class NotesModel {
     /// Adds an empty Note and opens it, for its Title to be typed.
     func add() {
         guard let note = try? store.create() else { return }
-        openID = note.id
         newID = note.id
-        reload()
+        openID = note.id
     }
 
     /// The Note `id` as last saved.
