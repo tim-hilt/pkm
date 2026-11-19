@@ -301,6 +301,7 @@ export function editTaskDialog(
     subtasks.stopAdding();
     model.releaseImages([...started, ...images.takeAdded()]);
   });
+  title.focus(); // showModal would leave the caret at the start
   return { dialog, refresh: () => subtasks.refresh() };
 }
 
