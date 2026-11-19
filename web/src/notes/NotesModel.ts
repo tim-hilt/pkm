@@ -1,3 +1,4 @@
+import { imageTargets } from "../core/Core";
 import type { NoteFiles } from "./NoteFiles";
 
 /** A Note as a row of the list shows it: a plain copy, as the core's objects must be freed. */
@@ -43,6 +44,8 @@ export class NotesModel {
   newId: string | undefined;
   /** Why the last save failed; none after one that worked. */
   failure: string | undefined;
+  /** The Images the open Note started with or added, for release when it is left. */
+  private releasable: string[] = [];
   /** Called after the rows, the open Note or the failure changed. */
   onChange: () => void = () => {};
 
@@ -80,8 +83,9 @@ export class NotesModel {
   /** Opens the Note `id`, or none; leaving a Note discards it if it is empty. */
   open(id: string | undefined): void {
     if (id === this.openId) return;
-    if (this.openId !== undefined) this.store.discardIfEmpty(this.openId);
+    this.leave();
     this.openId = id;
+    this.releasable = id === undefined ? [] : imageTargets(this.note(id)?.body ?? "");
     if (id !== this.newId) this.newId = undefined;
     this.changed();
   }
@@ -103,8 +107,39 @@ export class NotesModel {
 
   /** Closes the open Note, discarding it if it is empty; the caller reports the change. */
   private closeNote(): void {
-    if (this.openId !== undefined) this.store.discardIfEmpty(this.openId);
+    this.leave();
     this.openId = this.newId = undefined;
+    this.releasable = [];
+  }
+
+  /** Leaving the open Note: releases its Images that no Note shows any more, then discards it if it is empty. */
+  private leave(): void {
+    const id = this.openId;
+    if (id === undefined) return;
+    if (this.releasable.length > 0) this.store.releaseImages(id, this.releasable);
+    this.store.discardIfEmpty(id);
+  }
+
+  /** Keeps a PNG, JPEG, GIF or WebP beside the Note `id`; its reference, or `undefined` for any other format. */
+  addImage(id: string, bytes: Uint8Array): string | undefined {
+    let reference: string;
+    try {
+      reference = this.store.addImage(id, bytes);
+    } catch {
+      return undefined;
+    }
+    if (id === this.openId) this.releasable.push(reference);
+    this.changed();
+    return reference;
+  }
+
+  /** The bytes of the Image `reference` names beside the Note `id`; `undefined` if there is none. */
+  async readImage(id: string, reference: string): Promise<Uint8Array | undefined> {
+    try {
+      return this.store.readImage(id, reference);
+    } catch {
+      return undefined;
+    }
   }
 
   /** The Note `id` as last saved. */
@@ -136,7 +171,10 @@ export class NotesModel {
 
   /** Deletes the Note; the open one closes. */
   delete(id: string): void {
-    if (this.openId === id) this.openId = undefined;
+    if (this.openId === id) {
+      this.openId = undefined;
+      this.releasable = [];
+    }
     this.store.delete(id);
     this.changed();
   }
@@ -180,7 +218,10 @@ export class NotesModel {
       this.folder = path.slice(0, Math.max(path.lastIndexOf("/"), 0));
     }
     // A Note in the Folder is gone with it.
-    if (this.openId !== undefined && !this.note(this.openId)) this.openId = undefined;
+    if (this.openId !== undefined && !this.note(this.openId)) {
+      this.openId = undefined;
+      this.releasable = [];
+    }
     this.changed();
   }
 

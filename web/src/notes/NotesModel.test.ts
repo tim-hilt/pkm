@@ -154,3 +154,96 @@ describe("Folders", () => {
     expect(model.showsFolder).toBe(false);
   });
 });
+
+describe("Images", () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2]);
+  const imagesIn = async (folder: string) =>
+    (await storage.files(folder)).map((file) => file.name).filter((name) => !name.endsWith(".md"));
+
+  /** A Note in `folder` showing a new Image, as a pasted picture would. */
+  const withImage = (folder = "") => {
+    model.select(folder);
+    model.add();
+    const id = model.openId!;
+    const reference = model.addImage(id, png)!;
+    model.save(id, "Pic", `![](${reference})\n`);
+    return { id, reference };
+  };
+
+  it("adds an Image beside the Note, which reads back", async () => {
+    const { id, reference } = withImage();
+    expect(await model.readImage(id, reference)).toEqual(png);
+    await model.saving;
+    expect(await imagesIn("Notes")).toEqual([reference]);
+    expect(model.addImage(id, new Uint8Array([1, 2, 3]))).toBeUndefined();
+  });
+
+  it("reads an Image after a reopen", async () => {
+    const { id, reference } = withImage();
+    await model.saving;
+    const reopened = new NotesModel(await NoteFiles.open(storage));
+    expect(await reopened.readImage(id, reference)).toEqual(png);
+  });
+
+  it("releases an Image removed from the Body when the Note is left", async () => {
+    const { id, reference } = withImage();
+    model.save(id, "Pic", "no picture\n");
+    await model.saving;
+    expect(await imagesIn("Notes")).toEqual([reference]);
+    model.open(undefined);
+    await model.saving;
+    expect(await imagesIn("Notes")).toEqual([]);
+  });
+
+  it("releases an Image the Note started with, and keeps one it still shows", async () => {
+    const kept = withImage();
+    const dropped = model.addImage(kept.id, png)!;
+    model.save(kept.id, "Pic", `![](${kept.reference})\n![](${dropped})\n`);
+    model.open(undefined);
+    model.open(kept.id);
+    model.save(kept.id, "Pic", `![](${kept.reference})\n`);
+    model.open(undefined);
+    await model.saving;
+    expect(await imagesIn("Notes")).toEqual([kept.reference]);
+  });
+
+  it("Deletes a Note's Images with it, and a Folder's with the Folder", async () => {
+    model.addFolder("Work", "");
+    const note = withImage("Work");
+    const loose = withImage("");
+    await model.saving;
+    expect(await imagesIn("Notes/Work")).toEqual([note.reference]);
+    model.deleteFolder("Work");
+    model.delete(loose.id);
+    await model.saving;
+    expect(await imagesIn("Notes/Work")).toEqual([]);
+    expect(await imagesIn("Notes")).toEqual([]);
+  });
+
+  it("Moves the Images only the Note shows, and leaves shared ones", async () => {
+    model.addFolder("Work", "");
+    const own = withImage("");
+    const shared = model.addImage(own.id, png)!;
+    model.save(own.id, "Pic", `![](${own.reference})\n![](${shared})\n`);
+    model.add();
+    const other = model.openId!;
+    model.save(other, "Other", `![](${shared})\n`);
+    model.open(undefined);
+    model.moveNote(own.id, "Work");
+    await model.saving;
+    expect(await imagesIn("Notes/Work")).toEqual([own.reference]);
+    expect(await imagesIn("Notes")).toEqual([shared]);
+  });
+
+  it("Moves Images saved before, with their Folder", async () => {
+    model.addFolder("Work", "");
+    const { reference } = withImage("Work");
+    await model.saving;
+    const reopened = new NotesModel(await NoteFiles.open(storage));
+    reopened.addFolder("Plans", "");
+    reopened.moveFolder("Work", "Plans");
+    await reopened.saving;
+    expect(await imagesIn("Notes/Plans/Work")).toEqual([reference]);
+    expect(await imagesIn("Notes/Work")).toEqual([]);
+  });
+});

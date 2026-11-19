@@ -1,10 +1,13 @@
 import { NoteStore } from "../core/Core";
 import type { FileStorage } from "../storage/FileStorage";
 
+/** What an Image's file name looks like: `<id>.<ext>`. */
+const imageName = /^[a-z0-9]+\.(png|jpg|gif|webp)$/;
+
 const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 
 /**
- * The Notes, kept in the Origin Private File System. The core's store works on
+ * The Notes and the Images beside them, kept in the Origin Private File System. The core's store works on
  * files in memory; this opens it from `Notes/` and saves what it changed, one
  * write after another; a file the store removed is removed. Folders are kept
  * as folders, empty ones too: after each change the ones the store has and
@@ -26,12 +29,19 @@ export class NoteFiles {
     const paths: string[] = [];
     const texts: string[] = [];
     const folders: string[] = [];
+    const images: { path: string; bytes: Uint8Array }[] = [];
     const visit = async (folder: string): Promise<void> => {
       for (const { name } of await storage.files(folder)) {
-        const bytes = name.endsWith(".md") ? await storage.read(`${folder}/${name}`) : undefined;
+        const path = `${folder}/${name}`;
+        const isImage = imageName.test(name);
+        const bytes = isImage || name.endsWith(".md") ? await storage.read(path) : undefined;
         if (!bytes) continue;
-        paths.push(`${folder}/${name}`);
-        texts.push(decode(bytes));
+        // Images are held too, for the store to Move them with their Note.
+        if (isImage) images.push({ path, bytes });
+        else {
+          paths.push(path);
+          texts.push(decode(bytes));
+        }
       }
       for (const name of await storage.folders(folder)) {
         folders.push(`${folder}/${name}`);
@@ -40,6 +50,7 @@ export class NoteFiles {
     };
     await visit(root);
     const store = new NoteStore(paths, texts, folders);
+    for (const { path, bytes } of images) store.loadImage(path, bytes);
     return new NoteFiles(store, storage, new Set(folderPaths(store)));
   }
 

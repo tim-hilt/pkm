@@ -114,6 +114,13 @@ impl NoteStore {
         Self { files, notes }
     }
 
+    /// Puts an Image saved beside the Notes in memory, where Moves reach it;
+    /// `path` is a storage path. Not counted as a change.
+    #[wasm_bindgen(js_name = loadImage)]
+    pub fn load_image(&self, path: &str, bytes: Vec<u8>) {
+        self.files.load_bytes(Path::new(path), bytes);
+    }
+
     /// The paths written or removed since the last call; `fileBytes` holds
     /// what to save, none for a removed one.
     #[wasm_bindgen(js_name = takeChanges)]
@@ -148,6 +155,25 @@ impl NoteStore {
 
     pub fn delete(&self, id: &str) -> Result<(), JsError> {
         self.notes.delete(id).map_err(error)
+    }
+
+    /// Keeps a PNG, JPEG, GIF or WebP beside the Note `id`; its reference.
+    #[wasm_bindgen(js_name = addImage)]
+    pub fn add_image(&self, id: &str, bytes: &[u8]) -> Result<String, JsError> {
+        self.notes.add_image(id, bytes).map_err(error)
+    }
+
+    /// The bytes of the Image `reference` names beside the Note `id`.
+    #[wasm_bindgen(js_name = readImage)]
+    pub fn read_image(&self, id: &str, reference: &str) -> Result<Vec<u8>, JsError> {
+        self.notes.read_image(id, reference).map_err(error)
+    }
+
+    /// Deletes those of the Images `references` beside the Note `id` that no
+    /// Note there shows any more; for leaving it.
+    #[wasm_bindgen(js_name = releaseImages)]
+    pub fn release_images(&self, id: &str, references: Vec<String>) -> Result<(), JsError> {
+        self.notes.release_images(id, &references).map_err(error)
     }
 
     /// Deletes the Note if its Title and Body are empty; for leaving it.

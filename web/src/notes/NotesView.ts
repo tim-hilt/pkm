@@ -1,4 +1,5 @@
 import { button, make, onNewKey } from "../Dom";
+import { DescriptionImages } from "../tasks/DescriptionImages";
 import { DescriptionField } from "../tasks/DescriptionField";
 import { RowMenu } from "../tasks/RowMenu";
 import { confirmButton, modal } from "../tasks/TaskDialogs";
@@ -34,6 +35,8 @@ export class NotesView {
   private readonly folderName = make("span", "notes-folder");
   /** The Note the editor shows; the editor is built again for another. */
   private shown: string | undefined;
+  /** The Images of the Note the editor shows. */
+  private images: DescriptionImages | undefined;
 
   constructor(private readonly model: NotesModel) {
     this.failure.setAttribute("role", "alert");
@@ -108,6 +111,8 @@ export class NotesView {
     const id = this.model.openId;
     if (id === this.shown) return;
     this.shown = id;
+    this.images?.dispose();
+    this.images = undefined;
     const note = id === undefined ? undefined : this.model.note(id);
     if (id === undefined || !note) {
       this.detail.replaceChildren(
@@ -116,7 +121,11 @@ export class NotesView {
       return;
     }
     const save = () => this.model.save(id, title.value, body.value);
-    const body = new DescriptionField(note.body);
+    const images = (this.images = new DescriptionImages({
+      addImage: (bytes) => this.model.addImage(id, bytes),
+      readImage: (reference) => this.model.readImage(id, reference),
+    }));
+    const body = new DescriptionField(note.body, images);
     body.element.setAttribute("aria-label", "Note");
     body.element.dataset.placeholder = "Note";
     const title = new TitleField(note.title, { change: save, submit: () => body.focus() });
