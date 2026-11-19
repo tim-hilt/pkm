@@ -82,6 +82,10 @@ import XCTest
         app.buttons["Filters"].tap()
         app.staticTexts["@backlog"].tap()
         XCTAssertTrue(app.staticTexts["Learn Rust"].waitForExistence(timeout: 5))
+        app.staticTexts["Learn Rust"].tap()  // its sheet shows over the pushed Filter
+        XCTAssertTrue(showsForm(of: "Learn Rust"))
+        app.swipeDown(velocity: .fast)
+        XCTAssertTrue(app.navigationBars["Learn Rust"].waitForNonExistence(timeout: 5))
         app.navigationBars["Backlog"].buttons.element(boundBy: 0).tap()
         XCTAssertTrue(app.staticTexts["@backlog"].waitForExistence(timeout: 5))
     }

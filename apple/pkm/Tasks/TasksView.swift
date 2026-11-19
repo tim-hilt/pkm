@@ -42,17 +42,40 @@ struct TasksView: View {
         .navigationDestination(for: String.self) { id in
             TaskListView(emptyText: "No Open Tasks match.")
                 .addButton("New Task", identifier: "add-task") { isAdding = true }
+                .taskSheets(isAdding: $isAdding, isInFront: true)
                 .navigationTitle(model.filters.first { $0.id == id }?.title ?? "")
                 #if os(iOS)
                     .navigationBarTitleDisplayMode(.inline)
                 #endif
         }
         // Outside the switch, not on the content that swaps between empty and list when a Task is added.
-        .sheet(isPresented: $isAdding) { NewTaskSheet(model: model) }
+        .taskSheets(isAdding: $isAdding, isInFront: model.openFilterPath.isEmpty)
         .sheet(isPresented: $isAddingFilter) { FilterSheet() }
-        .sheet(isPresented: Binding(get: { !model.editing.isEmpty }, set: { if !$0 { model.closeEditing() } })) {
-            EditTaskSheet()
-        }
+    }
+}
+
+extension View {
+    /// The New Task and edit sheets, presented only while this view `isInFront`: on the Mac a
+    /// sheet of a view under a pushed one waits until it shows again.
+    fileprivate func taskSheets(isAdding: Binding<Bool>, isInFront: Bool) -> some View {
+        modifier(TaskSheets(isAdding: isAdding, isInFront: isInFront))
+    }
+}
+
+private struct TaskSheets: ViewModifier {
+    @Environment(TasksModel.self) private var model
+    @Binding var isAdding: Bool
+    let isInFront: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(isPresented: Binding(get: { isInFront && isAdding }, set: { isAdding = $0 })) {
+                NewTaskSheet(model: model)
+            }
+            .sheet(
+                isPresented: Binding(
+                    get: { isInFront && !model.editing.isEmpty }, set: { if !$0 { model.closeEditing() } })
+            ) { EditTaskSheet() }
     }
 }
 
