@@ -562,6 +562,7 @@ dependencies = [
  "pkm-base",
  "pkm-books",
  "pkm-drawing",
+ "pkm-notes",
  "pkm-tasks",
  "quick-xml",
  "ureq",

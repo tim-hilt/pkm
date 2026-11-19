@@ -96,6 +96,7 @@ export class CloudBacking {
   private readonly listeners = new Set<(connection: Connection | undefined) => void>();
   private readonly syncedListeners = new Set<(names: string[]) => void>();
   private readonly tasksListeners = new Set<() => void>();
+  private readonly notesListeners = new Set<() => void>();
   private readonly state: SyncState;
   private readonly books: FileFolder;
   private readonly bookStates: FileFolder;
@@ -103,6 +104,8 @@ export class CloudBacking {
   private readonly bookStateStates: SyncState;
   private readonly tasks: FileFolder;
   private readonly tasksState: SyncState;
+  private readonly notes: FileFolder;
+  private readonly notesState: SyncState;
   private readonly tags: FileFolder;
   private readonly tagsState: SyncState;
   private readonly filters: FileFolder;
@@ -119,6 +122,7 @@ export class CloudBacking {
   private readonly incoming = { known: false };
   private readonly booksIncoming = { known: false };
   private readonly tasksIncoming = { known: false };
+  private readonly notesIncoming = { known: false };
   private readonly tagsIncoming = { known: false };
   private readonly filtersIncoming = { known: false };
 
@@ -136,6 +140,8 @@ export class CloudBacking {
     this.bookStateStates = new SyncState(storage, "BooksState");
     this.tasks = new FileFolder(storage, "Tasks");
     this.tasksState = new SyncState(storage, "Tasks");
+    this.notes = new FileFolder(storage, "Notes");
+    this.notesState = new SyncState(storage, "Notes");
     this.tags = new FileFolder(storage, "Tags");
     this.tagsState = new SyncState(storage, "Tags");
     this.filters = new FileFolder(storage, "Filters");
@@ -162,24 +168,26 @@ export class CloudBacking {
     return data && JSON.parse(new TextDecoder().decode(data));
   }
 
-  /** Throws `ConnectFailed` unless the server takes `credentials` and has (or now has) its `pkm/Drawings`, `pkm/Books`, `pkm/Tasks`, `pkm/Tags` and `pkm/Filters` folders. */
+  /** Throws `ConnectFailed` unless the server takes `credentials` and has (or now has) its `pkm/Drawings`, `pkm/Books`, `pkm/Tasks`, `pkm/Notes`, `pkm/Tags` and `pkm/Filters` folders. */
   private async check({ url, username, password }: Credentials): Promise<void> {
     let drawings;
     let books;
     let tasks;
+    let notes;
     let tags;
     let filters;
     try {
       drawings = this.core.webDav(url, username, password);
       books = this.core.webDavForBooks(url, username, password);
       tasks = this.core.webDavForTasks(url, username, password);
+      notes = this.core.webDavForNotes(url, username, password);
       tags = this.core.webDavForTags(url, username, password);
       filters = this.core.webDavForFilters(url, username, password);
     } catch {
       throw new ConnectFailed("notHttps");
     }
     try {
-      for (const protocol of [drawings, books, tasks, tags, filters]) {
+      for (const protocol of [drawings, books, tasks, notes, tags, filters]) {
         const result = await runExchange(protocol.connect(), this.send);
         if (result.error) throw new ConnectFailed(result.error as ConnectReason);
       }
@@ -187,6 +195,7 @@ export class CloudBacking {
       drawings.free();
       books.free();
       tasks.free();
+      notes.free();
       tags.free();
       filters.free();
     }
@@ -268,6 +277,7 @@ export class CloudBacking {
     this.incoming.known = false;
     this.booksIncoming.known = false;
     this.tasksIncoming.known = false;
+    this.notesIncoming.known = false;
     this.setReport({});
     this.changed();
     this.tabs.post({ kind: "disconnected" });
@@ -311,13 +321,25 @@ export class CloudBacking {
   /** This tab saved Task files: Sync follows, and the other tabs, whose stores don't hold them yet, read them again. */
   tasksSaved(): void {
     this.localChange();
-    this.tabs.post({ kind: "changed", names: [], tasks: true });
+    this.tabs.post({ kind: "changed", names: [], tasks: true, notes: false });
+  }
+
+  /** Calls `listener` whenever a step or another tab changed Note files here. Returns a function that stops it. */
+  onNotesChanged(listener: () => void): () => void {
+    this.notesListeners.add(listener);
+    return () => this.notesListeners.delete(listener);
+  }
+
+  /** This tab saved Note files: Sync follows, and the other tabs, whose stores don't hold them yet, read them again. */
+  notesSaved(): void {
+    this.localChange();
+    this.tabs.post({ kind: "changed", names: [], tasks: false, notes: true });
   }
 
   /** Follows what another tab did: the storage already holds the new connection (or none). */
   private async heard(message: TabMessage): Promise<void> {
     if (message.kind === "changed") {
-      this.tell(message.names, message.tasks);
+      this.tell(message.names, message.tasks, message.notes);
       return;
     }
     const saved = message.kind === "connected" ? await this.saved() : undefined;
@@ -326,6 +348,7 @@ export class CloudBacking {
     this.incoming.known = false;
     this.booksIncoming.known = false;
     this.tasksIncoming.known = false;
+    this.notesIncoming.known = false;
     this.setReport({});
     if (saved) this.startLoop();
     this.changed();
@@ -387,6 +410,11 @@ export class CloudBacking {
       credentials.username,
       credentials.password,
     );
+    const notesProtocol = this.core.webDavForNotes(
+      credentials.url,
+      credentials.username,
+      credentials.password,
+    );
     const tagsProtocol = this.core.webDavForTags(
       credentials.url,
       credentials.username,
@@ -400,7 +428,7 @@ export class CloudBacking {
     const now = Date.now();
     // One step per folder, in order, all against the same server: Drawings,
     // the Book Files, then their state, which the core's Books merge merges,
-    // the Task files, the Tags file and the Filters.
+    // the Task files, the Note files, the Tags file and the Filters.
     const plans = [
       {
         run: this.core.syncRun(now),
@@ -435,6 +463,14 @@ export class CloudBacking {
         reports: "tasks" as const,
       },
       {
+        run: this.core.syncRunForNotes(now),
+        protocol: notesProtocol,
+        files: this.notes,
+        state: this.notesState,
+        incoming: this.notesIncoming,
+        reports: "notes" as const,
+      },
+      {
         run: this.core.syncRunForTags(now),
         protocol: tagsProtocol,
         files: this.tags,
@@ -454,6 +490,7 @@ export class CloudBacking {
     const results: StepResult[] = [];
     const changed: string[] = [];
     let tasksChanged = false;
+    let notesChanged = false;
     let finished = 0;
     let planned = 0;
     try {
@@ -479,6 +516,7 @@ export class CloudBacking {
         results.push(result);
         if (reports === "drawings") changed.push(...result.changed);
         if (reports === "tasks" && result.changed.length > 0) tasksChanged = true;
+        if (reports === "notes" && result.changed.length > 0) notesChanged = true;
         if (latest.seen) {
           finished += latest.done;
           planned += latest.total;
@@ -499,6 +537,7 @@ export class CloudBacking {
       drawingsProtocol.free();
       booksProtocol.free();
       tasksProtocol.free();
+      notesProtocol.free();
       tagsProtocol.free();
       filtersProtocol.free();
     }
@@ -518,16 +557,17 @@ export class CloudBacking {
       progress: undefined,
       lastSync: wentThrough ? Date.now() : this.report.lastSync,
     });
-    if (changed.length > 0 || tasksChanged) {
-      this.tell(changed, tasksChanged);
-      this.tabs.post({ kind: "changed", names: changed, tasks: tasksChanged });
+    if (changed.length > 0 || tasksChanged || notesChanged) {
+      this.tell(changed, tasksChanged, notesChanged);
+      this.tabs.post({ kind: "changed", names: changed, tasks: tasksChanged, notes: notesChanged });
     }
   }
 
   /** Tells the listeners what a step, here or in another tab, changed. */
-  private tell(names: string[], tasks: boolean): void {
+  private tell(names: string[], tasks: boolean, notes: boolean): void {
     if (names.length > 0) for (const listener of this.syncedListeners) listener(names);
     if (tasks) for (const listener of this.tasksListeners) listener();
+    if (notes) for (const listener of this.notesListeners) listener();
   }
 
   private setReport(report: SyncReport): void {

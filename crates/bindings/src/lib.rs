@@ -14,9 +14,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use pkm_base::item_id::ItemId;
 use pkm_base::random::Entropy;
 use pkm_cloud::{
-    BookStates, Books, ConnectError, DirStorage, Drawings, Filters, GoogleDriveStorage, Observer,
-    OneDriveStorage, Progress, Status, Storage, SyncFolder, SyncLoop, SyncState, TagsFile,
-    Tasks as TaskFiles, Timing, WebDavStorage,
+    BookStates, Books, ConnectError, DirStorage, Drawings, Filters, GoogleDriveStorage,
+    Notes as NoteFiles, Observer, OneDriveStorage, Progress, Status, Storage, SyncFolder, SyncLoop,
+    SyncState, TagsFile, Tasks as TaskFiles, Timing, WebDavStorage,
 };
 use pkm_drawing::scene::{FillPattern, LineStyle};
 use pkm_drawing::{
@@ -46,13 +46,14 @@ pub enum ConnectError {
 
 /// Connects to the WebDAV server at `url` as `username` with `password`, which
 /// checks the server and creates the `pkm` folder under `url`, and the
-/// folders of Drawings, Books, Tasks, Tags and Filters in it, if they are missing. Blocks while it talks to the
+/// folders of Drawings, Books, Tasks, Notes, Tags and Filters in it, if they are missing. Blocks while it talks to the
 /// server, so call it off the main thread. Keeps nothing: the client keeps the credentials.
 #[uniffi::export]
 pub fn connect_webdav(url: String, username: String, password: String) -> Result<(), ConnectError> {
     WebDavStorage::connect(&url, &username, &password, Drawings::FOLDER)?;
     WebDavStorage::connect(&url, &username, &password, Books::FOLDER)?;
     WebDavStorage::connect(&url, &username, &password, TaskFiles::FOLDER)?;
+    WebDavStorage::connect(&url, &username, &password, NoteFiles::FOLDER)?;
     WebDavStorage::connect(&url, &username, &password, TagsFile::FOLDER)?;
     WebDavStorage::connect(&url, &username, &password, Filters::FOLDER).map(drop)
 }
@@ -266,6 +267,10 @@ pub trait SyncObserver: Send + Sync {
     /// The Tasks list should read again. Also on the Sync loop's thread.
     fn tasks_changed(&self, names: Vec<String>);
 
+    /// Sync wrote or deleted these Note files (names without `.md`). The
+    /// Notes lists should read again. Also on the Sync loop's thread.
+    fn notes_changed(&self, names: Vec<String>);
+
     /// Items are being transferred: `done` of `total`. `total` is 0 once
     /// the step is over. Also on the Sync loop's thread.
     fn progress(&self, done: u32, total: u32);
@@ -307,6 +312,8 @@ impl Observer for ForeignObserver {
             self.0.changed(names);
         } else if folder == Books::FOLDER {
             self.0.books_changed(names);
+        } else if folder == NoteFiles::FOLDER {
+            self.0.notes_changed(names);
         } else if [TaskFiles::FOLDER, TagsFile::FOLDER, Filters::FOLDER].contains(&folder) {
             // The Tags and Filters show in the Tasks.
             self.0.tasks_changed(names);
@@ -344,6 +351,7 @@ pub struct SyncDirectories {
     pub drawings: String,
     pub books: String,
     pub tasks: String,
+    pub notes: String,
     /// What Sync remembers: outside the Context folders, never Synced itself.
     pub state: String,
 }
@@ -526,6 +534,7 @@ struct ContextStorages {
     drawings: Arc<dyn Storage>,
     books: Arc<dyn Storage>,
     tasks: Arc<dyn Storage>,
+    notes: Arc<dyn Storage>,
     tags: Arc<dyn Storage>,
     filters: Arc<dyn Storage>,
 }
@@ -537,6 +546,7 @@ impl ContextStorages {
             drawings: open(Drawings::FOLDER)?,
             books: open(Books::FOLDER)?,
             tasks: open(TaskFiles::FOLDER)?,
+            notes: open(NoteFiles::FOLDER)?,
             tags: open(TagsFile::FOLDER)?,
             filters: open(Filters::FOLDER)?,
         })
@@ -544,21 +554,22 @@ impl ContextStorages {
 
     /// The cloud folder of each Sync folder, in `start_contexts`' order: the
     /// one list both starting and Reconnecting take them from.
-    fn per_folder(self) -> [Arc<dyn Storage>; 6] {
+    fn per_folder(self) -> [Arc<dyn Storage>; 7] {
         let Self {
             drawings,
             books,
             tasks,
+            notes,
             tags,
             filters,
         } = self;
-        [drawings, books.clone(), books, tasks, tags, filters]
+        [drawings, books.clone(), books, tasks, notes, tags, filters]
     }
 }
 
 impl CloudSync {
     /// Syncs the Context folders: Drawings, both halves of Books (the Files
-    /// and their hidden state), the Task files, the Tags file in `Tags/` and the Filters in
+    /// and their hidden state), the Task files, the Note files, the Tags file in `Tags/` and the Filters in
     /// `Filters/` beside the Tasks folder, each
     /// with its state in a folder of its own in `state_directory` and its
     /// cloud folder.
@@ -576,6 +587,8 @@ impl CloudSync {
             .map_err(|_| SyncStartError::StateUnavailable)?;
         let tasks_state = SyncState::open(state_root.join(TaskFiles::FOLDER))
             .map_err(|_| SyncStartError::StateUnavailable)?;
+        let notes_state = SyncState::open(state_root.join(NoteFiles::FOLDER))
+            .map_err(|_| SyncStartError::StateUnavailable)?;
         let tags_state = SyncState::open(state_root.join(TagsFile::FOLDER))
             .map_err(|_| SyncStartError::StateUnavailable)?;
         let filters_state = SyncState::open(state_root.join(Filters::FOLDER))
@@ -590,6 +603,7 @@ impl CloudSync {
             books_storage,
             book_states_storage,
             tasks_storage,
+            notes_storage,
             tags_storage,
             filters_storage,
         ] = storages.per_folder();
@@ -624,6 +638,13 @@ impl CloudSync {
                 state: tasks_state,
                 storage: tasks_storage,
                 merge: Arc::new(TaskFiles),
+            },
+            SyncFolder {
+                name: NoteFiles::FOLDER.into(),
+                dir: directories.notes.into(),
+                state: notes_state,
+                storage: notes_storage,
+                merge: Arc::new(NoteFiles),
             },
             SyncFolder {
                 name: TagsFile::FOLDER.into(),

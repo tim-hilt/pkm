@@ -16,6 +16,8 @@ pkm-drawing = { path = "../drawing" }
 pkm-books = { path = "../books" }
 # The merge of Task files.
 pkm-tasks = { path = "../tasks" }
+# The merge of Note files.
+pkm-notes = { path = "../notes" }
 # The PROPFIND answers of a WebDAV server.
 quick-xml = "0.42"
 

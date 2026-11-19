@@ -17,41 +17,44 @@ export class NoteFiles {
   /** The writes in progress: each save waits for the one before. */
   private writing: Promise<void> = Promise.resolve();
 
+  /** Called after files were written or removed, for Sync to follow. */
+  onSaved: () => void = () => {};
+
   private constructor(
-    readonly store: NoteStore,
+    private current: NoteStore,
     private readonly storage: FileStorage,
     /** The Folders the storage holds, as the store's paths. */
     private held: Set<string>,
   ) {}
 
   static async open(storage: FileStorage): Promise<NoteFiles> {
-    const root = NoteStore.folder();
-    const paths: string[] = [];
-    const texts: string[] = [];
-    const folders: string[] = [];
-    const images: { path: string; bytes: Uint8Array }[] = [];
-    const visit = async (folder: string): Promise<void> => {
-      for (const { name } of await storage.files(folder)) {
-        const path = `${folder}/${name}`;
-        const isImage = imageName.test(name);
-        const bytes = isImage || name.endsWith(".md") ? await storage.read(path) : undefined;
-        if (!bytes) continue;
-        // Images are held too, for the store to Move them with their Note.
-        if (isImage) images.push({ path, bytes });
-        else {
-          paths.push(path);
-          texts.push(decode(bytes));
-        }
-      }
-      for (const name of await storage.folders(folder)) {
-        folders.push(`${folder}/${name}`);
-        await visit(`${folder}/${name}`);
-      }
-    };
-    await visit(root);
-    const store = new NoteStore(paths, texts, folders);
-    for (const { path, bytes } of images) store.loadImage(path, bytes);
+    const store = await load(storage);
     return new NoteFiles(store, storage, new Set(folderPaths(store)));
+  }
+
+  /** The store; a new one after `reload`. */
+  get store(): NoteStore {
+    return this.current;
+  }
+
+  /**
+   * Starts over from what the files hold now, after Sync wrote or deleted
+   * some. What the store changed is saved first; the old store is freed.
+   */
+  async reload(): Promise<void> {
+    for (;;) {
+      const saved = this.saveAll();
+      await saved;
+      const reloaded = await load(this.storage);
+      // What the store changed while the files were read may be missing from them.
+      if (this.saveAll() === saved) {
+        this.current.free();
+        this.current = reloaded;
+        this.held = new Set(folderPaths(reloaded));
+        return;
+      }
+      reloaded.free();
+    }
   }
 
   /** Saves what the store changed since the last call. Rejects if a write failed; later calls go on. */
@@ -74,9 +77,16 @@ export class NoteFiles {
       // After the files, which a Moved Folder's old place held until now.
       for (const path of gone) await this.storage.remove(`${root}/${path}`);
       for (const path of made) await this.storage.makeFolder(`${root}/${path}`);
+      this.onSaved();
     });
     this.writing = written.catch(() => {});
     return written;
+  }
+
+  /** Saves what changed; the writes then in progress, the same as before if there was nothing to save. */
+  private saveAll(): Promise<void> {
+    void this.save().catch(() => {});
+    return this.writing;
   }
 }
 
@@ -87,4 +97,35 @@ function folderPaths(store: NoteStore): string[] {
     row.free();
     return path;
   });
+}
+
+/** A store of what the files in `Notes/` hold now. */
+async function load(storage: FileStorage): Promise<NoteStore> {
+  const root = NoteStore.folder();
+  const paths: string[] = [];
+  const texts: string[] = [];
+  const folders: string[] = [];
+  const images: { path: string; bytes: Uint8Array }[] = [];
+  const visit = async (folder: string): Promise<void> => {
+    for (const { name } of await storage.files(folder)) {
+      const path = `${folder}/${name}`;
+      const isImage = imageName.test(name);
+      const bytes = isImage || name.endsWith(".md") ? await storage.read(path) : undefined;
+      if (!bytes) continue;
+      // Images are held too, for the store to Move them with their Note.
+      if (isImage) images.push({ path, bytes });
+      else {
+        paths.push(path);
+        texts.push(decode(bytes));
+      }
+    }
+    for (const name of await storage.folders(folder)) {
+      folders.push(`${folder}/${name}`);
+      await visit(`${folder}/${name}`);
+    }
+  };
+  await visit(root);
+  const store = new NoteStore(paths, texts, folders);
+  for (const { path, bytes } of images) store.loadImage(path, bytes);
+  return store;
 }

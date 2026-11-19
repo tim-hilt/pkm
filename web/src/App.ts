@@ -75,7 +75,11 @@ export async function startApp(
       close: () => navigation.closeItem(),
     }).element,
   );
-  shell.pane("notes").append(new NotesView(new NotesModel(await NoteFiles.open(storage))).element);
+  const noteFiles = await NoteFiles.open(storage);
+  const notes = new NotesModel(noteFiles);
+  noteFiles.onSaved = () => cloud.notesSaved();
+  cloud.onNotesChanged(() => void notes.syncDidChange());
+  shell.pane("notes").append(new NotesView(notes).element);
   const pane = shell.pane("drawings");
 
   let canvas: { drawing: OpenDrawing; stop: () => void } | undefined;

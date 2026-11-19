@@ -274,6 +274,8 @@ export interface Core {
   webDavForBooks(url: string, username: string, password: string): WebDavProtocol;
   /** The WebDAV protocol for the server's Tasks folder; throws if the URL is not https. Free it when done. */
   webDavForTasks(url: string, username: string, password: string): WebDavProtocol;
+  /** The WebDAV protocol for the server's Notes folder; throws if the URL is not https. Free it when done. */
+  webDavForNotes(url: string, username: string, password: string): WebDavProtocol;
   /** The WebDAV protocol for the server's Tags folder; throws if the URL is not https. Free it when done. */
   webDavForTags(url: string, username: string, password: string): WebDavProtocol;
   /** The WebDAV protocol for the server's Filters folder; throws if the URL is not https. Free it when done. */
@@ -286,6 +288,8 @@ export interface Core {
   syncRunForBookStates(nowMs: number): SyncRun;
   /** A Sync step over the Task files, merged field by field. Free it when done. */
   syncRunForTasks(nowMs: number): SyncRun;
+  /** A Sync step over the Note files, merged field by field, the Body by line. Free it when done. */
+  syncRunForNotes(nowMs: number): SyncRun;
   /** A Sync step over the Tags file, merged per Tag. Free it when done. */
   syncRunForTags(nowMs: number): SyncRun;
   /** A Sync step over the Filter files, merged field by field and their order per Task. Free it when done. */
@@ -321,6 +325,8 @@ export async function loadCore(
       WebDavProtocol.newForBooks(url, username, password),
     webDavForTasks: (url, username, password) =>
       WebDavProtocol.newForTasks(url, username, password),
+    webDavForNotes: (url, username, password) =>
+      WebDavProtocol.newForNotes(url, username, password),
     webDavForTags: (url, username, password) => WebDavProtocol.newForTags(url, username, password),
     webDavForFilters: (url, username, password) =>
       WebDavProtocol.newForFilters(url, username, password),
@@ -328,6 +334,7 @@ export async function loadCore(
     syncRunForBooks: (nowMs) => SyncRun.newForBooks(nowMs),
     syncRunForBookStates: (nowMs) => SyncRun.newForBookStates(nowMs),
     syncRunForTasks: (nowMs) => SyncRun.newForTasks(nowMs),
+    syncRunForNotes: (nowMs) => SyncRun.newForNotes(nowMs),
     syncRunForTags: (nowMs) => SyncRun.newForTags(nowMs),
     syncRunForFilters: (nowMs) => SyncRun.newForFilters(nowMs),
     syncSchedule: (now) => new SyncSchedule(now),

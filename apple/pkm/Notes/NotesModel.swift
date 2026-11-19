@@ -221,6 +221,13 @@ final class NotesModel {
         reloadRows()
     }
 
+    /// Sync wrote or deleted Note files: the tree and lists show what is there now. The open Note
+    /// stays as it is, which the editor holds.
+    func syncDidChange() {
+        reloadTree()
+        reloadRows()
+    }
+
     private func reloadTree() {
         tree = (try? store.folders()) ?? []
     }

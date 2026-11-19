@@ -637,7 +637,8 @@ mod tests {
 
         use crate::{
             Blob, BookStates, Books as BookFiles, ContextFolder, DirStorage, Drawings, Filters,
-            Merge, Progress, Storage, SyncState, TagsFile, Tasks, sync_context_folders, sync_step,
+            Merge, Notes as NoteFiles, Progress, Storage, SyncState, TagsFile, Tasks,
+            sync_context_folders, sync_step,
         };
         use pkm_base::json;
         use pkm_books::library::Library;
@@ -767,6 +768,8 @@ mod tests {
             books: Scratch,
             /// The Tasks Context: Task files.
             tasks: Scratch,
+            /// The Notes Context: Note files.
+            note_files: Scratch,
         }
 
         impl Device {
@@ -776,6 +779,7 @@ mod tests {
                 let tasks = Scratch::new("tasks");
                 Device {
                     tasks,
+                    note_files: Scratch::new("notes"),
                     drawings: Scratch::new("drawings"),
                     state: Scratch::new("state"),
                     notes: Notes::new(),
@@ -876,6 +880,28 @@ mod tests {
                 }
                 changed.sort();
                 changed
+            }
+
+            fn write_note(&self, file: &str, bytes: &[u8]) {
+                fs::write(self.note_files.0.join(file), bytes).unwrap();
+            }
+
+            fn read_note(&self, file: &str) -> Option<String> {
+                fs::read_to_string(self.note_files.0.join(file)).ok()
+            }
+
+            /// One Sync step over the Notes Context.
+            fn sync_notes(&self, cloud: &Cloud) {
+                let state = SyncState::open(self.state.0.join("Notes")).unwrap();
+                let folders = [ContextFolder {
+                    dir: &self.note_files.0,
+                    state: &state,
+                    storage: &cloud.storage,
+                    merge: Arc::new(NoteFiles),
+                }];
+                for outcome in sync_context_folders(&folders, &AtomicBool::new(false), &|_| {}) {
+                    assert!(outcome.error.is_none(), "{:?}", outcome.error);
+                }
             }
 
             /// One Sync step over the Books Context: the Book Files and their state
@@ -2909,6 +2935,102 @@ mod tests {
             assert!(tablet.read_task("aaaaaaaaaaaa.md").is_some());
             assert_eq!(tablet.read_book("Book.pdf").unwrap(), b"%PDF-one");
             assert_eq!(tablet.files(), ["Sketch.excalidraw"]);
+        }
+
+        // ---- Notes (ADR-0020, ADR-0032) ----
+
+        fn note(title: &str, body: &str, updated: &str) -> Vec<u8> {
+            format!("---\nid: aaaaaaaaaaaa\ntitle: {title}\nupdated: {updated}\n---\n{body}")
+                .into_bytes()
+        }
+
+        /// Both Devices have the Note, as of the last Sync.
+        fn synced_note(cloud: &Cloud, phone: &Device, tablet: &Device, body: &str) {
+            phone.write_note(
+                "aaaaaaaaaaaa.md",
+                &note("Plan", body, "2024-01-01T00:00:00Z"),
+            );
+            phone.sync_notes(cloud);
+            tablet.sync_notes(cloud);
+        }
+
+        #[test]
+        fn a_new_note_reaches_the_other_device() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            synced_note(&cloud, &phone, &tablet, "one\n");
+            assert_eq!(
+                tablet.read_note("aaaaaaaaaaaa.md").unwrap(),
+                text(note("Plan", "one\n", "2024-01-01T00:00:00Z"))
+            );
+        }
+
+        #[test]
+        fn body_edits_on_different_lines_are_both_kept() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            synced_note(&cloud, &phone, &tablet, "one\ntwo\nthree\n");
+            phone.write_note(
+                "aaaaaaaaaaaa.md",
+                &note("Plan", "ONE\ntwo\nthree\n", "2024-01-02T00:00:00Z"),
+            );
+            tablet.write_note(
+                "aaaaaaaaaaaa.md",
+                &note("Plan", "one\ntwo\nTHREE\n", "2024-01-03T00:00:00Z"),
+            );
+            phone.sync_notes(&cloud);
+            tablet.sync_notes(&cloud);
+            phone.sync_notes(&cloud);
+
+            let merged = phone.read_note("aaaaaaaaaaaa.md").unwrap();
+            assert!(merged.ends_with("---\nONE\ntwo\nTHREE\n"), "{merged}");
+            assert_eq!(tablet.read_note("aaaaaaaaaaaa.md"), Some(merged));
+        }
+
+        #[test]
+        fn the_same_lines_edited_on_both_take_the_newer_side() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            synced_note(&cloud, &phone, &tablet, "one\n");
+            phone.write_note(
+                "aaaaaaaaaaaa.md",
+                &note("Plan", "uno\n", "2024-01-03T00:00:00Z"),
+            );
+            tablet.write_note(
+                "aaaaaaaaaaaa.md",
+                &note("Plan", "eins\n", "2024-01-02T00:00:00Z"),
+            );
+            phone.sync_notes(&cloud);
+            tablet.sync_notes(&cloud);
+            phone.sync_notes(&cloud);
+
+            for device in [&phone, &tablet] {
+                let merged = device.read_note("aaaaaaaaaaaa.md").unwrap();
+                assert!(merged.ends_with("---\nuno\n"), "{merged}");
+            }
+        }
+
+        #[test]
+        fn titles_changed_on_both_devices_take_the_newer() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            synced_note(&cloud, &phone, &tablet, "one\n");
+            phone.write_note(
+                "aaaaaaaaaaaa.md",
+                &note("Roadmap", "one\n", "2024-01-02T00:00:00Z"),
+            );
+            tablet.write_note(
+                "aaaaaaaaaaaa.md",
+                &note("Agenda", "one\n", "2024-01-03T00:00:00Z"),
+            );
+            phone.sync_notes(&cloud);
+            tablet.sync_notes(&cloud);
+            phone.sync_notes(&cloud);
+
+            for device in [&phone, &tablet] {
+                let merged = device.read_note("aaaaaaaaaaaa.md").unwrap();
+                assert!(merged.contains("title: Agenda\n"), "{merged}");
+            }
         }
 
         /// A Device with a Tasks store, its Tags beside it as on a real Device.

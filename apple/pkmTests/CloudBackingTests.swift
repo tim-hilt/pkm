@@ -238,8 +238,9 @@ import Testing
             drawings: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
             books: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
             tasks: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
+            notes: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
             stateDirectory: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
-            onChanged: { _ in }, onBooksChanged: { _ in }, onTasksChanged: { _ in })
+            onChanged: { _ in }, onBooksChanged: { _ in }, onTasksChanged: { _ in }, onNotesChanged: { _ in })
 
         #expect(cloud.status == .accessLost)
         #expect(cloud.hasProblem)
@@ -337,7 +338,9 @@ import Testing
             drawings: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
             books: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
             tasks: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
-            stateDirectory: state.directory, onChanged: { _ in }, onBooksChanged: { _ in }, onTasksChanged: { _ in })
+            notes: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
+            stateDirectory: state.directory,
+            onChanged: { _ in }, onBooksChanged: { _ in }, onTasksChanged: { _ in }, onNotesChanged: { _ in })
 
         try await cloud.connect(url: "https://dav.example.com", username: "me", password: "pw")
 
@@ -353,7 +356,9 @@ import Testing
             drawings: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
             books: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
             tasks: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
-            stateDirectory: state.directory, onChanged: { _ in }, onBooksChanged: { _ in }, onTasksChanged: { _ in })
+            notes: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
+            stateDirectory: state.directory,
+            onChanged: { _ in }, onBooksChanged: { _ in }, onTasksChanged: { _ in }, onNotesChanged: { _ in })
 
         try await cloud.reconnect(password: "new")
 

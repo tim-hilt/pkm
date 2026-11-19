@@ -8,6 +8,7 @@
 mod folder;
 mod search;
 mod store;
+pub mod sync;
 
 pub use folder::{Counts, Folder, FolderError};
 pub use pkm_base::files::{DiskFiles, Files, MemoryFiles};

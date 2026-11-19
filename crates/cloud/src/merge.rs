@@ -5,6 +5,7 @@
 use pkm_base::tags::Tags;
 use pkm_books::sync as books;
 use pkm_drawing::{are_same_drawing, is_drawing, merge_drawings};
+use pkm_notes::sync as notes;
 use pkm_tasks::sync::{self as tasks, filters};
 
 /// The merge hook of one Context folder.
@@ -204,6 +205,42 @@ impl Merge for Tasks {
 
     fn accepts(&self, file: &str) -> bool {
         tasks::accepts(file)
+    }
+
+    fn transfers_unparseable(&self) -> bool {
+        false
+    }
+}
+
+/// Notes: `<id>.md` files, merged three-way, the Body by line (ADR-0032). A
+/// file that isn't a Note is left where it is, and two versions that can't
+/// merge are not both kept: one Note has one file.
+pub struct Notes;
+
+impl Notes {
+    /// The Context's folder on the Device and in the cloud (`pkm/Notes`).
+    pub const FOLDER: &str = pkm_notes::Notes::FOLDER;
+}
+
+impl Merge for Notes {
+    fn extension(&self) -> &str {
+        ".md"
+    }
+
+    fn merge(&self, base: Option<&[u8]>, local: &[u8], remote: &[u8]) -> Option<Vec<u8>> {
+        notes::merge(base, local, remote)
+    }
+
+    fn is_item(&self, bytes: &[u8]) -> bool {
+        notes::is_item(bytes)
+    }
+
+    fn same_item(&self, a: &[u8], b: &[u8]) -> Option<bool> {
+        notes::same_item(a, b)
+    }
+
+    fn accepts(&self, file: &str) -> bool {
+        notes::accepts(file)
     }
 
     fn transfers_unparseable(&self) -> bool {

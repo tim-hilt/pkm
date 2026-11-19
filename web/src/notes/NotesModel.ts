@@ -264,6 +264,13 @@ export class NotesModel {
     this.changed();
   }
 
+  /** Sync or another tab wrote or deleted Note files: reads them again. */
+  async syncDidChange(): Promise<void> {
+    await this.files.reload();
+    this.reload();
+    this.onChange();
+  }
+
   /** Saves what changed, then tells the view. */
   private changed(): void {
     this.reload();
