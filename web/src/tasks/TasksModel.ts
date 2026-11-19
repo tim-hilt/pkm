@@ -364,11 +364,7 @@ export class TasksModel {
     const quickAdd = new TaskQuickAdd();
     const list = this.shownList;
     const tags = list.kind === "filter" ? this.files.store.requiredTags(list.id) : [];
-    if (tags.length > 0) {
-      const text = tags.map((t) => `@${t} `).join("");
-      quickAdd.replace(0, 0, text);
-      quickAdd.moveCursor(text.length);
-    }
+    if (tags.length > 0) quickAdd.replace(0, 0, tags.map((t) => `@${t} `).join(""));
     return quickAdd;
   }
 
