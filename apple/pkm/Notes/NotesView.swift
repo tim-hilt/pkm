@@ -334,7 +334,7 @@ private struct NoteEditor: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 TitleField(text: $title, autofocus: model.newID == id)
-                MarkdownEditor(text: $text, placeholder: "Note")
+                MarkdownEditor(text: $text, placeholder: "Note", images: model.images(for: id))
                     .accessibilityIdentifier("note-body")
             }
             .padding()

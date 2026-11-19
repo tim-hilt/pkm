@@ -171,4 +171,61 @@ import Testing
         #expect(gone.openID == nil)
         #expect(gone.pushedPath.isEmpty)
     }
+
+    // MARK: Images
+
+    private var png: Data { TestImages.png(width: 2, height: 2, color: { _, _ in TestImages.blue }) }
+
+    private func fileExists(_ reference: String, in folder: String = "") -> Bool {
+        FileManager.default.fileExists(atPath: root.appending(path: "Notes/\(folder)/\(reference)").path)
+    }
+
+    @Test func aPictureIsKeptBesideItsNoteAndReadBack() throws {
+        let model = try openModel()
+        let work = try model.addFolder(named: "Work", in: "")
+        model.add()
+        let id = try #require(model.openID)
+        let reference = try #require(model.addImage(png, to: id))
+        #expect(fileExists(reference, in: work))
+        #expect(model.image(reference, of: id) == png)
+        #expect(model.addImage(Data("text".utf8), to: id) == nil)
+        #expect(model.image("missing.png", of: id) == nil)
+    }
+
+    @Test func anImageRemovedFromTheBodyIsDeletedOnLeavingTheNote() throws {
+        let model = try openModel()
+        model.add()
+        let id = try #require(model.openID)
+        let kept = try #require(model.addImage(png, to: id))
+        let removed = try #require(model.addImage(png, to: id))
+        model.save(id: id, title: "", body: "![](\(kept))\n\n![](\(removed))")
+        model.save(id: id, title: "", body: "![](\(kept))")
+        #expect(fileExists(removed), "released on leaving, not before")
+        model.openID = nil
+        #expect(fileExists(kept))
+        #expect(!fileExists(removed))
+    }
+
+    @Test func anImageRemovedInEarlierVisitIsReleasedOnTheNextLeave() throws {
+        let model = try openModel()
+        model.add()
+        let id = try #require(model.openID)
+        let image = try #require(model.addImage(png, to: id))
+        model.save(id: id, title: "", body: "![](\(image))")
+        model.openID = nil
+        model.openID = id
+        model.save(id: id, title: "", body: "text")
+        model.openID = nil
+        #expect(!fileExists(image))
+    }
+
+    @Test func deletingANoteDeletesItsImages() throws {
+        let model = try openModel()
+        model.add()
+        let id = try #require(model.openID)
+        let image = try #require(model.addImage(png, to: id))
+        model.save(id: id, title: "", body: "![](\(image))")
+        model.delete(id: id)
+        #expect(!fileExists(image))
+    }
 }

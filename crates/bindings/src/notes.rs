@@ -134,6 +134,21 @@ impl NoteStore {
         Ok(self.0.delete(&id)?)
     }
 
+    /// Keeps `bytes`, a PNG, JPEG, GIF or WebP, beside the Note; the reference for its Body.
+    pub fn add_image(&self, id: String, bytes: Vec<u8>) -> Result<String, NotesError> {
+        Ok(self.0.add_image(&id, &bytes)?)
+    }
+
+    /// The bytes of the Image `reference` names beside the Note.
+    pub fn read_image(&self, id: String, reference: String) -> Result<Vec<u8>, NotesError> {
+        Ok(self.0.read_image(&id, &reference)?)
+    }
+
+    /// Deletes those of the `references` beside the Note that no Note shows any more; for leaving it.
+    pub fn release_images(&self, id: String, references: Vec<String>) -> Result<(), NotesError> {
+        Ok(self.0.release_images(&id, &references)?)
+    }
+
     /// Deletes the Note if its Title and Body are empty; for leaving it.
     pub fn discard_if_empty(&self, id: String) -> Result<(), NotesError> {
         Ok(self.0.discard_if_empty(&id)?)

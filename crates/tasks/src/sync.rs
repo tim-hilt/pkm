@@ -14,8 +14,9 @@
 
 pub mod filters;
 
-use crate::store::{is_image, is_image_file, is_task};
+use crate::store::is_task;
 use pkm_base::front_matter::{Document, Value};
+use pkm_base::images::{is_image, is_image_file};
 use std::cmp::Ordering;
 
 const UPDATED: &str = "updated";

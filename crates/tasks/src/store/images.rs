@@ -2,28 +2,13 @@
 //! a Description as `![](<id>.<ext>)`.
 
 use super::Tasks;
+use pkm_base::images::{extension, is_image_file};
 use pkm_base::item_id::ItemId;
 use pkm_base::markdown::image_targets;
 use pkm_base::random::Entropy;
 use std::collections::HashSet;
 use std::io;
 use std::path::PathBuf;
-
-/// The extension of a PNG, JPEG, GIF or WebP by its first bytes; none for
-/// anything else, which the client converts to PNG first.
-fn extension(bytes: &[u8]) -> Option<&'static str> {
-    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        Some("png")
-    } else if bytes.starts_with(b"\xff\xd8\xff") {
-        Some("jpg")
-    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
-        Some("gif")
-    } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
-        Some("webp")
-    } else {
-        None
-    }
-}
 
 impl Tasks {
     /// Keeps `bytes`, a PNG, JPEG, GIF or WebP, as they are beside the Tasks;
@@ -72,18 +57,6 @@ impl Tasks {
     fn image_path(&self, reference: &str) -> Option<PathBuf> {
         is_image_file(reference).then(|| self.root.join(reference))
     }
-}
-
-/// Whether `bytes` are a PNG, JPEG, GIF or WebP.
-pub(crate) fn is_image(bytes: &[u8]) -> bool {
-    extension(bytes).is_some()
-}
-
-/// Whether a file name is an Image's: `<id>.<ext>` with a kept format's extension.
-pub(crate) fn is_image_file(name: &str) -> bool {
-    name.split_once('.').is_some_and(|(id, extension)| {
-        ItemId::parse(id).is_some() && matches!(extension, "png" | "jpg" | "gif" | "webp")
-    })
 }
 
 #[cfg(test)]

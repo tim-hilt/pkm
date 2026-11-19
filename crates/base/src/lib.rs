@@ -5,6 +5,7 @@ pub mod base64;
 pub mod clock;
 pub mod files;
 pub mod front_matter;
+pub mod images;
 pub mod item_id;
 pub mod json;
 pub mod line_merge;

@@ -1,12 +1,14 @@
 //! The Notes store: `<id>.md` files in nested folders, each with the front
 //! matter `id`, `title` and `updated` and the Body as the file's body.
 
+mod images;
+
 use crate::folder::{Counts, Folder, FolderError, check_name, is_visible_name};
 use pkm_base::clock::{iso8601, now_ms};
 use pkm_base::files::{DiskFiles, Files};
 use pkm_base::front_matter::Document;
 use pkm_base::item_id::ItemId;
-use pkm_base::markdown::row_preview;
+use pkm_base::markdown::{image_targets, row_preview};
 use pkm_base::random::Entropy;
 use std::fs;
 use std::io;
@@ -105,10 +107,14 @@ impl Notes {
         Ok(note_of(&file, &id))
     }
 
-    /// Deletes the Note `id`; one that is gone already is as wanted.
+    /// Deletes the Note `id` and the Images only it shows; one that is gone
+    /// already is as wanted.
     pub fn delete(&self, id: &str) -> io::Result<()> {
         match self.find(id) {
-            Ok((_, path, _)) => self.files.remove(&path),
+            Ok((_, path, file)) => {
+                self.files.remove(&path)?;
+                self.release_beside(&path, &image_targets(&file.body))
+            }
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e),
         }
@@ -178,7 +184,8 @@ impl Notes {
     }
 
     /// Moves the Note `id` into the Folder `folder` (empty for the top level),
-    /// keeping its Item ID, and bumps `updated`. `NotFound` if there is no
+    /// keeping its Item ID, and bumps `updated`. The Images only it shows go
+    /// with it, those another Note beside it shows stay. `NotFound` if there is no
     /// such Note or Folder; Moving it where it is changes nothing.
     pub fn move_note(&self, id: &str, folder: &str) -> io::Result<()> {
         let (id, from, mut file) = self.find(id)?;
@@ -188,7 +195,8 @@ impl Notes {
         }
         self.files.rename(&from, &to)?;
         file.set_scalar(UPDATED, iso8601(now_ms()));
-        self.files.write(&to, &file.render())
+        self.files.write(&to, &file.render())?;
+        self.move_images(&id, &file.body, &from, &to)
     }
 
     /// Moves the Folder at `path` with everything in it into the Folder
@@ -357,10 +365,10 @@ mod tests {
     use super::*;
 
     /// A Notes folder in a temporary directory, removed afterwards.
-    struct Scratch(PathBuf);
+    pub(super) struct Scratch(pub(super) PathBuf);
 
     impl Scratch {
-        fn new() -> Self {
+        pub(super) fn new() -> Self {
             let id = ItemId::new(&mut Entropy::from_system());
             Self(
                 std::env::temp_dir()
@@ -369,7 +377,7 @@ mod tests {
             )
         }
 
-        fn store(&self) -> Notes {
+        pub(super) fn store(&self) -> Notes {
             Notes::open(&self.0).unwrap()
         }
 
@@ -381,6 +389,10 @@ mod tests {
 
         fn text(&self, id: &str) -> String {
             fs::read_to_string(self.0.join(format!("{id}.md"))).unwrap()
+        }
+
+        pub(super) fn exists_file(&self, name: &str) -> bool {
+            self.0.join(name).exists()
         }
 
         fn exists(&self, id: &str) -> bool {

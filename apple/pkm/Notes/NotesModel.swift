@@ -30,12 +30,19 @@ final class NotesModel {
     var openID: String? {
         didSet {
             guard oldValue != openID else { return }
-            if let oldValue { try? store.discardIfEmpty(id: oldValue) }
+            if let oldValue {
+                try? store.releaseImages(id: oldValue, references: Array(imagesInPlay))
+                try? store.discardIfEmpty(id: oldValue)
+            }
+            imagesInPlay = openID.flatMap { note(id: $0) }.map { Set(imageTargets(text: $0.body)) } ?? []
             if openID != newID { newID = nil }
             defaults?.set(openID, forKey: Self.noteKey)
             reloadRows()
         }
     }
+
+    /// The Images the open Note started with or added, until it is left.
+    @ObservationIgnored private var imagesInPlay: Set<String> = []
 
     /// The Note just added and not yet left: its editor takes the focus on the Title.
     private(set) var newID: String?
@@ -104,6 +111,25 @@ final class NotesModel {
         if openID == id { openID = nil }
         try? store.delete(id: id)
         reloadRows()
+    }
+
+    // MARK: Images
+
+    /// Keeps a picture beside the Note `id`, as PNG unless it is a PNG, JPEG, GIF or WebP; the
+    /// reference for its Body. Nil if it is no image. Leaving the Note Deletes it if the Body
+    /// doesn't show it.
+    func addImage(_ picture: Data, to id: String) -> String? {
+        let reference = StoredImage.bytes(of: picture).flatMap { try? store.addImage(id: id, bytes: $0) }
+        if let reference, id == openID { imagesInPlay.insert(reference) }
+        return reference
+    }
+
+    /// The bytes of the Image `reference` names beside the Note `id`.
+    func image(_ reference: String, of id: String) -> Data? { try? store.readImage(id: id, reference: reference) }
+
+    /// What the Body editor of the Note `id` keeps its Images with.
+    func images(for id: String) -> ImageSource {
+        ImageSource(add: { [self] in addImage($0, to: id) }, read: { [self] in image($0, of: id) })
     }
 
     // MARK: Folders

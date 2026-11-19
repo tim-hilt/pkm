@@ -6,7 +6,6 @@ mod images;
 pub(crate) use filters::is_filter;
 use filters::shown_in;
 pub use filters::{Direction, Filter, FilterSort, FilterSortKey};
-pub(crate) use images::{is_image, is_image_file};
 
 use crate::query::QueryError;
 use pkm_base::clock::{iso8601, now_ms};
