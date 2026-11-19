@@ -17,7 +17,9 @@ use ureq::http::Response;
 use crate::http::api_agent;
 use crate::oauth::{OAuthConfig, OnRotate, Session, SignIn as OAuthSignIn};
 use crate::percent::encode;
-use crate::storage::{Blob, ConnectError, Storage, check_name, unique_name};
+use crate::storage::{
+    Blob, ConnectError, Storage, Tree, check_path, is_plain, split_last, unique_name,
+};
 
 /// The folder in My Drive that holds everything the app stores, a folder per
 /// Context in it.
@@ -248,9 +250,8 @@ impl GoogleDriveStorage {
         json::parse(&text).map_err(io::Error::other)
     }
 
-    /// Files matching the Drive query `q`, oldest first: their `id`, `name`
-    /// and `version`. Pages are followed.
-    fn query(&self, q: &str, limit: Option<u32>) -> io::Result<Vec<(String, String, String)>> {
+    /// Files matching the Drive query `q`, oldest first. Pages are followed.
+    fn query(&self, q: &str, limit: Option<u32>) -> io::Result<Vec<Item>> {
         let mut files = Vec::new();
         let mut page = String::new();
         loop {
@@ -258,7 +259,7 @@ impl GoogleDriveStorage {
                 "{}/files?q={}&fields={}&orderBy=createdTime&pageSize={}{page}",
                 self.hosts.api,
                 encode(q),
-                encode("nextPageToken,files(id,name,version)"),
+                encode("nextPageToken,files(id,name,version,mimeType)"),
                 limit.unwrap_or(1000),
             );
             let answer = self.json("GET", &url, None)?;
@@ -269,7 +270,12 @@ impl GoogleDriveStorage {
                     .to_owned()
             };
             for file in answer.get("files").and_then(Value::as_array).unwrap_or(&[]) {
-                files.push((text(file, "id"), text(file, "name"), text(file, "version")));
+                files.push(Item {
+                    id: text(file, "id"),
+                    name: text(file, "name"),
+                    version: text(file, "version"),
+                    is_dir: text(file, "mimeType") == FOLDER_TYPE,
+                });
             }
             match answer.get("nextPageToken").and_then(Value::as_str) {
                 Some(token) if limit.is_none() => page = format!("&pageToken={}", encode(token)),
@@ -291,13 +297,18 @@ impl GoogleDriveStorage {
         Ok(id)
     }
 
-    /// The ID of the folder `name` in folder `parent`: found, or created now.
-    fn folder_in(&self, parent: &str, name: &str) -> io::Result<String> {
+    /// The ID of the folder `name` in folder `parent`, if there is one.
+    fn find_folder(&self, parent: &str, name: &str) -> io::Result<Option<String>> {
         let q = format!(
             "mimeType = '{FOLDER_TYPE}' and name = '{}' and '{parent}' in parents and trashed = false",
             escape(name)
         );
-        if let Some((id, ..)) = self.query(&q, Some(1))?.into_iter().next() {
+        Ok(self.query(&q, Some(1))?.into_iter().next().map(|f| f.id))
+    }
+
+    /// The ID of the folder `name` in folder `parent`: found, or created now.
+    fn folder_in(&self, parent: &str, name: &str) -> io::Result<String> {
+        if let Some(id) = self.find_folder(parent, name)? {
             return Ok(id);
         }
         let mut meta = Object::new();
@@ -319,18 +330,34 @@ impl GoogleDriveStorage {
             .to_owned())
     }
 
-    /// The ID of the file `name` in the folder; the oldest if there are two.
-    fn file_id(&self, name: &str) -> io::Result<Option<String>> {
+    /// The ID of directory `dir` (a path, empty for the Context's folder):
+    /// found, or if `create` made now with the ones above it. None if it
+    /// is missing and not to be made.
+    fn dir_id(&self, dir: &str, create: bool) -> io::Result<Option<String>> {
+        let mut id = self.folder_id()?;
+        for segment in dir.split('/').filter(|s| !s.is_empty()) {
+            id = if create {
+                self.folder_in(&id, segment)?
+            } else if let Some(found) = self.find_folder(&id, segment)? {
+                found
+            } else {
+                return Ok(None);
+            };
+        }
+        Ok(Some(id))
+    }
+
+    /// The ID of the file at `path`; the oldest if there are two.
+    fn file_id(&self, path: &str) -> io::Result<Option<String>> {
+        let (dir, name) = split_last(path);
+        let Some(parent) = self.dir_id(dir, false)? else {
+            return Ok(None);
+        };
         let q = format!(
-            "name = '{}' and '{}' in parents and trashed = false",
+            "name = '{}' and '{parent}' in parents and mimeType != '{FOLDER_TYPE}' and trashed = false",
             escape(name),
-            self.folder_id()?
         );
-        Ok(self
-            .query(&q, Some(1))?
-            .into_iter()
-            .next()
-            .map(|(id, ..)| id))
+        Ok(self.query(&q, Some(1))?.into_iter().next().map(|f| f.id))
     }
 
     fn email(&self) -> io::Result<String> {
@@ -351,14 +378,14 @@ impl GoogleDriveStorage {
             .ok_or_else(|| io::Error::other("no email address"))
     }
 
-    fn create(&self, name: &str, content: &[u8]) -> io::Result<u16> {
+    /// Creates the file at `path`, and its directories.
+    fn create(&self, path: &str, content: &[u8]) -> io::Result<u16> {
+        let (dir, name) = split_last(path);
+        let parent = self.dir_id(dir, true)?.expect("made");
         let mut meta = Object::new();
         meta.insert("name".into(), Value::String(name.into()));
         meta.insert("mimeType".into(), Value::String(DRAWING_TYPE.into()));
-        meta.insert(
-            "parents".into(),
-            Value::Array(vec![Value::String(self.folder_id()?)]),
-        );
+        meta.insert("parents".into(), Value::Array(vec![Value::String(parent)]));
         let boundary = format!("pkm-{}", unique_name());
         let mut body = format!(
             "--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{}\r\n--{boundary}\r\nContent-Type: {DRAWING_TYPE}\r\n\r\n",
@@ -375,6 +402,14 @@ impl GoogleDriveStorage {
 }
 
 const DRAWING_TYPE: &str = "application/json";
+
+/// A file or folder found by `GoogleDriveStorage::query`.
+struct Item {
+    id: String,
+    name: String,
+    version: String,
+    is_dir: bool,
+}
 
 /// `text` as the inside of a quoted Drive query string.
 fn escape(text: &str) -> String {
@@ -414,7 +449,7 @@ fn forbidden(body: &str) -> io::Error {
 
 impl Storage for GoogleDriveStorage {
     fn put(&self, name: &str, data: &mut dyn Read) -> io::Result<()> {
-        check_name(name)?;
+        check_path(name)?;
         // A Drawing is uploaded whole, in one request that Drive applies
         // entirely or not at all; read first, so a failing `data` sends nothing.
         let mut content = Vec::new();
@@ -439,7 +474,7 @@ impl Storage for GoogleDriveStorage {
     }
 
     fn get(&self, name: &str) -> io::Result<Option<Box<dyn Read + Send>>> {
-        check_name(name)?;
+        check_path(name)?;
         let Some(id) = self.file_id(name)? else {
             return Ok(None);
         };
@@ -452,24 +487,47 @@ impl Storage for GoogleDriveStorage {
         }
     }
 
-    fn list(&self) -> io::Result<Vec<Blob>> {
-        let q = format!("'{}' in parents and trashed = false", self.folder_id()?);
-        let mut seen = HashSet::new();
-        let mut blobs = Vec::new();
-        for (_, name, version) in self.query(&q, None)? {
-            // Two files of one name: the oldest counts, as for `get`.
-            if check_name(&name).is_ok() && seen.insert(name.clone()) {
-                blobs.push(Blob {
-                    name,
-                    marker: version,
-                });
+    fn scan(&self) -> io::Result<Tree> {
+        let mut tree = Tree::default();
+        let mut pending = vec![(self.folder_id()?, String::new())];
+        while let Some((id, dir)) = pending.pop() {
+            let q = format!("'{id}' in parents and trashed = false");
+            let mut seen = HashSet::new();
+            let mut empty = true;
+            for item in self.query(&q, None)? {
+                // Two of one name: the oldest counts, as for `get`.
+                if !is_plain(&item.name) || !seen.insert((item.name.clone(), item.is_dir)) {
+                    continue;
+                }
+                empty = false;
+                let path = if dir.is_empty() {
+                    item.name
+                } else {
+                    format!("{dir}/{}", item.name)
+                };
+                if item.is_dir {
+                    pending.push((item.id, path));
+                } else {
+                    tree.blobs.push(Blob {
+                        name: path,
+                        marker: item.version,
+                    });
+                }
+            }
+            if empty && !dir.is_empty() {
+                tree.empty_dirs.push(dir);
             }
         }
-        Ok(blobs)
+        Ok(tree)
+    }
+
+    fn create_dir(&self, path: &str) -> io::Result<()> {
+        check_path(path)?;
+        self.dir_id(path, true).map(drop)
     }
 
     fn delete(&self, name: &str) -> io::Result<()> {
-        check_name(name)?;
+        check_path(name)?;
         let Some(id) = self.file_id(name)? else {
             return Ok(());
         };

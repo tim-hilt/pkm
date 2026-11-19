@@ -19,7 +19,7 @@ use ureq::http::Response;
 use crate::http::api_agent;
 use crate::oauth::{OAuthConfig, OnRotate, Session, SignIn as OAuthSignIn};
 use crate::percent::encode;
-use crate::storage::{Blob, ConnectError, Storage, check_name};
+use crate::storage::{Blob, ConnectError, Storage, Tree, check_path, is_plain};
 
 const SCOPE: &str = "Files.ReadWrite.AppFolder offline_access";
 
@@ -208,14 +208,30 @@ impl OneDriveStorage {
         }
     }
 
-    /// The URL of blob `name`, followed by `action` (`"/content"`, ...).
-    fn blob_url(&self, name: &str, action: &str) -> String {
-        format!(
-            "{}:/{}/{}:{action}",
-            self.root_url(),
-            encode(&self.context),
-            encode(name)
-        )
+    /// The URL of blob or directory `path` (empty for the Context's folder),
+    /// followed by `action` (`"/content"`, ...).
+    fn blob_url(&self, path: &str, action: &str) -> String {
+        let mut segments = vec![encode(&self.context)];
+        segments.extend(path.split('/').filter(|s| !s.is_empty()).map(encode));
+        format!("{}:/{}:{action}", self.root_url(), segments.join("/"))
+    }
+
+    /// Makes directory `name` in the folder whose `children` URL this is,
+    /// unless it is there; the folder must exist.
+    fn make_dir(&self, children: &str, name: &str) -> io::Result<()> {
+        let mut item = json::Object::new();
+        item.insert("name".into(), Value::String(name.into()));
+        item.insert("folder".into(), Value::Object(json::Object::new()));
+        let fail = Value::String("fail".into());
+        item.insert("@microsoft.graph.conflictBehavior".into(), fail);
+        let body = Value::Object(item).to_json();
+        let headers = [("Content-Type", "application/json")];
+        let response = self.send("POST", children, &headers, body.as_bytes())?;
+        match response.status().as_u16() {
+            // 409: it exists already.
+            200..=299 | 409 => Ok(()),
+            status => Err(unexpected("POST", status)),
+        }
     }
 
     /// The app folder, which Graph creates on first access.
@@ -354,7 +370,7 @@ fn refuse(mut response: Response<Body>) -> io::Result<Response<Body>> {
 
 impl Storage for OneDriveStorage {
     fn put(&self, name: &str, data: &mut dyn Read) -> io::Result<()> {
-        check_name(name)?;
+        check_path(name)?;
         // A Drawing is read first, so a failing `data` sends nothing, and is
         // replaced whole: Graph makes a blob visible only when all of it is there.
         let mut content = Vec::new();
@@ -371,7 +387,7 @@ impl Storage for OneDriveStorage {
     }
 
     fn get(&self, name: &str) -> io::Result<Option<Box<dyn Read + Send>>> {
-        check_name(name)?;
+        check_path(name)?;
         let mut response = self.send("GET", &self.blob_url(name, "/content"), &[], &[])?;
         if matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
             // To a download URL that is authorized already, and refuses a token.
@@ -391,43 +407,73 @@ impl Storage for OneDriveStorage {
         }
     }
 
-    fn list(&self) -> io::Result<Vec<Blob>> {
-        let mut next = Some(format!(
-            "{}:/{}:/children?$select=name,file,eTag&$top=200",
-            self.root_url(),
-            encode(&self.context)
-        ));
-        let mut blobs = Vec::new();
-        while let Some(url) = next {
-            let response = self.send("GET", &url, &[], &[])?;
-            // Graph makes the folder with the first upload.
-            if response.status().as_u16() == 404 {
-                return Ok(blobs);
-            }
-            let page = read_json(response, "GET")?;
-            for item in page.get("value").and_then(Value::as_array).unwrap_or(&[]) {
-                let text = |key| item.get(key).and_then(Value::as_str);
-                // Folders have no `file`.
-                if let (Some(name), Some(marker), Some(_)) =
-                    (text("name"), text("eTag"), item.get("file"))
-                    && check_name(name).is_ok()
-                {
-                    blobs.push(Blob {
-                        name: name.to_owned(),
-                        marker: marker.to_owned(),
-                    });
+    fn scan(&self) -> io::Result<Tree> {
+        let mut tree = Tree::default();
+        let mut pending = vec![String::new()];
+        while let Some(dir) = pending.pop() {
+            let mut next = Some(format!(
+                "{}?$select=name,file,folder,eTag&$top=200",
+                self.blob_url(&dir, "/children")
+            ));
+            let mut empty = true;
+            while let Some(url) = next {
+                let response = self.send("GET", &url, &[], &[])?;
+                // Graph makes the Context's folder with the first upload.
+                if response.status().as_u16() == 404 {
+                    empty = false;
+                    break;
                 }
+                let page = read_json(response, "GET")?;
+                for item in page.get("value").and_then(Value::as_array).unwrap_or(&[]) {
+                    let text = |key| item.get(key).and_then(Value::as_str);
+                    let Some(name) = text("name").filter(|name| is_plain(name)) else {
+                        continue;
+                    };
+                    let path = if dir.is_empty() {
+                        name.to_owned()
+                    } else {
+                        format!("{dir}/{name}")
+                    };
+                    if item.get("folder").is_some() {
+                        empty = false;
+                        pending.push(path);
+                    } else if let (Some(marker), Some(_)) = (text("eTag"), item.get("file")) {
+                        empty = false;
+                        tree.blobs.push(Blob {
+                            name: path,
+                            marker: marker.to_owned(),
+                        });
+                    }
+                }
+                next = page
+                    .get("@odata.nextLink")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
             }
-            next = page
-                .get("@odata.nextLink")
-                .and_then(Value::as_str)
-                .map(str::to_owned);
+            if empty && !dir.is_empty() {
+                tree.empty_dirs.push(dir);
+            }
         }
-        Ok(blobs)
+        Ok(tree)
+    }
+
+    fn create_dir(&self, path: &str) -> io::Result<()> {
+        check_path(path)?;
+        // The Context's folder first, then each directory in the one before.
+        self.make_dir(&format!("{}/children", self.root_url()), &self.context)?;
+        let mut parent = String::new();
+        for segment in path.split('/') {
+            self.make_dir(&self.blob_url(&parent, "/children"), segment)?;
+            if !parent.is_empty() {
+                parent.push('/');
+            }
+            parent.push_str(segment);
+        }
+        Ok(())
     }
 
     fn delete(&self, name: &str) -> io::Result<()> {
-        check_name(name)?;
+        check_path(name)?;
         let response = self.send("DELETE", &self.blob_url(name, ""), &[], &[])?;
         match response.status().as_u16() {
             200..=299 | 404 => Ok(()),

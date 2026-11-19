@@ -85,7 +85,7 @@ async function answer(
   const { kind, file } = request;
   switch (kind) {
     case "listCloud": {
-      const result = await runExchange(protocol.list(), send);
+      const result = await runExchange(protocol.scan(), send);
       if (result.error) return run.fail(result.error, result.message);
       return run.answerCloud(
         result.blobs.map((b) => b.name),

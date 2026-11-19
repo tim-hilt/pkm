@@ -3,7 +3,7 @@
 //! memory, and can be made to revoke access, rotate refresh tokens, run out of
 //! space or belong to a work account.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
 use pkm_base::json::Value;
@@ -34,6 +34,8 @@ struct State {
     next_id: u32,
     /// The blobs, by name below the app root.
     files: BTreeMap<String, File>,
+    /// The folders, by name below the app root; they stay when emptied.
+    folders: BTreeSet<String>,
     uploads: HashMap<String, Upload>,
     /// Code → the PKCE challenge it was issued for.
     codes: HashMap<String, String>,
@@ -48,6 +50,14 @@ struct State {
 }
 
 impl State {
+    /// Makes folder `path` and the ones above it.
+    fn make_folders(&mut self, path: &str) {
+        for (i, _) in path.match_indices('/') {
+            self.folders.insert(path[..i].to_owned());
+        }
+        self.folders.insert(path.to_owned());
+    }
+
     fn id(&mut self, prefix: &str) -> String {
         self.next_id += 1;
         format!("{prefix}{}", self.next_id)
@@ -75,6 +85,7 @@ impl FakeMicrosoft {
         let state = Arc::new(Mutex::new(State {
             next_id: 0,
             files: BTreeMap::new(),
+            folders: BTreeSet::new(),
             uploads: HashMap::new(),
             codes: HashMap::new(),
             refresh_tokens: Vec::new(),
@@ -257,6 +268,10 @@ fn token(request: &Request, fake: &mut State) -> Answer {
 
 /// A finished upload: 201 if the blob is new.
 fn store(fake: &mut State, name: &str, data: Vec<u8>) -> Answer {
+    // Graph makes the folders above a blob with it.
+    if let Some((folder, _)) = name.rsplit_once('/') {
+        fake.make_folders(folder);
+    }
     let version = fake.files.get(name).map_or(0, |f| f.version) + 1;
     let created = fake
         .files
@@ -300,7 +315,7 @@ fn graph(request: &Request, base: &str, fake: &mut State) -> Answer {
     let method = request.method.as_str();
     let changes = matches!(
         (method, action),
-        ("PUT", "/content") | ("POST", "/createUploadSession")
+        ("PUT", "/content") | ("POST", "/createUploadSession" | "/children")
     );
     if fake.full && changes {
         return failure(507, "quotaLimitReached");
@@ -318,6 +333,22 @@ fn graph(request: &Request, base: &str, fake: &mut State) -> Answer {
             )
         }
         ("GET", "/children") => children(&name, request, base, fake),
+        ("POST", "/children") => {
+            let body = pkm_base::json::parse(&String::from_utf8_lossy(&request.body)).unwrap();
+            let child = body.get("name").unwrap().as_str().unwrap();
+            let path = if name.is_empty() {
+                child.to_owned()
+            } else {
+                format!("{name}/{child}")
+            };
+            if !name.is_empty() && !fake.folders.contains(&name) {
+                return failure(404, "itemNotFound");
+            }
+            if !fake.folders.insert(path) {
+                return failure(409, "nameAlreadyExists");
+            }
+            Answer::json(201, "{}")
+        }
         ("GET", "/content") => match fake.files.contains_key(&name) {
             true => {
                 let mut redirect = Answer::data(302, Vec::new());
@@ -347,18 +378,28 @@ fn graph(request: &Request, base: &str, fake: &mut State) -> Answer {
     }
 }
 
-/// The blobs in folder `folder` of the app folder, two to a page, the link to
-/// the next page carrying the offset. A folder with no blobs doesn't exist,
-/// as Graph makes it with the first upload.
+/// The blobs and folders in folder `folder` of the app folder, two to a page,
+/// the link to the next page carrying the offset. A folder is there once
+/// something was put in it or it was made.
 fn children(folder: &str, request: &Request, base: &str, fake: &State) -> Answer {
     const PAGE: usize = 2;
     let prefix = format!("{folder}/");
-    let blobs: Vec<_> = fake
-        .files
+    let direct = |path: &'_ String| {
+        let rest = path.strip_prefix(&prefix)?;
+        (!rest.contains('/')).then_some(rest.to_owned())
+    };
+    let mut entries: Vec<(String, Option<&File>)> = fake
+        .folders
         .iter()
-        .filter_map(|(name, file)| Some((name.strip_prefix(&prefix)?, file)))
+        .filter_map(|path| Some((direct(path)?, None)))
         .collect();
-    if blobs.is_empty() {
+    entries.extend(
+        fake.files
+            .iter()
+            .filter_map(|(path, file)| Some((direct(path)?, Some(file)))),
+    );
+    let exists = fake.folders.contains(folder) || fake.files.keys().any(|p| p.starts_with(&prefix));
+    if !exists {
         return failure(404, "itemNotFound");
     }
     let start: usize = request
@@ -366,23 +407,24 @@ fn children(folder: &str, request: &Request, base: &str, fake: &State) -> Answer
         .get("$skiptoken")
         .and_then(|t| t.parse().ok())
         .unwrap_or(0);
-    let items: Vec<String> = blobs
+    let items: Vec<String> = entries
         .iter()
         .skip(start)
         .take(PAGE)
-        .map(|&(name, file)| {
-            format!(
+        .map(|(name, file)| match file {
+            Some(file) => format!(
                 r#"{{"name":{},"size":{},"eTag":"\"v{}\"","file":{{}}}}"#,
                 quote(name),
                 file.data.len(),
                 file.version
-            )
+            ),
+            None => format!(r#"{{"name":{},"folder":{{}}}}"#, quote(name)),
         })
         .collect();
-    let next = if start + PAGE < blobs.len() {
+    let next = if start + PAGE < entries.len() {
         format!(
             r#","@odata.nextLink":"{base}{APP_ROOT}:/{}:/children?$skiptoken={}""#,
-            encode(folder),
+            folder.split('/').map(encode).collect::<Vec<_>>().join("/"),
             start + PAGE
         )
     } else {

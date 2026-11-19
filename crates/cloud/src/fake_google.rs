@@ -227,12 +227,14 @@ fn token(request: &Request, fake: &mut State) -> Answer {
 struct Query {
     name: Option<String>,
     mime: Option<String>,
+    /// Matches every type but this.
+    not_mime: Option<String>,
     parent: String,
 }
 
 fn parse_drive_query(q: &str) -> Query {
     let field = |key: &str| {
-        let rest = q.split(&format!("{key} = '")).nth(1)?;
+        let rest = q.split(&format!("{key} '")).nth(1)?;
         let mut out = String::new();
         let mut chars = rest.chars();
         while let Some(c) = chars.next() {
@@ -252,18 +254,20 @@ fn parse_drive_query(q: &str) -> Query {
         .nth(1)
         .unwrap();
     Query {
-        name: field("name"),
-        mime: field("mimeType"),
+        name: field("name ="),
+        mime: field("mimeType ="),
+        not_mime: field("mimeType !="),
         parent: parent.to_owned(),
     }
 }
 
 fn meta(file: &File) -> String {
     format!(
-        r#"{{"id":{},"name":{},"version":"{}"}}"#,
+        r#"{{"id":{},"name":{},"version":"{}","mimeType":{}}}"#,
         quote(&file.id),
         quote(&file.name),
-        file.version
+        file.version,
+        quote(&file.mime)
     )
 }
 
@@ -283,6 +287,7 @@ fn drive(request: &Request, fake: &mut State) -> Answer {
                 .filter(|f| f.parent == query.parent)
                 .filter(|f| query.name.as_ref().is_none_or(|n| &f.name == n))
                 .filter(|f| query.mime.as_ref().is_none_or(|m| &f.mime == m))
+                .filter(|f| query.not_mime.as_ref().is_none_or(|m| &f.mime != m))
                 .collect();
             // Pages of `page` files, the token being the offset.
             let from: usize = request

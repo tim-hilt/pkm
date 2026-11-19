@@ -474,6 +474,14 @@ mod tests {
                 self.check(&self.all_fail)?;
                 self.inner.list()
             }
+            fn scan(&self) -> io::Result<crate::storage::Tree> {
+                self.check(&self.all_fail)?;
+                self.inner.scan()
+            }
+            fn create_dir(&self, path: &str) -> io::Result<()> {
+                self.check(&self.all_fail)?;
+                self.inner.create_dir(path)
+            }
             fn delete(&self, name: &str) -> io::Result<()> {
                 self.check(&self.all_fail)?;
                 self.inner.delete(name)
@@ -687,6 +695,12 @@ mod tests {
             fn list(&self) -> io::Result<Vec<Blob>> {
                 self.calls.lock().unwrap().lists += 1;
                 self.inner.list()
+            }
+            fn scan(&self) -> io::Result<crate::storage::Tree> {
+                self.inner.scan()
+            }
+            fn create_dir(&self, path: &str) -> io::Result<()> {
+                self.inner.create_dir(path)
             }
             fn delete(&self, name: &str) -> io::Result<()> {
                 self.calls.lock().unwrap().deletes.push(name.into());

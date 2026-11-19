@@ -1118,6 +1118,7 @@ pub struct DavOutcome {
     data: Option<Vec<u8>>,
     names: Vec<String>,
     markers: Vec<String>,
+    empty_dirs: Vec<String>,
 }
 
 #[wasm_bindgen]
@@ -1141,7 +1142,7 @@ impl DavOutcome {
         self.data.clone()
     }
 
-    /// The names of the blobs a `list` found.
+    /// The paths of the blobs a `scan` found.
     #[wasm_bindgen(getter)]
     pub fn names(&self) -> Vec<String> {
         self.names.clone()
@@ -1151,6 +1152,12 @@ impl DavOutcome {
     #[wasm_bindgen(getter)]
     pub fn markers(&self) -> Vec<String> {
         self.markers.clone()
+    }
+
+    /// The paths of the empty directories a `scan` found.
+    #[wasm_bindgen(getter, js_name = emptyDirs)]
+    pub fn empty_dirs(&self) -> Vec<String> {
+        self.empty_dirs.clone()
     }
 }
 
@@ -1344,12 +1351,22 @@ impl WebDavProtocol {
         DavExchange::new(self.0.connect(), DavOutcome::connect)
     }
 
-    pub fn list(&self) -> DavExchange {
-        DavExchange::new(self.0.list(), |result| {
-            DavOutcome::of(result, |blobs, outcome| {
+    /// Everything in the folder and the directories below it.
+    pub fn scan(&self) -> DavExchange {
+        DavExchange::new(self.0.scan(), |result| {
+            DavOutcome::of(result, |tree, outcome| {
                 (outcome.names, outcome.markers) =
-                    blobs.into_iter().map(|b| (b.name, b.marker)).unzip();
+                    tree.blobs.into_iter().map(|b| (b.name, b.marker)).unzip();
+                outcome.empty_dirs = tree.empty_dirs;
             })
+        })
+    }
+
+    /// Makes the directory `path` and the ones above it.
+    #[wasm_bindgen(js_name = createDir)]
+    pub fn create_dir(&self, path: &str) -> DavExchange {
+        DavExchange::new(self.0.create_dir(path), |result| {
+            DavOutcome::of(result, |(), _| {})
         })
     }
 
