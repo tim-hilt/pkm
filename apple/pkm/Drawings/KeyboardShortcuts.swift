@@ -161,6 +161,13 @@ struct CanvasCommands: Commands {
 #if os(macOS)
     extension FocusedValues {
         /// Leaves the Drawing in front for the Gallery (File > Back to Gallery).
-        @Entry var backToGallery: (() -> Void)?
+        var backToGallery: (() -> Void)? {
+            get { self[BackToGalleryKey.self] }
+            set { self[BackToGalleryKey.self] = newValue }
+        }
+    }
+
+    private struct BackToGalleryKey: FocusedValueKey {
+        typealias Value = () -> Void
     }
 #endif

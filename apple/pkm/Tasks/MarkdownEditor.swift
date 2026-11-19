@@ -397,7 +397,7 @@ extension NSTextStorage {
                 width: width, height: max(height, MarkdownStyler.baseFont.boundingRectForFont.height * minimumLines))
         }
 
-        final class Coordinator: NSObject, NSTextViewDelegate {
+        @MainActor final class Coordinator: NSObject, NSTextViewDelegate {
             var parent: MarkdownTextRepresentable
             let display = MarkerDisplay()
             let attachments: ImageAttachments?
@@ -453,5 +453,5 @@ extension NSTextStorage {
 
 /// What formats the selection of `view`, for `FormatCommands`.
 private func formatter(for view: MarkdownTextView) -> (Inline) -> Void {
-    { [weak view] kind in _ = view?.apply(.toggle(kind)) }
+    { [weak view] kind in MainActor.assumeIsolated { _ = view?.apply(.toggle(kind)) } }
 }

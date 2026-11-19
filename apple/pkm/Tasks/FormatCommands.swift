@@ -3,7 +3,14 @@ import SwiftUI
 extension FocusedValues {
     /// Toggles Inline formatting on the selection of the Title or Description being edited; nil
     /// while neither is.
-    @Entry var formatText: ((Inline) -> Void)?
+    var formatText: ((Inline) -> Void)? {
+        get { self[FormatTextKey.self] }
+        set { self[FormatTextKey.self] = newValue }
+    }
+}
+
+private struct FormatTextKey: FocusedValueKey {
+    typealias Value = (Inline) -> Void
 }
 
 /// Format menu on the Mac, and the ⌘ overlay on an iPad with a keyboard: ⌘B, ⌘I and ⌘E format
