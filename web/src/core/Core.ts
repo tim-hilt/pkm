@@ -25,6 +25,7 @@ import init, {
   Tool,
   ZOrder,
   darkModeColor,
+  imageTargets,
   insertImage,
   isValidTag,
   parseDescription,
@@ -82,6 +83,7 @@ export {
   Tool,
   ZOrder,
   darkModeColor,
+  imageTargets,
   insertImage,
   isValidTag,
   parseDescription,
@@ -366,7 +368,11 @@ export class Editor {
 
   viewport(): Viewport {
     const state = this.inner.viewport();
-    const viewport = { originX: state.originX, originY: state.originY, zoom: state.zoom };
+    const viewport = {
+      originX: state.originX,
+      originY: state.originY,
+      zoom: state.zoom,
+    };
     state.free();
     return viewport;
   }

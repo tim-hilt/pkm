@@ -39,6 +39,51 @@ import Testing
         #expect(model.image("missing.png") == nil)
     }
 
+    private func fileExists(_ reference: String) -> Bool {
+        FileManager.default.fileExists(atPath: root.appending(path: "Tasks/\(reference)").path)
+    }
+
+    private var png: Data { TestImages.png(width: 2, height: 2, color: { _, _ in TestImages.blue }) }
+
+    @Test func anImageRemovedFromTheDescriptionIsDeletedOnRelease() throws {
+        let model = try openModel()
+        let kept = try #require(model.addImage(png))
+        #expect(model.add(title: "a", description: "![](\(kept))"))
+        model.startEditing(model.tasks[0])
+        let removed = try #require(model.addImage(png))
+        model.edit(model.tasks[0], title: "a", description: "![](\(removed))", priority: 4, tags: [])
+        model.edit(model.tasks[0], title: "a", description: "", priority: 4, tags: [])
+        model.releaseImages()
+        #expect(!fileExists(kept))
+        #expect(!fileExists(removed))
+    }
+
+    @Test func anImageStillShownSurvivesRelease() throws {
+        let model = try openModel()
+        let image = try #require(model.addImage(png))
+        #expect(model.add(title: "a", description: "![](\(image))"))
+        model.startEditing(model.tasks[0])
+        model.releaseImages()
+        #expect(fileExists(image))
+    }
+
+    @Test func imagesPastedIntoANewTaskAreDeletedOnCancel() throws {
+        let model = try openModel()
+        let image = try #require(model.addImage(png))
+        model.releaseImages()
+        #expect(!fileExists(image))
+    }
+
+    @Test func aTaskAddedKeepsItsImagesAndLosesTheOnesRemovedAgain() throws {
+        let model = try openModel()
+        let shown = try #require(model.addImage(png))
+        let removed = try #require(model.addImage(png))
+        #expect(model.add(title: "a", description: "![](\(shown))"))
+        model.releaseImages()
+        #expect(fileExists(shown))
+        #expect(!fileExists(removed))
+    }
+
     @Test func aTaskIsAddedWithTheTagsOfQuickAddCreatingNewOnes() throws {
         let model = try openModel()
         let quickAdd = TaskQuickAdd()

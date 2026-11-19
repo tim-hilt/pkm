@@ -310,12 +310,14 @@ private struct NewTaskSheet: View {
             .frame(minWidth: 360)
         #endif
         .presentationDetents([.medium, .large])
+        .onDisappear { model.releaseImages() }
     }
 
     private func add() {
         let priority = quickAdd.priority() ?? 4
         let tags = quickAdd.tags()
         guard model.add(title: title, description: description, priority: priority, tags: tags) else { return }
+        model.releaseImages()
         quickAdd = model.newQuickAdd()
         title = ""
         description = ""
@@ -360,6 +362,8 @@ private struct EditTaskSheet: View {
         }
         .animation(.default, value: model.pendingClose)
         .interactiveDismissDisabled(model.isLeavingBlocked)
+        // After the forms' last save, which their own onDisappear does.
+        .onDisappear { Task { model.releaseImages() } }
         #if os(macOS)
             .frame(minWidth: 360)
         #endif

@@ -3,7 +3,9 @@
 
 use super::Tasks;
 use pkm_base::item_id::ItemId;
+use pkm_base::markdown::image_targets;
 use pkm_base::random::Entropy;
+use std::collections::HashSet;
 use std::io;
 use std::path::PathBuf;
 
@@ -42,6 +44,28 @@ impl Tasks {
         self.files.read_bytes(&path)
     }
 
+    /// Deletes those of the Images `references` that no Task's Description
+    /// shows any more; others, and anything that isn't an Image, stay. This
+    /// is the only way an Image goes besides its Task's Close (never a sweep
+    /// of every unreferenced Image).
+    pub fn release_images(&self, references: &[String]) -> io::Result<()> {
+        let shown: HashSet<String> = self
+            .load()?
+            .values()
+            .flat_map(|node| image_targets(&node.task.description))
+            .collect();
+        for reference in references.iter().filter(|r| !shown.contains(*r)) {
+            let Some(path) = self.image_path(reference) else {
+                continue;
+            };
+            match self.files.remove(&path) {
+                Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     fn image_path(&self, reference: &str) -> Option<PathBuf> {
         let (id, extension) = reference.split_once('.')?;
         ItemId::parse(id)?;
@@ -51,7 +75,7 @@ impl Tasks {
 
 #[cfg(test)]
 mod tests {
-    use super::super::tests::Scratch;
+    use super::super::{Closing, tests::Scratch};
     use super::*;
 
     const PNG: &[u8] = b"\x89PNG\r\n\x1a\n rest";
@@ -103,5 +127,80 @@ mod tests {
             let error = tasks.read_image(reference).unwrap_err();
             assert_eq!(error.kind(), io::ErrorKind::NotFound, "{reference}");
         }
+    }
+
+    fn describe(tasks: &Tasks, id: &str, description: &str) {
+        tasks.edit(id, "t", description, 4, &[]).unwrap();
+    }
+
+    fn exists(scratch: &Scratch, reference: &str) -> bool {
+        scratch.0.join(reference).exists()
+    }
+
+    #[test]
+    fn release_deletes_only_unreferenced_images() {
+        let scratch = Scratch::new();
+        let tasks = scratch.store();
+        let task = tasks.create("a", 4, &[]).unwrap();
+        let shown = tasks.add_image(PNG).unwrap();
+        let loose = tasks.add_image(PNG).unwrap();
+        let other = tasks.add_image(PNG).unwrap();
+        describe(&tasks, &task.id, &format!("![]({shown})"));
+        assert!(exists(&scratch, &loose), "nothing releases it but release");
+        tasks
+            .release_images(&[shown.clone(), loose.clone()])
+            .unwrap();
+        assert!(exists(&scratch, &shown));
+        assert!(!exists(&scratch, &loose));
+        assert!(exists(&scratch, &other));
+        tasks.release_images(&[loose, "../Tags.md".into()]).unwrap();
+    }
+
+    #[test]
+    fn an_image_shown_by_two_tasks_stays_until_both_let_go() {
+        let scratch = Scratch::new();
+        let tasks = scratch.store();
+        let (a, b) = (
+            tasks.create("a", 4, &[]).unwrap(),
+            tasks.create("b", 4, &[]).unwrap(),
+        );
+        let image = tasks.add_image(PNG).unwrap();
+        describe(&tasks, &a.id, &format!("![]({image})"));
+        describe(&tasks, &b.id, &format!("![]({image})"));
+        describe(&tasks, &a.id, "");
+        tasks.release_images(std::slice::from_ref(&image)).unwrap();
+        assert!(exists(&scratch, &image));
+        describe(&tasks, &b.id, "");
+        tasks.release_images(std::slice::from_ref(&image)).unwrap();
+        assert!(!exists(&scratch, &image));
+    }
+
+    #[test]
+    fn committing_a_close_deletes_the_images_unless_another_task_shows_them() {
+        let scratch = Scratch::new();
+        let tasks = scratch.store();
+        let task = tasks.create("a", 4, &[]).unwrap();
+        let other = tasks.create("b", 4, &[]).unwrap();
+        let (own, shared) = (tasks.add_image(PNG).unwrap(), tasks.add_image(PNG).unwrap());
+        describe(&tasks, &task.id, &format!("![]({own})\n\n![]({shared})"));
+        describe(&tasks, &other.id, &format!("![]({shared})"));
+        tasks.close(&task.id, Closing::Done).unwrap();
+        assert!(exists(&scratch, &own));
+        tasks.commit().unwrap();
+        assert!(!exists(&scratch, &own));
+        assert!(exists(&scratch, &shared));
+    }
+
+    #[test]
+    fn reverting_a_close_keeps_the_images() {
+        let scratch = Scratch::new();
+        let tasks = scratch.store();
+        let task = tasks.create("a", 4, &[]).unwrap();
+        let image = tasks.add_image(PNG).unwrap();
+        describe(&tasks, &task.id, &format!("![]({image})"));
+        tasks.close(&task.id, Closing::Rejected).unwrap();
+        tasks.revert();
+        tasks.commit().unwrap();
+        assert!(exists(&scratch, &image));
     }
 }

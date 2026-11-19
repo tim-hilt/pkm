@@ -424,6 +424,12 @@ impl TaskStore {
         Ok(self.tasks.add_image(bytes)?)
     }
 
+    /// Deletes those of the Images that no Description shows any more.
+    #[wasm_bindgen(js_name = releaseImages)]
+    pub fn release_images(&self, references: Vec<String>) -> Result<(), JsError> {
+        Ok(self.tasks.release_images(&references)?)
+    }
+
     /// The bytes of the Image a reference names.
     #[wasm_bindgen(js_name = readImage)]
     pub fn read_image(&self, reference: &str) -> Result<Vec<u8>, JsError> {

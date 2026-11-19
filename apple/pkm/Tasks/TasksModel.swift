@@ -48,7 +48,15 @@ final class TasksModel {
     /// The Tasks of the open sheet's stack, by id, first opened first: a Blocker
     /// or Subtask opened from a Task is pushed on it. Empty when no sheet is open. Over the
     /// list shown, which opening a Blocker never changes.
-    private(set) var editing: [String] = []
+    private(set) var editing: [String] = [] {
+        didSet {
+            for id in editing where !oldValue.contains(id) {
+                imagesInPlay.formUnion(task(id: id).map { imageTargets(text: $0.description) } ?? [])
+            }
+        }
+    }
+    /// The Images the open sheets started with or added, until `releaseImages`.
+    @ObservationIgnored private var imagesInPlay: Set<String> = []
     /// Whether the sheet can't be left or popped: the Task on top was last
     /// saved with an empty Title, which keeps the stack as it is until it has one.
     private(set) var isLeavingBlocked = false
@@ -228,7 +236,16 @@ final class TasksModel {
     /// Keeps a picture beside the Tasks, as PNG unless it is a PNG, JPEG, GIF or WebP; the
     /// reference for the Description. Nil if it is no image.
     func addImage(_ picture: Data) -> String? {
-        StoredImage.bytes(of: picture).flatMap { try? store.addImage(bytes: $0) }
+        let reference = StoredImage.bytes(of: picture).flatMap { try? store.addImage(bytes: $0) }
+        if let reference { imagesInPlay.insert(reference) }
+        return reference
+    }
+
+    /// Ends what the sheets of Images started with or added: those no Description shows any
+    /// more are Deleted. Call it once the sheet has saved for the last time.
+    func releaseImages() {
+        try? store.releaseImages(references: Array(imagesInPlay))
+        imagesInPlay = []
     }
 
     /// The bytes of the Image `reference` names.

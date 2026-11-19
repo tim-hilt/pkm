@@ -1093,7 +1093,10 @@ describe("Filters", () => {
     });
 
     it("is Manual at first, and sorts by Priority in either Direction", () => {
-      expect(filter("Work").sort).toEqual({ key: FilterSortKey.Manual, direction: undefined });
+      expect(filter("Work").sort).toEqual({
+        key: FilterSortKey.Manual,
+        direction: undefined,
+      });
       expect(titles()).toEqual(["low", "high", "mid"]);
       model.setSort(filter("Work"), FilterSortKey.Priority);
       expect(filter("Work").sort).toEqual({
@@ -1191,7 +1194,10 @@ describe("Filters", () => {
     }
     first.deleteFilter(first.filters.find((f) => f.title === "A")!);
     first.list = { kind: "filter", id };
-    expect((await open()).list).toEqual({ kind: "filter", id: first.filters[0].id });
+    expect((await open()).list).toEqual({
+      kind: "filter",
+      id: first.filters[0].id,
+    });
     // The Filters list when there is no Favorite.
     first.deleteFilter(first.filters[0]);
     expect((await open()).list).toEqual({ kind: "filters" });
@@ -1305,7 +1311,10 @@ describe("a Grouped Filter", () => {
 
   it("shows the Tasks without a Group first, then a Group per Tag with its Tag Color, empty ones too", () => {
     expect(model.addFilter("Grouped", "*", "@home @work")).toBe(true);
-    model.list = { kind: "filter", id: model.filters.find((f) => f.title === "Grouped")!.id };
+    model.list = {
+      kind: "filter",
+      id: model.filters.find((f) => f.title === "Grouped")!.id,
+    };
     expect(model.groups.map((g) => [g.tag, g.color])).toEqual([
       [undefined, undefined],
       ["home", undefined],
@@ -1321,7 +1330,10 @@ describe("a Grouped Filter", () => {
   it("moves a Task in one Group only, leaving its place in other Groups", () => {
     model.add("H", { tags: ["home"] });
     model.addFilter("Grouped", "*", "@home @work");
-    model.list = { kind: "filter", id: model.filters.find((f) => f.title === "Grouped")!.id };
+    model.list = {
+      kind: "filter",
+      id: model.filters.find((f) => f.title === "Grouped")!.id,
+    };
     const both = model.tasks.find((t) => t.title === "Both")!;
     const w = model.tasks.find((t) => t.title === "W")!;
     model.moveBefore(both, w, "work");
@@ -1356,5 +1368,47 @@ describe("a Grouped Filter", () => {
     expect(model.filters.find((f) => f.id === id)!.groupBy).toBe("@work");
     expect(model.editFilter(id, "All", "*", "")).toBe(true);
     expect(model.filters.find((f) => f.id === id)!.groupBy).toBe("");
+  });
+});
+
+describe("releasing Images", () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2]);
+  const kept = async (reference: string) =>
+    (await storage.read(`Tasks/${reference}`)) !== undefined;
+  const settle = () => model.syncDidChange(); // waits for the saves
+
+  it("deletes an Image removed from the Description, and keeps one still shown", async () => {
+    const shown = model.addImage(png)!;
+    const removed = model.addImage(png)!;
+    model.add("a", { description: `![](${shown})\n\n![](${removed})` });
+    model.openLinked(first().id);
+    model.edit(first(), {
+      title: "a",
+      description: `![](${shown})`,
+      priority: 4,
+      tags: [],
+    });
+    model.releaseImages();
+    await settle();
+    expect(await kept(shown)).toBe(true);
+    expect(await kept(removed)).toBe(false);
+  });
+
+  it("deletes an Image the Description started with once it is removed", async () => {
+    const image = model.addImage(png)!;
+    model.add("a", { description: `![](${image})` });
+    model.releaseImages();
+    model.openLinked(first().id);
+    model.edit(first(), { title: "a", description: "", priority: 4, tags: [] });
+    model.releaseImages();
+    await settle();
+    expect(await kept(image)).toBe(false);
+  });
+
+  it("deletes the Images pasted into a cancelled New Task", async () => {
+    const image = model.addImage(png)!;
+    model.releaseImages();
+    await settle();
+    expect(await kept(image)).toBe(false);
   });
 });

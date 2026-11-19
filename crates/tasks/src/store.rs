@@ -12,6 +12,7 @@ use crate::query::QueryError;
 use pkm_base::clock::{iso8601, now_ms};
 use pkm_base::front_matter::{Document, Value};
 use pkm_base::item_id::ItemId;
+use pkm_base::markdown::image_targets;
 use pkm_base::random::Entropy;
 use pkm_base::tag;
 use pkm_base::tags::{Suggestions, Tags};
@@ -394,20 +395,25 @@ impl Tasks {
     }
 
     /// Deletes the files of the pending Close, if any: the Task and its Open
-    /// Subtasks. One Deleted meanwhile, e.g. by Sync, is already as wanted;
+    /// Subtasks, and their Images no other Task shows. One Deleted meanwhile, e.g. by Sync, is already as wanted;
     /// where another Device edited one meanwhile, the Delete wins on Sync
     /// (ADR-0020).
     pub fn commit(&self) -> Result<(), Error> {
         let Some(Pending { ids, .. }) = self.pending().take() else {
             return Ok(());
         };
+        let nodes = self.load()?;
+        let images: Vec<String> = (ids.iter())
+            .filter_map(|id| nodes.get(id.as_str()))
+            .flat_map(|node| image_targets(&node.task.description))
+            .collect();
         for id in ids {
             match self.files.remove(&self.path(&id)) {
                 Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e.into()),
                 _ => {}
             }
         }
-        Ok(())
+        Ok(self.release_images(&images)?)
     }
 
     fn pending(&self) -> MutexGuard<'_, Option<Pending>> {

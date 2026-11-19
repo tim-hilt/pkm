@@ -133,6 +133,7 @@ export function newTaskDialog(model: TasksModel, host: HTMLElement): void {
       quickAdd = model.newQuickAdd();
       title.use(quickAdd);
       description.value = "";
+      model.releaseImages();
       enableAdd();
     }
     // Clicking Add moved the focus off the Title.
@@ -141,6 +142,7 @@ export function newTaskDialog(model: TasksModel, host: HTMLElement): void {
   dialog.addEventListener("close", () => {
     quickAdd.free();
     images.dispose();
+    model.releaseImages();
   });
   enableAdd();
   title.focus();
@@ -193,7 +195,11 @@ export function editTaskDialog(
   /** Applies the Shortcuts of the Title: they leave the field, the Priority control and the Tags show the result. With none pending it just saves. */
   const commit = () => {
     const pending = quickAdd.priority() !== undefined || quickAdd.tags().length > 0;
-    const edit = { description: description.value, priority, tags: tags.chosen() };
+    const edit = {
+      description: description.value,
+      priority,
+      tags: tags.chosen(),
+    };
     const saved = pending ? model.commitQuickAdd(quickAdd, task, edit) : undefined;
     if (!saved) return save();
     clearTimeout(pause);
@@ -221,7 +227,10 @@ export function editTaskDialog(
   );
   const back = button("tasks-back", "Back", () => places.back());
   back.hidden = model.depth < 2;
-  const priorities = [1, 2, 3, 4].map((value) => ({ value, text: `P${value}` }));
+  const priorities = [1, 2, 3, 4].map((value) => ({
+    value,
+    text: `P${value}`,
+  }));
   const done = confirmButton("Done");
   const titleEmpty = () => title.title === "";
   const priorityChoice = choice("Priority", priorities, priority, (value) => {
@@ -288,6 +297,7 @@ export function editTaskDialog(
     quickAdd.free();
     images.dispose();
     subtasks.stopAdding();
+    model.releaseImages();
   });
   return { dialog, refresh: () => subtasks.refresh() };
 }

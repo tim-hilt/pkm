@@ -391,6 +391,12 @@ impl TaskStore {
         Ok(self.0.read_image(&reference)?)
     }
 
+    /// Deletes those of the Images that no Description shows any more. See
+    /// `pkm_tasks::Tasks::release_images`.
+    pub fn release_images(&self, references: Vec<String>) -> Result<(), TasksError> {
+        Ok(self.0.release_images(&references)?)
+    }
+
     /// Moves a Subtask before its sibling `before`, or after its last sibling;
     /// its Parent stays. See `pkm_tasks::Tasks::move_subtask`.
     pub fn move_subtask(

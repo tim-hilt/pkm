@@ -160,13 +160,14 @@ impl Files for MemoryFiles {
         self.memory().files.contains_key(path)
     }
 
-    /// Counts as a change: the path is named by `take_changes`, and then reads
-    /// as missing.
+    /// Counts as a change, even for a file not loaded (an Image the browser
+    /// keeps without holding it): the path is named by `take_changes`, and then
+    /// reads as missing.
     fn remove(&self, path: &Path) -> io::Result<()> {
         let mut memory = self.memory();
-        memory.files.remove(path).ok_or(io::ErrorKind::NotFound)?;
+        let held = memory.files.remove(path);
         memory.changed.insert(path.to_owned());
-        Ok(())
+        held.map(drop).ok_or_else(|| io::ErrorKind::NotFound.into())
     }
 
     fn list(&self, folder: &Path) -> io::Result<Vec<Listed>> {
@@ -202,6 +203,17 @@ mod tests {
             .collect();
         assert_eq!(names, ["a.md"]);
         assert!(files.list(Path::new("Elsewhere")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn removing_a_file_not_loaded_is_still_a_change() {
+        let files = MemoryFiles::default();
+        let path = Path::new("Tasks/a.png");
+        assert_eq!(
+            files.remove(path).unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+        assert_eq!(files.take_changes(), [path]);
     }
 
     #[test]
