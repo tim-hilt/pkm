@@ -177,6 +177,42 @@ impl Notes {
         Ok(join(parent, name))
     }
 
+    /// Moves the Note `id` into the Folder `folder` (empty for the top level),
+    /// keeping its Item ID, and bumps `updated`. `NotFound` if there is no
+    /// such Note or Folder; Moving it where it is changes nothing.
+    pub fn move_note(&self, id: &str, folder: &str) -> io::Result<()> {
+        let (id, from, mut file) = self.find(id)?;
+        let to = self.dir(folder)?.join(file_name(&id));
+        if to == from {
+            return Ok(());
+        }
+        self.files.rename(&from, &to)?;
+        file.set_scalar(UPDATED, iso8601(now_ms()));
+        self.files.write(&to, &file.render())
+    }
+
+    /// Moves the Folder at `path` with everything in it into the Folder
+    /// `into` (empty for the top level) and returns its new path. Refused
+    /// with `Inside` into itself or a Folder in it, and with `Taken` if
+    /// `into` has a Folder of its name. Moving it where it is changes nothing.
+    pub fn move_folder(&self, path: &str, into: &str) -> Result<String, FolderError> {
+        let (parent, name) = path.rsplit_once('/').unwrap_or(("", path));
+        if name.is_empty() {
+            return Err(io::Error::from(io::ErrorKind::InvalidInput).into());
+        }
+        let from = self.dir(path)?;
+        let dest = self.dir(into)?;
+        if into == path || into.strip_prefix(path).is_some_and(|r| r.starts_with('/')) {
+            return Err(FolderError::Inside);
+        }
+        if parent == into {
+            return Ok(path.to_owned());
+        }
+        self.check_free(&dest, name, None)?;
+        self.files.rename(&from, &dest.join(name))?;
+        Ok(join(into, name))
+    }
+
     /// Deletes the Folder at `path` with everything in it; one that is gone
     /// already is as wanted.
     pub fn delete_folder(&self, path: &str) -> io::Result<()> {
@@ -557,6 +593,70 @@ mod tests {
         assert_eq!(notes.list("Job").unwrap()[0].id, id);
         assert_eq!(notes.read(&id).unwrap().title, "Plan");
         assert!(matches!(notes.list("Work"), Err(e) if e.kind() == io::ErrorKind::NotFound));
+    }
+
+    #[test]
+    fn a_moved_note_keeps_its_id_and_its_updated_is_set() {
+        let scratch = Scratch::new();
+        let notes = scratch.store();
+        let id = "aaaaaaaaaaaa";
+        scratch.write(
+            "aaaaaaaaaaaa.md",
+            &note_file(id, "T", "2020-01-01T00:00:00Z", "body\n"),
+        );
+        notes.create_folder("", "A").unwrap();
+        notes.create_folder("A", "B").unwrap();
+        notes.move_note(id, "A/B").unwrap();
+        assert!(notes.list("").unwrap().is_empty());
+        let rows = notes.list("A/B").unwrap();
+        assert_eq!((rows[0].id.as_str(), rows[0].title.as_str()), (id, "T"));
+        assert!(rows[0].updated.as_str() > "2020-01-01T00:00:00Z");
+        assert_eq!(notes.read(id).unwrap().body, "body\n");
+        notes.move_note(id, "").unwrap();
+        assert_eq!(notes.list("").unwrap().len(), 1);
+        assert!(notes.move_note(id, "Nope").is_err());
+        assert!(notes.move_note("bbbbbbbbbbbb", "A").is_err());
+    }
+
+    #[test]
+    fn a_moved_folder_takes_everything_in_it() {
+        let scratch = Scratch::new();
+        let notes = scratch.store();
+        notes.create_folder("", "A").unwrap();
+        notes.create_folder("A", "Inner").unwrap();
+        notes.create_folder("", "B").unwrap();
+        let id = notes.create("A/Inner").unwrap().id;
+        assert_eq!(notes.move_folder("A", "B").unwrap(), "B/A");
+        assert_eq!(notes.list("B/A/Inner").unwrap()[0].id, id);
+        assert_eq!(names(&notes.folders().unwrap()), ["B"]);
+        assert_eq!(notes.move_folder("B/A/Inner", "").unwrap(), "Inner");
+        assert_eq!(notes.move_folder("Inner", "").unwrap(), "Inner");
+        assert_eq!(notes.list("Inner").unwrap()[0].id, id);
+    }
+
+    #[test]
+    fn a_folder_is_refused_into_itself_a_descendant_or_a_name_clash() {
+        let scratch = Scratch::new();
+        let notes = scratch.store();
+        notes.create_folder("", "A").unwrap();
+        notes.create_folder("A", "B").unwrap();
+        notes.create_folder("", "AB").unwrap();
+        notes.create_folder("", "b").unwrap();
+        assert!(matches!(
+            notes.move_folder("A", "A"),
+            Err(FolderError::Inside)
+        ));
+        assert!(matches!(
+            notes.move_folder("A", "A/B"),
+            Err(FolderError::Inside)
+        ));
+        assert!(matches!(
+            notes.move_folder("A/B", ""),
+            Err(FolderError::Taken)
+        ));
+        assert_eq!(notes.move_folder("A", "AB").unwrap(), "AB/A");
+        assert!(notes.move_folder("", "AB").is_err());
+        assert!(notes.move_folder("Nope", "").is_err());
     }
 
     #[test]

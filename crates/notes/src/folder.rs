@@ -19,7 +19,7 @@ pub struct Counts {
     pub folders: u32,
 }
 
-/// Why a Folder couldn't be made or renamed.
+/// Why a Folder couldn't be made, renamed or Moved.
 #[derive(Debug)]
 pub enum FolderError {
     /// The name is empty (only whitespace counts as empty).
@@ -30,6 +30,8 @@ pub enum FolderError {
     Hidden,
     /// A Folder of that name, whatever the case, is there already.
     Taken,
+    /// A Folder can't be Moved into itself or a Folder in it.
+    Inside,
     /// No such Folder, or the storage failed.
     Io(io::Error),
 }
@@ -47,6 +49,7 @@ impl std::fmt::Display for FolderError {
             Self::HasSlash => f.write_str("The name can't contain a /."),
             Self::Hidden => f.write_str("The name can't start with a dot."),
             Self::Taken => f.write_str("A Folder of that name is already there."),
+            Self::Inside => f.write_str("A Folder can't be moved into itself."),
             Self::Io(e) => e.fmt(f),
         }
     }

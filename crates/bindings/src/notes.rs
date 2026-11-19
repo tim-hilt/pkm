@@ -46,13 +46,14 @@ pub struct Counts {
     pub folders: u32,
 }
 
-/// Why a Folder couldn't be made or renamed, see `pkm_notes::FolderError`.
+/// Why a Folder couldn't be made, renamed or Moved, see `pkm_notes::FolderError`.
 #[derive(Debug, uniffi::Error)]
 pub enum FolderNameError {
     Empty,
     HasSlash,
     Hidden,
     Taken,
+    Inside,
     Failed { message: String },
 }
 
@@ -72,6 +73,7 @@ impl From<FolderError> for FolderNameError {
             FolderError::HasSlash => Self::HasSlash,
             FolderError::Hidden => Self::Hidden,
             FolderError::Taken => Self::Taken,
+            FolderError::Inside => Self::Inside,
             FolderError::Io(e) => Self::Failed {
                 message: e.to_string(),
             },
@@ -155,6 +157,16 @@ impl NoteStore {
     /// Renames the Folder at `path` and returns its new path.
     pub fn rename_folder(&self, path: String, name: String) -> Result<String, FolderNameError> {
         Ok(self.0.rename_folder(&path, &name)?)
+    }
+
+    /// Moves the Note into the Folder at `folder` (empty for the top level).
+    pub fn move_note(&self, id: String, folder: String) -> Result<(), NotesError> {
+        Ok(self.0.move_note(&id, &folder)?)
+    }
+
+    /// Moves the Folder at `path` into the Folder `into` and returns its new path.
+    pub fn move_folder(&self, path: String, into: String) -> Result<String, FolderNameError> {
+        Ok(self.0.move_folder(&path, &into)?)
     }
 
     /// Deletes the Folder at `path` with everything in it.

@@ -120,10 +120,27 @@ final class NotesModel {
 
     /// Renames the Folder at `path` (throwing as `addFolder` does); a selected Folder, or one around it, stays selected.
     func renameFolder(_ path: String, to name: String) throws {
-        let renamed = try store.renameFolder(path: path, name: name)
+        relocateFolder(path, to: try store.renameFolder(path: path, name: name))
+    }
+
+    /// Moves the Folder at `path` into the Folder at `parent` (empty for the top level), throwing a
+    /// `FolderNameError` for a Move the core refuses; a selected Folder, or one around it, stays selected.
+    func moveFolder(_ path: String, into parent: String) throws {
+        relocateFolder(path, to: try store.moveFolder(path: path, into: parent))
+    }
+
+    /// Moves the Note into the Folder at `folder` (empty for the top level). An open Note stays
+    /// open, even where the selected Folder doesn't list it.
+    func moveNote(id: String, into folder: String) {
+        guard (try? store.moveNote(id: id, folder: folder)) != nil else { return }
+        reloadRows()
+    }
+
+    /// The selection follows a Folder that is now at `new`, and the tree is read again.
+    private func relocateFolder(_ old: String, to new: String) {
         let open = openID
-        if folderPath == path || folderPath.hasPrefix(path + "/") {
-            folderPath = renamed + String(folderPath.dropFirst(path.count))
+        if folderPath == old || folderPath.hasPrefix(old + "/") {
+            folderPath = new + String(folderPath.dropFirst(old.count))
             openID = open
         }
         reloadTree()

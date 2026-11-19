@@ -114,6 +114,46 @@ import Testing
         #expect(model.note(id: id) == nil)
     }
 
+    @Test func aMovedNoteStaysOpenAndIsListedInItsNewFolder() throws {
+        let model = try openModel()
+        let work = try model.addFolder(named: "Work", in: "")
+        model.add()
+        let id = try #require(model.openID)
+        model.save(id: id, title: "Moving", body: "x")
+        model.moveNote(id: id, into: "")
+        #expect(model.openID == id)
+        #expect(model.rows.isEmpty)
+        #expect(model.note(id: id)?.title == "Moving")
+        model.folderPath = ""
+        #expect(model.rows.map(\.id) == [id])
+        model.moveNote(id: id, into: work)
+        #expect(model.rows.isEmpty)
+        model.folderPath = work
+        #expect(model.rows.map(\.id) == [id])
+    }
+
+    @Test func aMovedFolderKeepsItsSelectionAndRefusalsThrowTheirReason() throws {
+        let model = try openModel()
+        let work = try model.addFolder(named: "Work", in: "")
+        let plans = try model.addFolder(named: "Plans", in: work)
+        let home = try model.addFolder(named: "Home", in: "")
+        model.folderPath = plans
+        try model.moveFolder(work, into: home)
+        #expect(model.folderPath == "Home/Work/Plans")
+        #expect(model.tree.map(\.name) == ["Home"])
+        try model.addFolder(named: "Work", in: "")
+        for (path, into, reason) in [
+            ("Home", "Home", FolderNameError.Inside), ("Home", "Home/Work", .Inside), ("Home/Work", "", .Taken),
+        ] {
+            do {
+                try model.moveFolder(path, into: into)
+                Issue.record("\(path) into \(into) was accepted")
+            } catch let error as FolderNameError {
+                #expect(error == reason, "\(path) into \(into)")
+            }
+        }
+    }
+
     @Test func theLastFolderAndNoteOpenAgain() throws {
         let defaults = isolatedDefaults()
         let first = try openModel(defaults: defaults)

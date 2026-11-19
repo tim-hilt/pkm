@@ -1,4 +1,6 @@
+import CoreTransferable
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The Notes Context: the Folder tree, the selected Folder's Notes (newest changed first) and the
 /// open Note's editor, side by side where there is room (Mac, iPad); on an iPhone each is pushed
@@ -33,6 +35,29 @@ struct NotesView: View {
     }
 }
 
+/// A Note or Folder being Moved: dragged, or chosen for "Move to…".
+enum NotesMovable: Codable, Hashable, Transferable, Identifiable {
+    case note(String)
+    case folder(String)
+
+    var id: Self { self }
+
+    static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: .json)
+    }
+}
+
+extension NotesModel {
+    /// Moves what is dropped or chosen into the Folder at `folder`; throws a `FolderNameError` for a
+    /// Folder Move the core refuses.
+    func move(_ item: NotesMovable, into folder: String) throws {
+        switch item {
+        case .note(let id): moveNote(id: id, into: folder)
+        case .folder(let path): try moveFolder(path, into: folder)
+        }
+    }
+}
+
 enum NotesLayout {
     /// Whether the columns are pushed over each other rather than shown side by side.
     static func pushes(_ sizeClass: UserInterfaceSizeClass?) -> Bool { sizeClass == .compact }
@@ -47,6 +72,7 @@ private struct FolderTree: View {
     @State private var name = ""
     @State private var problem: FolderNameError?
     @State private var deleting: Folder?
+    @State private var moving: NotesMovable?
 
     /// What the name field of the alert is for.
     private enum Naming: Equatable {
@@ -100,6 +126,7 @@ private struct FolderTree: View {
         } message: { folder in
             Text(model.summary(ofFolder: folder.path))
         }
+        .sheet(item: $moving) { MoveSheet(item: $0) }
         .accessibilityIdentifier("folder-tree")
     }
 
@@ -116,10 +143,12 @@ private struct FolderTree: View {
             }
         }
         .tag(path)
+        .modifier(FolderDrag(path: path))
         .contextMenu {
             Button("New Folder", systemImage: "folder.badge.plus") { ask(.create(inside: path)) }
             if !path.isEmpty {
                 Button("Rename", systemImage: "pencil") { ask(.rename(path)) }
+                Button("Move to…", systemImage: "folder") { moving = .folder(path) }
                 Button("Delete", systemImage: "trash", role: .destructive) { deleting = model.folder(at: path) }
             }
         }
@@ -144,14 +173,76 @@ private struct FolderTree: View {
         } catch {}
     }
 
-    private static func reason(_ error: FolderNameError) -> LocalizedStringKey {
+    fileprivate static func reason(_ error: FolderNameError) -> LocalizedStringKey {
         switch error {
         case .Empty: "The name is empty."
         case .HasSlash: "The name can't contain a /."
         case .Hidden: "The name can't start with a dot."
         case .Taken: "A Folder of that name is already there."
+        case .Inside: "A Folder can't be moved into itself."
         case .Failed(let message): LocalizedStringKey(message)
         }
+    }
+}
+
+/// Makes a Folder row draggable and a drop target; the top level (empty path) can't be dragged.
+private struct FolderDrag: ViewModifier {
+    @Environment(NotesModel.self) private var model
+    let path: String
+
+    func body(content: Content) -> some View {
+        content
+            .draggableIf(!path.isEmpty, NotesMovable.folder(path))
+            .dropDestination(for: NotesMovable.self) { items, _ in
+                let moved = items.filter { (try? model.move($0, into: path)) != nil }
+                return !moved.isEmpty
+            }
+    }
+}
+
+extension View {
+    @ViewBuilder fileprivate func draggableIf(_ condition: Bool, _ item: NotesMovable) -> some View {
+        if condition { draggable(item) } else { self }
+    }
+}
+
+/// The Folder tree to choose where to Move a Note or Folder; a refused Folder Move says why.
+private struct MoveSheet: View {
+    @Environment(NotesModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let item: NotesMovable
+    @State private var problem: FolderNameError?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let problem { Text(FolderTree.reason(problem)).foregroundStyle(.red) }
+                destination(path: "", title: "Notes", systemImage: "tray")
+                OutlineGroup(model.tree, id: \.path, children: \.children) { folder in
+                    destination(path: folder.path, title: folder.name, systemImage: "folder")
+                }
+            }
+            .navigationTitle("Move to…")
+            #if os(iOS)
+                .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+        }
+        .frame(minWidth: 280, minHeight: 320)
+    }
+
+    private func destination(path: String, title: String, systemImage: String) -> some View {
+        Button {
+            do {
+                try model.move(item, into: path)
+                dismiss()
+            } catch let error as FolderNameError {
+                problem = error
+            } catch {}
+        } label: {
+            Label(title, systemImage: systemImage)
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -161,6 +252,7 @@ private struct NoteList: View {
     @Environment(NotesModel.self) private var model
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var deleting: ListedNote?
+    @State private var moving: NotesMovable?
 
     var body: some View {
         List(selection: NotesLayout.pushes(sizeClass) ? .constant(nil) : Bindable(model).openID) {
@@ -173,8 +265,12 @@ private struct NoteList: View {
                     }
                 }
                 .tag(row.id)
+                .draggable(NotesMovable.note(row.id))
                 .swipeActions { Button("Delete", role: .destructive) { ask(row) } }
-                .contextMenu { Button("Delete", systemImage: "trash", role: .destructive) { ask(row) } }
+                .contextMenu {
+                    Button("Move to…", systemImage: "folder") { moving = .note(row.id) }
+                    Button("Delete", systemImage: "trash", role: .destructive) { ask(row) }
+                }
             }
         }
         .overlay {
@@ -194,6 +290,7 @@ private struct NoteList: View {
         ) { row in
             Button("Delete", role: .destructive) { model.delete(id: row.id) }
         }
+        .sheet(item: $moving) { MoveSheet(item: $0) }
         .accessibilityIdentifier("notes-list")
     }
 
