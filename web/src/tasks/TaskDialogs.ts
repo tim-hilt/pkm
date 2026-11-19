@@ -1,4 +1,4 @@
-import { TaskQuickAdd, isValidTag } from "../core/Core";
+import { TaskQuickAdd, imageTargets, isValidTag } from "../core/Core";
 import { button, make } from "../Dom";
 import { DescriptionImages } from "./DescriptionImages";
 import { DescriptionField } from "./DescriptionField";
@@ -133,7 +133,7 @@ export function newTaskDialog(model: TasksModel, host: HTMLElement): void {
       quickAdd = model.newQuickAdd();
       title.use(quickAdd);
       description.value = "";
-      model.releaseImages();
+      model.releaseImages(images.takeAdded());
       enableAdd();
     }
     // Clicking Add moved the focus off the Title.
@@ -142,7 +142,7 @@ export function newTaskDialog(model: TasksModel, host: HTMLElement): void {
   dialog.addEventListener("close", () => {
     quickAdd.free();
     images.dispose();
-    model.releaseImages();
+    model.releaseImages(images.takeAdded());
   });
   enableAdd();
   title.focus();
@@ -179,6 +179,8 @@ export function editTaskDialog(
   });
   const titleHint = make("p", "tasks-hint", ["A Task needs a Title."]);
   const images = new DescriptionImages(model);
+  // Released on close: each Task pushed or popped to gets a view of its own.
+  const started = imageTargets(task.description);
   const description = new DescriptionField(task.description, images);
   let priority = task.priority;
   let pause: ReturnType<typeof setTimeout> | undefined;
@@ -297,7 +299,7 @@ export function editTaskDialog(
     quickAdd.free();
     images.dispose();
     subtasks.stopAdding();
-    model.releaseImages();
+    model.releaseImages([...started, ...images.takeAdded()]);
   });
   return { dialog, refresh: () => subtasks.refresh() };
 }

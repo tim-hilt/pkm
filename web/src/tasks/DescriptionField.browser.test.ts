@@ -198,6 +198,8 @@ describe("DescriptionField", () => {
       field.element.dispatchEvent(pasting(bytes, "image/png"));
       await vi.waitFor(() => expect(field.value).toBe("a\n![](a0.png)\n"));
       expect(kept.get("a0.png")).toEqual(bytes);
+      expect(images.takeAdded()).toEqual(["a0.png"]);
+      expect(images.takeAdded()).toEqual([]);
       await moveTo(field, 0);
       const image = await shown(field);
       expect([image.naturalWidth, image.naturalHeight]).toEqual([3, 2]);

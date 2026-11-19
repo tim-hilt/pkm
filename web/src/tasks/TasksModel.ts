@@ -3,7 +3,6 @@ import {
   type Direction,
   type FilterSortKey,
   TaskQuickAdd,
-  imageTargets,
   isValidTag,
   stripForbiddenTagCharacters,
   typedQuery,
@@ -161,8 +160,6 @@ export class TasksModel {
   private stack: string[] = [];
   /** Whether the Task on top was last saved with an empty Title, which keeps the stack as it is. */
   private titleMissing = false;
-  /** The Images the edit and New Task views started with or added, until `releaseImages`. */
-  private readonly imagesInPlay = new Set<string>();
   /** The Groups of the list shown, in order; none for the Filters list. */
   private shownGroups: TaskGroup[] = [];
   /** The Tasks of `shownGroups`, one after another. */
@@ -292,7 +289,6 @@ export class TasksModel {
         );
         if (home) this.show(home);
         this.stack = [id];
-        this.watchImages(id);
       }
     }
     this.reload();
@@ -308,10 +304,7 @@ export class TasksModel {
   open(id: string): boolean {
     if (this.stack.length === 0 || this.titleMissing || !this.find(id)) return false;
     if (id === this.stack.at(-2)) this.stack.pop();
-    else {
-      this.stack.push(id);
-      this.watchImages(id);
-    }
+    else this.stack.push(id);
     this.onChange();
     return true;
   }
@@ -450,24 +443,16 @@ export class TasksModel {
     this.change(() => {
       reference = this.files.store.addImage(bytes);
     });
-    if (reference !== undefined) this.imagesInPlay.add(reference);
     return reference;
   }
 
   /**
-   * Ends what the views of Images started with or added: those no Description
-   * shows any more are Deleted. Call it once the view has saved for the last time.
+   * Deletes those of the Images `references` that no Description shows any
+   * more. A view calls it with the Images it started with or added, once it
+   * has saved for the last time.
    */
-  releaseImages(): void {
-    const references = [...this.imagesInPlay];
-    this.imagesInPlay.clear();
-    this.change(() => this.files.store.releaseImages(references));
-  }
-
-  private watchImages(id: string): void {
-    for (const reference of imageTargets(this.find(id)?.description ?? "")) {
-      this.imagesInPlay.add(reference);
-    }
+  releaseImages(references: string[]): void {
+    if (references.length > 0) this.change(() => this.files.store.releaseImages(references));
   }
 
   /** The bytes of the Image a reference names; `undefined` if there is none. */

@@ -342,11 +342,10 @@ pub fn parse_description(text: &str) -> Description {
     d
 }
 
-/// Adds the Inline formatting and links of `text`, which starts at `offset`.
 /// The line a Task row shows for a Description: its first line with text, block
-/// markers stripped, empty and Image-only lines skipped (a fence's lines count as
-/// text, its markers not). Empty when there is none. Callers format it like a Title
-/// (`parse_title`).
+/// markers stripped and links shown as their text, empty and Image-only lines
+/// skipped (a fence's lines count as text, as they are, its markers not). Empty
+/// when there is none. Callers format it like a Title (`parse_title`).
 pub fn row_preview(text: &str) -> String {
     let mut in_fence = false;
     for line in text.split('\n') {
@@ -368,12 +367,29 @@ pub fn row_preview(text: &str) -> String {
         let (_, from, len, ..) = line_block(line);
         let body = line[from + len..].trim_start_matches(' ');
         if !body.is_empty() {
-            return body.to_string();
+            return link_texts(body);
         }
     }
     String::new()
 }
 
+/// `line` with each link replaced by its text.
+fn link_texts(line: &str) -> String {
+    let mut d = Description::default();
+    inline_spans(&mut d, line, 0);
+    let units: Vec<u16> = line.encode_utf16().collect();
+    let mut kept = Vec::with_capacity(units.len());
+    let mut at = 0;
+    for link in &d.links {
+        kept.extend_from_slice(&units[at..link.start as usize]);
+        kept.extend_from_slice(&units[link.text_start as usize..link.text_end as usize]);
+        at = link.end as usize;
+    }
+    kept.extend_from_slice(&units[at..]);
+    String::from_utf16_lossy(&kept)
+}
+
+/// Adds the Inline formatting and links of `text`, which starts at `offset`.
 fn inline_spans(d: &mut Description, text: &str, offset: u32) {
     let spans = parse_title(text);
     let chars: Vec<char> = text.chars().collect();
@@ -724,6 +740,15 @@ mod tests {
     #[test]
     fn row_preview_keeps_inline_markers_for_formatting() {
         assert_eq!(row_preview("- a **b**"), "a **b**");
+    }
+
+    #[test]
+    fn row_preview_shows_links_as_their_text() {
+        assert_eq!(
+            row_preview("see [*the* 😀 docs](https://x.y) now"),
+            "see *the* 😀 docs now"
+        );
+        assert_eq!(row_preview("`[a](b)` [c](d)"), "`[a](b)` c");
     }
 
     #[test]

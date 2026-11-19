@@ -4,7 +4,8 @@ import UniformTypeIdentifiers
 /// A Description edited in Live Preview (ADR-0028): a TextKit 2 text view whose lines are styled
 /// from the core's parse (`MarkdownStyler`), the caret's line raw. The text is exactly what was
 /// typed. It grows with its content, so the sheet around it scrolls. Links open on a tap or click,
-/// and pasting takes only the plain text, or a picture, which `images` keeps as an Image. While focused it offers ⌘B, ⌘I and ⌘E (`FormatCommands`).
+/// and pasting takes only the plain text, or a picture, which `images` keeps as an Image. While
+/// focused it offers ⌘B, ⌘I and ⌘E (`FormatCommands`).
 struct MarkdownEditor: View {
     @Binding var text: String
     var placeholder: LocalizedStringKey

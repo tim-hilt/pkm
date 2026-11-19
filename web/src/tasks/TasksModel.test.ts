@@ -1377,38 +1377,25 @@ describe("releasing Images", () => {
     (await storage.read(`Tasks/${reference}`)) !== undefined;
   const settle = () => model.syncDidChange(); // waits for the saves
 
-  it("deletes an Image removed from the Description, and keeps one still shown", async () => {
+  it("deletes the Images released that no Description shows, and keeps the others", async () => {
     const shown = model.addImage(png)!;
     const removed = model.addImage(png)!;
+    const other = model.addImage(png)!;
     model.add("a", { description: `![](${shown})\n\n![](${removed})` });
-    model.openLinked(first().id);
     model.edit(first(), {
       title: "a",
       description: `![](${shown})`,
       priority: 4,
       tags: [],
     });
-    model.releaseImages();
+    model.releaseImages([shown, removed]);
     await settle();
     expect(await kept(shown)).toBe(true);
     expect(await kept(removed)).toBe(false);
+    expect(await kept(other)).toBe(true);
   });
 
-  it("deletes an Image the Description started with once it is removed", async () => {
-    const image = model.addImage(png)!;
-    model.add("a", { description: `![](${image})` });
-    model.releaseImages();
-    model.openLinked(first().id);
-    model.edit(first(), { title: "a", description: "", priority: 4, tags: [] });
-    model.releaseImages();
-    await settle();
-    expect(await kept(image)).toBe(false);
-  });
-
-  it("deletes the Images pasted into a cancelled New Task", async () => {
-    const image = model.addImage(png)!;
-    model.releaseImages();
-    await settle();
-    expect(await kept(image)).toBe(false);
+  it("refuses to add what is no picture it keeps", () => {
+    expect(model.addImage(new Uint8Array([1, 2, 3]))).toBeUndefined();
   });
 });

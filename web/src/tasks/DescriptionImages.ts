@@ -10,14 +10,16 @@ export interface ImageFiles {
 }
 
 /**
- * The Images of Descriptions: adds pictures, converting what isn't a web
+ * The Images of a Description: adds pictures, converting what isn't a web
  * format to PNG through a canvas, and shows them as `<img>` from blob URLs,
- * made once per reference until `dispose`.
+ * made once per reference until `dispose`. It remembers what it added, for
+ * the view around it to release (`takeAdded`).
  */
 export class DescriptionImages {
   private readonly urls = new Map<string, Promise<string | undefined>>();
   /** The URLs already made, to show an Image on the draw that asks for it. */
   private readonly ready = new Map<string, string>();
+  private added: string[] = [];
 
   constructor(
     private readonly files: ImageFiles,
@@ -26,10 +28,20 @@ export class DescriptionImages {
 
   /** Stores a picture; its reference, or `undefined` if it is no picture the browser reads. */
   async add(bytes: Uint8Array): Promise<string | undefined> {
-    const kept = this.files.addImage(bytes);
-    if (kept !== undefined) return kept;
-    const png = await this.codec.encode(bytes, Infinity, "image/png", 1);
-    return png && this.files.addImage(png.bytes);
+    let reference = this.files.addImage(bytes);
+    if (reference === undefined) {
+      const png = await this.codec.encode(bytes, Infinity, "image/png", 1);
+      reference = png && this.files.addImage(png.bytes);
+    }
+    if (reference !== undefined) this.added.push(reference);
+    return reference;
+  }
+
+  /** The references `add` returned since the last call. */
+  takeAdded(): string[] {
+    const added = this.added;
+    this.added = [];
+    return added;
   }
 
   /** Makes `image` show the Image `reference`, as soon as it is read. */

@@ -28,34 +28,33 @@ import Testing
         #expect(model.tasks.map(\.priority) == [1])
     }
 
-    @Test func aPictureIsKeptAsAnImageAndReadBack() throws {
-        let model = try openModel()
-        let png = TestImages.png(width: 2, height: 2, color: { _, _ in TestImages.blue })
-        let reference = try #require(model.addImage(png))
-        #expect(reference.hasSuffix(".png"))
-        #expect(model.image(reference) == png)
-        #expect(FileManager.default.fileExists(atPath: root.appending(path: "Tasks/\(reference)").path))
-        #expect(model.addImage(Data("text".utf8)) == nil)
-        #expect(model.image("missing.png") == nil)
-    }
-
     private func fileExists(_ reference: String) -> Bool {
         FileManager.default.fileExists(atPath: root.appending(path: "Tasks/\(reference)").path)
     }
 
     private var png: Data { TestImages.png(width: 2, height: 2, color: { _, _ in TestImages.blue }) }
 
+    @Test func aPictureIsKeptAsAnImageAndReadBack() throws {
+        let model = try openModel()
+        let reference = try #require(model.addImage(png))
+        #expect(reference.hasSuffix(".png"))
+        #expect(model.image(reference) == png)
+        #expect(fileExists(reference))
+        #expect(model.addImage(Data("text".utf8)) == nil)
+        #expect(model.image("missing.png") == nil)
+    }
+
     @Test func anImageRemovedFromTheDescriptionIsDeletedOnRelease() throws {
         let model = try openModel()
-        let kept = try #require(model.addImage(png))
-        #expect(model.add(title: "a", description: "![](\(kept))"))
+        let started = try #require(model.addImage(png))
+        #expect(model.add(title: "a", description: "![](\(started))"))
         model.startEditing(model.tasks[0])
-        let removed = try #require(model.addImage(png))
-        model.edit(model.tasks[0], title: "a", description: "![](\(removed))", priority: 4, tags: [])
+        let added = try #require(model.addImage(png))
+        model.edit(model.tasks[0], title: "a", description: "![](\(added))", priority: 4, tags: [])
         model.edit(model.tasks[0], title: "a", description: "", priority: 4, tags: [])
         model.releaseImages()
-        #expect(!fileExists(kept))
-        #expect(!fileExists(removed))
+        #expect(!fileExists(started))
+        #expect(!fileExists(added))
     }
 
     @Test func anImageStillShownSurvivesRelease() throws {

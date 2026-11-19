@@ -396,17 +396,16 @@ impl Tasks {
     }
 
     /// Deletes the files of the pending Close, if any: the Task and its Open
-    /// Subtasks, and their Images no other Task shows. One Deleted meanwhile, e.g. by Sync, is already as wanted;
-    /// where another Device edited one meanwhile, the Delete wins on Sync
-    /// (ADR-0020).
+    /// Subtasks, and their Images no other Task shows. One Deleted meanwhile,
+    /// e.g. by Sync, is already as wanted; where another Device edited one
+    /// meanwhile, the Delete wins on Sync (ADR-0020).
     pub fn commit(&self) -> Result<(), Error> {
         let Some(Pending { ids, .. }) = self.pending().take() else {
             return Ok(());
         };
-        let nodes = self.load()?;
         let images: Vec<String> = (ids.iter())
-            .filter_map(|id| nodes.get(id.as_str()))
-            .flat_map(|node| image_targets(&node.task.description))
+            .filter_map(|id| read_node(self.files.as_ref(), &self.path(id)))
+            .flat_map(|(node, _)| image_targets(&node.task.description))
             .collect();
         for id in ids {
             match self.files.remove(&self.path(&id)) {

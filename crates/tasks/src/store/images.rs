@@ -49,6 +49,9 @@ impl Tasks {
     /// is the only way an Image goes besides its Task's Close (never a sweep
     /// of every unreferenced Image).
     pub fn release_images(&self, references: &[String]) -> io::Result<()> {
+        if references.is_empty() {
+            return Ok(()); // without reading every Task
+        }
         let shown: HashSet<String> = self
             .load()?
             .values()
