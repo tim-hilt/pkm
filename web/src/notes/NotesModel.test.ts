@@ -255,3 +255,50 @@ describe("Images", () => {
     expect(await imagesIn("Notes/Work")).toEqual([]);
   });
 });
+
+describe("Search", () => {
+  it("finds Notes in any Folder, Title matches first, with Folder and snippet", () => {
+    model.addFolder("Work", "");
+    model.add();
+    const inBody = model.openId!;
+    model.save(inBody, "Plan", "see the Café menu 😀 today");
+    model.select("");
+    model.add();
+    const inTitle = model.openId!;
+    model.save(inTitle, "CAFE", "");
+    model.search("cafe");
+    expect(model.results.map((hit) => [hit.id, hit.folder, hit.titleMatched])).toEqual([
+      [inTitle, "", true],
+      [inBody, "Work", false],
+    ]);
+    const { snippet, matchStart, matchEnd } = model.results[1]!;
+    expect(snippet.slice(matchStart, matchEnd)).toBe("Café");
+  });
+
+  it("finds nothing for a blank query, and follows changes while searching", () => {
+    model.add();
+    const id = model.openId!;
+    model.save(id, "Alpha", "");
+    model.search("  ");
+    expect(model.results).toEqual([]);
+    model.search("beta");
+    expect(model.results).toEqual([]);
+    model.save(id, "Beta", "");
+    expect(model.results.map((hit) => hit.id)).toEqual([id]);
+    model.search("");
+    expect(model.results).toEqual([]);
+  });
+
+  it("opens a result in its Folder", () => {
+    model.addFolder("Work", "");
+    model.add();
+    const id = model.openId!;
+    model.save(id, "Roadmap", "");
+    model.select("");
+    model.search("road");
+    model.openResult(model.results[0]!);
+    expect(model.folder).toBe("Work");
+    expect(model.openId).toBe(id);
+    expect(model.rows.map((row) => row.id)).toEqual([id]);
+  });
+});

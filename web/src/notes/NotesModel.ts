@@ -9,6 +9,20 @@ export interface ListedNote {
   preview: string;
 }
 
+/** A Note that Search found; a plain copy of the core's result. */
+export interface SearchHit {
+  id: string;
+  title: string;
+  /** The path of its Folder; empty for the top level. */
+  folder: string;
+  /** Around the match in the Body, as typed. */
+  snippet: string;
+  /** The match in `snippet`: `matchStart` up to `matchEnd`. */
+  matchStart: number;
+  matchEnd: number;
+  titleMatched: boolean;
+}
+
 /** A Folder as a row of the outline: the tree flattened, parents before their Folders. */
 export interface FolderRow {
   name: string;
@@ -34,6 +48,10 @@ export class NotesModel {
   folders: FolderRow[] = [];
   /** The Notes of the selected Folder, newest changed first. */
   rows: ListedNote[] = [];
+  /** What Search looks for; empty when not searching. */
+  searchText = "";
+  /** The Notes in any Folder that match `searchText`, Title matches first; empty when not searching. */
+  results: SearchHit[] = [];
   /** The selected Folder's path; empty for the top level. Selecting another closes the open Note. */
   folder = "";
   /** Whether the selected Folder's Notes are pushed over the outline, where the columns don't fit. */
@@ -96,6 +114,19 @@ export class NotesModel {
     this.folder = path;
     this.showsFolder = true;
     this.changed();
+  }
+
+  /** Searches for `text`; results follow it and later changes. */
+  search(text: string): void {
+    this.searchText = text;
+    this.reload();
+    this.onChange();
+  }
+
+  /** Opens a Search result in its Folder. */
+  openResult(hit: SearchHit): void {
+    this.select(hit.folder);
+    this.open(hit.id);
   }
 
   /** Leaves the selected Folder's Notes for the outline, where the columns don't fit; the Folder stays selected. */
@@ -261,5 +292,21 @@ export class NotesModel {
       note.free();
       return row;
     });
+    this.results =
+      this.searchText.trim() === ""
+        ? []
+        : store.search(this.searchText).map((hit) => {
+            const result = {
+              id: hit.id,
+              title: hit.title,
+              folder: hit.folder,
+              snippet: hit.snippet,
+              matchStart: hit.matchedStart,
+              matchEnd: hit.matchedEnd,
+              titleMatched: hit.titleMatched,
+            };
+            hit.free();
+            return result;
+          });
   }
 }

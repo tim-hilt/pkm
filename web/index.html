@@ -1613,6 +1613,17 @@
         flex-direction: column;
         text-align: left;
       }
+      .notes-find {
+        padding-top: 0;
+      }
+      .notes-search {
+        flex: 1;
+        min-width: 0;
+      }
+      .note-folder {
+        font-size: 0.8em;
+        opacity: 0.6;
+      }
       .note-none {
         opacity: 0.5;
       }
@@ -1637,6 +1648,9 @@
         .notes-bar {
           /* Right of the shell's sidebar button. */
           padding-left: calc(max(4px, env(safe-area-inset-left)) + 52px);
+        }
+        .notes .notes-find {
+          padding-left: 16px;
         }
         .notes-detail .tasks-back:first-child {
           visibility: visible;

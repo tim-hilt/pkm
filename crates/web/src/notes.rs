@@ -49,6 +49,38 @@ impl From<pkm_notes::Row> for ListedNote {
     }
 }
 
+/// A Note that Search found, see `pkm_notes::Found`.
+#[wasm_bindgen(getter_with_clone)]
+pub struct SearchResult {
+    pub id: String,
+    pub title: String,
+    /// The path of its Folder; empty for the top level.
+    pub folder: String,
+    /// Around the match in the Body, as typed.
+    pub snippet: String,
+    /// The match in `snippet`, in UTF-16 units (JavaScript's): `matched_start` up to `matched_end`.
+    #[wasm_bindgen(js_name = matchedStart)]
+    pub matched_start: u32,
+    #[wasm_bindgen(js_name = matchedEnd)]
+    pub matched_end: u32,
+    #[wasm_bindgen(js_name = titleMatched)]
+    pub title_matched: bool,
+}
+
+impl From<pkm_notes::Found> for SearchResult {
+    fn from(found: pkm_notes::Found) -> Self {
+        Self {
+            id: found.id,
+            title: found.title,
+            folder: found.folder,
+            snippet: found.snippet.text,
+            matched_start: found.snippet.matched.start as u32,
+            matched_end: found.snippet.matched.end as u32,
+            title_matched: found.title_matched,
+        }
+    }
+}
+
 /// A Folder as one row of the outline: the tree flattened, parents before
 /// their Folders, each level by name.
 #[wasm_bindgen(getter_with_clone)]
@@ -186,6 +218,12 @@ impl NoteStore {
     pub fn notes(&self, folder: &str) -> Result<Vec<ListedNote>, JsError> {
         let rows = self.notes.list(folder).map_err(error)?;
         Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    /// The Notes in any Folder with `query` in the Title or Body, Title matches first, each newest first.
+    pub fn search(&self, query: &str) -> Result<Vec<SearchResult>, JsError> {
+        let found = self.notes.search(query).map_err(error)?;
+        Ok(found.into_iter().map(Into::into).collect())
     }
 
     /// Every Folder, as the outline shows them.

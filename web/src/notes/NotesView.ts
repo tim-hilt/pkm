@@ -4,7 +4,7 @@ import { DescriptionField } from "../tasks/DescriptionField";
 import { RowMenu } from "../tasks/RowMenu";
 import { confirmButton, modal } from "../tasks/TaskDialogs";
 import { titleNodes } from "../tasks/TitleText";
-import { type ListedNote, type NotesModel } from "./NotesModel";
+import { type ListedNote, type NotesModel, type SearchHit } from "./NotesModel";
 import { FolderOutline } from "./FolderOutline";
 import { draggable } from "./FolderDrag";
 import { moveDialog } from "./FolderDialogs";
@@ -28,6 +28,8 @@ export class NotesView {
     make("strong", "", ["No Notes"]),
     make("span", "", ["Tap + to write one."]),
   ]);
+  private readonly noResults = make("div", "tasks-empty");
+  private readonly search = make("input", "notes-search");
   private readonly detail = make("div", "notes-detail");
   private readonly failure = make("p", "tasks-failure");
   private readonly menu: RowMenu;
@@ -43,6 +45,10 @@ export class NotesView {
     this.list.setAttribute("aria-label", "Notes");
     this.menu = new RowMenu(this.element);
     this.outline = new FolderOutline(model, this.menu, this.element);
+    this.search.type = "search";
+    this.search.placeholder = "Search";
+    this.search.ariaLabel = "Search Notes";
+    this.search.addEventListener("input", () => model.search(this.search.value));
     const create = button("tasks-new", "", () => model.add());
     create.innerHTML = plusGlyph;
     create.title = create.ariaLabel = "New Note";
@@ -51,7 +57,8 @@ export class NotesView {
         button("tasks-back", "Folders", () => model.leaveFolder()),
         this.folderName,
       ]),
-      make("div", "tasks-scroll", [this.list, this.empty]),
+      make("div", "notes-bar notes-find", [this.search]),
+      make("div", "tasks-scroll", [this.list, this.empty, this.noResults]),
       this.failure,
     ]);
     this.element.append(this.outline.element, side, this.detail, create, this.menu.element);
@@ -68,8 +75,17 @@ export class NotesView {
     this.element.classList.toggle("has-open", model.openId !== undefined);
     this.outline.update();
     this.folderName.textContent = model.folder.slice(model.folder.lastIndexOf("/") + 1) || "Notes";
-    this.list.replaceChildren(...model.rows.map((row) => this.row(row)));
-    this.empty.hidden = model.rows.length > 0;
+    const searching = model.searchText.trim() !== "";
+    this.list.replaceChildren(
+      ...(searching
+        ? model.results.map((hit) => this.result(hit))
+        : model.rows.map((row) => this.row(row))),
+    );
+    this.empty.hidden = searching || model.rows.length > 0;
+    this.noResults.hidden = !searching || model.results.length > 0;
+    this.noResults.replaceChildren(
+      make("strong", "", [`No Results for “${model.searchText.trim()}”`]),
+    );
     this.failure.hidden = model.failure === undefined;
     this.failure.textContent = model.failure ?? "";
     this.showEditor();
@@ -92,6 +108,25 @@ export class NotesView {
       if (event.key === "Backspace" || event.key === "Delete") this.ask(row.id);
     });
     return item;
+  }
+
+  /** A Search result: the Title, the snippet with the match in bold, and the Folder. */
+  private result(hit: SearchHit): HTMLElement {
+    const open = button("task-open note-open", "", () => this.model.openResult(hit));
+    const { snippet, matchStart, matchEnd } = hit;
+    const text = make("span", hit.title === "" ? "task-title" : "task-description", [
+      snippet.slice(0, matchStart),
+      make("b", "", [snippet.slice(matchStart, matchEnd)]),
+      snippet.slice(matchEnd),
+    ]);
+    const folder = hit.folder.slice(hit.folder.lastIndexOf("/") + 1) || "Notes";
+    open.append(
+      ...(hit.title === "" ? [] : [make("span", "task-title", titleNodes(hit.title))]),
+      text,
+      make("span", "note-folder", [folder]),
+    );
+    if (hit.id === this.model.openId) open.setAttribute("aria-current", "true");
+    return make("li", "task-row note-row", [open]);
   }
 
   /** The Title formatted, or the Body's first line, or "New Note". */
