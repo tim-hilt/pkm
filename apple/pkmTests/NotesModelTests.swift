@@ -255,4 +255,36 @@ import Testing
         model.delete(id: id)
         #expect(!fileExists(image))
     }
+
+    @Test func searchFindsNotesInAnyFolderAsTheTextChangesAndOpensAResult() throws {
+        let model = try openModel()
+        try model.addFolder(named: "Trips", in: "")
+        model.add()
+        let id = try #require(model.openID)
+        model.save(id: id, title: "Plan", body: "Visit the Café\n")
+        model.folderPath = ""
+        #expect(model.results.isEmpty)
+        model.searchText = "cafe"
+        #expect(model.results.map(\.id) == [id])
+        #expect(model.results.first?.folder == "Trips")
+        #expect(model.results.first?.snippet == "Visit the Café")
+        #expect(model.results.first.map { $0.matchedStart..<$0.matchedEnd } == 10..<14)
+        model.searchText = "cafes"
+        #expect(model.results.isEmpty)
+        model.searchText = ""
+        #expect(model.results.isEmpty)
+    }
+
+    @Test func aTitleMatchComesBeforeABodyMatch() throws {
+        let model = try openModel()
+        model.add()
+        let body = try #require(model.openID)
+        model.save(id: body, title: "x", body: "tea")
+        model.add()
+        let title = try #require(model.openID)
+        model.save(id: title, title: "Tea", body: "")
+        model.searchText = "tea"
+        #expect(model.results.map(\.id) == [title, body])
+        #expect(model.results.map(\.titleMatched) == [true, false])
+    }
 }

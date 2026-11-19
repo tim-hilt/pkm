@@ -108,15 +108,15 @@ lint:
 	swift format lint --strict -r $(SWIFT_SRC)
 	cargo fmt --all --check
 	cargo clippy --workspace --all-targets --locked -q -- -D warnings
-	@# ADR-0009, ADR-0017: pkm-base has no dependencies, pkm-drawing, pkm-tasks and pkm-notes only pkm-base.
+	@# ADR-0009, ADR-0017: pkm-base has no dependencies, pkm-drawing and pkm-tasks only pkm-base, pkm-notes also unicode-normalization (Search folds accents; Books has it already).
 	@test "$$(cargo tree -p pkm-base -e normal --depth 1 --prefix none --locked | wc -l)" -eq 1 \
 		|| { echo 'error: crates/base must not have dependencies (ADR-0009)'; exit 1; }
 	@test "$$(cargo tree -p pkm-drawing -e normal --depth 1 --prefix none --locked | cut -d' ' -f1 | sort | tr '\n' ' ')" = "pkm-base pkm-drawing " \
 		|| { echo 'error: crates/drawing may only depend on pkm-base (ADR-0009)'; exit 1; }
 	@test "$$(cargo tree -p pkm-tasks -e normal --depth 1 --prefix none --locked | cut -d' ' -f1 | sort | tr '\n' ' ')" = "pkm-base pkm-tasks " \
 		|| { echo 'error: crates/tasks may only depend on pkm-base (ADR-0017)'; exit 1; }
-	@test "$$(cargo tree -p pkm-notes -e normal --depth 1 --prefix none --locked | cut -d' ' -f1 | sort | tr '\n' ' ')" = "pkm-base pkm-notes " \
-		|| { echo 'error: crates/notes may only depend on pkm-base (ADR-0017)'; exit 1; }
+	@test "$$(cargo tree -p pkm-notes -e normal --depth 1 --prefix none --locked | cut -d' ' -f1 | sort | tr '\n' ' ')" = "pkm-base pkm-notes unicode-normalization " \
+		|| { echo 'error: crates/notes may only depend on pkm-base and unicode-normalization (ADR-0017)'; exit 1; }
 
 fmt: web-fmt
 	swift format -i -r $(SWIFT_SRC)

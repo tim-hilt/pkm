@@ -1,7 +1,7 @@
 //! The Notes surface of the UniFFI library (ADR-0007): the Notes store. The
 //! logic lives in `pkm-notes`.
 
-use pkm_notes::{Counts, Folder, FolderError, Note, Notes, Row};
+use pkm_notes::{Counts, Folder, FolderError, Found, Note, Notes, Row};
 
 /// Why the Notes couldn't be read or saved.
 #[derive(Debug, uniffi::Error)]
@@ -104,6 +104,35 @@ impl From<Row> for ListedNote {
     }
 }
 
+/// A Note that Search found, see `pkm_notes::Found`.
+#[derive(uniffi::Record)]
+pub struct SearchResult {
+    pub id: String,
+    pub title: String,
+    /// The path of its Folder; empty for the top level.
+    pub folder: String,
+    /// Around the match in the Body, as typed.
+    pub snippet: String,
+    /// The match in `snippet`, in UTF-16 units: `matched_start` up to `matched_end`.
+    pub matched_start: u32,
+    pub matched_end: u32,
+    pub title_matched: bool,
+}
+
+impl From<Found> for SearchResult {
+    fn from(found: Found) -> Self {
+        Self {
+            id: found.id,
+            title: found.title,
+            folder: found.folder,
+            snippet: found.snippet.text,
+            matched_start: found.snippet.matched.start as u32,
+            matched_end: found.snippet.matched.end as u32,
+            title_matched: found.title_matched,
+        }
+    }
+}
+
 /// The Notes in a folder, see `pkm_notes::Notes`.
 #[derive(uniffi::Object)]
 pub struct NoteStore(Notes);
@@ -159,6 +188,11 @@ impl NoteStore {
         Ok(self.0.list(&folder)?.into_iter().map(Into::into).collect())
     }
 
+    /// The Notes in any Folder with `query` in the Title or Body, Title matches first, each newest first.
+    pub fn search(&self, query: String) -> Result<Vec<SearchResult>, NotesError> {
+        Ok(self.0.search(&query)?.into_iter().map(Into::into).collect())
+    }
+
     /// The Folders at the top level, with the Folders in them, by name.
     pub fn folders(&self) -> Result<Vec<Folder>, NotesError> {
         Ok(self.0.folders()?)
@@ -211,6 +245,11 @@ mod tests {
         assert_eq!(
             (rows[0].title.as_str(), rows[0].preview.as_str()),
             ("Title", "first")
+        );
+        let found = store.search("TITLE".into()).unwrap();
+        assert_eq!(
+            (found[0].id.as_str(), found[0].title_matched),
+            (note.id.as_str(), true)
         );
         std::fs::remove_dir_all(dir).unwrap();
     }

@@ -16,6 +16,14 @@ final class NotesModel {
     /// The Notes of the selected Folder, newest changed first.
     private(set) var rows: [ListedNote] = []
 
+    /// What Search looks for; empty when not searching.
+    var searchText = "" {
+        didSet { if searchText != oldValue { reloadResults() } }
+    }
+
+    /// The Notes in any Folder that match `searchText`, Title matches first; empty when not searching.
+    private(set) var results: [SearchResult] = []
+
     /// The selected Folder's path; empty for the top level. Selecting another closes the open Note.
     var folderPath: String {
         get { selectedFolder }
@@ -219,6 +227,11 @@ final class NotesModel {
 
     private func reloadRows() {
         rows = (try? store.notes(folder: folderPath)) ?? []
+        reloadResults()
+    }
+
+    private func reloadResults() {
+        results = searchText.isEmpty ? [] : (try? store.search(query: searchText)) ?? []
     }
 }
 

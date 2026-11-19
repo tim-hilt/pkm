@@ -273,10 +273,25 @@ private struct NoteList: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var deleting: ListedNote?
     @State private var moving: NotesMovable?
+    @FocusState private var isSearchFocused: Bool
+
+    private var isSearching: Bool { !model.searchText.isEmpty }
 
     var body: some View {
         List(selection: NotesLayout.pushes(sizeClass) ? .constant(nil) : Bindable(model).openID) {
-            ForEach(model.rows, id: \.id) { row in
+            if isSearching {
+                ForEach(model.results, id: \.id) { result in
+                    Group {
+                        if NotesLayout.pushes(sizeClass) {
+                            NavigationLink(value: result.id) { ResultRow(result: result) }
+                        } else {
+                            ResultRow(result: result)
+                        }
+                    }
+                    .tag(result.id)
+                }
+            }
+            ForEach(isSearching ? [] : model.rows, id: \.id) { row in
                 Group {
                     if NotesLayout.pushes(sizeClass) {
                         NavigationLink(value: row.id) { NoteRow(row: row) }
@@ -293,8 +308,23 @@ private struct NoteList: View {
                 }
             }
         }
+        .searchable(text: Bindable(model).searchText)
+        .searchFocused($isSearchFocused)
+        #if os(iOS)
+            .searchToolbarBehavior(.minimize)
+        #endif
+        .toolbar {
+            #if os(iOS)
+                // At the top, so that the bottom stays free for the "+", as in Books.
+                DefaultToolbarItem(kind: .search, placement: .topBarTrailing)
+            #endif
+        }
         .overlay {
-            if model.rows.isEmpty {
+            if isSearching {
+                if model.results.isEmpty {
+                    ContentUnavailableView.search(text: model.searchText)
+                }
+            } else if model.rows.isEmpty {
                 ContentUnavailableView("No Notes", systemImage: "note.text", description: Text("Tap + to write one."))
             }
         }
@@ -317,6 +347,37 @@ private struct NoteList: View {
     /// Deletes the Note, or asks first if its Body has text.
     private func ask(_ row: ListedNote) {
         if model.confirmsDelete(id: row.id) { deleting = row } else { model.delete(id: row.id) }
+    }
+}
+
+/// A Search result: the Title, the Folder, and the snippet with the match emphasized.
+private struct ResultRow: View {
+    let result: SearchResult
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if result.title.isEmpty {
+                Text(snippet).lineLimit(2)
+            } else {
+                Text(AttributedString(title: result.title)).lineLimit(1)
+                Text(snippet).lineLimit(2).font(.subheadline).foregroundStyle(.secondary)
+            }
+            Label(FolderTree.name(ofPath: result.folder), systemImage: "folder")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    /// The snippet as typed, with the match in bold; the range counts UTF-16 units.
+    private var snippet: AttributedString {
+        var text = AttributedString(result.snippet)
+        let units = result.snippet.utf16
+        if let from = units.index(units.startIndex, offsetBy: Int(result.matchedStart), limitedBy: units.endIndex),
+            let to = units.index(units.startIndex, offsetBy: Int(result.matchedEnd), limitedBy: units.endIndex),
+            let range = Range(NSRange(from..<to, in: result.snippet), in: text)
+        {
+            text[range].font = .subheadline.bold()
+        }
+        return text
     }
 }
 

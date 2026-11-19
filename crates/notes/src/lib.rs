@@ -6,8 +6,10 @@
 //! `pkm-bindings`.
 
 mod folder;
+mod search;
 mod store;
 
 pub use folder::{Counts, Folder, FolderError};
 pub use pkm_base::files::{DiskFiles, Files, MemoryFiles};
-pub use store::{Note, Notes, Row};
+pub use search::Snippet;
+pub use store::{Found, Note, Notes, Row};

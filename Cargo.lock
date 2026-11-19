@@ -579,6 +579,7 @@ name = "pkm-notes"
 version = "0.1.0"
 dependencies = [
  "pkm-base",
+ "unicode-normalization",
 ]
 
 [[package]]

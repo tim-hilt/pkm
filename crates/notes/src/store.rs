@@ -4,6 +4,7 @@
 mod images;
 
 use crate::folder::{Counts, Folder, FolderError, check_name, is_visible_name};
+use crate::search::{Needle, Snippet, start_of};
 use pkm_base::clock::{iso8601, now_ms};
 use pkm_base::files::{DiskFiles, Files};
 use pkm_base::front_matter::Document;
@@ -36,6 +37,19 @@ pub struct Row {
     pub preview: String,
     /// When it last changed, as UTC ISO 8601.
     pub updated: String,
+}
+
+/// A Note that Search found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Found {
+    pub id: String,
+    pub title: String,
+    /// The path of the Folder it is in; empty for the top level.
+    pub folder: String,
+    /// Around the first match in the Body; the Body's start, with no match
+    /// marked, where only the Title matched.
+    pub snippet: Snippet,
+    pub title_matched: bool,
 }
 
 /// The Notes in one folder (`Notes` in the app's storage).
@@ -149,6 +163,42 @@ impl Notes {
             .collect();
         rows.sort_by(|a, b| b.updated.cmp(&a.updated).then_with(|| a.id.cmp(&b.id)));
         Ok(rows)
+    }
+
+    /// The Notes in any Folder whose Title or Body has `query`, ignoring case
+    /// and accents, anywhere in a word and in the text as typed. Those
+    /// matching in the Title come first, then those matching only in the Body,
+    /// each newest `updated` first. A blank query finds nothing. Reads every
+    /// Note on each call.
+    pub fn search(&self, query: &str) -> io::Result<Vec<Found>> {
+        let Some(needle) = Needle::new(query) else {
+            return Ok(Vec::new());
+        };
+        let mut hits = Vec::new();
+        for (folder, id, file) in self.all_notes()? {
+            let note = note_of(&file, &id);
+            let title_matched = needle.find(&note.title).is_some();
+            let snippet = match needle.find(&note.body) {
+                Some(snippet) => snippet,
+                None if title_matched => start_of(&note.body),
+                None => continue,
+            };
+            let updated = file.scalar(UPDATED).unwrap_or_default().to_owned();
+            let found = Found {
+                id: note.id,
+                title: note.title,
+                folder,
+                snippet,
+                title_matched,
+            };
+            hits.push((updated, found));
+        }
+        hits.sort_by(|(a_updated, a), (b_updated, b)| {
+            (b.title_matched.cmp(&a.title_matched))
+                .then_with(|| b_updated.cmp(a_updated))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        Ok(hits.into_iter().map(|(_, found)| found).collect())
     }
 
     /// The Folders at the top level, each with the Folders in it, by name
@@ -315,6 +365,21 @@ impl Notes {
             }
         }
         Ok(notes)
+    }
+
+    /// Every Note in any Folder, with its Folder's path and file.
+    fn all_notes(&self) -> io::Result<Vec<(String, ItemId, Document)>> {
+        let mut all = Vec::new();
+        let mut pending = vec![(String::new(), self.root.clone())];
+        while let Some((path, dir)) = pending.pop() {
+            all.extend(
+                (self.notes_in(&dir)?.into_iter()).map(|(id, file)| (path.clone(), id, file)),
+            );
+            for name in self.subfolders(&dir)? {
+                pending.push((join(&path, &name), dir.join(&name)));
+            }
+        }
+        Ok(all)
     }
 
     /// The Note `id`, found in whichever Folder it is: its Item ID, path and
@@ -726,5 +791,78 @@ mod tests {
         assert!(scratch.exists(&kept));
         notes.delete_folder("A").unwrap();
         assert!(notes.delete_folder("").is_err());
+    }
+
+    #[test]
+    fn search_finds_notes_in_any_folder_with_their_folder_and_snippet() {
+        let scratch = Scratch::new();
+        let notes = scratch.store();
+        scratch.write(
+            "a/b/aaaaaaaaaaaa.md",
+            &note_file(
+                "aaaaaaaaaaaa",
+                "T",
+                "2020-01-01T00:00:00Z",
+                "one\n**Café** two\n",
+            ),
+        );
+        scratch.write(
+            ".hidden/bbbbbbbbbbbb.md",
+            &note_file("bbbbbbbbbbbb", "T", "2020-01-01T00:00:00Z", "cafe\n"),
+        );
+        let found = notes.search("CAFE").unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].folder, "a/b");
+        assert!(!found[0].title_matched);
+        assert_eq!(found[0].snippet.text, "one **Café** two");
+        assert_eq!(found[0].snippet.matched, 6..10);
+        assert!(notes.search("  ").unwrap().is_empty());
+    }
+
+    #[test]
+    fn search_lists_title_matches_first_then_body_matches_each_newest_first() {
+        let scratch = Scratch::new();
+        let notes = scratch.store();
+        let file = |id: &str, title: &str, updated: &str, body: &str| {
+            scratch.write(&format!("{id}.md"), &note_file(id, title, updated, body));
+        };
+        file("aaaaaaaaaaaa", "x", "2022-01-01T00:00:00Z", "tea\n");
+        file("bbbbbbbbbbbb", "Tea", "2020-01-01T00:00:00Z", "");
+        file("cccccccccccc", "x", "2021-01-01T00:00:00Z", "tea\n");
+        file(
+            "dddddddddddd",
+            "Teatime",
+            "2021-01-01T00:00:00Z",
+            "first\ntea\n",
+        );
+        let ids: Vec<_> = notes
+            .search("tea")
+            .unwrap()
+            .into_iter()
+            .map(|f| f.id)
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                "dddddddddddd",
+                "bbbbbbbbbbbb",
+                "aaaaaaaaaaaa",
+                "cccccccccccc"
+            ]
+        );
+        let title_only = &notes.search("tea").unwrap()[1];
+        assert!(title_only.title_matched);
+        assert_eq!(title_only.snippet.matched, 0..0);
+    }
+
+    #[test]
+    fn a_search_match_is_counted_in_utf16_units_after_an_emoji() {
+        let scratch = Scratch::new();
+        let notes = scratch.store();
+        scratch.write(
+            "aaaaaaaaaaaa.md",
+            &note_file("aaaaaaaaaaaa", "T", "2020-01-01T00:00:00Z", "😀 tea\n"),
+        );
+        assert_eq!(notes.search("tea").unwrap()[0].snippet.matched, 3..6);
     }
 }
