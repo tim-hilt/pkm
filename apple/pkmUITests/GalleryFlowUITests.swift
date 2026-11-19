@@ -76,7 +76,7 @@ import XCTest
         drawARectangle()
         app.buttons["back-to-gallery"].tap()
         openSidebarRow("Tasks")
-        XCTAssertTrue(app.buttons["add-task"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["add-filter"].waitForExistence(timeout: 10))  // no Favorites: the Filters list
 
         openDrawings()
 

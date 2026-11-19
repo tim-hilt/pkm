@@ -102,11 +102,17 @@ struct TagPicker: View {
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
             #endif
-            .searchable(text: $query, prompt: "Search or create")
-            // Keeps Done reachable while searching.
-            .searchPresentationToolbarBehavior(.avoidHidingContent)
             #if os(iOS)
-                .textInputAutocapitalization(.never)
+                // A plain field: `searchable` in this sheet over another aborts on tapping it.
+                .safeAreaInset(edge: .bottom) {
+                    TextField("Search or create", text: $query)
+                    .accessibilityIdentifier("tag-search")
+                    .textFieldStyle(.roundedBorder)
+                    .textInputAutocapitalization(.never)
+                    .padding()
+                }
+            #else
+                .searchable(text: $query, prompt: "Search or create")
             #endif
             .autocorrectionDisabled()
             .onChange(of: query) { _, text in
@@ -118,9 +124,6 @@ struct TagPicker: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { done(selected) }
                 }
-                #if os(iOS)
-                    DefaultToolbarItem(kind: .search, placement: .bottomBar)
-                #endif
             }
         }
         #if os(macOS)

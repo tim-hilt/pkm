@@ -134,10 +134,14 @@ import XCTest
         for _ in 0..<4 where !row.isHittable { app.collectionViews.firstMatch.swipeUp() }
         row.tap()
         XCTAssertTrue(app.navigationBars["Tags"].waitForExistence(timeout: 5))
-        // Search takes the focus right away, so typing filters without a tap first.
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        // The keyboard opens only when search is tapped; a tap while the sheet still rises is lost.
+        for _ in 0..<3 where !app.keys["h"].exists {
+            app.textFields["tag-search"].tap()
+            _ = app.keys["h"].waitForExistence(timeout: 2)
+        }
+        XCTAssertTrue(app.keys["h"].exists)
         for key in ["h", "o"] { app.keys[key].tap() }
-        XCTAssertEqual(app.searchFields.firstMatch.value as? String, "ho")
+        XCTAssertEqual(app.textFields["tag-search"].value as? String, "ho")
         app.buttons["home"].firstMatch.tap()
         app.navigationBars["Tags"].buttons["Done"].tap()
 
