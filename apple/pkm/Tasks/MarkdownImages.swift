@@ -34,10 +34,36 @@ enum StoredImage {
         CGImageDestinationAddImage(destination, image, nil)
         return CGImageDestinationFinalize(destination) ? png as Data : nil
     }
+
+    /// Puts the stored `bytes` of an Image on `pasteboard` as the type they are; on the Mac also as
+    /// TIFF unless PNG, the picture types every app there reads.
+    static func copy(_ bytes: Data, to pasteboard: Pasteboard) {
+        let type =
+            CGImageSourceCreateWithData(bytes as CFData, nil).flatMap(CGImageSourceGetType)
+            .flatMap { UTType($0 as String) } ?? .png
+        #if canImport(UIKit)
+            pasteboard.setData(bytes, forPasteboardType: type.identifier)
+        #else
+            pasteboard.clearContents()
+            pasteboard.setData(bytes, forType: NSPasteboard.PasteboardType(type.identifier))
+            if type != .png, type != .tiff, let tiff = NSImage(data: bytes)?.tiffRepresentation {
+                pasteboard.setData(tiff, forType: .tiff)
+            }
+        #endif
+    }
 }
 
 /// An Image shown in the text, at most as wide as the line.
 private final class FittedAttachment: NSTextAttachment {
+    let reference: String
+
+    init(reference: String) {
+        self.reference = reference
+        super.init(data: nil, ofType: nil)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
     override func attachmentBounds(
         for attributes: [NSAttributedString.Key: Any], location: any NSTextLocation,
         textContainer: NSTextContainer?, proposedLineFragment: CGRect, position: CGPoint
@@ -61,10 +87,17 @@ final class ImageAttachments {
     func attachment(for reference: String) -> NSTextAttachment? {
         if let known = attachments[reference] { return known }
         guard let data = source.read(reference), let image = Self.decode(data) else { return nil }
-        let attachment = FittedAttachment()
+        let attachment = FittedAttachment(reference: reference)
         attachment.image = image
         attachments[reference] = attachment
         return attachment
+    }
+
+    /// Puts the Image `attachment` draws on the general pasteboard, as it is stored.
+    func copy(_ attachment: NSTextAttachment) {
+        guard let reference = (attachment as? FittedAttachment)?.reference, let bytes = source.read(reference)
+        else { return }
+        StoredImage.copy(bytes, to: .general)
     }
 
     private static func decode(_ data: Data) -> PlatformImage? {
@@ -87,6 +120,8 @@ final class ImageAttachments {
 
 #if canImport(UIKit)
     typealias PlatformImage = UIImage
+    typealias Pasteboard = UIPasteboard
 #else
     typealias PlatformImage = NSImage
+    typealias Pasteboard = NSPasteboard
 #endif

@@ -102,6 +102,25 @@ import XCTest
         XCTAssertTrue(field.exists, "the field stays for the next Subtask")
     }
 
+    func testAnImageIsCopiedFromItsMenu() {
+        app.staticTexts["Buy milk"].firstMatch.tap()
+        XCTAssertTrue(showsForm(of: "Buy milk"))
+        let description = app.textViews["Description"]
+        XCTAssertTrue(description.waitForExistence(timeout: 5))
+        for _ in 0..<4 where description.frame.maxY > app.frame.maxY * 0.8 {
+            app.collectionViews.firstMatch.swipeUp()
+        }
+        UIPasteboard.general.items = []
+
+        // The sample's Image sits just above its last line.
+        description.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 1))
+            .withOffset(CGVector(dx: 0, dy: -60)).press(forDuration: 1)
+        let copy = app.buttons["Copy Image to Clipboard"]
+        XCTAssertTrue(copy.waitForExistence(timeout: 5))
+        copy.tap()
+        XCTAssertTrue(UIPasteboard.general.hasImages)
+    }
+
     func testTagsArePickedInTheirOwnSheet() {
         app.staticTexts["Book the dentist"].tap()
         XCTAssertTrue(showsForm(of: "Book the dentist"))

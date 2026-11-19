@@ -148,7 +148,7 @@ describe("DescriptionField", () => {
     const isPng = (bytes: Uint8Array) => bytes[0] === 0x89 && bytes[1] === 0x50;
 
     /** A store that keeps PNGs only, as the core does besides JPEG, GIF and WebP. */
-    function pngStore() {
+    function pngStore(clipboard?: Pick<Clipboard, "write">) {
       const kept = new Map<string, Uint8Array>();
       const files: ImageFiles = {
         addImage(bytes) {
@@ -159,7 +159,7 @@ describe("DescriptionField", () => {
         },
         readImage: async (reference) => kept.get(reference),
       };
-      return { kept, images: new DescriptionImages(files) };
+      return { kept, images: new DescriptionImages(files, undefined, clipboard) };
     }
 
     const png = async () => {
@@ -225,6 +225,34 @@ describe("DescriptionField", () => {
       expect(line().querySelector("img")).not.toBeNull();
       await moveTo(field, 13);
       expect(line().classList.contains("md-shown")).toBe(false);
+    });
+
+    it("copies an Image to the clipboard from its context menu", async () => {
+      const written: ClipboardItem[] = [];
+      const { images } = pngStore({ write: async (items) => void written.push(...items) });
+      const field = open("", images);
+      const bytes = await png();
+      field.element.dispatchEvent(pasting(bytes, "image/png"));
+      await vi.waitFor(() => expect(field.value).toBe("![](a0.png)\n"));
+      const image = await shown(field);
+      const opened = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+      image.dispatchEvent(opened);
+      expect(opened.defaultPrevented).toBe(true);
+      const entry = [...document.querySelectorAll<HTMLElement>(".row-menu-item")].find(
+        (item) => item.textContent === "Copy Image to Clipboard",
+      );
+      entry!.click();
+      await vi.waitFor(() => expect(written).toHaveLength(1));
+      const blob = await written[0].getType("image/png");
+      expect(new Uint8Array(await blob.arrayBuffer())).toEqual(bytes);
+    });
+
+    it("leaves the context menu of the text to the browser", async () => {
+      const { images } = pngStore();
+      const field = open("text", images);
+      const opened = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+      field.element.dispatchEvent(opened);
+      expect(opened.defaultPrevented).toBe(false);
     });
 
     it("ignores a picture that is none, and pictures when there is no store", async () => {

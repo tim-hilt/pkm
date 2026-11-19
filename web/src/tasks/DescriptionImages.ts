@@ -24,6 +24,8 @@ export class DescriptionImages {
   constructor(
     private readonly files: ImageFiles,
     private readonly codec: ImageCodec = browserImageCodec,
+    /** The system clipboard unless handed in. */
+    private readonly clipboard?: Pick<Clipboard, "write">,
   ) {}
 
   /** Stores a picture; its reference, or `undefined` if it is no picture the browser reads. */
@@ -35,6 +37,22 @@ export class DescriptionImages {
     }
     if (reference !== undefined) this.added.push(reference);
     return reference;
+  }
+
+  /**
+   * Puts the Image `reference` on the clipboard as PNG, the one picture type
+   * every browser writes. Its bytes are handed over as a promise, so that
+   * Safari still counts the write as part of the click that asked for it.
+   */
+  copy(reference: string): Promise<void> {
+    const png = this.files.readImage(reference).then(async (bytes) => {
+      const png =
+        bytes &&
+        (isPng(bytes) ? bytes : (await this.codec.encode(bytes, Infinity, "image/png", 1))?.bytes);
+      if (!png) throw new Error(`Image ${reference} can't be read`);
+      return new Blob([png as Uint8Array<ArrayBuffer>], { type: "image/png" });
+    });
+    return (this.clipboard ?? navigator.clipboard).write([new ClipboardItem({ "image/png": png })]);
   }
 
   /** The references `add` returned since the last call. */
@@ -73,3 +91,6 @@ export class DescriptionImages {
     this.urls.clear();
   }
 }
+
+const isPng = (bytes: Uint8Array) =>
+  [0x89, 0x50, 0x4e, 0x47].every((byte, at) => bytes[at] === byte);

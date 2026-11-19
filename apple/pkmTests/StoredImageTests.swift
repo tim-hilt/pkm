@@ -5,6 +5,12 @@ import UniformTypeIdentifiers
 
 @testable import pkm
 
+#if canImport(UIKit)
+    import UIKit
+#else
+    import AppKit
+#endif
+
 /// Which bytes an Image is stored as; reading the formats is ImageIO's.
 @Suite struct StoredImageTests {
     private func encoded(_ type: UTType) -> Data {
@@ -39,6 +45,23 @@ import UniformTypeIdentifiers
         #expect(type(of: tiff) == .tiff)
         let stored = try #require(StoredImage.bytes(of: tiff))
         #expect(type(of: stored) == .png)
+    }
+
+    @Test func anImageIsCopiedAsTheTypeItIsStored() {
+        let jpeg = encoded(.jpeg)
+        #if canImport(UIKit)
+            let pasteboard = UIPasteboard.withUniqueName()
+            defer { UIPasteboard.remove(withName: pasteboard.name) }
+            StoredImage.copy(jpeg, to: pasteboard)
+            #expect(pasteboard.data(forPasteboardType: UTType.jpeg.identifier) == jpeg)
+        #else
+            let pasteboard = NSPasteboard.withUniqueName()
+            defer { pasteboard.releaseGlobally() }
+            StoredImage.copy(jpeg, to: pasteboard)
+            #expect(pasteboard.data(forType: NSPasteboard.PasteboardType(UTType.jpeg.identifier)) == jpeg)
+            // What reads only the picture types every Mac app takes still finds it.
+            #expect(PictureInput.hasPictures(in: pasteboard))
+        #endif
     }
 
     @Test func whatIsNoImageIsRefused() {

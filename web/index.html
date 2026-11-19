@@ -1665,7 +1665,9 @@
       .tasks-description .md-image:not(.md-shown) {
         font-size: 0;
       }
+      /* Its long press opens our menu, not the system's. */
       .tasks-description .md-picture {
+        -webkit-touch-callout: none;
         display: inline-block;
         max-width: 100%;
         vertical-align: top;

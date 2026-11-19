@@ -33,18 +33,32 @@ export class RowMenu {
     this.element.addEventListener("keydown", (event) => this.key(event));
   }
 
-  /** Opens `items()` on `row` for right click and long press. `focusAfter` is where focus goes back to. */
-  attach(row: HTMLElement, items: () => RowMenuItem[], focusAfter: HTMLElement = row): void {
+  /**
+   * Opens `items(pressed)` on `row` for right click and long press, `pressed`
+   * being the element in it that was pressed; where they are `undefined`, the
+   * press is left to the browser. `focusAfter` is where focus goes back to.
+   */
+  attach(
+    row: HTMLElement,
+    items: (pressed: Element) => RowMenuItem[] | undefined,
+    focusAfter: HTMLElement = row,
+  ): void {
+    let pressed: Element = row;
     const hold = new HoldDetector((x, y) => {
+      const chosen = items(pressed);
+      if (!chosen) return;
       this.swallowClick = true;
-      this.show(items(), x, y, focusAfter);
+      this.show(chosen, x, y, focusAfter);
     });
     row.addEventListener("contextmenu", (event) => {
+      const chosen = items(event.target as Element);
+      if (!chosen) return;
       event.preventDefault();
-      this.show(items(), event.clientX, event.clientY, focusAfter);
+      this.show(chosen, event.clientX, event.clientY, focusAfter);
     });
     row.addEventListener("pointerdown", (event) => {
       this.swallowClick = false;
+      pressed = event.target as Element;
       if (event.pointerType === "touch") hold.down(event.pointerId, event.clientX, event.clientY);
     });
     row.addEventListener("pointermove", (event) =>

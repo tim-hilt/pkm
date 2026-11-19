@@ -1,6 +1,7 @@
 import { insertImage, rawRange, returnAt, shiftItems, toggleInline } from "../core/Core";
 import { make } from "../Dom";
 import type { DescriptionImages } from "./DescriptionImages";
+import { RowMenu, type RowMenuItem } from "./RowMenu";
 import { type Raw, descriptionNodes } from "./DescriptionText";
 import { formatKey } from "./TitleText";
 import { caretOffset, placeCaret, selectRange, selectionOffsets } from "./TextCaret";
@@ -13,7 +14,8 @@ import { caretOffset, placeCaret, selectRange, selectionOffsets } from "./TextCa
  * with the caret (the whole fence, in a code block), which shows its markers.
  * Rendered links open on a click; pasting inserts plain text. A picture pasted
  * or dropped is added through `images` and put on a line of its own as an Image;
- * without `images` pictures are ignored.
+ * without `images` pictures are ignored. An Image's menu (right click, long
+ * press) copies it to the clipboard.
  */
 export class DescriptionField {
   /** The `contenteditable` element, which sends `input` events like a text field. */
@@ -24,6 +26,8 @@ export class DescriptionField {
   /** The texts and carets to undo and redo through, and where in them the field is. */
   private history: { text: string; caret: number | undefined }[] = [];
   private at = -1;
+  /** The menu of an Image, put next to the field when it first opens. */
+  private readonly menu = new RowMenu(document.body);
 
   constructor(
     text = "",
@@ -53,6 +57,7 @@ export class DescriptionField {
     editor.addEventListener("beforeinput", (event) => this.beforeInput(event));
     editor.addEventListener("keydown", (event) => this.keyDown(event));
     editor.addEventListener("mousedown", (event) => this.open(event));
+    this.menu.attach(editor, (pressed) => this.imageMenu(pressed));
     editor.addEventListener("paste", (event) => this.take(event, event.clipboardData));
     editor.addEventListener("dragover", (event) => {
       if (this.images && hasFiles(event.dataTransfer)) event.preventDefault();
@@ -190,6 +195,15 @@ export class DescriptionField {
     if (text.endsWith("\n")) nodes.push(document.createElement("br"));
     this.element.replaceChildren(...nodes);
     if (caret !== undefined) placeCaret(this.element, caret);
+  }
+
+  /** The menu of the Image `pressed` is; none for anything else. */
+  private imageMenu(pressed: Element): RowMenuItem[] | undefined {
+    const reference = pressed.closest<HTMLElement>("img.md-picture")?.dataset.reference;
+    const images = this.images;
+    if (reference === undefined || !images) return undefined;
+    if (!this.menu.element.isConnected) this.element.after(this.menu.element);
+    return [{ label: "Copy Image to Clipboard", run: () => void images.copy(reference) }];
   }
 
   private open(event: MouseEvent): void {

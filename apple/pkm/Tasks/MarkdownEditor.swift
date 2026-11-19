@@ -79,7 +79,29 @@ extension NSTextStorage {
         }
         return nil
     }
+
+    /// The Image drawn at `point` (in the text container) and its frame there.
+    fileprivate func image(at point: CGPoint, in layout: NSTextLayoutManager?) -> (NSTextAttachment, CGRect)? {
+        guard let layout, let content = layout.textContentManager else { return nil }
+        var found: (NSTextAttachment, CGRect)?
+        enumerateAttribute(.imageDisplay, in: NSRange(location: 0, length: length)) { value, run, stop in
+            guard let attachment = value as? NSTextAttachment,
+                let start = content.location(content.documentRange.location, offsetBy: run.location),
+                let end = content.location(start, offsetBy: run.length),
+                let range = NSTextRange(location: start, end: end)
+            else { return }
+            layout.enumerateTextSegments(in: range, type: .standard, options: []) { _, frame, _, _ in
+                if frame.contains(point) { found = (attachment, frame) }
+                return found == nil
+            }
+            if found != nil { stop.pointee = true }
+        }
+        return found
+    }
 }
+
+/// The title of the one entry of an Image's menu.
+private let copyImageTitle = String(localized: "Copy Image to Clipboard")
 
 #if canImport(UIKit)
     private final class MarkdownTextView: UITextView {
@@ -145,7 +167,10 @@ extension NSTextStorage {
             let coordinator = context.coordinator
             view.delegate = coordinator
             view.images = images
-            if images != nil { view.addInteraction(UIDropInteraction(delegate: coordinator)) }
+            if images != nil {
+                view.addInteraction(UIDropInteraction(delegate: coordinator))
+                view.addInteraction(UIContextMenuInteraction(delegate: coordinator))
+            }
             (view.textLayoutManager?.textContentManager as? NSTextContentStorage)?.delegate = coordinator.display
             view.backgroundColor = .clear
             view.isScrollEnabled = false
@@ -176,7 +201,9 @@ extension NSTextStorage {
             return CGSize(width: width, height: max(fitted.height, MarkdownStyler.baseFont.lineHeight * minimumLines))
         }
 
-        final class Coordinator: NSObject, UITextViewDelegate, UIGestureRecognizerDelegate, UIDropInteractionDelegate {
+        final class Coordinator: NSObject, UITextViewDelegate, UIGestureRecognizerDelegate, UIDropInteractionDelegate,
+            UIContextMenuInteractionDelegate
+        {
             var parent: MarkdownTextRepresentable
             let display = MarkerDisplay()
             let attachments: ImageAttachments?
@@ -184,10 +211,39 @@ extension NSTextStorage {
             private var isStyling = false
             /// The link under the touch that is going on, as it was drawn when the touch began.
             private var touched: URL?
+            /// Where the Image is whose menu is open, to lift it alone.
+            private var menuImageFrame: CGRect?
 
             init(_ parent: MarkdownTextRepresentable) {
                 self.parent = parent
                 attachments = parent.images.map(ImageAttachments.init)
+            }
+
+            /// An Image's menu, on a long press or a secondary click on it; none elsewhere.
+            func contextMenuInteraction(
+                _ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint
+            ) -> UIContextMenuConfiguration? {
+                guard let view = interaction.view as? UITextView, let attachments,
+                    let (attachment, frame) = view.textStorage.image(at: location, in: view.textLayoutManager)
+                else { return nil }
+                menuImageFrame = frame
+                return UIContextMenuConfiguration(actionProvider: { _ in
+                    UIMenu(children: [
+                        UIAction(title: copyImageTitle, image: UIImage(systemName: "doc.on.doc")) { _ in
+                            attachments.copy(attachment)
+                        }
+                    ])
+                })
+            }
+
+            func contextMenuInteraction(
+                _ interaction: UIContextMenuInteraction, configuration: UIContextMenuConfiguration,
+                highlightPreviewForItemWithIdentifier identifier: any NSCopying
+            ) -> UITargetedPreview? {
+                guard let view = interaction.view, let frame = menuImageFrame else { return nil }
+                let parameters = UIPreviewParameters()
+                parameters.visiblePath = UIBezierPath(roundedRect: frame, cornerRadius: 6)
+                return UITargetedPreview(view: view, parameters: parameters)
             }
 
             func dropInteraction(_ interaction: UIDropInteraction, canHandle session: any UIDropSession) -> Bool {
@@ -275,6 +331,8 @@ extension NSTextStorage {
         /// Tells whether the view has the focus.
         var onFocusChange: ((Bool) -> Void)?
         var images: ImageSource?
+        /// What draws the Images, for their menu.
+        var attachments: ImageAttachments?
 
         override func paste(_ sender: Any?) {
             if images != nil, PictureInput.hasPictures(in: .general) {
@@ -332,11 +390,34 @@ extension NSTextStorage {
             return true
         }
 
+        /// Where `event` is, in the text container.
+        private func containerPoint(of event: NSEvent) -> CGPoint {
+            let point = convert(event.locationInWindow, from: nil)
+            return CGPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
+        }
+
+        /// An Image's menu on a right click on it; the text's elsewhere.
+        override func menu(for event: NSEvent) -> NSMenu? {
+            guard attachments != nil,
+                let (attachment, _) = textStorage?.image(at: containerPoint(of: event), in: textLayoutManager)
+            else { return super.menu(for: event) }
+            let item = NSMenuItem(title: copyImageTitle, action: #selector(copyImage(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = attachment
+            let menu = NSMenu()
+            menu.addItem(item)
+            return menu
+        }
+
+        @objc private func copyImage(_ item: NSMenuItem) {
+            guard let attachment = item.representedObject as? NSTextAttachment else { return }
+            attachments?.copy(attachment)
+        }
+
         override func mouseDown(with event: NSEvent) {
             let point = convert(event.locationInWindow, from: nil)
             let index = characterIndexForInsertion(at: point)
-            let origin = textContainerOrigin
-            let inContainer = CGPoint(x: point.x - origin.x, y: point.y - origin.y)
+            let inContainer = containerPoint(of: event)
             if let url = textStorage?.link(at: inContainer, near: index, in: textLayoutManager) {
                 NSWorkspace.shared.open(url)
                 return
@@ -358,6 +439,7 @@ extension NSTextStorage {
             let coordinator = context.coordinator
             view.delegate = coordinator
             view.images = images
+            view.attachments = coordinator.attachments
             if images != nil { view.registerForDraggedTypes(view.registeredDraggedTypes + PictureInput.droppedTypes) }
             view.onFocusChange = { [unowned coordinator, weak view] focused in
                 coordinator.parent.formatting = focused ? view.map(formatter) : nil

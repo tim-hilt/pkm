@@ -15,7 +15,7 @@ export interface Raw {
  * `md-shown`. The nodes hold exactly `text`, so a caret offset in them is one in
  * the text. Rendered links are `a` elements with their target in `data-href`.
  * An Image line holds its reference as text, hidden unless raw, and an `img`
- * (no text) that `images` fills.
+ * (no text) that `images` fills, with the reference in `data-reference`.
  */
 export function descriptionNodes(
   text: string,
@@ -97,6 +97,7 @@ export function descriptionNodes(
   for (const [element, target] of pictures) {
     const image = make("img", "md-picture");
     image.alt = "Image";
+    image.dataset.reference = target;
     images?.show(image, target);
     element.append(image);
   }
