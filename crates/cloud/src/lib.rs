@@ -46,7 +46,7 @@ pub use step::{Next, Progress, Request, Response, StepOutcome, SyncStep};
 pub use storage::DirStorage;
 pub use storage::{Blob, ConnectError, Storage};
 #[cfg(feature = "native")]
-pub use sync::{Folder, SyncState, sync_folders, sync_step, sync_step_reporting};
+pub use sync::{ContextFolder, SyncState, sync_context_folders, sync_step, sync_step_reporting};
 #[cfg(feature = "native")]
 pub use sync_loop::{Observer, SyncFolder, SyncLoop};
 #[cfg(feature = "native")]

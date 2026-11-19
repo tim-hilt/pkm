@@ -16,7 +16,7 @@ use crate::merge::Merge;
 use crate::schedule::{Schedule, Status, Timing};
 use crate::step::{Progress, StepOutcome};
 use crate::storage::Storage;
-use crate::sync::{Folder, SyncState, sync_folders};
+use crate::sync::{ContextFolder, SyncState, sync_context_folders};
 
 /// Hears what the loop does, on its thread. The status comes at the end of
 /// every step, so the observer can tell when Sync last went through.
@@ -220,16 +220,16 @@ fn run_step(
     shared: &Shared,
     transferring: &AtomicBool,
 ) -> Vec<StepOutcome> {
-    let borrowed: Vec<Folder> = folders
+    let borrowed: Vec<ContextFolder> = folders
         .iter()
-        .map(|folder| Folder {
+        .map(|folder| ContextFolder {
             dir: &folder.dir,
             state: &folder.state,
             storage: &*folder.storage,
             merge: Arc::clone(&folder.merge),
         })
         .collect();
-    sync_folders(&borrowed, &shared.cancel, &|p| {
+    sync_context_folders(&borrowed, &shared.cancel, &|p| {
         if !transferring.swap(true, Relaxed) {
             shared.publish(Status::Syncing);
         }

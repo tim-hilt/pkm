@@ -147,7 +147,7 @@ fn now_ms() -> u64 {
 
 /// One Context folder to Sync: its folder on this Device, what is remembered
 /// of it, its cloud folder and its merge hook.
-pub struct Folder<'a> {
+pub struct ContextFolder<'a> {
     pub dir: &'a Path,
     pub state: &'a SyncState,
     pub storage: &'a dyn Storage,
@@ -161,8 +161,8 @@ pub struct Folder<'a> {
 ///
 /// `progress` counts the transfers of all folders together: each folder adds
 /// its own once it knows them, so the total grows as the folders come up.
-pub fn sync_folders(
-    folders: &[Folder],
+pub fn sync_context_folders(
+    folders: &[ContextFolder],
     cancel: &AtomicBool,
     progress: &dyn Fn(Progress),
 ) -> Vec<StepOutcome> {
@@ -170,7 +170,7 @@ pub fn sync_folders(
     let (mut finished, mut planned) = (0, 0);
     for folder in folders {
         let latest = Cell::new(None);
-        let outcome = sync_folder(folder, cancel, &|p| {
+        let outcome = sync_context_folder(folder, cancel, &|p| {
             latest.set(Some(p));
             progress(Progress {
                 done: finished + p.done,
@@ -190,7 +190,7 @@ pub fn sync_folders(
     outcomes
 }
 
-/// `sync_folders` for the Drawings folder alone.
+/// `sync_context_folders` for the Drawings folder alone.
 pub fn sync_step(
     drawings: &Path,
     state: &SyncState,
@@ -209,16 +209,20 @@ pub fn sync_step_reporting(
     cancel: &AtomicBool,
     progress: &dyn Fn(Progress),
 ) -> StepOutcome {
-    let folder = Folder {
+    let folder = ContextFolder {
         dir: drawings,
         state,
         storage,
         merge: Arc::new(Drawings),
     };
-    sync_folders(&[folder], cancel, progress).remove(0)
+    sync_context_folders(&[folder], cancel, progress).remove(0)
 }
 
-fn sync_folder(folder: &Folder, cancel: &AtomicBool, progress: &dyn Fn(Progress)) -> StepOutcome {
+fn sync_context_folder(
+    folder: &ContextFolder,
+    cancel: &AtomicBool,
+    progress: &dyn Fn(Progress),
+) -> StepOutcome {
     let runner = Runner {
         dir: folder.dir,
         state: folder.state,
@@ -624,8 +628,8 @@ mod tests {
         use std::sync::{Arc, Mutex};
 
         use crate::{
-            Blob, BookStates, Books as BookFiles, DirStorage, Drawings, Filters, Folder, Merge,
-            Progress, Storage, SyncState, TagsFile, Tasks, sync_folders, sync_step,
+            Blob, BookStates, Books as BookFiles, ContextFolder, DirStorage, Drawings, Filters,
+            Merge, Progress, Storage, SyncState, TagsFile, Tasks, sync_context_folders, sync_step,
         };
         use pkm_base::json;
         use pkm_books::library::Library;
@@ -844,13 +848,13 @@ mod tests {
             /// One Sync step over the Tasks Context. Returns the names it changed here.
             fn sync_tasks(&self, cloud: &Cloud) -> Vec<String> {
                 let tasks_state = SyncState::open(self.state.0.join("Tasks")).unwrap();
-                let folders = [Folder {
+                let folders = [ContextFolder {
                     dir: &self.tasks.0,
                     state: &tasks_state,
                     storage: &cloud.storage,
                     merge: Arc::new(Tasks),
                 }];
-                let outcomes = sync_folders(&folders, &AtomicBool::new(false), &|_| {});
+                let outcomes = sync_context_folders(&folders, &AtomicBool::new(false), &|_| {});
                 let mut changed = Vec::new();
                 for outcome in outcomes {
                     assert!(outcome.error.is_none(), "{:?}", outcome.error);
@@ -866,20 +870,20 @@ mod tests {
                 let files_state = SyncState::open(self.state.0.join("Books")).unwrap();
                 let states_state = SyncState::open(self.state.0.join("BooksState")).unwrap();
                 let folders = [
-                    Folder {
+                    ContextFolder {
                         dir: &self.books.0,
                         state: &files_state,
                         storage: &cloud.storage,
                         merge: Arc::new(BookFiles),
                     },
-                    Folder {
+                    ContextFolder {
                         dir: &self.books.0.join(".state"),
                         state: &states_state,
                         storage: &cloud.storage,
                         merge: Arc::new(BookStates),
                     },
                 ];
-                let outcomes = sync_folders(&folders, &AtomicBool::new(false), &|_| {});
+                let outcomes = sync_context_folders(&folders, &AtomicBool::new(false), &|_| {});
                 assert_eq!(outcomes.len(), 2);
                 for outcome in &outcomes {
                     assert!(outcome.error.is_none(), "{:?}", outcome.error);
@@ -2133,13 +2137,13 @@ mod tests {
             let drawings_state = SyncState::open(&device.state.0).unwrap();
             let notes_state = SyncState::open(&device.notes.state.0).unwrap();
             let folders = [
-                Folder {
+                ContextFolder {
                     dir: &device.drawings.0,
                     state: &drawings_state,
                     storage: &drawings_cloud.storage,
                     merge: Arc::new(Drawings),
                 },
-                Folder {
+                ContextFolder {
                     dir: &device.notes.dir.0,
                     state: &notes_state,
                     storage: &notes_cloud.storage,
@@ -2147,7 +2151,7 @@ mod tests {
                 },
             ];
             let progress = Mutex::new(Vec::new());
-            let outcomes = sync_folders(
+            let outcomes = sync_context_folders(
                 &folders,
                 &AtomicBool::new(false),
                 &|Progress { done, total }| progress.lock().unwrap().push((done, total)),
@@ -2301,13 +2305,13 @@ mod tests {
             let notes_state = SyncState::open(&phone.notes.state.0).unwrap();
             let notes_cloud = Cloud::new();
             let folders = [
-                Folder {
+                ContextFolder {
                     dir: &missing,
                     state: &notes_state,
                     storage: &notes_cloud.storage,
                     merge: Arc::new(Opaque),
                 },
-                Folder {
+                ContextFolder {
                     dir: &phone.drawings.0,
                     state: &state,
                     storage: &cloud.storage,
@@ -2315,7 +2319,7 @@ mod tests {
                 },
             ];
 
-            let outcomes = sync_folders(&folders, &AtomicBool::new(false), &|_| {});
+            let outcomes = sync_context_folders(&folders, &AtomicBool::new(false), &|_| {});
 
             assert!(outcomes[0].error.is_some());
             assert!(outcomes[1].error.is_none());
@@ -2903,20 +2907,20 @@ mod tests {
                 fs::create_dir_all(&tags_dir).unwrap();
                 fs::create_dir_all(&tasks_dir).unwrap();
                 let folders = [
-                    Folder {
+                    ContextFolder {
                         dir: &tags_dir,
                         state: &tags_state,
                         storage: &tags.storage,
                         merge: Arc::new(TagsFile),
                     },
-                    Folder {
+                    ContextFolder {
                         dir: &tasks_dir,
                         state: &tasks_state,
                         storage: &tasks.storage,
                         merge: Arc::new(Tasks),
                     },
                 ];
-                for outcome in sync_folders(&folders, &AtomicBool::new(false), &|_| {}) {
+                for outcome in sync_context_folders(&folders, &AtomicBool::new(false), &|_| {}) {
                     assert!(outcome.error.is_none(), "{:?}", outcome.error);
                 }
             }
@@ -2927,13 +2931,13 @@ mod tests {
                 let state = SyncState::open(self.root.0.join("state").join("Filters")).unwrap();
                 let dir = self.root.0.join("Filters");
                 fs::create_dir_all(&dir).unwrap();
-                let folders = [Folder {
+                let folders = [ContextFolder {
                     dir: &dir,
                     state: &state,
                     storage: &filters.storage,
                     merge: Arc::new(Filters),
                 }];
-                for outcome in sync_folders(&folders, &AtomicBool::new(false), &|_| {}) {
+                for outcome in sync_context_folders(&folders, &AtomicBool::new(false), &|_| {}) {
                     assert!(outcome.error.is_none(), "{:?}", outcome.error);
                 }
             }
