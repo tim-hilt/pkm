@@ -43,7 +43,19 @@ impl SyncState {
         }
     }
 
+    /// Where the state of `file`, a path from the Context folder, lives in
+    /// the folders of `bytes`, `markers` and `stamps`: one flat file, with `/`
+    /// (and the `%` that escapes it) escaped.
+    fn key(file: &str) -> String {
+        file.replace('%', "%25").replace('/', "%2F")
+    }
+
+    fn unkey(key: &str) -> String {
+        key.replace("%2F", "/").replace("%25", "%")
+    }
+
     fn get(&self, file: &str) -> io::Result<Option<Synced>> {
+        let file = &Self::key(file);
         let read = |kind: &str| match fs::read(self.dir.join(kind).join(file)) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
             other => other.map(Some),
@@ -59,7 +71,7 @@ impl SyncState {
 
     /// The cloud blob's change marker as last seen, without the bytes.
     fn marker(&self, file: &str) -> io::Result<Option<String>> {
-        match fs::read_to_string(self.dir.join("markers").join(file)) {
+        match fs::read_to_string(self.dir.join("markers").join(Self::key(file))) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(e) if e.kind() == io::ErrorKind::InvalidData => Ok(None),
             other => other.map(Some),
@@ -69,7 +81,7 @@ impl SyncState {
     /// The stamp the local file had when it was read and found equal to the
     /// remembered bytes. Gone as soon as those change.
     fn stamp(&self, file: &str) -> io::Result<Option<String>> {
-        match fs::read_to_string(self.dir.join("stamps").join(file)) {
+        match fs::read_to_string(self.dir.join("stamps").join(Self::key(file))) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(e) if e.kind() == io::ErrorKind::InvalidData => Ok(None),
             other => other.map(Some),
@@ -79,11 +91,14 @@ impl SyncState {
     /// Remembers that the local file with `stamp` holds the remembered bytes.
     /// `stamp` must have been taken before the read that showed it.
     fn set_stamp(&self, file: &str, stamp: &str) -> io::Result<()> {
-        write_file_atomically(&self.dir.join("stamps").join(file), stamp.as_bytes())
+        write_file_atomically(
+            &self.dir.join("stamps").join(Self::key(file)),
+            stamp.as_bytes(),
+        )
     }
 
     fn remove_stamp(&self, file: &str) -> io::Result<()> {
-        match fs::remove_file(self.dir.join("stamps").join(file)) {
+        match fs::remove_file(self.dir.join("stamps").join(Self::key(file))) {
             Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
             _ => Ok(()),
         }
@@ -94,13 +109,15 @@ impl SyncState {
     /// other bytes.
     fn set(&self, file: &str, bytes: &[u8], marker: &str) -> io::Result<()> {
         self.remove_stamp(file)?;
-        write_file_atomically(&self.dir.join("bytes").join(file), bytes)?;
-        write_file_atomically(&self.dir.join("markers").join(file), marker.as_bytes())
+        let key = Self::key(file);
+        write_file_atomically(&self.dir.join("bytes").join(&key), bytes)?;
+        write_file_atomically(&self.dir.join("markers").join(&key), marker.as_bytes())
     }
 
     fn remove(&self, file: &str) -> io::Result<()> {
+        let key = Self::key(file);
         for kind in ["stamps", "markers", "bytes"] {
-            match fs::remove_file(self.dir.join(kind).join(file)) {
+            match fs::remove_file(self.dir.join(kind).join(&key)) {
                 Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
                 _ => {}
             }
@@ -112,7 +129,7 @@ impl SyncState {
         Ok(
             files_in(&self.dir.join("markers"), |name| !name.starts_with('.'))?
                 .into_iter()
-                .map(|(name, _)| name)
+                .map(|(key, _)| Self::unkey(&key))
                 .collect(),
         )
     }
@@ -270,8 +287,9 @@ struct Runner<'a> {
 impl Runner<'_> {
     fn answer(&self, request: Request) -> io::Result<Response> {
         Ok(match request {
-            Request::ListCloud => Response::Cloud(self.storage.list()?),
+            Request::ListCloud => Response::Cloud(self.storage.scan()?),
             Request::ListLocal => Response::Local(self.list_local()?),
+            Request::ListLocalDirs => Response::Names(self.list_local_dirs()?),
             Request::ReadLocal { file } => Response::Bytes(self.read_local(&file)?),
             Request::ReadMarks { file } => Response::Marks(Marks {
                 marker: self.state.marker(&file)?,
@@ -308,13 +326,37 @@ impl Runner<'_> {
                 self.storage.delete(&file)?;
                 Response::Done
             }
+            Request::MakeLocalDir { path } => {
+                fs::create_dir_all(self.dir.join(path))?;
+                Response::Done
+            }
+            Request::RemoveLocalDir { path } => {
+                Response::Happened(match fs::remove_dir(self.dir.join(path)) {
+                    Ok(()) => true,
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => true,
+                    Err(e) if e.kind() == io::ErrorKind::DirectoryNotEmpty => false,
+                    Err(e) => return Err(e),
+                })
+            }
+            Request::MakeCloudDir { path } => {
+                self.storage.create_dir(&path)?;
+                Response::Done
+            }
+            Request::DeleteCloudDir { path } => {
+                self.storage.delete_dir(&path)?;
+                Response::Done
+            }
             Request::WriteLocal {
                 file,
                 bytes,
                 expected,
             } => Response::Happened(
                 if self.read_local(&file)?.as_deref() == expected.as_deref() {
-                    write_file_atomically(&self.dir.join(&file), &bytes)?;
+                    let path = self.dir.join(&file);
+                    if let Some(parent) = path.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    write_file_atomically(&path, &bytes)?;
                     true
                 } else {
                     false
@@ -340,13 +382,29 @@ impl Runner<'_> {
     }
 
     fn list_local(&self) -> io::Result<Vec<LocalFile>> {
-        Ok(files_in(self.dir, |name| self.merge.accepts(name))?
+        let found = if self.merge.has_directories() {
+            nested_files_in(self.dir, &|name| self.merge.accepts(name))?
+        } else {
+            files_in(self.dir, |name| self.merge.accepts(name))?
+        };
+        Ok(found
             .into_iter()
             .map(|(file, meta)| LocalFile {
                 file,
                 ..stamp_of(&meta)
             })
             .collect())
+    }
+
+    /// Every visible directory below the Context folder, as paths.
+    fn list_local_dirs(&self) -> io::Result<Vec<String>> {
+        let mut dirs = Vec::new();
+        walk(self.dir, "", &mut |path, meta| {
+            if meta.is_dir() {
+                dirs.push(path.to_owned());
+            }
+        })?;
+        Ok(dirs)
     }
 
     fn read_local(&self, file: &str) -> io::Result<Option<Vec<u8>>> {
@@ -403,6 +461,42 @@ fn files_in(dir: &Path, wanted: impl Fn(&str) -> bool) -> io::Result<Vec<(String
         }
     }
     Ok(files)
+}
+
+/// The files at any depth below `dir` that `wanted` accepts by their own
+/// name, as `/`-separated paths with their metadata. Hidden directories are
+/// not entered.
+fn nested_files_in(
+    dir: &Path,
+    wanted: &dyn Fn(&str) -> bool,
+) -> io::Result<Vec<(String, fs::Metadata)>> {
+    let mut files = Vec::new();
+    walk(dir, "", &mut |path, meta| {
+        let name = path.rsplit_once('/').map_or(path, |(_, name)| name);
+        if meta.is_file() && wanted(name) {
+            files.push((path.to_owned(), meta.clone()));
+        }
+    })?;
+    Ok(files)
+}
+
+/// Calls `visit` with the path and metadata of every visible file and
+/// directory below `dir`, the paths starting with `prefix`.
+fn walk(dir: &Path, prefix: &str, visit: &mut dyn FnMut(&str, &fs::Metadata)) -> io::Result<()> {
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') {
+            continue;
+        }
+        let path = format!("{prefix}{name}");
+        let meta = entry.metadata()?;
+        visit(&path, &meta);
+        if meta.is_dir() {
+            walk(&entry.path(), &format!("{path}/"), visit)?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -485,6 +579,10 @@ mod tests {
             fn delete(&self, name: &str) -> io::Result<()> {
                 self.check(&self.all_fail)?;
                 self.inner.delete(name)
+            }
+            fn delete_dir(&self, path: &str) -> io::Result<()> {
+                self.check(&self.all_fail)?;
+                self.inner.delete_dir(path)
             }
         }
 
@@ -698,6 +796,7 @@ mod tests {
                 self.inner.list()
             }
             fn scan(&self) -> io::Result<crate::storage::Tree> {
+                self.calls.lock().unwrap().lists += 1;
                 self.inner.scan()
             }
             fn create_dir(&self, path: &str) -> io::Result<()> {
@@ -706,6 +805,9 @@ mod tests {
             fn delete(&self, name: &str) -> io::Result<()> {
                 self.calls.lock().unwrap().deletes.push(name.into());
                 self.inner.delete(name)
+            }
+            fn delete_dir(&self, path: &str) -> io::Result<()> {
+                self.inner.delete_dir(path)
             }
         }
 
@@ -737,6 +839,10 @@ mod tests {
 
             fn read(&self, file: &str) -> Option<Vec<u8>> {
                 fs::read(self.dir.0.join(file)).ok()
+            }
+
+            fn has_dir(&self, path: &str) -> bool {
+                self.dir.0.join(path).is_dir()
             }
 
             /// The Drawings in the cloud folder, not the storage's own bookkeeping.
@@ -882,8 +988,24 @@ mod tests {
                 changed
             }
 
+            /// Writes a Note file; `file` may be a path in Folders, which are made.
             fn write_note(&self, file: &str, bytes: &[u8]) {
-                fs::write(self.note_files.0.join(file), bytes).unwrap();
+                let path = self.note_files.0.join(file);
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, bytes).unwrap();
+            }
+
+            fn make_folder(&self, path: &str) {
+                fs::create_dir_all(self.note_files.0.join(path)).unwrap();
+            }
+
+            /// Deletes a Folder with everything in it.
+            fn delete_folder(&self, path: &str) {
+                fs::remove_dir_all(self.note_files.0.join(path)).unwrap();
+            }
+
+            fn has_folder(&self, path: &str) -> bool {
+                self.note_files.0.join(path).is_dir()
             }
 
             fn read_note(&self, file: &str) -> Option<String> {
@@ -2944,6 +3066,10 @@ mod tests {
                 .into_bytes()
         }
 
+        fn note_of(id: &str, title: &str, body: &str, updated: &str) -> Vec<u8> {
+            format!("---\nid: {id}\ntitle: {title}\nupdated: {updated}\n---\n{body}").into_bytes()
+        }
+
         /// Both Devices have the Note, as of the last Sync.
         fn synced_note(cloud: &Cloud, phone: &Device, tablet: &Device, body: &str) {
             phone.write_note(
@@ -2963,6 +3089,153 @@ mod tests {
                 tablet.read_note("aaaaaaaaaaaa.md").unwrap(),
                 text(note("Plan", "one\n", "2024-01-01T00:00:00Z"))
             );
+        }
+
+        const A: &str = "Work/Plans/aaaaaaaaaaaa.md";
+        const NEW: &str = "2024-01-02T00:00:00Z";
+
+        #[test]
+        fn a_note_in_a_nested_folder_reaches_the_other_device_and_the_cloud() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            phone.write_note(A, &note("Plan", "one\n", NEW));
+            phone.sync_notes(&cloud);
+            tablet.sync_notes(&cloud);
+
+            assert!(cloud.read(A).is_some());
+            assert_eq!(
+                tablet.read_note(A).unwrap(),
+                text(note("Plan", "one\n", NEW))
+            );
+
+            // An edit in it travels back, in the same place.
+            tablet.write_note(A, &note("Plan", "one\ntwo\n", "2024-01-03T00:00:00Z"));
+            tablet.sync_notes(&cloud);
+            phone.sync_notes(&cloud);
+            assert!(phone.read_note(A).unwrap().ends_with("one\ntwo\n"));
+        }
+
+        #[test]
+        fn an_empty_folder_reaches_the_other_device_and_the_cloud() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            phone.make_folder("Work/Later");
+            phone.sync_notes(&cloud);
+            tablet.sync_notes(&cloud);
+
+            assert!(cloud.has_dir("Work/Later"));
+            assert!(tablet.has_folder("Work/Later"));
+        }
+
+        #[test]
+        fn deleting_an_empty_folder_deletes_it_on_the_other_device_and_in_the_cloud() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            phone.make_folder("Work/Later");
+            phone.make_folder("Ideas");
+            for device in [&phone, &tablet] {
+                device.sync_notes(&cloud);
+            }
+
+            phone.delete_folder("Work");
+            phone.sync_notes(&cloud);
+            tablet.sync_notes(&cloud);
+
+            assert!(!cloud.has_dir("Work"));
+            assert!(!tablet.has_folder("Work"));
+            assert!(tablet.has_folder("Ideas"));
+            // Nothing comes back.
+            phone.sync_notes(&cloud);
+            assert!(!phone.has_folder("Work"));
+        }
+
+        #[test]
+        fn deleting_a_folder_deletes_the_notes_in_it_that_another_device_only_edited() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            phone.write_note(A, &note("Plan", "one\n", NEW));
+            for device in [&phone, &tablet] {
+                device.sync_notes(&cloud);
+            }
+
+            phone.delete_folder("Work");
+            tablet.write_note(A, &note("Plan", "one\ntwo\n", "2024-01-03T00:00:00Z"));
+            for device in [&phone, &tablet, &phone] {
+                device.sync_notes(&cloud);
+            }
+
+            assert!(cloud.read(A).is_none() && !cloud.has_dir("Work"));
+            for device in [&phone, &tablet] {
+                assert!(!device.has_folder("Work"));
+            }
+        }
+
+        const B: &str = "Work/Plans/bbbbbbbbbbbb.md";
+
+        #[test]
+        fn a_note_created_in_a_folder_another_device_deleted_lands_at_the_top_level() {
+            // Whichever Device Syncs first.
+            for phone_first in [true, false] {
+                let cloud = Cloud::new();
+                let (phone, tablet) = (Device::new(), Device::new());
+                phone.write_note(A, &note("Plan", "one\n", NEW));
+                for device in [&phone, &tablet] {
+                    device.sync_notes(&cloud);
+                }
+
+                phone.delete_folder("Work");
+                tablet.write_note(B, &note_of("bbbbbbbbbbbb", "Fresh", "x\n", NEW));
+                let order = if phone_first {
+                    [&phone, &tablet, &phone]
+                } else {
+                    [&tablet, &phone, &tablet]
+                };
+                for device in order {
+                    device.sync_notes(&cloud);
+                }
+                for device in [&phone, &tablet] {
+                    device.sync_notes(&cloud);
+                }
+
+                for device in [&phone, &tablet] {
+                    assert!(
+                        device.read_note("bbbbbbbbbbbb.md").is_some(),
+                        "{phone_first}"
+                    );
+                    assert!(device.read_note(B).is_none());
+                    assert!(device.read_note(A).is_none());
+                    assert!(!device.has_folder("Work"), "{phone_first}");
+                }
+                assert!(cloud.read("bbbbbbbbbbbb.md").is_some());
+                assert!(!cloud.has_dir("Work"), "{phone_first}");
+            }
+        }
+
+        #[test]
+        fn a_nested_note_keeps_its_own_sync_history_beside_a_top_level_one_of_the_same_name() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            phone.write_note("aaaaaaaaaaaa.md", &note("Top", "t\n", NEW));
+            phone.write_note(
+                "Work/bbbbbbbbbbbb.md",
+                &note_of("bbbbbbbbbbbb", "In", "w\n", NEW),
+            );
+            for device in [&phone, &tablet, &phone] {
+                device.sync_notes(&cloud);
+            }
+            tablet.write_note(
+                "Work/bbbbbbbbbbbb.md",
+                &note_of("bbbbbbbbbbbb", "In", "w2\n", "2024-01-03T00:00:00Z"),
+            );
+            tablet.sync_notes(&cloud);
+            phone.sync_notes(&cloud);
+            assert!(
+                phone
+                    .read_note("Work/bbbbbbbbbbbb.md")
+                    .unwrap()
+                    .ends_with("w2\n")
+            );
+            assert!(phone.read_note("aaaaaaaaaaaa.md").unwrap().ends_with("t\n"));
         }
 
         #[test]

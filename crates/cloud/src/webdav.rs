@@ -169,6 +169,11 @@ impl Storage for WebDavStorage {
         check_path(name)?;
         self.run(self.protocol.delete(name))
     }
+
+    fn delete_dir(&self, path: &str) -> io::Result<()> {
+        // The same request: a collection is deleted like a blob.
+        self.delete(path)
+    }
 }
 
 #[cfg(test)]

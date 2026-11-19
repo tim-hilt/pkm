@@ -480,6 +480,11 @@ impl Storage for OneDriveStorage {
             status => Err(unexpected("DELETE", status)),
         }
     }
+
+    fn delete_dir(&self, path: &str) -> io::Result<()> {
+        // The same request: an item is deleted by its path, folder or file.
+        self.delete(path)
+    }
 }
 
 #[cfg(test)]

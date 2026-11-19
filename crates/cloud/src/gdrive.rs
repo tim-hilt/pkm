@@ -528,10 +528,24 @@ impl Storage for GoogleDriveStorage {
 
     fn delete(&self, name: &str) -> io::Result<()> {
         check_path(name)?;
-        let Some(id) = self.file_id(name)? else {
-            return Ok(());
-        };
-        // Permanent: Drive's DELETE skips the trash.
+        match self.file_id(name)? {
+            Some(id) => self.delete_id(&id),
+            None => Ok(()),
+        }
+    }
+
+    fn delete_dir(&self, path: &str) -> io::Result<()> {
+        check_path(path)?;
+        match self.dir_id(path, false)? {
+            Some(id) => self.delete_id(&id),
+            None => Ok(()),
+        }
+    }
+}
+
+impl GoogleDriveStorage {
+    /// Deletes the file or folder `id`. Permanent: Drive's DELETE skips the trash.
+    fn delete_id(&self, id: &str) -> io::Result<()> {
         let response = self.send(
             "DELETE",
             &format!("{}/files/{id}", self.hosts.api),

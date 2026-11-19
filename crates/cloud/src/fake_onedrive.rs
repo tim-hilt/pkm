@@ -370,10 +370,18 @@ fn graph(request: &Request, base: &str, fake: &mut State) -> Answer {
             );
             Answer::json(200, &format!(r#"{{"uploadUrl":"{base}/session/{id}"}}"#))
         }
-        ("DELETE", "") => match fake.files.remove(&name) {
-            Some(_) => Answer::data(204, Vec::new()),
-            None => failure(404, "itemNotFound"),
-        },
+        ("DELETE", "") => {
+            // A folder goes with everything in it, as in Graph.
+            let prefix = format!("{name}/");
+            let had_folder = fake.folders.remove(&name);
+            fake.folders.retain(|path| !path.starts_with(&prefix));
+            fake.files.retain(|path, _| !path.starts_with(&prefix));
+            match fake.files.remove(&name) {
+                Some(_) => Answer::data(204, Vec::new()),
+                None if had_folder => Answer::data(204, Vec::new()),
+                None => failure(404, "itemNotFound"),
+            }
+        }
         _ => Answer::json(405, "{}"),
     }
 }

@@ -107,6 +107,11 @@ pub trait Storage: Send + Sync {
     /// Deletes blob `name`, leaving its directories. Deleting a blob that
     /// isn't there does nothing.
     fn delete(&self, name: &str) -> io::Result<()>;
+
+    /// Deletes the directory `path`, which the caller found empty. Fine if it
+    /// isn't there. A provider that can't check emptiness deletes what is in
+    /// it too, so never call it for a directory that holds something.
+    fn delete_dir(&self, path: &str) -> io::Result<()>;
 }
 
 #[cfg(feature = "native")]
@@ -377,6 +382,13 @@ impl Storage for DirStorage {
         }
         Ok(())
     }
+
+    fn delete_dir(&self, path: &str) -> io::Result<()> {
+        match fs::remove_dir(self.path(path)?) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        }
+    }
 }
 
 /// The content of blob `name` in memory, for small blobs. None if missing.
@@ -595,6 +607,16 @@ pub(crate) mod contract {
         assert_eq!(empty_dirs(storage), ["Work/Plans"]);
     }
 
+    pub fn a_deleted_directory_is_gone_and_a_missing_one_is_fine(storage: &dyn Storage) {
+        storage.create_dir("Work/Plans").unwrap();
+        storage.create_dir("Ideas").unwrap();
+
+        storage.delete_dir("Work/Plans").unwrap();
+        storage.delete_dir("Nowhere/Plans").unwrap();
+
+        assert_eq!(empty_dirs(storage), ["Ideas", "Work"]);
+    }
+
     pub fn paths_with_an_unplain_segment_are_invalid_input(storage: &dyn Storage) {
         let bad = [
             "", "/x", "a//b", "a/", "../x", "a/../b", "./x", "a/.b/c", ".hidden",
@@ -611,6 +633,7 @@ pub(crate) mod contract {
             invalid(storage.get(path).map(drop));
             invalid(storage.delete(path));
             invalid(storage.create_dir(path));
+            invalid(storage.delete_dir(path));
         }
         assert!(storage.scan().unwrap().blobs.is_empty());
     }
@@ -631,6 +654,7 @@ pub(crate) mod contract {
                 the_same_file_name_in_two_directories_is_two_blobs,
                 created_directories_are_listed_while_empty,
                 a_directory_stays_when_its_last_blob_is_deleted,
+                a_deleted_directory_is_gone_and_a_missing_one_is_fine,
                 paths_with_an_unplain_segment_are_invalid_input
             );
         };

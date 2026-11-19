@@ -387,6 +387,10 @@ mod tests {
             self.check()?;
             self.inner.delete(name)
         }
+        fn delete_dir(&self, path: &str) -> io::Result<()> {
+            self.check()?;
+            self.inner.delete_dir(path)
+        }
     }
 
     fn gate(cloud: &Scratch, reject: bool) -> Arc<Gate> {
@@ -496,6 +500,9 @@ mod tests {
             Ok(())
         }
         fn delete(&self, _: &str) -> io::Result<()> {
+            Ok(())
+        }
+        fn delete_dir(&self, _: &str) -> io::Result<()> {
             Ok(())
         }
     }

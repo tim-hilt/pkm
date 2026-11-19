@@ -40,6 +40,14 @@ pub trait Merge: Send + Sync {
     /// Item. None if either isn't an Item.
     fn same_item(&self, a: &[u8], b: &[u8]) -> Option<bool>;
 
+    /// Whether the Context keeps its Items in directories (ADR-0031). Then
+    /// Items are paired by their path from the Context folder, `/` separated,
+    /// and directories, empty ones too, are Synced. False by default: Items
+    /// are the files directly in the folder.
+    fn has_directories(&self) -> bool {
+        false
+    }
+
     /// Whether a file of this name is an Item of the Context.
     fn accepts(&self, file: &str) -> bool {
         let extension = self.extension();
@@ -212,8 +220,8 @@ impl Merge for Tasks {
     }
 }
 
-/// Notes: `<id>.md` files, merged three-way, the Body by line (ADR-0032). A
-/// file that isn't a Note is left where it is, and two versions that can't
+/// Notes: `<id>.md` files in Folder directories, merged three-way, the Body by
+/// line (ADR-0032). A file that isn't a Note is left where it is, and two versions that can't
 /// merge are not both kept: one Note has one file.
 pub struct Notes;
 
@@ -241,6 +249,10 @@ impl Merge for Notes {
 
     fn accepts(&self, file: &str) -> bool {
         notes::accepts(file)
+    }
+
+    fn has_directories(&self) -> bool {
+        true
     }
 
     fn transfers_unparseable(&self) -> bool {
@@ -309,5 +321,17 @@ impl Merge for Filters {
 
     fn transfers_unparseable(&self) -> bool {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_notes_keep_their_items_in_directories() {
+        assert!(Notes.has_directories());
+        let flat: [&dyn Merge; 6] = [&Drawings, &Books, &BookStates, &Tasks, &TagsFile, &Filters];
+        assert!(flat.iter().all(|merge| !merge.has_directories()));
     }
 }

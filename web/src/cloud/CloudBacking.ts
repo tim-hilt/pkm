@@ -140,7 +140,7 @@ export class CloudBacking {
     this.bookStateStates = new SyncState(storage, "BooksState");
     this.tasks = new FileFolder(storage, "Tasks");
     this.tasksState = new SyncState(storage, "Tasks");
-    this.notes = new FileFolder(storage, "Notes");
+    this.notes = new FileFolder(storage, "Notes", true);
     this.notesState = new SyncState(storage, "Notes");
     this.tags = new FileFolder(storage, "Tags");
     this.tagsState = new SyncState(storage, "Tags");
