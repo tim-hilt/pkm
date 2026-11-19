@@ -135,9 +135,10 @@ export class QuickAddField {
     this.draw();
   }
 
-  /** Takes the keyboard focus. */
+  /** Takes the keyboard focus, the caret where Quick Add has it. */
   focus(): void {
     this.editor.focus();
+    placeCaret(this.editor, this.quickAdd.cursor());
   }
 
   private readonly moved = (): void => {
