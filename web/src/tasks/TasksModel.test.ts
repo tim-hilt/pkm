@@ -61,6 +61,7 @@ describe("the Tasks list", () => {
     model.list = { kind: "filter", id: model.filters[2].id }; // @backlog
     const quickAdd = model.newQuickAdd();
     expect(quickAdd.text()).toBe("@backlog ");
+    expect(quickAdd.cursor()).toBe(9);
     expect(quickAdd.tags()).toEqual(["backlog"]);
     quickAdd.free();
     model.list = { kind: "filter", id: model.filters[0].id }; // *
