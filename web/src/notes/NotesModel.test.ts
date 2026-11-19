@@ -146,6 +146,14 @@ describe("Folders", () => {
     expect(await storage.files("Notes/Work")).toEqual([]);
   });
 
+  it("keeps the open Note when the selected Folder is selected again", () => {
+    model.addFolder("Work", "");
+    model.add();
+    const id = model.openId!;
+    model.select("Work");
+    expect(model.openId).toBe(id);
+  });
+
   it("pushes the selected Folder over the outline and back", () => {
     expect(model.showsFolder).toBe(false);
     model.select("");

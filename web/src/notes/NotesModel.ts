@@ -90,9 +90,9 @@ export class NotesModel {
     this.changed();
   }
 
-  /** Selects the Folder at `path` (empty for the top level) and shows its Notes; the open Note closes. */
+  /** Selects the Folder at `path` (empty for the top level) and shows its Notes; the open Note closes if it is another. */
   select(path: string): void {
-    this.closeNote();
+    if (path !== this.folder) this.closeNote();
     this.folder = path;
     this.showsFolder = true;
     this.changed();

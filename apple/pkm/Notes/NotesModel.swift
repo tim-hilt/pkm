@@ -17,11 +17,20 @@ final class NotesModel {
     private(set) var rows: [ListedNote] = []
 
     /// The selected Folder's path; empty for the top level. Selecting another closes the open Note.
-    var folderPath = "" {
-        didSet {
-            guard oldValue != folderPath else { return }
+    var folderPath: String {
+        get { selectedFolder }
+        set {
+            guard newValue != selectedFolder else { return }
             openID = nil
-            defaults?.set(folderPath, forKey: Self.folderKey)
+            selectedFolder = newValue
+        }
+    }
+
+    /// What `folderPath` gives; set alone where the selected Folder is renamed or Moved, which
+    /// leaves the open Note open.
+    private var selectedFolder = "" {
+        didSet {
+            defaults?.set(selectedFolder, forKey: Self.folderKey)
             reloadRows()
         }
     }
@@ -57,7 +66,7 @@ final class NotesModel {
         self.defaults = defaults
         reloadTree()
         if let path = defaults?.string(forKey: Self.folderKey), (try? store.notes(folder: path)) != nil {
-            folderPath = path
+            selectedFolder = path
         }
         reloadRows()
         if let id = defaults?.string(forKey: Self.noteKey), rows.contains(where: { $0.id == id }) {
@@ -164,10 +173,8 @@ final class NotesModel {
 
     /// The selection follows a Folder that is now at `new`, and the tree is read again.
     private func relocateFolder(_ old: String, to new: String) {
-        let open = openID
-        if folderPath == old || folderPath.hasPrefix(old + "/") {
-            folderPath = new + String(folderPath.dropFirst(old.count))
-            openID = open
+        if selectedFolder == old || selectedFolder.hasPrefix(old + "/") {
+            selectedFolder = new + String(selectedFolder.dropFirst(old.count))
         }
         reloadTree()
     }
@@ -194,11 +201,13 @@ final class NotesModel {
         return String(localized: "This Deletes \(notes) and \(folders).")
     }
 
-    /// Deletes the Folder with everything in it; the selection moves out of it.
+    /// Deletes the Folder with everything in it; the selection moves out of it, and an open Note in
+    /// it closes.
     func deleteFolder(_ path: String) {
         try? store.deleteFolder(path: path)
-        if folderPath == path || folderPath.hasPrefix(path + "/") {
-            folderPath = path.contains("/") ? String(path[..<path.lastIndex(of: "/")!]) : ""
+        if let openID, note(id: openID) == nil { self.openID = nil }
+        if selectedFolder == path || selectedFolder.hasPrefix(path + "/") {
+            selectedFolder = path.contains("/") ? String(path[..<path.lastIndex(of: "/")!]) : ""
         }
         reloadTree()
         reloadRows()

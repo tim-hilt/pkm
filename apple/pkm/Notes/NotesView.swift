@@ -73,6 +73,8 @@ private struct FolderTree: View {
     @State private var problem: FolderNameError?
     @State private var deleting: Folder?
     @State private var moving: NotesMovable?
+    /// Why the last drop couldn't be Moved.
+    @State private var refusedDrop: FolderNameError?
 
     /// What the name field of the alert is for.
     private enum Naming: Equatable {
@@ -126,6 +128,14 @@ private struct FolderTree: View {
         } message: { folder in
             Text(model.summary(ofFolder: folder.path))
         }
+        .alert(
+            "Can't Move", isPresented: Binding(get: { refusedDrop != nil }, set: { if !$0 { refusedDrop = nil } }),
+            presenting: refusedDrop
+        ) { _ in
+            Button("OK") {}
+        } message: {
+            Text(Self.reason($0))
+        }
         .sheet(item: $moving) { MoveSheet(item: $0) }
         .accessibilityIdentifier("folder-tree")
     }
@@ -143,7 +153,7 @@ private struct FolderTree: View {
             }
         }
         .tag(path)
-        .modifier(FolderDrag(path: path))
+        .modifier(FolderDrag(path: path) { refusedDrop = $0 })
         .contextMenu {
             Button("New Folder", systemImage: "folder.badge.plus") { ask(.create(inside: path)) }
             if !path.isEmpty {
@@ -189,13 +199,23 @@ private struct FolderTree: View {
 private struct FolderDrag: ViewModifier {
     @Environment(NotesModel.self) private var model
     let path: String
+    /// Called with why a dropped Folder can't be Moved here.
+    let refused: (FolderNameError) -> Void
 
     func body(content: Content) -> some View {
         content
             .draggableIf(!path.isEmpty, NotesMovable.folder(path))
             .dropDestination(for: NotesMovable.self) { items, _ in
-                let moved = items.filter { (try? model.move($0, into: path)) != nil }
-                return !moved.isEmpty
+                var moved = false
+                for item in items {
+                    do {
+                        try model.move(item, into: path)
+                        moved = true
+                    } catch let error as FolderNameError {
+                        refused(error)
+                    } catch {}
+                }
+                return moved
             }
     }
 }

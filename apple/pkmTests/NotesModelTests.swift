@@ -98,6 +98,33 @@ import Testing
         #expect(plans == "Work/Plans")
     }
 
+    @Test func aNewEmptyNoteSurvivesRenamingAndMovingItsFolder() throws {
+        let model = try openModel()
+        let work = try model.addFolder(named: "Work", in: "")
+        try model.addFolder(named: "Home", in: "")
+        model.folderPath = work
+        model.add()
+        let id = try #require(model.openID)
+        try model.renameFolder(work, to: "Job")
+        try model.moveFolder("Job", into: "Home")
+        #expect(model.folderPath == "Home/Job")
+        #expect(model.openID == id)
+        #expect(model.newID == id)
+        #expect(model.note(id: id) != nil)
+    }
+
+    @Test func deletingTheFolderOfTheOpenNoteClosesIt() throws {
+        let model = try openModel()
+        let work = try model.addFolder(named: "Work", in: "")
+        model.folderPath = ""
+        model.add()
+        let id = try #require(model.openID)
+        model.save(id: id, title: "Filed", body: "x")
+        model.moveNote(id: id, into: work)
+        model.deleteFolder(work)
+        #expect(model.openID == nil)
+    }
+
     @Test func deletingAFolderSaysWhatItDeletesAndMovesTheSelectionOut() throws {
         let model = try openModel()
         let work = try model.addFolder(named: "Work", in: "")
