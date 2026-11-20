@@ -48,6 +48,20 @@ pub trait Merge: Send + Sync {
         false
     }
 
+    /// The Item's identity, the same wherever it lives, none if `bytes` have
+    /// none (ADR-0031). With one, Sync pairs Items by it and follows an Item
+    /// Moved to another path; without, by path alone. Default: none.
+    fn identity(&self, _bytes: &[u8]) -> Option<String> {
+        None
+    }
+
+    /// Whether `local` wins over `remote`, two versions of one Item Moved to
+    /// different paths: the Move of the newer one stands. Only asked for Items
+    /// with an `identity`.
+    fn local_is_newer(&self, _local: &[u8], _remote: &[u8]) -> bool {
+        true
+    }
+
     /// Whether a file of this name is an Item of the Context.
     fn accepts(&self, file: &str) -> bool {
         let extension = self.extension();
@@ -251,6 +265,14 @@ impl Merge for Notes {
         notes::accepts(file)
     }
 
+    fn identity(&self, bytes: &[u8]) -> Option<String> {
+        notes::identity(bytes)
+    }
+
+    fn local_is_newer(&self, local: &[u8], remote: &[u8]) -> bool {
+        notes::local_is_newer(local, remote)
+    }
+
     fn has_directories(&self) -> bool {
         true
     }
@@ -333,5 +355,13 @@ mod tests {
         assert!(Notes.has_directories());
         let flat: [&dyn Merge; 6] = [&Drawings, &Books, &BookStates, &Tasks, &TagsFile, &Filters];
         assert!(flat.iter().all(|merge| !merge.has_directories()));
+    }
+
+    #[test]
+    fn only_notes_give_their_items_an_identity() {
+        let note = b"---\nid: aaaaaaaaaaaa\ntitle: x\nupdated: 2024-01-01T00:00:00Z\n---\n";
+        assert_eq!(Notes.identity(note).as_deref(), Some("aaaaaaaaaaaa"));
+        assert_eq!(Tasks.identity(note), None);
+        assert_eq!(Drawings.identity(b"{}"), None);
     }
 }

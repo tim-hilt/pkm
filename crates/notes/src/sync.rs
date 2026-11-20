@@ -58,6 +58,22 @@ pub fn merge(base: Option<&[u8]>, local: &[u8], remote: &[u8]) -> Option<Vec<u8>
     Some(merged.render().into_bytes())
 }
 
+/// The Note's Item ID, which stays the same wherever the Note is Moved to.
+/// None if `bytes` aren't a Note.
+pub fn identity(bytes: &[u8]) -> Option<String> {
+    parse(bytes)?.scalar("id").map(str::to_owned)
+}
+
+/// Whether `local` is at least as new as `remote`, two versions of one Note:
+/// then its Move wins over the other's. Equal `updated` (a Folder renamed
+/// without touching its Notes) goes to `local`, the Device Syncing later.
+pub fn local_is_newer(local: &[u8], remote: &[u8]) -> bool {
+    match (parse(local), parse(remote)) {
+        (Some(local), Some(remote)) => updated(&local) >= updated(&remote),
+        _ => true,
+    }
+}
+
 /// Whether a file of this name is a Note's: Markdown, not hidden.
 pub fn accepts(file: &str) -> bool {
     !file.starts_with('.') && file.ends_with(".md")
@@ -171,6 +187,23 @@ mod tests {
         assert_eq!(merge(None, &a, b.as_bytes()), None);
         assert_eq!(same_item(&a, b.as_bytes()), Some(false));
         assert_eq!(same_item(&a, &a), Some(true));
+    }
+
+    #[test]
+    fn a_notes_identity_is_its_item_id() {
+        assert_eq!(
+            identity(&note("Plan", "", T0)).as_deref(),
+            Some("aaaaaaaaaaaa")
+        );
+        assert_eq!(identity(b"just text"), None);
+    }
+
+    #[test]
+    fn the_later_updated_wins_a_move_and_a_tie_goes_to_local() {
+        let (old, new) = (note("Plan", "", T0), note("Plan", "", T1));
+        assert!(local_is_newer(&new, &old));
+        assert!(!local_is_newer(&old, &new));
+        assert!(local_is_newer(&old, &old));
     }
 
     #[test]

@@ -995,6 +995,25 @@ mod tests {
                 fs::write(path, bytes).unwrap();
             }
 
+            /// Moves a Note file to another path, as the store does: the file
+            /// keeps its bytes but for the new `updated`, if given.
+            fn move_note(&self, from: &str, to: &str, updated: Option<&str>) {
+                let target = self.note_files.0.join(to);
+                fs::create_dir_all(target.parent().unwrap()).unwrap();
+                let source = self.note_files.0.join(from);
+                if let Some(updated) = updated {
+                    let text = fs::read_to_string(&source).unwrap();
+                    let old = text.lines().find(|l| l.starts_with("updated: ")).unwrap();
+                    fs::write(&source, text.replace(old, &format!("updated: {updated}"))).unwrap();
+                }
+                fs::rename(source, target).unwrap();
+            }
+
+            /// Renames a Folder with everything in it; its Notes are untouched.
+            fn rename_folder(&self, from: &str, to: &str) {
+                fs::rename(self.note_files.0.join(from), self.note_files.0.join(to)).unwrap();
+            }
+
             fn make_folder(&self, path: &str) {
                 fs::create_dir_all(self.note_files.0.join(path)).unwrap();
             }
@@ -1014,6 +1033,11 @@ mod tests {
 
             /// One Sync step over the Notes Context.
             fn sync_notes(&self, cloud: &Cloud) {
+                self.sync_notes_changed(cloud);
+            }
+
+            /// `sync_notes`, giving the names it changed here, sorted.
+            fn sync_notes_changed(&self, cloud: &Cloud) -> Vec<String> {
                 let state = SyncState::open(self.state.0.join("Notes")).unwrap();
                 let folders = [ContextFolder {
                     dir: &self.note_files.0,
@@ -1021,9 +1045,13 @@ mod tests {
                     storage: &cloud.storage,
                     merge: Arc::new(NoteFiles),
                 }];
+                let mut changed = Vec::new();
                 for outcome in sync_context_folders(&folders, &AtomicBool::new(false), &|_| {}) {
                     assert!(outcome.error.is_none(), "{:?}", outcome.error);
+                    changed.extend(outcome.changed);
                 }
+                changed.sort();
+                changed
             }
 
             /// One Sync step over the Books Context: the Book Files and their state
@@ -3207,6 +3235,176 @@ mod tests {
                     assert!(!device.has_folder("Work"), "{phone_first}");
                 }
                 assert!(cloud.read("bbbbbbbbbbbb.md").is_some());
+                assert!(!cloud.has_dir("Work"), "{phone_first}");
+            }
+        }
+
+        const MOVED: &str = "Archive/aaaaaaaaaaaa.md";
+        const LATER: &str = "2024-01-03T00:00:00Z";
+        const LATEST: &str = "2024-01-04T00:00:00Z";
+
+        fn converge(cloud: &Cloud, devices: [&Device; 2]) {
+            for device in [devices[0], devices[1], devices[0], devices[1]] {
+                device.sync_notes(cloud);
+            }
+        }
+
+        #[test]
+        fn a_note_moved_on_one_device_and_edited_on_another_ends_up_moved_and_edited() {
+            // Whichever Device Syncs first.
+            for mover_first in [true, false] {
+                let cloud = Cloud::new();
+                let (phone, tablet) = (Device::new(), Device::new());
+                phone.write_note(A, &note("Plan", "one\ntwo\n", NEW));
+                for device in [&phone, &tablet] {
+                    device.sync_notes(&cloud);
+                }
+                phone.move_note(A, MOVED, Some(LATER));
+                tablet.write_note(A, &note("Plan", "one\ntwo\nthree\n", LATEST));
+                if mover_first {
+                    phone.sync_notes(&cloud);
+                    tablet.sync_notes(&cloud);
+                } else {
+                    tablet.sync_notes(&cloud);
+                    phone.sync_notes(&cloud);
+                }
+                converge(&cloud, [&phone, &tablet]);
+
+                for device in [&phone, &tablet] {
+                    let text = device.read_note(MOVED).unwrap();
+                    assert!(text.ends_with("one\ntwo\nthree\n"), "{mover_first} {text}");
+                    assert!(device.read_note(A).is_none(), "{mover_first}");
+                }
+                assert!(cloud.read(MOVED).is_some() && cloud.read(A).is_none());
+            }
+        }
+
+        #[test]
+        fn a_move_reports_the_old_and_the_new_file_as_changed() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            phone.write_note(A, &note("Plan", "one\n", NEW));
+            for device in [&phone, &tablet] {
+                device.sync_notes(&cloud);
+            }
+            phone.move_note(A, MOVED, Some(LATER));
+            phone.sync_notes(&cloud);
+            let changes = tablet.sync_notes_changed(&cloud);
+            assert_eq!(
+                changes,
+                [
+                    "Archive/",
+                    "Archive/aaaaaaaaaaaa",
+                    "Work/Plans/aaaaaaaaaaaa"
+                ]
+            );
+        }
+
+        #[test]
+        fn two_moves_of_one_note_take_the_newer() {
+            for phone_first in [true, false] {
+                let cloud = Cloud::new();
+                let (phone, tablet) = (Device::new(), Device::new());
+                phone.write_note(A, &note("Plan", "one\n", NEW));
+                for device in [&phone, &tablet] {
+                    device.sync_notes(&cloud);
+                }
+                phone.move_note(A, "Mine/aaaaaaaaaaaa.md", Some(LATER));
+                tablet.move_note(A, "Yours/aaaaaaaaaaaa.md", Some(LATEST));
+                if phone_first {
+                    phone.sync_notes(&cloud);
+                    tablet.sync_notes(&cloud);
+                } else {
+                    tablet.sync_notes(&cloud);
+                    phone.sync_notes(&cloud);
+                }
+                converge(&cloud, [&phone, &tablet]);
+
+                for device in [&phone, &tablet] {
+                    assert!(device.read_note("Yours/aaaaaaaaaaaa.md").is_some());
+                    assert!(device.read_note("Mine/aaaaaaaaaaaa.md").is_none());
+                    assert!(!device.has_folder("Mine"), "{phone_first}");
+                    // Emptied by the Move, but a Folder of its own.
+                    assert!(device.has_folder("Work/Plans"), "{phone_first}");
+                }
+                assert!(cloud.read("Yours/aaaaaaaaaaaa.md").is_some());
+                assert!(!cloud.has_dir("Mine") && cloud.has_dir("Work/Plans"));
+            }
+        }
+
+        #[test]
+        fn a_folder_renamed_differently_on_two_devices_ends_with_the_later_synced_name() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            phone.write_note("Work/aaaaaaaaaaaa.md", &note("Plan", "one\n", NEW));
+            phone.write_note(
+                "Work/Deep/bbbbbbbbbbbb.md",
+                &note_of("bbbbbbbbbbbb", "Deep", "d\n", NEW),
+            );
+            for device in [&phone, &tablet] {
+                device.sync_notes(&cloud);
+            }
+            phone.rename_folder("Work", "Jobs");
+            tablet.rename_folder("Work", "Tasks");
+            converge(&cloud, [&phone, &tablet]);
+
+            for device in [&phone, &tablet] {
+                // The tablet Synced last.
+                assert!(device.read_note("Tasks/aaaaaaaaaaaa.md").is_some());
+                assert!(device.read_note("Tasks/Deep/bbbbbbbbbbbb.md").is_some());
+                assert!(!device.has_folder("Jobs") && !device.has_folder("Work"));
+            }
+            assert!(cloud.read("Tasks/aaaaaaaaaaaa.md").is_some());
+            assert!(!cloud.has_dir("Jobs") && !cloud.has_dir("Work"));
+        }
+
+        #[test]
+        fn a_folder_emptied_by_a_synced_move_goes_but_one_empty_before_stays() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            phone.write_note("From/aaaaaaaaaaaa.md", &note("Plan", "one\n", NEW));
+            phone.make_folder("Kept");
+            for device in [&phone, &tablet] {
+                device.sync_notes(&cloud);
+            }
+            phone.move_note("From/aaaaaaaaaaaa.md", "aaaaaaaaaaaa.md", Some(LATER));
+            phone.delete_folder("From");
+            converge(&cloud, [&phone, &tablet]);
+
+            assert!(tablet.read_note("aaaaaaaaaaaa.md").is_some());
+            assert!(!tablet.has_folder("From") && !cloud.has_dir("From"));
+            assert!(tablet.has_folder("Kept") && cloud.has_dir("Kept"));
+        }
+
+        #[test]
+        fn a_note_moved_into_a_folder_another_device_deleted_lands_at_the_top_level() {
+            for phone_first in [true, false] {
+                let cloud = Cloud::new();
+                let (phone, tablet) = (Device::new(), Device::new());
+                phone.write_note("aaaaaaaaaaaa.md", &note("Plan", "one\n", NEW));
+                phone.make_folder("Work");
+                for device in [&phone, &tablet] {
+                    device.sync_notes(&cloud);
+                }
+                phone.delete_folder("Work");
+                tablet.move_note("aaaaaaaaaaaa.md", "Work/aaaaaaaaaaaa.md", Some(LATER));
+                if phone_first {
+                    phone.sync_notes(&cloud);
+                    tablet.sync_notes(&cloud);
+                } else {
+                    tablet.sync_notes(&cloud);
+                    phone.sync_notes(&cloud);
+                }
+                converge(&cloud, [&phone, &tablet]);
+
+                for device in [&phone, &tablet] {
+                    assert!(
+                        device.read_note("aaaaaaaaaaaa.md").is_some(),
+                        "{phone_first}"
+                    );
+                    assert!(!device.has_folder("Work"), "{phone_first}");
+                }
+                assert!(cloud.read("aaaaaaaaaaaa.md").is_some());
                 assert!(!cloud.has_dir("Work"), "{phone_first}");
             }
         }

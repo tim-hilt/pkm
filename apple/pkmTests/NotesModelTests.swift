@@ -159,6 +159,23 @@ import Testing
         #expect(model.rows.map(\.id) == [id])
     }
 
+    @Test func aNoteSyncMovedStaysOpen() throws {
+        let model = try openModel()
+        model.add()
+        let id = try #require(model.openID)
+        model.save(id: id, title: "Moved by Sync", body: "x")
+        // What a Sync step writes: the new file, then the old one goes.
+        let notes = root.appending(path: "Notes")
+        let work = notes.appending(path: "Work")
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: notes.appending(path: "\(id).md"), to: work.appending(path: "\(id).md"))
+        model.syncDidChange()
+        #expect(model.openID == id)
+        #expect(model.note(id: id)?.title == "Moved by Sync")
+        model.folderPath = "Work"
+        #expect(model.rows.map(\.id) == [id])
+    }
+
     @Test func aMovedFolderKeepsItsSelectionAndRefusalsThrowTheirReason() throws {
         let model = try openModel()
         let work = try model.addFolder(named: "Work", in: "")

@@ -135,6 +135,22 @@ describe("Folders", () => {
     expect(model.rows.map((row) => row.id)).toEqual([id]);
   });
 
+  it("keeps a Note open that Sync Moved to another Folder", async () => {
+    model.add();
+    const id = model.openId!;
+    model.save(id, "Moved by Sync", "text");
+    await model.saving;
+    // What a Sync step writes: the new file first, then the old one goes.
+    const bytes = (await storage.read(`Notes/${id}.md`))!;
+    await storage.write(`Notes/Work/${id}.md`, bytes);
+    await storage.remove(`Notes/${id}.md`);
+    await model.syncDidChange();
+    expect(model.openId).toBe(id);
+    expect(model.note(id)?.title).toBe("Moved by Sync");
+    model.select("Work");
+    expect(model.rows.map((row) => row.id)).toEqual([id]);
+  });
+
   it("Deleting a Folder removes its Notes, and the open one closes", async () => {
     model.addFolder("Work", "");
     model.add();

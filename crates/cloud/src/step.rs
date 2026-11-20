@@ -41,9 +41,17 @@
 //! lacks is made, one Deleted on a side is Deleted on the other once nothing is
 //! left in it. A new Item in a directory the other Device Deleted lands at the
 //! top level instead of bringing the directory back.
+//!
+//! A Context whose Items have an identity (`Merge::identity`) follows an Item
+//! Moved to another path: a path remembered but gone on one side, whose Item
+//! turns up under a new path, is a Move, not a delete and an add. The Item is
+//! merged three-way and ends at one path on both sides: the Move of the newer
+//! version if both sides Moved it, and the top level if the new directory was
+//! Deleted on the other side. A directory Sync emptied that nothing
+//! remembers is removed.
 
 use std::cell::{RefCell, RefMut};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
@@ -419,6 +427,20 @@ impl Engine {
                 .map(str::to_owned)
                 .collect();
         }
+        let moves = self.find_moves(&stamps, &synced_names).await?;
+        for moved in &moves {
+            for path in [
+                Some(&moved.from),
+                moved.local.as_ref(),
+                moved.remote.as_ref(),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                files.remove(path);
+            }
+        }
+        self.total += moves.len() as u32;
 
         // A Drawing is read only if it may have changed, and once if nothing
         // is to be done with it.
@@ -452,6 +474,17 @@ impl Engine {
         pending.sort_by_key(|(_, action)| *action == Action::DeleteLocal);
 
         // Read again: the app may have written a Drawing meanwhile.
+        for moved in moves {
+            let result = self.sync_move(&moved).await;
+            self.done += 1;
+            self.report();
+            if let Err(error) = result {
+                self.record(error);
+                if self.outcome().access_lost {
+                    return Ok(());
+                }
+            }
+        }
         for (file, _) in pending {
             if let Err(error) = self.sync_drawing(&file).await {
                 self.record(error);
@@ -736,6 +769,179 @@ impl Engine {
         }
         self.upload(top, bytes).await?;
         self.delete_cloud(file).await
+    }
+
+    /// The Items Moved since the last Sync: remembered paths gone on a side,
+    /// whose Item (by `Merge::identity`) is at a new path on a side that lost
+    /// it, while the other side still has it or Moved it elsewhere. Reads only
+    /// what is new, and only if something remembered is gone.
+    async fn find_moves(
+        &self,
+        local: &HashMap<String, LocalFile>,
+        synced_names: &[String],
+    ) -> io::Result<Vec<Moved>> {
+        let synced: HashSet<&str> = synced_names
+            .iter()
+            .map(String::as_str)
+            .filter(|name| !name.ends_with('/'))
+            .collect();
+        let mut sources = Vec::new();
+        for path in &synced {
+            if local.contains_key(*path) && self.remote.contains_key(*path) {
+                continue;
+            }
+            if let Some(base) = self.read_synced(path).await?
+                && let Some(id) = self.merge.identity(&base.bytes)
+            {
+                sources.push((path.to_string(), base.bytes, id));
+            }
+        }
+        if sources.is_empty() {
+            return Ok(Vec::new());
+        }
+        sources.sort();
+        let wanted: HashSet<&String> = sources.iter().map(|(_, _, id)| id).collect();
+
+        let mut new_local: Vec<&String> =
+            local.keys().filter(|p| !synced.contains(&***p)).collect();
+        new_local.sort();
+        let mut at_local = HashMap::new();
+        for path in new_local {
+            if let Some(bytes) = self.read_local(path).await?
+                && let Some(id) = self.merge.identity(&bytes).filter(|id| wanted.contains(id))
+            {
+                at_local.entry(id).or_insert_with(|| path.clone());
+            }
+        }
+        let mut new_remote: Vec<&String> = self
+            .remote
+            .keys()
+            .filter(|p| !synced.contains(&***p))
+            .collect();
+        new_remote.sort();
+        let mut at_remote = HashMap::new();
+        for path in new_remote {
+            if let Some(bytes) = self.fetch(path).await?
+                && let Some(id) = self.merge.identity(&bytes).filter(|id| wanted.contains(id))
+            {
+                at_remote.entry(id).or_insert_with(|| path.clone());
+            }
+        }
+
+        Ok(sources
+            .into_iter()
+            .filter_map(|(from, base, id)| {
+                let (here, there) = (local.contains_key(&from), self.remote.contains_key(&from));
+                let (to_local, to_remote) = (at_local.get(&id), at_remote.get(&id));
+                let is_move = match (to_local, to_remote) {
+                    (Some(l), Some(r)) => l != r && !here && !there,
+                    (Some(_), None) => !here && there,
+                    (None, Some(_)) => here && !there,
+                    (None, None) => false,
+                };
+                is_move.then(|| Moved {
+                    from,
+                    base,
+                    local: to_local.cloned(),
+                    remote: to_remote.cloned(),
+                })
+            })
+            .collect())
+    }
+
+    /// Puts a Moved Item, merged, at one path on both sides, and takes the old
+    /// paths away after the new one is written: the app, seeing the old one
+    /// go, finds the new one and follows the Item.
+    async fn sync_move(&mut self, moved: &Moved) -> io::Result<()> {
+        let local_path = moved.local.as_deref().unwrap_or(&moved.from);
+        let remote_path = moved.remote.as_deref().unwrap_or(&moved.from);
+        let (Some(local), Some(remote)) = (
+            self.read_local(local_path).await?,
+            self.fetch(remote_path).await?,
+        ) else {
+            return Ok(()); // gone since the listing
+        };
+        let Some(merged) = self.merge.merge(Some(&moved.base), &local, &remote) else {
+            return Ok(());
+        };
+        let (mut target, from_local) = match (&moved.local, &moved.remote) {
+            (Some(l), Some(r)) if !self.merge.local_is_newer(&local, &remote) => {
+                (r.as_str(), false)
+            }
+            (Some(l), _) => (l.as_str(), true),
+            (None, Some(r)) => (r.as_str(), false),
+            (None, None) => return Ok(()),
+        };
+        // Into a directory the other side Deleted: to the top level instead.
+        let other = if from_local {
+            &self.dirs.cloud
+        } else {
+            &self.dirs.local
+        };
+        if self.dirs.deleted_above(target, other) {
+            target = top_level(target);
+        }
+        let taken = (target != remote_path && self.remote.contains_key(target))
+            || (target != local_path && self.read_local(target).await?.is_some());
+        if taken {
+            return Ok(());
+        }
+
+        if local_path != target {
+            if !self.replace_local(target, &merged, None).await? {
+                return Ok(());
+            }
+        } else if merged != local && !self.replace_local(target, &merged, Some(&local)).await? {
+            return Ok(());
+        }
+        if remote_path == target && merged == remote {
+            let marker = self.remote[target].clone();
+            self.remember(target, &remote, &marker).await?;
+        } else {
+            self.upload(target, merged).await?;
+        }
+        // The old paths go last, and what is remembered of the old one after
+        // them: until then a failed step finds the Move again.
+        if local_path != target && self.remove_local(local_path, local).await? {
+            self.prune_local_dirs(parent_of(local_path)).await?;
+        }
+        if remote_path != target {
+            self.delete_cloud(remote_path).await?;
+            self.prune_cloud_dirs(parent_of(remote_path)).await?;
+        }
+        if moved.from != target {
+            self.forget(&moved.from).await?;
+        }
+        Ok(())
+    }
+
+    /// Removes `dir` here if Moves emptied it, and the directories above it
+    /// that are just as empty, as long as nothing remembers them: those the
+    /// directory step decides about, and one remembered stays.
+    async fn prune_local_dirs(&mut self, mut dir: &str) -> io::Result<()> {
+        while !dir.is_empty() && !self.dirs.synced.contains(dir) {
+            let path = dir.to_owned();
+            if !self.guarded(Request::RemoveLocalDir { path }).await? {
+                break;
+            }
+            self.dirs.local.remove(dir);
+            self.outcome().changed.push(dir_key(dir));
+            dir = parent_of(dir);
+        }
+        Ok(())
+    }
+
+    /// `prune_local_dirs` for the cloud, where a directory is empty once what
+    /// the step deleted is all it had.
+    async fn prune_cloud_dirs(&mut self, mut dir: &str) -> io::Result<()> {
+        while !dir.is_empty() && !self.dirs.synced.contains(dir) && self.cloud_dir_is_empty(dir) {
+            self.ask(Request::DeleteCloudDir { path: dir.into() })
+                .await?;
+            self.dirs.cloud.remove(dir);
+            self.deleted_cloud_dirs.insert(dir.to_owned());
+            dir = parent_of(dir);
+        }
+        Ok(())
     }
 
     /// Makes the directories of both sides agree (the Context's directories
@@ -1033,17 +1239,24 @@ impl Engine {
     }
 
     async fn delete_local(&mut self, file: &str, expected: Vec<u8>) -> io::Result<()> {
+        if self.remove_local(file, expected).await? {
+            self.forget(file).await?;
+        }
+        Ok(()) // else the app wrote it meanwhile; the next step decides again
+    }
+
+    /// Deletes the local file if it still holds `expected`. Whether it did.
+    async fn remove_local(&mut self, file: &str, expected: Vec<u8>) -> io::Result<bool> {
         let happened = self
             .guarded(Request::DeleteLocal {
                 file: file.into(),
                 expected,
             })
             .await?;
-        if !happened {
-            return Ok(()); // the app wrote it meanwhile; the next step decides again
+        if happened {
+            self.outcome().changed.push(self.merge.name_of(file));
         }
-        self.outcome().changed.push(self.merge.name_of(file));
-        self.forget(file).await
+        Ok(happened)
     }
 
     /// Remembers the uploads with the markers the cloud gave them, which a
@@ -1070,6 +1283,21 @@ impl Engine {
         }
         Ok(())
     }
+}
+
+/// The directory of `path`; empty at the top level.
+fn parent_of(path: &str) -> &str {
+    path.rsplit_once('/').map_or("", |(dir, _)| dir)
+}
+
+/// An Item Moved since the last Sync: it was at `from`, with `base` as its
+/// remembered bytes, and is now at `local` here and/or `remote` in the cloud
+/// (none: it stayed at `from` on that side).
+struct Moved {
+    from: String,
+    base: Vec<u8>,
+    local: Option<String>,
+    remote: Option<String>,
 }
 
 /// The file name of `path`: where it lands at the top level.
