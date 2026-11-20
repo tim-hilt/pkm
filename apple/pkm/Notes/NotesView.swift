@@ -12,9 +12,11 @@ struct NotesView: View {
     var body: some View {
         if NotesLayout.pushes(sizeClass) {
             FolderTree()
+                .addNoteButton()
                 .navigationDestination(for: String.self) { route in
                     if route.hasPrefix("/") {
                         NoteList().navigationTitle(FolderTree.name(ofPath: String(route.dropFirst())))
+                            .addNoteButton()
                     } else {
                         NoteEditor(id: route).id(route)
                     }
@@ -31,6 +33,7 @@ struct NotesView: View {
                     ContentUnavailableView("No Note Selected", systemImage: "note.text")
                 }
             }
+            .addNoteButton()
         }
     }
 }
@@ -220,7 +223,18 @@ private struct FolderDrag: ViewModifier {
     }
 }
 
+/// The "+" for a Note in the selected Folder.
+private struct AddNoteButton: ViewModifier {
+    @Environment(NotesModel.self) private var model
+
+    func body(content: Content) -> some View {
+        content.addButton("New Note", identifier: "add-note") { model.add() }
+    }
+}
+
 extension View {
+    fileprivate func addNoteButton() -> some View { modifier(AddNoteButton()) }
+
     @ViewBuilder fileprivate func draggableIf(_ condition: Bool, _ item: NotesMovable) -> some View {
         if condition { draggable(item) } else { self }
     }
@@ -333,7 +347,6 @@ private struct NoteList: View {
                 if let id = model.openID, let row = model.rows.first(where: { $0.id == id }) { ask(row) }
             }
         #endif
-        .addButton("New Note", identifier: "add-note") { model.add() }
         .confirmationDialog(
             "Delete this Note?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
             presenting: deleting
