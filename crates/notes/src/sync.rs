@@ -7,8 +7,12 @@
 //! `updated` when both did. The Body merges by line, the newer side winning
 //! the lines both changed. Without a base the newer side wins whole. Bytes
 //! that are no Note are no Item: `merge` and `same_item` say none.
+//!
+//! Image files (`store::images`) are Items too, but are transferred and never
+//! merged: an Image's file never changes after it is added.
 
 use pkm_base::front_matter::Document;
+use pkm_base::images::{is_image, is_image_file};
 use pkm_base::line_merge::{self, Side};
 use std::cmp::Ordering;
 
@@ -74,19 +78,26 @@ pub fn local_is_newer(local: &[u8], remote: &[u8]) -> bool {
     }
 }
 
-/// Whether a file of this name is a Note's: Markdown, not hidden.
+/// Whether a file of this name is a Note's or an Image's: not hidden.
 pub fn accepts(file: &str) -> bool {
-    !file.starts_with('.') && file.ends_with(".md")
+    !file.starts_with('.') && (file.ends_with(".md") || is_image_file(file))
 }
 
-/// Whether `bytes` are a Note.
+/// Whether `bytes` are a Note or an Image.
 pub fn is_item(bytes: &[u8]) -> bool {
-    parse(bytes).is_some()
+    is_image(bytes) || parse(bytes).is_some()
 }
 
-/// Whether two Notes are one Note: they share an id. None if either isn't a Note.
+/// Whether two Notes are one Note: they share an id; two Images, if they are
+/// the same bytes. None if either isn't a Note or an Image, or they differ in
+/// kind. An Image has no `identity`: its unique file name pairs it by path,
+/// and a Move is a delete and an add (ADR-0031).
 pub fn same_item(a: &[u8], b: &[u8]) -> Option<bool> {
-    Some(parse(a)?.scalar("id") == parse(b)?.scalar("id"))
+    match (is_image(a), is_image(b)) {
+        (true, true) => Some(a == b),
+        (false, false) => Some(parse(a)?.scalar("id") == parse(b)?.scalar("id")),
+        _ => None,
+    }
 }
 
 /// The Note a file holds: a document with an `id`.
@@ -207,9 +218,25 @@ mod tests {
     }
 
     #[test]
-    fn only_visible_markdown_files_are_accepted() {
-        assert!(accepts("aaaaaaaaaaaa.md"));
-        for file in [".aaaaaaaaaaaa.md", "aaaaaaaaaaaa.png", "a.txt"] {
+    fn images_are_items_that_are_the_same_only_by_their_bytes() {
+        let png = b"\x89PNG\r\n\x1a\n a";
+        let note = note("Plan", "", T0);
+        assert!(is_item(png));
+        assert_eq!(same_item(png, png), Some(true));
+        assert_eq!(same_item(png, b"\x89PNG\r\n\x1a\n b"), Some(false));
+        assert_eq!(same_item(png, &note), None);
+        assert_eq!(identity(png), None);
+    }
+
+    #[test]
+    fn only_visible_markdown_and_image_files_are_accepted() {
+        assert!(accepts("aaaaaaaaaaaa.md") && accepts("aaaaaaaaaaaa.png"));
+        for file in [
+            ".aaaaaaaaaaaa.md",
+            ".aaaaaaaaaaaa.png",
+            "photo.png",
+            "a.txt",
+        ] {
             assert!(!accepts(file), "{file}");
         }
     }

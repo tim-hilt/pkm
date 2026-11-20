@@ -235,7 +235,8 @@ impl Merge for Tasks {
 }
 
 /// Notes: `<id>.md` files in Folder directories, merged three-way, the Body by
-/// line (ADR-0032). A file that isn't a Note is left where it is, and two versions that can't
+/// line (ADR-0032), and the Images beside them, transferred unchanged
+/// (ADR-0029, ADR-0031). A file that isn't a Note is left where it is, and two versions that can't
 /// merge are not both kept: one Note has one file.
 pub struct Notes;
 

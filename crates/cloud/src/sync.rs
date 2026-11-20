@@ -3409,6 +3409,84 @@ mod tests {
             }
         }
 
+        const PNG: &[u8] = b"\x89PNG\r\n\x1a\n pixels";
+        const IMAGE: &str = "Work/Plans/cccccccccccc.png";
+
+        impl Device {
+            fn move_image(&self, from: &str, to: &str) {
+                let target = self.note_files.0.join(to);
+                fs::create_dir_all(target.parent().unwrap()).unwrap();
+                fs::rename(self.note_files.0.join(from), target).unwrap();
+            }
+
+            fn remove_note(&self, file: &str) {
+                fs::remove_file(self.note_files.0.join(file)).unwrap();
+            }
+
+            fn read_note_bytes(&self, file: &str) -> Option<Vec<u8>> {
+                fs::read(self.note_files.0.join(file)).ok()
+            }
+        }
+
+        #[test]
+        fn an_image_arrives_with_its_note_unmerged() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            phone.write_note(A, &note("Plan", "![](cccccccccccc.png)\n", NEW));
+            phone.write_note(IMAGE, PNG);
+            phone.write_note("Work/Plans/notes.png", PNG); // no Image of Notes
+            converge(&cloud, [&phone, &tablet]);
+
+            assert_eq!(tablet.read_note_bytes(IMAGE).unwrap(), PNG);
+            assert_eq!(cloud.read(IMAGE).unwrap(), PNG);
+            assert!(cloud.read("Work/Plans/notes.png").is_none());
+        }
+
+        #[test]
+        fn an_image_follows_its_note_when_moved() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            phone.write_note(A, &note("Plan", "![](cccccccccccc.png)\n", NEW));
+            phone.write_note(IMAGE, PNG);
+            converge(&cloud, [&phone, &tablet]);
+
+            phone.move_note(A, MOVED, Some(LATER));
+            phone.move_image(IMAGE, "Archive/cccccccccccc.png");
+            converge(&cloud, [&phone, &tablet]);
+
+            for device in [&phone, &tablet] {
+                assert!(device.read_note(MOVED).is_some());
+                assert_eq!(
+                    device.read_note_bytes("Archive/cccccccccccc.png").unwrap(),
+                    PNG
+                );
+                assert!(device.read_note_bytes(IMAGE).is_none());
+            }
+            assert!(cloud.read(IMAGE).is_none());
+        }
+
+        #[test]
+        fn an_image_stays_when_one_of_two_notes_showing_it_is_deleted() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            let shows = "![](cccccccccccc.png)\n";
+            let other = "Work/Plans/bbbbbbbbbbbb.md";
+            phone.write_note(A, &note("Plan", shows, NEW));
+            phone.write_note(other, &note_of("bbbbbbbbbbbb", "Other", shows, NEW));
+            phone.write_note(IMAGE, PNG);
+            converge(&cloud, [&phone, &tablet]);
+
+            // The store keeps the Image while another Note shows it.
+            tablet.remove_note(A);
+            converge(&cloud, [&phone, &tablet]);
+
+            for device in [&phone, &tablet] {
+                assert!(device.read_note(A).is_none());
+                assert_eq!(device.read_note_bytes(IMAGE).unwrap(), PNG);
+            }
+            assert!(cloud.read(A).is_none() && cloud.read(IMAGE).is_some());
+        }
+
         #[test]
         fn a_nested_note_keeps_its_own_sync_history_beside_a_top_level_one_of_the_same_name() {
             let cloud = Cloud::new();
