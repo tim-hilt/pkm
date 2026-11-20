@@ -1,9 +1,9 @@
-import { Closing, TaskQuickAdd } from "../core/Core";
+import { TaskQuickAdd } from "../core/Core";
 import { button, make } from "../Dom";
 import { QuickAddField } from "./QuickAddField";
 import { RowDrag } from "./RowDrag";
 import { RowMenu } from "./RowMenu";
-import { taskLine } from "./TaskRow";
+import { taskLine, taskMenuItems } from "./TaskRow";
 import type { ListedTask, TasksModel } from "./TasksModel";
 
 const chevronGlyph = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>`;
@@ -15,7 +15,7 @@ const chevronGlyph = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none
  * Enter adds the Subtask at the end and empties the field, which keeps the focus;
  * Enter on an empty field, or blur, closes it. A click opens a Subtask via
  * `open`. A row's circle marks it Done or Reverts that; its menu (right click,
- * long press) holds only Reject; a mouse drags it to reorder among its
+ * long press) is the list rows'; a mouse drags it to reorder among its
  * siblings. Starts unfolded; the fold is not saved; folding hides the button
  * too.
  * `refresh` redraws it from the model, as last saved.
@@ -118,11 +118,7 @@ export class SubtasksSection {
         });
         open.setAttribute("aria-haspopup", "menu");
         const row = make("li", "task-row", [line]);
-        // A pending Done is Reverted at its circle, so it has no menu.
-        const items = subtask.done
-          ? []
-          : [{ label: "Reject", run: () => model.close(subtask, Closing.Rejected), danger: true }];
-        this.menu.attach(row, () => items, open);
+        this.menu.attach(row, () => taskMenuItems(subtask, model), open);
         this.drag.attachRow(row, subtask);
         return row;
       }),

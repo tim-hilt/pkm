@@ -1,9 +1,20 @@
-import { button } from "../Dom";
+import { button, make } from "../Dom";
 import { HoldDetector } from "../drawings/input/HoldDetector";
 import { menuCorner } from "../drawings/gallery/CardMenu";
 
-/** One entry of a row's menu. */
-export interface RowMenuItem {
+/** One choice of a group, shown as a circle that only its `label` names for assistive technology. */
+export interface RowMenuChoice {
+  label: string;
+  run: () => void;
+  checked: boolean;
+  /** A class that colours the circle (it takes the text colour). */
+  className?: string;
+}
+
+/** One entry of a row's menu: a line, or a horizontal group of choices. */
+export type RowMenuItem = RowMenuLine | { choices: RowMenuChoice[] };
+
+export interface RowMenuLine {
   label: string;
   run: () => void;
   danger?: boolean;
@@ -11,6 +22,8 @@ export interface RowMenuItem {
   checked?: boolean;
   /** A heading shown above this entry, starting a section. */
   heading?: string;
+  /** A divider shown above this entry, starting a section. */
+  separated?: boolean;
 }
 
 /**
@@ -89,25 +102,7 @@ export class RowMenu {
     this.hide();
     this.focusAfter = focusAfter;
     if (items.length === 0) return;
-    this.element.replaceChildren(
-      ...items.flatMap(({ label, run, danger, checked, heading }) => {
-        const entry = button(`row-menu-item${danger ? " danger" : ""}`, label, () => {
-          this.hide();
-          focusAfter.focus();
-          run();
-        });
-        if (checked === undefined) entry.setAttribute("role", "menuitem");
-        else {
-          entry.setAttribute("role", "menuitemradio");
-          entry.setAttribute("aria-checked", String(checked));
-        }
-        if (heading === undefined) return [entry];
-        const title = document.createElement("div");
-        title.className = "row-menu-heading";
-        title.textContent = heading;
-        return [title, entry];
-      }),
-    );
+    this.element.replaceChildren(...items.flatMap((item) => this.entries(item)));
     this.element.hidden = false;
     const size = { width: this.element.offsetWidth, height: this.element.offsetHeight };
     const { left, top } = menuCorner({ x, y }, this.bounds.getBoundingClientRect(), size);
@@ -118,18 +113,68 @@ export class RowMenu {
     };
     document.addEventListener("pointerdown", away, true);
     this.closeOnPressElsewhere = () => document.removeEventListener("pointerdown", away, true);
-    this.element.querySelector<HTMLElement>("[role^=menuitem]")?.focus();
+    const first = this.element.querySelector<HTMLElement>(".row-menu-choices [aria-checked=true]");
+    (first ?? this.element.querySelector<HTMLElement>("[role^=menuitem]"))?.focus();
+  }
+
+  /** The elements of `item`: its entry, with the heading or divider that starts its section. */
+  private entries(item: RowMenuItem): HTMLElement[] {
+    const choose = (run: () => void) => () => {
+      this.hide();
+      this.focusAfter?.focus();
+      run();
+    };
+    const radio = (entry: HTMLElement, checked: boolean) => {
+      entry.setAttribute("role", "menuitemradio");
+      entry.setAttribute("aria-checked", String(checked));
+    };
+    if ("choices" in item) {
+      const group = make("div", "row-menu-choices");
+      group.setAttribute("role", "group");
+      for (const { label, run, checked, className } of item.choices) {
+        const circle = button(`row-menu-choice ${className ?? ""}`, "", choose(run));
+        circle.setAttribute("aria-label", label);
+        circle.title = label;
+        radio(circle, checked);
+        group.append(circle);
+      }
+      return [group];
+    }
+    const { label, run, danger, checked, heading, separated } = item;
+    const entry = button(`row-menu-item${danger ? " danger" : ""}`, label, choose(run));
+    if (checked === undefined) entry.setAttribute("role", "menuitem");
+    else radio(entry, checked);
+    const before: HTMLElement[] = [];
+    if (separated) before.push(make("div", "row-menu-divider"));
+    if (heading !== undefined) before.push(make("div", "row-menu-heading", [heading]));
+    return [...before, entry];
   }
 
   private key(event: KeyboardEvent): void {
-    const entries = [...this.element.querySelectorAll<HTMLElement>("[role^=menuitem]")];
-    const at = entries.indexOf(document.activeElement as HTMLElement);
+    const active = document.activeElement as HTMLElement;
+    const group = active.closest<HTMLElement>(".row-menu-choices");
     if (event.key === "Escape") {
       this.hide();
       this.focusAfter?.focus();
-    } else if (event.key === "ArrowDown") entries[(at + 1) % entries.length].focus();
-    else if (event.key === "ArrowUp") entries[(at - 1 + entries.length) % entries.length].focus();
-    else return;
+    } else if (group && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+      const circles = [...group.children] as HTMLElement[];
+      const step = event.key === "ArrowRight" ? 1 : -1;
+      circles[(circles.indexOf(active) + step + circles.length) % circles.length].focus();
+    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      // A group is one stop, entered at its checked choice (else the first).
+      const stops = [
+        ...this.element.querySelectorAll<HTMLElement>(
+          ":scope > :is(.row-menu-item, .row-menu-choices)",
+        ),
+      ];
+      const at = stops.findIndex((stop) => stop.contains(active));
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      const next = stops[(at + step + stops.length) % stops.length];
+      const target = next.matches(".row-menu-choices")
+        ? (next.querySelector<HTMLElement>("[aria-checked=true]") ?? next.firstElementChild)
+        : next;
+      (target as HTMLElement).focus();
+    } else return;
     event.preventDefault();
   }
 }

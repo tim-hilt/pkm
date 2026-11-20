@@ -1,5 +1,6 @@
-import { rowPreview } from "../core/Core";
+import { Closing, rowPreview } from "../core/Core";
 import { make } from "../Dom";
+import type { RowMenuItem } from "./RowMenu";
 import { tagLabel } from "./TagLabel";
 import { titleNodes } from "./TitleText";
 import type { ListedTask, TasksModel } from "./TasksModel";
@@ -47,6 +48,31 @@ export function taskLine(
     line.append(lock);
   }
   return { line, open };
+}
+
+/**
+ * The row menu of a Task, as the list and the Subtasks section offer it: the
+ * Priority palette, a divider, Reject. None while its Done is pending: that is
+ * Reverted at its circle.
+ */
+export function taskMenuItems(task: ListedTask, model: TasksModel): RowMenuItem[] {
+  if (task.done) return [];
+  return [
+    {
+      choices: [1, 2, 3, 4].map((priority) => ({
+        label: `P${priority}`,
+        className: `priority-${priority}`,
+        checked: priority === task.priority,
+        run: () => model.setPriority(task, priority),
+      })),
+    },
+    {
+      label: "Reject",
+      run: () => model.close(task, Closing.Rejected),
+      danger: true,
+      separated: true,
+    },
+  ];
 }
 
 /** The Parent marker (how many are Open) and, if `showsParent`, the Subtask marker (its Parent's Title). */

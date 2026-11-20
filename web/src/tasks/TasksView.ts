@@ -5,7 +5,7 @@ import { filterRows } from "./FiltersList";
 import { RowDrag } from "./RowDrag";
 import { RowMenu, type RowMenuItem } from "./RowMenu";
 import { tagLabel } from "./TagLabel";
-import { taskLine } from "./TaskRow";
+import { taskLine, taskMenuItems } from "./TaskRow";
 import { type TaskPlaces, editTaskDialog, newTaskDialog } from "./TaskDialogs";
 import { type Filter, type ListedTask, type TasksList, type TasksModel } from "./TasksModel";
 
@@ -285,21 +285,8 @@ export class TasksView {
     const { line, open } = taskLine(task, this.model, () => this.places.open(task.id));
     open.setAttribute("aria-haspopup", "menu");
     const row = make("li", "task-row", [line]);
-    this.menu.attach(row, () => this.menuItems(task), open);
+    this.menu.attach(row, () => taskMenuItems(task, this.model), open);
     drag.attachRow(row, task);
     return row;
-  }
-
-  private menuItems(task: ListedTask): RowMenuItem[] {
-    // A pending Done is Reverted at its circle.
-    if (task.done) return [];
-    const { model } = this;
-    return [
-      {
-        label: "Reject",
-        run: () => model.close(task, Closing.Rejected),
-        danger: true,
-      },
-    ];
   }
 }

@@ -407,6 +407,17 @@ export class TasksModel {
   }
 
   /**
+   * Sets only the Priority of a Task, as saved now (not as `task`, which may be
+   * stale); writes nothing if it is the one saved. Leaves the edit stack alone,
+   * so changing a Subtask from its row never disturbs its Parent's open form.
+   */
+  setPriority(task: ListedTask, priority: number): void {
+    const saved = this.current(task);
+    if (saved.priority === priority) return;
+    this.apply(() => this.files.store.edit(saved.id, saved.title, saved.description, priority, []));
+  }
+
+  /**
    * Commits the Shortcuts of Quick Add, the Title field of the edit view, to a
    * Task: its Title without them, a Priority Shortcut replacing `priority`, its
    * Tags added to `tags` (never removed), saved like `edit`. Returns the Task as

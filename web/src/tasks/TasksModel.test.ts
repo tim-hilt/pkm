@@ -1399,3 +1399,65 @@ describe("releasing Images", () => {
     expect(model.addImage(new Uint8Array([1, 2, 3]))).toBeUndefined();
   });
 });
+
+describe("setPriority", () => {
+  it("sets only the Priority, as saved now", () => {
+    model.add("T", { description: "Body", priority: 3, tags: ["work"] });
+    const stale = first();
+    model.edit(stale, { title: "T2", description: "Body", priority: 3, tags: ["work", "home"] });
+    model.setPriority(stale, 1);
+    expect(model.find(stale.id)).toMatchObject({
+      title: "T2",
+      description: "Body",
+      priority: 1,
+      tags: ["work", "home"],
+    });
+  });
+
+  it("writes nothing when the Priority is unchanged", async () => {
+    model.add("T", { priority: 2 });
+    await model.saved();
+    const saves = vi.fn();
+    model.onSaved = saves;
+    model.setPriority(first(), 2);
+    await model.saved();
+    expect(saves).not.toHaveBeenCalled();
+    model.setPriority(first(), 1);
+    await model.saved();
+    expect(saves).toHaveBeenCalledOnce();
+  });
+
+  it("moves the row in a Sorted Filter", () => {
+    for (const [title, priority] of [
+      ["a", 1],
+      ["b", 2],
+      ["c", 3],
+    ] as const)
+      model.add(title, { priority, tags: ["work"] });
+    model.addFilter("Work", "@work");
+    const work = model.filters.find((f) => f.title === "Work")!;
+    model.list = { kind: "filter", id: work.id };
+    model.setSort(work, FilterSortKey.Priority);
+    expect(titles()).toEqual(["a", "b", "c"]);
+    model.setPriority(
+      model.tasks.find((t) => t.title === "a")!,
+      4,
+    );
+    expect(titles()).toEqual(["b", "c", "a"]);
+  });
+
+  it("changes a Subtask while the Parent's dialog is open, leaving the dialog's state alone", () => {
+    model.add("Parent");
+    const parent = first();
+    model.addSubtask("Sub", parent);
+    model.openLinked(parent.id);
+    model.edit(parent, { title: "", description: "", priority: 4, tags: [] });
+    expect(model.isLeavingBlocked).toBe(true);
+    const [sub] = model.subtasks(parent.id);
+    model.setPriority(sub, 1);
+    expect(model.subtasks(parent.id)[0].priority).toBe(1);
+    expect(model.isLeavingBlocked).toBe(true);
+    expect(model.depth).toBe(1);
+    expect(model.editing?.id).toBe(parent.id);
+  });
+});
