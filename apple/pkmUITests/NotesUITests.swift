@@ -1,7 +1,8 @@
 import XCTest
 
 /// The Notes Context on a phone: the top level lists its Folders and Notes, a Folder pushes its
-/// own, and "+" and New Folder add to the Folder shown.
+/// own, and "+" and New Folder add to the Folder shown. On an iPad: a tap beside the tree's rows
+/// selects the top level.
 @MainActor final class NotesUITests: XCTestCase {
     func testTheTopLevelsPlusOpensANewNote() throws {
         continueAfterFailure = false
@@ -29,6 +30,24 @@ import XCTest
         app.staticTexts["Weekly review"].tap()
 
         XCTAssertTrue(app.descendants(matching: .any)["note-body"].waitForExistence(timeout: 5))
+    }
+
+    func testATapBesideTheTreeSelectsTheTopLevel() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-UITestingOpenNotes"]
+        app.launch()
+        try XCTSkipUnless(app.staticTexts["Work"].waitForExistence(timeout: 10))
+        try XCTSkipUnless(app.windows.firstMatch.horizontalSizeClass == .regular, "an iPad shows the tree")
+        let work = app.cells.containing(.staticText, identifier: "Work").firstMatch
+        work.tap()
+        XCTAssertTrue(work.wait(for: \.isSelected, toEqual: true, timeout: 5))
+
+        let window = app.windows.firstMatch
+        let below = CGVector(dx: work.frame.midX - window.frame.minX, dy: window.frame.height * 0.8)
+        window.coordinate(withNormalizedOffset: .zero).withOffset(below).tap()
+
+        XCTAssertTrue(work.wait(for: \.isSelected, toEqual: false, timeout: 5))
     }
 
     func testAFolderIsMadeInsideThePushedFolder() throws {

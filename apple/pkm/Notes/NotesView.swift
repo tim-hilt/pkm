@@ -132,6 +132,9 @@ private struct NotesBrowser: View {
                 FolderContents(path: path, isTree: folder == nil, request: handle)
             }
         }
+        #if os(iOS)
+            .modifier(TapBesideRows(enabled: folder == nil) { model.selection = nil })
+        #endif
         .modifier(FolderDrop(path: path) { handle(.refused($0)) })
         .searchable(text: Bindable(model).searchText)
         #if os(iOS)
@@ -309,6 +312,39 @@ private struct FolderContents: View {
         )
     }
 }
+
+#if os(iOS)
+    /// Calls `action` for a tap below a List's last row, which a Mac List takes as selecting none
+    /// and an iPad List ignores.
+    private struct TapBesideRows: ViewModifier {
+        let enabled: Bool
+        let action: () -> Void
+        /// The empty space below the rows: its top from the List's top, and its height.
+        @State private var space = (top: CGFloat.zero, height: CGFloat.zero)
+
+        func body(content: Content) -> some View {
+            if enabled {
+                content
+                    .onScrollGeometryChange(for: [CGFloat].self) { scroll in
+                        let top = scroll.contentSize.height - scroll.contentOffset.y
+                        return [top, scroll.containerSize.height - scroll.contentInsets.bottom - top]
+                    } action: {
+                        space = ($1[0], max(0, $1[1]))
+                    }
+                    .overlay(alignment: .top) {
+                        Color.clear
+                            .contentShape(.rect)
+                            .frame(height: space.height)
+                            .onTapGesture(perform: action)
+                            .padding(.top, space.top)
+                            .ignoresSafeArea(edges: .vertical)
+                    }
+            } else {
+                content
+            }
+        }
+    }
+#endif
 
 /// Makes a row, or a whole list, a drop target that Moves into the Folder at `path`.
 private struct FolderDrop: ViewModifier {
