@@ -287,6 +287,17 @@ final class TasksModel {
         return true
     }
 
+    /// Sets only the Priority of a Task, as saved now (not as `task`, which may be stale); writes
+    /// nothing if it is the one saved. Leaves the edit stack alone, so changing a Subtask from its
+    /// row never disturbs its Parent's open form.
+    func setPriority(_ task: ListedTask, to priority: UInt8) {
+        let saved = current(task)
+        guard saved.priority != priority else { return }
+        _ = try? store.edit(
+            id: saved.id, title: saved.title, description: saved.description, priority: priority, addTags: [])
+        reload()
+    }
+
     /// Commits Quick Add's Shortcuts to a Task being edited: its Title without them, a Priority
     /// Shortcut replacing `priority`, its Tags added to `tags` (never removed), saved in one write
     /// like `edit`. Returns the Task as saved, or nil, changing nothing, if only Shortcuts were typed

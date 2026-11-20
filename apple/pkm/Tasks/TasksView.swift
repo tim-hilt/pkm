@@ -109,13 +109,7 @@ private struct TaskListView: View {
                                             Button("Reject", role: .destructive) { model.close(task, as: .rejected) }
                                         }
                                     }
-                                    .contextMenu {
-                                        if !task.done {  // a pending Done is Reverted at its circle
-                                            Button("Reject", systemImage: "xmark.circle", role: .destructive) {
-                                                model.close(task, as: .rejected)
-                                            }
-                                        }
-                                    }
+                                    .taskContextMenu(task)
                             }
                             // A drop lands within the Section: no target outside the row's Group.
                             .onMove { model.move(in: group.tag, from: $0, to: $1) }
@@ -278,12 +272,57 @@ struct TaskRow: View {
     }
 }
 
+extension View {
+    /// The context menu of a Task row (long press, right click): the Priority palette, a divider,
+    /// then Reject. A pending Done (reverted at its circle) has none.
+    func taskContextMenu(_ task: ListedTask) -> some View {
+        modifier(TaskContextMenu(task: task))
+    }
+}
+
+private struct TaskContextMenu: ViewModifier {
+    @Environment(TasksModel.self) private var model
+    let task: ListedTask
+
+    func body(content: Content) -> some View {
+        content.contextMenu {
+            if !task.done {
+                // The palette applies a tap at once; a row that moves does so animated.
+                Picker(
+                    "Priority",
+                    selection: Binding(
+                        get: { task.priority },
+                        set: { priority in withAnimation { model.setPriority(task, to: priority) } })
+                ) {
+                    ForEach(UInt8(1)...4, id: \.self) { priority in
+                        Label {
+                            Text(verbatim: "P\(priority)")
+                        } icon: {
+                            Image(systemName: "circle.fill").foregroundStyle(ListedTask.color(ofPriority: priority))
+                        }
+                        .labelStyle(.iconOnly)
+                        .tag(priority)
+                    }
+                }
+                .pickerStyle(.palette)
+                Divider()
+                Button("Reject", systemImage: "xmark.circle", role: .destructive) {
+                    model.close(task, as: .rejected)
+                }
+            }
+        }
+    }
+}
+
 extension ListedTask {
     fileprivate func hasMarkers(showsParent: Bool) -> Bool {
         openSubtasks > 0 || (showsParent && parentTitle != nil)
     }
 
-    fileprivate var priorityColor: Color {
+    fileprivate var priorityColor: Color { Self.color(ofPriority: priority) }
+
+    /// The colour of a Priority's circle, in the rows and the palette.
+    fileprivate static func color(ofPriority priority: UInt8) -> Color {
         switch priority {
         case 1: .red
         case 2: .orange

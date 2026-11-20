@@ -107,6 +107,16 @@ import XCTest
         XCTAssertTrue(field.exists, "the field stays for the next Subtask")
     }
 
+    func testAPriorityIsSetFromARowsContextMenu() {
+        app.staticTexts["Book the dentist"].press(forDuration: 1)
+        XCTAssertTrue(app.buttons["Reject"].waitForExistence(timeout: 5))
+        app.buttons["P1"].tap()
+
+        app.staticTexts["Book the dentist"].press(forDuration: 1)
+        XCTAssertTrue(app.buttons["P1"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["P1"].isSelected)
+    }
+
     func testAnImageIsCopiedFromItsMenu() {
         app.staticTexts["Buy milk"].firstMatch.tap()
         XCTAssertTrue(showsForm(of: "Buy milk"))

@@ -867,6 +867,60 @@ import Testing
         #expect(model.tasks.map(\.title) == ["high", "low", "mid"])
     }
 
+    @Test func aPriorityIsSetKeepingTheOtherFields() throws {
+        let model = try openModel()
+        model.add(title: "t", description: "d", priority: 3, tags: ["work"])
+        let task = model.tasks[0]
+        model.setPriority(task, to: 1)
+        let saved = try #require(model.task(id: task.id))
+        #expect((saved.priority, saved.title, saved.description) == (1, "t", "d"))
+        #expect(saved.tags.map(\.name) == ["work"])
+    }
+
+    @Test func aPriorityIsNotWrittenWhenItIsTheOneSaved() async throws {
+        let model = try openModel()
+        model.add(title: "t", priority: 3)
+        func stamps() -> [String: Date] {
+            let files = FileManager.default.enumerator(
+                at: root, includingPropertiesForKeys: [.contentModificationDateKey])
+            return Dictionary(
+                uniqueKeysWithValues: (files?.allObjects as? [URL] ?? []).compactMap { url in
+                    (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+                        .map { (url.path, $0) }
+                })
+        }
+        let before = stamps()
+        try await Task.sleep(for: .milliseconds(50))
+        model.setPriority(model.tasks[0], to: 3)
+        #expect(stamps() == before)
+    }
+
+    @Test func aTaskMovesInASortedFilterWhenItsPriorityChanges() throws {
+        let model = try openModelWithoutFavorites()
+        for (title, priority) in [("low", 3), ("high", 1)] as [(String, UInt8)] {
+            model.add(title: title, priority: priority, tags: ["work"])
+        }
+        model.addFilter(title: "Work", query: "@work")
+        model.list = .filter(model.filters[0].id)
+        model.setSort(.priority(.ascending))
+        #expect(model.tasks.map(\.title) == ["high", "low"])
+        model.setPriority(model.tasks[0], to: 4)
+        #expect(model.tasks.map(\.title) == ["low", "high"])
+    }
+
+    @Test func aSubtasksPriorityChangesWhileItsParentsFormIsOpen() throws {
+        let model = try openModel()
+        model.add(title: "p")
+        let parent = model.tasks[0]
+        model.addSubtask(title: "s", priority: 4, under: parent)
+        model.startEditing(parent)
+        model.edit(parent, title: " ", description: "", priority: 4, tags: [])  // blocks leaving
+        model.setPriority(model.subtasks(of: parent.id)[0], to: 1)
+        #expect(model.subtasks(of: parent.id)[0].priority == 1)
+        #expect(model.editing == [parent.id])
+        #expect(model.isLeavingBlocked)
+    }
+
     @Test func theSortKeysComeFromTheCore() {
         #expect(sortKeys() == [.manual, .priority])
         #expect(sortWithKey(sort: .manual, key: .priority) == .priority(.ascending))
