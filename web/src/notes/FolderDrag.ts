@@ -15,7 +15,7 @@ export function draggable(row: HTMLElement, what: Dragged): void {
   });
 }
 
-/** Lets a Note or Folder be dropped on `target`, which is marked with `drop-target` meanwhile; `drop` gets it. */
+/** Lets a Note or Folder be dropped on `target`, which is marked with `drop-target` meanwhile; `drop` gets it, not a target around. */
 export function droppable(target: HTMLElement, drop: (what: Dragged) => void): void {
   const accepts = (event: DragEvent) =>
     event.dataTransfer?.types.some((type) => type === NOTE || type === FOLDER) ?? false;
@@ -23,6 +23,7 @@ export function droppable(target: HTMLElement, drop: (what: Dragged) => void): v
   target.addEventListener("dragover", (event) => {
     if (!accepts(event)) return;
     event.preventDefault();
+    event.stopPropagation();
     target.classList.add("drop-target");
   });
   target.addEventListener("dragleave", unmark);
@@ -31,6 +32,7 @@ export function droppable(target: HTMLElement, drop: (what: Dragged) => void): v
     const data = event.dataTransfer;
     if (!data || !accepts(event)) return;
     event.preventDefault();
+    event.stopPropagation();
     const note = data.getData(NOTE);
     drop(note !== "" ? { note } : { folder: data.getData(FOLDER) });
   });

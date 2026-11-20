@@ -32,6 +32,11 @@ export interface FolderRow {
   depth: number;
 }
 
+/** A row of the tree: a Folder, or a Note of the Folder above it at `depth` − 1. */
+export type TreeRow =
+  | { kind: "folder"; name: string; path: string; depth: number; expanded: boolean }
+  | ({ kind: "note"; folder: string; depth: number } & ListedNote);
+
 /** A Note's Title and Body as typed. */
 export interface NoteText {
   title: string;
@@ -39,23 +44,23 @@ export interface NoteText {
 }
 
 /**
- * The Notes Context's state: the Folder outline, the selected Folder's Notes
- * and the open Note, from the core's store, saved to storage after each change. It only forwards to the store;
+ * The Notes Context's state: the tree of Folders and Notes, the selected
+ * Folder and the open Note, from the core's store, saved to storage after each change. It only forwards to the store;
  * every Notes rule lives in the core. A port of the Swift `NotesModel`.
  */
 export class NotesModel {
-  /** Every Folder, as the outline shows them. */
+  /** Every Folder, parents before their Folders. */
   folders: FolderRow[] = [];
-  /** The Notes of the selected Folder, newest changed first. */
-  rows: ListedNote[] = [];
+  /** The Folders open in the tree, by path. */
+  readonly expanded = new Set<string>();
+  /** The top level's Folders and Notes, each open Folder followed by its own. */
+  tree: TreeRow[] = [];
   /** What Search looks for; empty when not searching. */
   searchText = "";
   /** The Notes in any Folder that match `searchText`, Title matches first; empty when not searching. */
   results: SearchHit[] = [];
-  /** The selected Folder's path; empty for the top level. Selecting another closes the open Note. */
+  /** The selected Folder's path, where new Notes and Folders go; empty for the top level. Selecting another closes the open Note. */
   folder = "";
-  /** Whether the selected Folder's Notes are pushed over the outline, where the columns don't fit. */
-  showsFolder = false;
   /** The open Note's ID. */
   openId: string | undefined;
   /** The Note just added and not yet left: its editor takes the focus on the Title. */
@@ -77,10 +82,10 @@ export class NotesModel {
     return this.files.store;
   }
 
-  /** The top level, then every Folder below its parent, one level deeper: what the outline and the Move dialog list. */
+  /** The top level, then every Folder below its parent, one level deeper: where the Move dialog Moves to. */
   get outline(): FolderRow[] {
     return [
-      { name: "Notes", path: "", depth: 0 },
+      { name: "Top Level", path: "", depth: 0 },
       ...this.folders.map((folder) => ({ ...folder, depth: folder.depth + 1 })),
     ];
   }
@@ -96,13 +101,15 @@ export class NotesModel {
     const id = note.id;
     note.free();
     this.newId = id;
-    this.showsFolder = true;
+    this.expand(this.folder);
     this.open(id);
   }
 
-  /** Opens the Note `id`, or none; leaving a Note discards it if it is empty. */
+  /** Opens the Note `id`, or none, selecting the Folder the tree shows it in; leaving a Note discards it if it is empty. */
   open(id: string | undefined): void {
     if (id === this.openId) return;
+    const row = this.tree.find((row) => row.kind === "note" && row.id === id);
+    if (row?.kind === "note") this.folder = row.folder;
     this.leave();
     this.openId = id;
     this.releasable = id === undefined ? [] : imageTargets(this.note(id)?.body ?? "");
@@ -110,12 +117,36 @@ export class NotesModel {
     this.changed();
   }
 
-  /** Selects the Folder at `path` (empty for the top level) and shows its Notes; the open Note closes if it is another. */
+  /** Selects the Folder at `path` (empty for the top level) and opens the Folders around it; the open Note closes if it is another. */
   select(path: string): void {
     if (path !== this.folder) this.closeNote();
     this.folder = path;
-    this.showsFolder = true;
+    this.expand(path.slice(0, Math.max(path.lastIndexOf("/"), 0)));
     this.changed();
+  }
+
+  /** Selects the Folder at `path` and opens it in the tree, or closes it if it is open. */
+  toggle(path: string): void {
+    if (!this.expanded.delete(path)) this.expanded.add(path);
+    this.select(path);
+  }
+
+  /** Opens the Folder at `path` in the tree, and every Folder around it. */
+  private expand(path: string): void {
+    let at = 0;
+    while (path !== "" && at !== -1) {
+      at = path.indexOf("/", at + 1);
+      this.expanded.add(at === -1 ? path : path.slice(0, at));
+    }
+  }
+
+  /** The Notes in the Folder at `path` (empty for the top level), newest changed first. */
+  notesIn(path: string): ListedNote[] {
+    return this.store.notes(path).map((note) => {
+      const row = { id: note.id, title: note.title, preview: note.preview };
+      note.free();
+      return row;
+    });
   }
 
   /** Searches for `text`; results follow it and later changes. */
@@ -125,17 +156,11 @@ export class NotesModel {
     this.onChange();
   }
 
-  /** Opens a Search result in its Folder. */
+  /** Opens a Search result in its Folder, which the tree opens. */
   openResult(hit: SearchHit): void {
     this.select(hit.folder);
+    this.expand(hit.folder);
     this.open(hit.id);
-  }
-
-  /** Leaves the selected Folder's Notes for the outline, where the columns don't fit; the Folder stays selected. */
-  leaveFolder(): void {
-    this.closeNote();
-    this.showsFolder = false;
-    this.changed();
   }
 
   /** Closes the open Note, discarding it if it is empty; the caller reports the change. */
@@ -258,11 +283,14 @@ export class NotesModel {
     this.changed();
   }
 
-  /** The selection follows a Folder that is now at `to`; an open Note stays open. */
+  /** The selection and the open Folders follow a Folder that is now at `to`; an open Note stays open. */
   private relocate(from: string, to: string): void {
-    if (this.folder === from || this.folder.startsWith(`${from}/`)) {
-      this.folder = to + this.folder.slice(from.length);
-    }
+    const follow = (path: string) =>
+      path === from || path.startsWith(`${from}/`) ? to + path.slice(from.length) : path;
+    this.folder = follow(this.folder);
+    const open = [...this.expanded].map(follow);
+    this.expanded.clear();
+    open.forEach((path) => this.expanded.add(path));
     this.changed();
   }
 
@@ -315,11 +343,18 @@ export class NotesModel {
       folder.free();
       return row;
     });
-    this.rows = store.notes(this.folder).map((note) => {
-      const row = { id: note.id, title: note.title, preview: note.preview };
-      note.free();
-      return row;
-    });
+    this.tree = [];
+    const list = (path: string, depth: number) => {
+      for (const { name, path: inner } of this.folders) {
+        if (inner.slice(0, Math.max(inner.lastIndexOf("/"), 0)) !== path) continue;
+        const expanded = this.expanded.has(inner);
+        this.tree.push({ kind: "folder", name, path: inner, depth, expanded });
+        if (expanded) list(inner, depth + 1);
+      }
+      for (const note of this.notesIn(path))
+        this.tree.push({ kind: "note", folder: path, depth, ...note });
+    };
+    list("", 0);
     this.results =
       this.searchText.trim() === ""
         ? []

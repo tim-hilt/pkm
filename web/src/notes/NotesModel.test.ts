@@ -24,10 +24,10 @@ describe("the Notes list", () => {
     model.add();
     const id = model.openId!;
     expect(model.newId).toBe(id);
-    expect(model.rows.map((row) => row.id)).toEqual([id]);
+    expect(model.notesIn(model.folder).map((row) => row.id)).toEqual([id]);
     model.open(undefined);
     await model.saving;
-    expect(model.rows).toEqual([]);
+    expect(model.notesIn(model.folder)).toEqual([]);
     expect(model.newId).toBeUndefined();
     expect(await saved()).toBe(0);
   });
@@ -38,7 +38,7 @@ describe("the Notes list", () => {
     model.save(id, "A *title*", "- first line\n");
     model.open(undefined);
     await model.saving;
-    expect(model.rows.map((row) => [row.title, row.preview])).toEqual([
+    expect(model.notesIn(model.folder).map((row) => [row.title, row.preview])).toEqual([
       ["A *title*", "first line"],
     ]);
     expect(model.note(id)?.body).toBe("- first line\n");
@@ -57,7 +57,7 @@ describe("the Notes list", () => {
     model.delete(written);
     await model.saving;
     expect(model.openId).toBeUndefined();
-    expect(model.rows.map((row) => row.id)).toEqual([stub]);
+    expect(model.notesIn(model.folder).map((row) => row.id)).toEqual([stub]);
     expect(await saved()).toBe(1);
   });
 });
@@ -73,14 +73,14 @@ describe("Folders", () => {
     model.add();
     model.save(model.openId!, "Roadmap", "");
     model.select("Work");
-    expect(model.rows).toEqual([]);
+    expect(model.notesIn(model.folder)).toEqual([]);
     model.select("Work/Plans");
-    expect(model.rows.map((row) => row.title)).toEqual(["Roadmap"]);
+    expect(model.notesIn(model.folder).map((row) => row.title)).toEqual(["Roadmap"]);
     await model.saving;
     const reopened = new NotesModel(await NoteFiles.open(storage));
     expect(reopened.folders.map((folder) => folder.path)).toEqual(["Work", "Work/Plans"]);
     reopened.select("Work/Plans");
-    expect(reopened.rows.map((row) => row.title)).toEqual(["Roadmap"]);
+    expect(reopened.notesIn(reopened.folder).map((row) => row.title)).toEqual(["Roadmap"]);
   });
 
   it("keeps empty Folders, and forgets Deleted and renamed ones", async () => {
@@ -126,13 +126,13 @@ describe("Folders", () => {
     model.save(id, "Moved", "text");
     model.moveNote(id, "Work");
     expect(model.openId).toBe(id);
-    expect(model.rows).toEqual([]);
+    expect(model.notesIn(model.folder)).toEqual([]);
     expect(() => model.moveNote(id, "Nowhere")).toThrow();
     await model.saving;
     expect(await storage.files("Notes")).toEqual([]);
     expect((await storage.files("Notes/Work")).map((file) => file.name)).toEqual([`${id}.md`]);
     model.select("Work");
-    expect(model.rows.map((row) => row.id)).toEqual([id]);
+    expect(model.notesIn(model.folder).map((row) => row.id)).toEqual([id]);
   });
 
   it("keeps a Note open that Sync Moved to another Folder", async () => {
@@ -148,7 +148,7 @@ describe("Folders", () => {
     expect(model.openId).toBe(id);
     expect(model.note(id)?.title).toBe("Moved by Sync");
     model.select("Work");
-    expect(model.rows.map((row) => row.id)).toEqual([id]);
+    expect(model.notesIn(model.folder).map((row) => row.id)).toEqual([id]);
   });
 
   it("leaves a Folder Sync Deleted for the one around it, and closes the open Note it took", async () => {
@@ -163,7 +163,7 @@ describe("Folders", () => {
     await model.syncDidChange();
     expect(model.folder).toBe("Work");
     expect(model.openId).toBeUndefined();
-    expect(model.rows).toEqual([]);
+    expect(model.notesIn(model.folder)).toEqual([]);
     expect(model.syncs).toBe(syncs + 1);
   });
 
@@ -186,12 +186,36 @@ describe("Folders", () => {
     expect(model.openId).toBe(id);
   });
 
-  it("pushes the selected Folder over the outline and back", () => {
-    expect(model.showsFolder).toBe(false);
+  it("lists the tree: each Folder's Folders, then its Notes, an open Folder with its own", () => {
+    model.addFolder("Work", "");
+    model.addFolder("Plans", "Work");
+    model.add();
+    model.save(model.openId!, "Roadmap", "");
     model.select("");
-    expect(model.showsFolder).toBe(true);
-    model.leaveFolder();
-    expect(model.showsFolder).toBe(false);
+    model.add();
+    model.save(model.openId!, "Loose", "");
+    const shown = () =>
+      model.tree.map(
+        (row) => `${"-".repeat(row.depth)}${row.kind === "folder" ? `${row.name}/` : row.title}`,
+      );
+    expect(shown()).toEqual(["Work/", "-Plans/", "--Roadmap", "Loose"]);
+    model.toggle("Work");
+    expect(model.folder).toBe("Work");
+    expect(shown()).toEqual(["Work/", "Loose"]);
+    model.toggle("Work");
+    expect(shown()).toEqual(["Work/", "-Plans/", "--Roadmap", "Loose"]);
+    expect(model.outline.map((row) => row.name)).toEqual(["Top Level", "Work", "Plans"]);
+  });
+
+  it("selects the Folder of a Note opened in the tree, for the next Note", () => {
+    model.addFolder("Work", "");
+    model.add();
+    const id = model.openId!;
+    model.save(id, "Filed", "");
+    model.select("");
+    model.open(id);
+    expect(model.folder).toBe("Work");
+    expect(model.openId).toBe(id);
   });
 });
 
@@ -331,6 +355,8 @@ describe("Search", () => {
     model.openResult(model.results[0]!);
     expect(model.folder).toBe("Work");
     expect(model.openId).toBe(id);
-    expect(model.rows.map((row) => row.id)).toEqual([id]);
+    expect(model.notesIn(model.folder).map((row) => row.id)).toEqual([id]);
+    model.search("");
+    expect(model.tree.map((row) => row.kind === "note" && row.id)).toContain(id);
   });
 });

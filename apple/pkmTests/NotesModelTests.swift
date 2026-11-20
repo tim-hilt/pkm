@@ -20,9 +20,9 @@ import Testing
         model.add()
         let id = try #require(model.openID)
         #expect(model.newID == id)
-        #expect(model.rows.map(\.id) == [id])
+        #expect(model.notes(in: model.folderPath).map(\.id) == [id])
         model.openID = nil
-        #expect(model.rows.isEmpty)
+        #expect(model.notes(in: model.folderPath).isEmpty)
         #expect(model.newID == nil)
     }
 
@@ -32,8 +32,8 @@ import Testing
         let id = try #require(model.openID)
         model.save(id: id, title: "A *title*", body: "- first line\n")
         model.openID = nil
-        #expect(model.rows.map(\.title) == ["A *title*"])
-        #expect(model.rows.map(\.preview) == ["first line"])
+        #expect(model.notes(in: model.folderPath).map(\.title) == ["A *title*"])
+        #expect(model.notes(in: model.folderPath).map(\.preview) == ["first line"])
         #expect(model.note(id: id)?.body == "- first line\n")
     }
 
@@ -49,7 +49,7 @@ import Testing
         #expect(model.confirmsDelete(id: written))
         model.delete(id: written)
         #expect(model.openID == nil)
-        #expect(model.rows.map(\.id) == [stub])
+        #expect(model.notes(in: model.folderPath).map(\.id) == [stub])
     }
 
     @Test func foldersAreMadeSelectedAndNotesGoIntoTheSelectedOne() throws {
@@ -63,10 +63,10 @@ import Testing
         model.add()
         let id = try #require(model.openID)
         model.save(id: id, title: "In plans", body: "")
-        #expect(model.rows.map(\.id) == [id])
+        #expect(model.notes(in: model.folderPath).map(\.id) == [id])
         model.folderPath = ""
         #expect(model.openID == nil)
-        #expect(model.rows.isEmpty)
+        #expect(model.notes(in: model.folderPath).isEmpty)
     }
 
     @Test func refusedFolderNamesThrowTheirReason() throws {
@@ -93,7 +93,7 @@ import Testing
         try model.renameFolder(work, to: "Job")
         #expect(model.folderPath == "Job/Plans")
         #expect(model.openID == id)
-        #expect(model.rows.map(\.id) == [id])
+        #expect(model.notes(in: model.folderPath).map(\.id) == [id])
         #expect(model.tree.map(\.name) == ["Job"])
         #expect(plans == "Work/Plans")
     }
@@ -149,14 +149,14 @@ import Testing
         model.save(id: id, title: "Moving", body: "x")
         model.moveNote(id: id, into: "")
         #expect(model.openID == id)
-        #expect(model.rows.isEmpty)
+        #expect(model.notes(in: model.folderPath).isEmpty)
         #expect(model.note(id: id)?.title == "Moving")
         model.folderPath = ""
-        #expect(model.rows.map(\.id) == [id])
+        #expect(model.notes(in: model.folderPath).map(\.id) == [id])
         model.moveNote(id: id, into: work)
-        #expect(model.rows.isEmpty)
+        #expect(model.notes(in: model.folderPath).isEmpty)
         model.folderPath = work
-        #expect(model.rows.map(\.id) == [id])
+        #expect(model.notes(in: model.folderPath).map(\.id) == [id])
     }
 
     @Test func aNoteSyncMovedStaysOpen() throws {
@@ -173,7 +173,7 @@ import Testing
         #expect(model.openID == id)
         #expect(model.note(id: id)?.title == "Moved by Sync")
         model.folderPath = "Work"
-        #expect(model.rows.map(\.id) == [id])
+        #expect(model.notes(in: model.folderPath).map(\.id) == [id])
     }
 
     @Test func aFolderSyncDeletedLeavesTheSelectionForTheOneAroundItAndClosesItsOpenNote() throws {
@@ -188,7 +188,7 @@ import Testing
         model.syncDidChange()
         #expect(model.folderPath == "Work")
         #expect(model.openID == nil)
-        #expect(model.rows.isEmpty)
+        #expect(model.notes(in: model.folderPath).isEmpty)
         #expect(model.syncs == syncs + 1)
     }
 
@@ -214,6 +214,60 @@ import Testing
         }
     }
 
+    @Test func theTopLevelHoldsItsFoldersAndNotesWithoutAFolderOfItsOwn() throws {
+        let model = try openModel()
+        let work = try model.addFolder(named: "Work", in: "")
+        try model.addFolder(named: "Plans", in: work)
+        model.folderPath = ""
+        model.add()
+        let loose = try #require(model.openID)
+        model.save(id: loose, title: "Loose", body: "")
+        #expect(model.folders(in: "").map(\.path) == [work])
+        #expect(model.folders(in: work).map(\.path) == ["Work/Plans"])
+        #expect(model.notes(in: "").map(\.id) == [loose])
+        #expect(model.notes(in: work).isEmpty)
+    }
+
+    @Test func pushedFoldersNestAndNewFoldersGoIntoTheDeepestOne() throws {
+        let model = try openModel()
+        try model.addFolder(named: "Work", in: "")
+        try model.addFolder(named: "Plans", in: "Work")
+        model.pushedPath = ["/Work", "/Work/Plans"]
+        #expect(model.folderPath == "Work/Plans")
+        try model.addFolder(named: "Q1", in: model.folderPath)
+        #expect(model.pushedPath == ["/Work", "/Work/Plans", "/Work/Plans/Q1"])
+        model.add()
+        let id = try #require(model.openID)
+        #expect(model.pushedPath == ["/Work", "/Work/Plans", "/Work/Plans/Q1", id])
+        model.pushedPath = ["/Work"]
+        #expect(model.folderPath == "Work")
+        #expect(model.openID == nil)
+        model.pushedPath = []
+        #expect(model.folderPath == "")
+    }
+
+    @Test func selectingANoteInTheTreeOpensItInItsFolderAndExpandsTheFoldersAroundIt() throws {
+        let model = try openModel()
+        try model.addFolder(named: "Work", in: "")
+        let plans = try model.addFolder(named: "Plans", in: "Work")
+        model.add()
+        let id = try #require(model.openID)
+        model.save(id: id, title: "Deep", body: "x")
+        model.folderPath = ""
+        model.expanded = []
+        model.selection = id
+        #expect(model.openID == id)
+        #expect(model.folderPath == plans)
+        #expect(model.expanded == ["Work", plans])
+        model.selection = "/Work"
+        #expect(model.folderPath == "Work")
+        #expect(model.openID == nil)
+        #expect(model.selection == "/Work")
+        model.selection = nil
+        #expect(model.folderPath == "")
+        #expect(model.selection == nil)
+    }
+
     @Test func theLastFolderAndNoteOpenAgain() throws {
         let defaults = isolatedDefaults()
         let first = try openModel(defaults: defaults)
@@ -225,6 +279,7 @@ import Testing
         #expect(again.folderPath == "Work")
         #expect(again.openID == id)
         #expect(again.pushedPath == ["/Work", id])
+        #expect(again.expanded.contains("Work"))
         again.deleteFolder("Work")
         let gone = try openModel(defaults: defaults)
         #expect(gone.folderPath == "")

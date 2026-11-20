@@ -2,8 +2,8 @@ import CoreTransferable
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The Notes Context: the Folder tree, the selected Folder's Notes (newest changed first) and the
-/// open Note's editor, side by side where there is room (Mac, iPad); on an iPhone each is pushed
+/// The Notes Context: the tree of Folders and Notes beside the open Note's editor where there is
+/// room (Mac, iPad); on an iPhone the top level's Folders and Notes, each Folder and Note pushed
 /// over the last.
 struct NotesView: View {
     @Environment(NotesModel.self) private var model
@@ -11,11 +11,12 @@ struct NotesView: View {
 
     var body: some View {
         if NotesLayout.pushes(sizeClass) {
-            FolderTree()
+            NotesBrowser(folder: "")
                 .addNoteButton()
                 .navigationDestination(for: String.self) { route in
                     if route.hasPrefix("/") {
-                        NoteList().navigationTitle(FolderTree.name(ofPath: String(route.dropFirst())))
+                        NotesBrowser(folder: String(route.dropFirst()))
+                            .navigationTitle(NotesBrowser.name(ofPath: String(route.dropFirst())))
                             .addNoteButton()
                     } else {
                         NoteEditor(id: route).id(route)
@@ -23,9 +24,7 @@ struct NotesView: View {
                 }
         } else {
             HStack(spacing: 0) {
-                FolderTree().frame(width: 220)
-                Divider()
-                NoteList().frame(width: 300)
+                NotesBrowser(folder: nil).frame(width: 300)
                 Divider()
                 if let id = model.openID {
                     NoteEditor(id: id).id(id)
@@ -62,21 +61,35 @@ extension NotesModel {
 }
 
 enum NotesLayout {
-    /// Whether the columns are pushed over each other rather than shown side by side. Then the
-    /// lists have no selection: a selectable List takes a `NavigationLink(value:)`'s tap as a
+    /// Whether the Folders and the editor are pushed over each other rather than shown side by
+    /// side. Then the lists have no selection: a selectable List takes a `NavigationLink(value:)`'s tap as a
     /// selection of the value and pushes nothing.
     static func pushes(_ sizeClass: UserInterfaceSizeClass?) -> Bool { sizeClass == .compact }
 }
 
-/// The Folders as an outline under the top level, which is selectable too. New Folder in the
-/// toolbar and context menu, Rename and Delete in the context menu, Return renames on the Mac.
-private struct FolderTree: View {
+/// What a row asks of the browser around it, which holds the alerts and sheets.
+private enum NotesRequest {
+    case newFolder(in: String)
+    case rename(String)
+    case move(NotesMovable)
+    case deleteFolder(String)
+    case deleteNote(String)
+    case refused(FolderNameError)
+}
+
+/// A Folder's Folders by name, then its Notes newest changed first. Pushed (`folder` set) it shows
+/// that Folder, and a Folder row pushes its own; else the whole tree from the top level, each
+/// Folder expanding in place. New Folder in the toolbar and context menu, Rename, Move and Delete
+/// in the context menu, Return renames on the Mac. While searching it shows the results instead.
+private struct NotesBrowser: View {
     @Environment(NotesModel.self) private var model
-    @Environment(\.horizontalSizeClass) private var sizeClass
+    /// The pushed Folder's path, empty for the top level; nil for the tree.
+    let folder: String?
     @State private var naming: Naming?
     @State private var name = ""
     @State private var problem: FolderNameError?
-    @State private var deleting: Folder?
+    @State private var deletingFolder: Folder?
+    @State private var deletingNote: String?
     @State private var moving: NotesMovable?
     /// Why the last drop couldn't be Moved.
     @State private var refusedDrop: FolderNameError?
@@ -90,82 +103,119 @@ private struct FolderTree: View {
         var button: LocalizedStringKey { if case .create = self { "Create" } else { "Rename" } }
     }
 
-    static func name(ofPath path: String) -> String {
-        path.isEmpty ? String(localized: "Notes") : String(path.split(separator: "/").last ?? "")
-    }
+    static func name(ofPath path: String) -> String { String(path.split(separator: "/").last ?? "") }
+
+    private var isSearching: Bool { !model.searchText.isEmpty }
+    /// The Folder shown, or the top level of the tree.
+    private var path: String { folder ?? "" }
 
     var body: some View {
-        List(selection: NotesLayout.pushes(sizeClass) ? nil : selection) {
-            row(path: "", title: "Notes", systemImage: "tray")
-            OutlineGroup(model.tree, id: \.path, children: \.children) { folder in
-                row(path: folder.path, title: folder.name, systemImage: "folder")
+        withDialogs(list)
+            .sheet(item: $moving) { MoveSheet(item: $0) }
+            .accessibilityIdentifier("notes-browser")
+    }
+
+    private var list: some View {
+        List(selection: folder == nil ? Bindable(model).selection : nil) {
+            if isSearching {
+                ForEach(model.results, id: \.id) { result in
+                    Group {
+                        if folder == nil {
+                            ResultRow(result: result)
+                        } else {
+                            NavigationLink(value: result.id) { ResultRow(result: result) }
+                        }
+                    }
+                    .tag(result.id)
+                }
+            } else {
+                FolderContents(path: path, isTree: folder == nil, request: handle)
             }
         }
+        .modifier(FolderDrop(path: path) { handle(.refused($0)) })
+        .searchable(text: Bindable(model).searchText)
+        #if os(iOS)
+            .searchToolbarBehavior(.minimize)
+        #endif
         .toolbar {
+            #if os(iOS)
+                // At the top, so that the bottom stays free for the "+", as in Books.
+                DefaultToolbarItem(kind: .search, placement: .topBarTrailing)
+            #endif
             ToolbarItem {
-                Button("New Folder", systemImage: "folder.badge.plus") { ask(.create(inside: model.folderPath)) }
-                    .accessibilityIdentifier("add-folder")
+                Button("New Folder", systemImage: "folder.badge.plus") {
+                    ask(.create(inside: folder ?? model.folderPath))
+                }
+                .accessibilityIdentifier("add-folder")
+            }
+        }
+        .overlay {
+            if isSearching {
+                if model.results.isEmpty { ContentUnavailableView.search(text: model.searchText) }
+            } else if model.folders(in: path).isEmpty && model.notes(in: path).isEmpty {
+                ContentUnavailableView("No Notes", systemImage: "note.text", description: Text("Tap + to write one."))
             }
         }
         #if os(macOS)
             .onKeyPress(.return) {
-                guard !model.folderPath.isEmpty else { return .ignored }
+                guard model.openID == nil, !model.folderPath.isEmpty else { return .ignored }
                 ask(.rename(model.folderPath))
                 return .handled
             }
+            .onDeleteCommand {
+                if let id = model.openID { handle(.deleteNote(id)) }
+            }
         #endif
-        .alert(
-            naming?.title ?? "", isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } }),
-            presenting: naming
-        ) { target in
-            TextField("Name", text: $name)
-            Button(target.button) { commit(target) }
-            Button("Cancel", role: .cancel) {}
-        } message: { _ in
-            if let problem { Text(Self.reason(problem)) }
-        }
-        .confirmationDialog(
-            deleting.map { "Delete “\($0.name)”?" } ?? "",
-            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
-            presenting: deleting
-        ) { folder in
-            Button("Delete", role: .destructive) { model.deleteFolder(folder.path) }
-        } message: { folder in
-            Text(model.summary(ofFolder: folder.path))
-        }
-        .alert(
-            "Can't Move", isPresented: Binding(get: { refusedDrop != nil }, set: { if !$0 { refusedDrop = nil } }),
-            presenting: refusedDrop
-        ) { _ in
-            Button("OK") {}
-        } message: {
-            Text(Self.reason($0))
-        }
-        .sheet(item: $moving) { MoveSheet(item: $0) }
-        .accessibilityIdentifier("folder-tree")
     }
 
-    private var selection: Binding<String?> {
-        Binding(get: { model.folderPath }, set: { model.folderPath = $0 ?? "" })
+    /// The alerts that name, confirm and refuse.
+    private func withDialogs(_ content: some View) -> some View {
+        content
+            .alert(
+                naming?.title ?? "", isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } }),
+                presenting: naming
+            ) { target in
+                TextField("Name", text: $name)
+                Button(target.button) { commit(target) }
+                Button("Cancel", role: .cancel) {}
+            } message: { _ in
+                if let problem { Text(Self.reason(problem)) }
+            }
+            .confirmationDialog(
+                deletingFolder.map { "Delete “\($0.name)”?" } ?? "",
+                isPresented: Binding(get: { deletingFolder != nil }, set: { if !$0 { deletingFolder = nil } }),
+                presenting: deletingFolder
+            ) { folder in
+                Button("Delete", role: .destructive) { model.deleteFolder(folder.path) }
+            } message: { folder in
+                Text(model.summary(ofFolder: folder.path))
+            }
+            .confirmationDialog(
+                "Delete this Note?",
+                isPresented: Binding(get: { deletingNote != nil }, set: { if !$0 { deletingNote = nil } }),
+                presenting: deletingNote
+            ) { id in
+                Button("Delete", role: .destructive) { model.delete(id: id) }
+            }
+            .alert(
+                "Can't Move", isPresented: Binding(get: { refusedDrop != nil }, set: { if !$0 { refusedDrop = nil } }),
+                presenting: refusedDrop
+            ) { _ in
+                Button("OK") {}
+            } message: {
+                Text(Self.reason($0))
+            }
     }
 
-    private func row(path: String, title: String, systemImage: String) -> some View {
-        Group {
-            if NotesLayout.pushes(sizeClass) {
-                NavigationLink(value: NotesModel.route(to: path)) { Label(title, systemImage: systemImage) }
-            } else {
-                Label(title, systemImage: systemImage)
-            }
-        }
-        .tag(path)
-        .modifier(FolderDrag(path: path) { refusedDrop = $0 })
-        .contextMenu {
-            Button("New Folder", systemImage: "folder.badge.plus") { ask(.create(inside: path)) }
-            if !path.isEmpty {
-                Button("Rename", systemImage: "pencil") { ask(.rename(path)) }
-                Button("Move to…", systemImage: "folder") { moving = .folder(path) }
-                Button("Delete", systemImage: "trash", role: .destructive) { deleting = model.folder(at: path) }
-            }
+    private func handle(_ request: NotesRequest) {
+        switch request {
+        case .newFolder(let parent): ask(.create(inside: parent))
+        case .rename(let path): ask(.rename(path))
+        case .move(let item): moving = item
+        case .deleteFolder(let path): deletingFolder = model.folder(at: path)
+        // A Note with text is only Deleted after asking.
+        case .deleteNote(let id): if model.confirmsDelete(id: id) { deletingNote = id } else { model.delete(id: id) }
+        case .refused(let error): refusedDrop = error
         }
     }
 
@@ -200,28 +250,86 @@ private struct FolderTree: View {
     }
 }
 
-/// Makes a Folder row draggable and a drop target; the top level (empty path) can't be dragged.
-private struct FolderDrag: ViewModifier {
+/// The rows of the Folder at `path`: its Folders, then its Notes. In the tree a Folder expands to
+/// its own rows; pushed, it links to them.
+private struct FolderContents: View {
+    @Environment(NotesModel.self) private var model
+    let path: String
+    let isTree: Bool
+    let request: (NotesRequest) -> Void
+
+    var body: some View {
+        ForEach(model.folders(in: path), id: \.path) { folder in
+            if isTree {
+                DisclosureGroup(isExpanded: expanded(folder.path)) {
+                    FolderContents(path: folder.path, isTree: true, request: request)
+                } label: {
+                    folderRow(folder)
+                }
+            } else {
+                NavigationLink(value: NotesModel.route(to: folder.path)) { folderRow(folder) }
+            }
+        }
+        ForEach(model.notes(in: path), id: \.id) { row in
+            Group {
+                if isTree {
+                    NoteRow(row: row)
+                } else {
+                    NavigationLink(value: row.id) { NoteRow(row: row) }
+                }
+            }
+            .tag(row.id)
+            .draggable(NotesMovable.note(row.id))
+            .modifier(FolderDrop(path: path) { request(.refused($0)) })
+            .swipeActions { Button("Delete", role: .destructive) { request(.deleteNote(row.id)) } }
+            .contextMenu {
+                Button("Move to…", systemImage: "folder") { request(.move(.note(row.id))) }
+                Button("Delete", systemImage: "trash", role: .destructive) { request(.deleteNote(row.id)) }
+            }
+        }
+    }
+
+    private func folderRow(_ folder: Folder) -> some View {
+        Label(folder.name, systemImage: "folder")
+            .tag(NotesModel.route(to: folder.path))
+            .draggable(NotesMovable.folder(folder.path))
+            .modifier(FolderDrop(path: folder.path) { request(.refused($0)) })
+            .contextMenu {
+                Button("New Folder", systemImage: "folder.badge.plus") { request(.newFolder(in: folder.path)) }
+                Button("Rename", systemImage: "pencil") { request(.rename(folder.path)) }
+                Button("Move to…", systemImage: "folder") { request(.move(.folder(folder.path))) }
+                Button("Delete", systemImage: "trash", role: .destructive) { request(.deleteFolder(folder.path)) }
+            }
+    }
+
+    private func expanded(_ path: String) -> Binding<Bool> {
+        Binding(
+            get: { model.expanded.contains(path) },
+            set: { if $0 { model.expanded.insert(path) } else { model.expanded.remove(path) } }
+        )
+    }
+}
+
+/// Makes a row, or a whole list, a drop target that Moves into the Folder at `path`.
+private struct FolderDrop: ViewModifier {
     @Environment(NotesModel.self) private var model
     let path: String
     /// Called with why a dropped Folder can't be Moved here.
     let refused: (FolderNameError) -> Void
 
     func body(content: Content) -> some View {
-        content
-            .draggableIf(!path.isEmpty, NotesMovable.folder(path))
-            .dropDestination(for: NotesMovable.self) { items, _ in
-                var moved = false
-                for item in items {
-                    do {
-                        try model.move(item, into: path)
-                        moved = true
-                    } catch let error as FolderNameError {
-                        refused(error)
-                    } catch {}
-                }
-                return moved
+        content.dropDestination(for: NotesMovable.self) { items, _ in
+            var moved = false
+            for item in items {
+                do {
+                    try model.move(item, into: path)
+                    moved = true
+                } catch let error as FolderNameError {
+                    refused(error)
+                } catch {}
             }
+            return moved
+        }
     }
 }
 
@@ -236,10 +344,6 @@ private struct AddNoteButton: ViewModifier {
 
 extension View {
     fileprivate func addNoteButton() -> some View { modifier(AddNoteButton()) }
-
-    @ViewBuilder fileprivate func draggableIf(_ condition: Bool, _ item: NotesMovable) -> some View {
-        if condition { draggable(item) } else { self }
-    }
 }
 
 /// The Folder tree to choose where to Move a Note or Folder; a refused Folder Move says why.
@@ -252,8 +356,8 @@ private struct MoveSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                if let problem { Text(FolderTree.reason(problem)).foregroundStyle(.red) }
-                destination(path: "", title: "Notes", systemImage: "tray")
+                if let problem { Text(NotesBrowser.reason(problem)).foregroundStyle(.red) }
+                destination(path: "", title: String(localized: "Top Level"), systemImage: "tray")
                 OutlineGroup(model.tree, id: \.path, children: \.children) { folder in
                     destination(path: folder.path, title: folder.name, systemImage: "folder")
                 }
@@ -282,90 +386,7 @@ private struct MoveSheet: View {
     }
 }
 
-/// The Notes of the selected Folder. A Note is Deleted by swipe, context menu or ⌫ on the Mac,
-/// asking first when its Body has text.
-private struct NoteList: View {
-    @Environment(NotesModel.self) private var model
-    @Environment(\.horizontalSizeClass) private var sizeClass
-    @State private var deleting: ListedNote?
-    @State private var moving: NotesMovable?
-    @FocusState private var isSearchFocused: Bool
-
-    private var isSearching: Bool { !model.searchText.isEmpty }
-
-    var body: some View {
-        List(selection: NotesLayout.pushes(sizeClass) ? nil : Bindable(model).openID) {
-            if isSearching {
-                ForEach(model.results, id: \.id) { result in
-                    Group {
-                        if NotesLayout.pushes(sizeClass) {
-                            NavigationLink(value: result.id) { ResultRow(result: result) }
-                        } else {
-                            ResultRow(result: result)
-                        }
-                    }
-                    .tag(result.id)
-                }
-            }
-            ForEach(isSearching ? [] : model.rows, id: \.id) { row in
-                Group {
-                    if NotesLayout.pushes(sizeClass) {
-                        NavigationLink(value: row.id) { NoteRow(row: row) }
-                    } else {
-                        NoteRow(row: row)
-                    }
-                }
-                .tag(row.id)
-                .draggable(NotesMovable.note(row.id))
-                .swipeActions { Button("Delete", role: .destructive) { ask(row) } }
-                .contextMenu {
-                    Button("Move to…", systemImage: "folder") { moving = .note(row.id) }
-                    Button("Delete", systemImage: "trash", role: .destructive) { ask(row) }
-                }
-            }
-        }
-        .searchable(text: Bindable(model).searchText)
-        .searchFocused($isSearchFocused)
-        #if os(iOS)
-            .searchToolbarBehavior(.minimize)
-        #endif
-        .toolbar {
-            #if os(iOS)
-                // At the top, so that the bottom stays free for the "+", as in Books.
-                DefaultToolbarItem(kind: .search, placement: .topBarTrailing)
-            #endif
-        }
-        .overlay {
-            if isSearching {
-                if model.results.isEmpty {
-                    ContentUnavailableView.search(text: model.searchText)
-                }
-            } else if model.rows.isEmpty {
-                ContentUnavailableView("No Notes", systemImage: "note.text", description: Text("Tap + to write one."))
-            }
-        }
-        #if os(macOS)
-            .onDeleteCommand {
-                if let id = model.openID, let row = model.rows.first(where: { $0.id == id }) { ask(row) }
-            }
-        #endif
-        .confirmationDialog(
-            "Delete this Note?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
-            presenting: deleting
-        ) { row in
-            Button("Delete", role: .destructive) { model.delete(id: row.id) }
-        }
-        .sheet(item: $moving) { MoveSheet(item: $0) }
-        .accessibilityIdentifier("notes-list")
-    }
-
-    /// Deletes the Note, or asks first if its Body has text.
-    private func ask(_ row: ListedNote) {
-        if model.confirmsDelete(id: row.id) { deleting = row } else { model.delete(id: row.id) }
-    }
-}
-
-/// A Search result: the Title, the Folder, and the snippet with the match emphasized.
+/// A Search result: the Title, the Folder unless at the top level, and the snippet with the match emphasized.
 private struct ResultRow: View {
     let result: SearchResult
 
@@ -377,8 +398,10 @@ private struct ResultRow: View {
                 Text(AttributedString(title: result.title)).lineLimit(1)
                 Text(snippet).lineLimit(2).font(.subheadline).foregroundStyle(.secondary)
             }
-            Label(FolderTree.name(ofPath: result.folder), systemImage: "folder")
-                .font(.caption).foregroundStyle(.secondary)
+            if !result.folder.isEmpty {
+                Label(NotesBrowser.name(ofPath: result.folder), systemImage: "folder")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 

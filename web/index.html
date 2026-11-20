@@ -1500,7 +1500,7 @@
           bottom: calc(var(--tasks-bar) + 12px);
         }
       }
-      /* The Notes Context: the Folder outline, the list and the editor side by side; on a narrow window one over the other. */
+      /* The Notes Context: the tree of Folders and Notes beside the editor; on a narrow window the editor covers the tree. */
       .notes {
         position: absolute;
         inset: 0;
@@ -1508,23 +1508,21 @@
         color: var(--control-ink);
         background: var(--island-fill);
       }
-      .notes-tree {
-        flex: none;
-        width: 240px;
-        display: flex;
-        flex-direction: column;
-        border-right: 1px solid var(--divider);
-      }
-      .notes-tree .notes-bar {
-        justify-content: flex-start;
-      }
-      .notes-tree .tasks-scroll {
-        padding: 0 8px 16px;
-      }
       .folder-open {
+        width: 100%;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        text-align: left;
+      }
+      .folder-open::before {
+        content: "\25B8";
+        display: inline-block;
+        width: 1.25em;
+        opacity: 0.6;
+      }
+      .folder-open[aria-expanded="true"]::before {
+        content: "\25BE";
       }
       .drop-target {
         border-radius: 8px;
@@ -1549,7 +1547,7 @@
         border-right: 1px solid var(--divider);
       }
       .notes-side .tasks-scroll {
-        padding: max(12px, env(safe-area-inset-top)) 8px 96px;
+        padding: 0 8px 96px;
       }
       .notes-detail {
         flex: 1;
@@ -1562,13 +1560,6 @@
         display: flex;
         justify-content: space-between;
         padding: max(12px, env(safe-area-inset-top)) 16px 8px;
-      }
-      .notes-nav {
-        display: none;
-      }
-      .notes-folder {
-        align-self: center;
-        font-weight: 600;
       }
       .notes-detail .tasks-back:first-child {
         visibility: hidden;
@@ -1597,9 +1588,6 @@
         flex: 1;
       }
       @media (max-width: 899px) {
-        .notes-tree {
-          width: 200px;
-        }
         .notes-side {
           width: 260px;
         }
@@ -1626,37 +1614,20 @@
         opacity: 0.5;
       }
       @media (max-width: 599px), (max-height: 499px) and (max-width: 999px) {
-        .notes-tree,
         .notes-side {
           width: 100%;
           border-right: 0;
         }
-        .notes:not(.has-folder) .notes-side,
-        .notes.has-folder .notes-tree,
         .notes:not(.has-open) .notes-detail,
-        .notes.has-open .notes-tree,
         .notes.has-open .notes-side {
           display: none;
-        }
-        .notes-nav {
-          display: flex;
-          justify-content: flex-start;
-          gap: 12px;
         }
         .notes-bar {
           /* Right of the shell's sidebar button. */
           padding-left: calc(max(4px, env(safe-area-inset-left)) + 52px);
         }
-        /* Below the bar with the Folder's name. */
-        .notes .notes-find {
-          padding-top: 0;
-          padding-left: 16px;
-        }
         .notes-detail .tasks-back:first-child {
           visibility: visible;
-        }
-        .notes-side .tasks-scroll {
-          padding-top: 0;
         }
         /* Without the Tasks' bottom bar. */
         .notes .tasks-new {

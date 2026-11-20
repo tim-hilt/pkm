@@ -1,8 +1,8 @@
 import Foundation
 import Observation
 
-/// The Notes Context's state: the Folder tree, the selected Folder's Notes and the open Note, from
-/// the core's store. It only forwards to the store; every Notes rule lives in the core.
+/// The Notes Context's state: the Folder tree with the Notes of each Folder, the selected Folder and
+/// the open Note, from the core's store. It only forwards to the store; every Notes rule lives in the core.
 @MainActor @Observable
 final class NotesModel {
     private let store: NoteStore
@@ -13,8 +13,14 @@ final class NotesModel {
     /// The Folders at the top level, with the Folders in them.
     private(set) var tree: [Folder] = []
 
-    /// The Notes of the selected Folder, newest changed first.
-    private(set) var rows: [ListedNote] = []
+    /// The Notes of each Folder read since the files last changed, by path; read again on demand.
+    @ObservationIgnored private var listed: [String: [ListedNote]] = [:]
+
+    /// Grows when the files change, so that views asking `notes(in:)` read them again.
+    private var changes = 0
+
+    /// The Folders open in the tree, by path.
+    var expanded: Set<String> = []
 
     /// What Search looks for; empty when not searching.
     var searchText = "" {
@@ -24,7 +30,8 @@ final class NotesModel {
     /// The Notes in any Folder that match `searchText`, Title matches first; empty when not searching.
     private(set) var results: [SearchResult] = []
 
-    /// The selected Folder's path; empty for the top level. Selecting another closes the open Note.
+    /// The selected Folder's path, where new Notes and Folders go; empty for the top level.
+    /// Selecting another closes the open Note.
     var folderPath: String {
         get { selectedFolder }
         set {
@@ -39,7 +46,6 @@ final class NotesModel {
     private var selectedFolder = "" {
         didSet {
             defaults?.set(selectedFolder, forKey: Self.folderKey)
-            reloadRows()
         }
     }
 
@@ -54,7 +60,7 @@ final class NotesModel {
             imagesInPlay = openID.flatMap { note(id: $0) }.map { Set(imageTargets(text: $0.body)) } ?? []
             if openID != newID { newID = nil }
             defaults?.set(openID, forKey: Self.noteKey)
-            reloadRows()
+            filesChanged()
         }
     }
 
@@ -63,9 +69,6 @@ final class NotesModel {
 
     /// The Note just added and not yet left: its editor takes the focus on the Title.
     private(set) var newID: String?
-
-    /// Whether the selected Folder's Notes are pushed over the tree, where the columns don't fit.
-    private(set) var showsFolder = false
 
     /// How often Sync changed the files: when it grows, an open editor takes the Note as saved.
     private(set) var syncs = 0
@@ -79,28 +82,66 @@ final class NotesModel {
         if let path = defaults?.string(forKey: Self.folderKey), (try? store.notes(folder: path)) != nil {
             selectedFolder = path
         }
-        reloadRows()
-        if let id = defaults?.string(forKey: Self.noteKey), rows.contains(where: { $0.id == id }) {
+        if let id = defaults?.string(forKey: Self.noteKey), notes(in: folderPath).contains(where: { $0.id == id }) {
             openID = id
         }
-        showsFolder = !folderPath.isEmpty || openID != nil
+        expand(folderPath)
     }
 
-    // MARK: Pushed screens
+    // MARK: Navigation
 
-    /// What is pushed over the tree, for a narrow window: the selected Folder as `"/" + path`, then
-    /// the open Note's ID. (Neither a Note ID nor a Folder name starts with a `/`.)
+    /// What is pushed over the top level, for a narrow window: each Folder down to the selected one
+    /// as `"/" + path`, then the open Note's ID. (Neither a Note ID nor a Folder name starts with a `/`.)
     var pushedPath: [String] {
-        get { (showsFolder ? ["/" + folderPath] : []) + (openID.map { [$0] } ?? []) }
+        get { Self.ancestry(of: folderPath).map(Self.route(to:)) + (openID.map { [$0] } ?? []) }
         set {
-            showsFolder = !newValue.isEmpty
-            if let folder = newValue.first, folder.hasPrefix("/") { folderPath = String(folder.dropFirst()) }
-            openID = newValue.count > 1 ? newValue.last : nil
+            let folder = newValue.last { $0.hasPrefix("/") }.map { String($0.dropFirst()) } ?? ""
+            let note = newValue.last.flatMap { $0.hasPrefix("/") ? nil : $0 }
+            folderPath = folder
+            openID = note
         }
     }
 
-    /// Pushes the Notes of the Folder at `path`.
+    /// The selected row of the tree, for a wide window: the open Note's ID, or the selected Folder
+    /// as its route. Selecting a Note selects its Folder and opens the Folders around it; selecting
+    /// none (a click beside the rows) selects the top level, unless Search shows other rows.
+    var selection: String? {
+        get { openID ?? (folderPath.isEmpty ? nil : Self.route(to: folderPath)) }
+        set {
+            guard let newValue else {
+                guard searchText.isEmpty else { return }
+                folderPath = ""
+                openID = nil
+                return
+            }
+            if newValue.hasPrefix("/") {
+                folderPath = String(newValue.dropFirst())
+                return
+            }
+            let folder = folder(ofNote: newValue) ?? folderPath
+            selectedFolder = folder
+            expand(folder)
+            openID = newValue
+        }
+    }
+
+    /// Shows the Folder at `path`.
     static func route(to path: String) -> String { "/" + path }
+
+    /// The paths from the top level down to the Folder at `path`, without the top level.
+    private static func ancestry(of path: String) -> [String] {
+        guard !path.isEmpty else { return [] }
+        var paths: [String] = []
+        for name in path.split(separator: "/") {
+            paths.append(paths.last.map { "\($0)/\(name)" } ?? String(name))
+        }
+        return paths
+    }
+
+    /// Opens the Folder at `path` in the tree, and every Folder around it.
+    private func expand(_ path: String) {
+        expanded.formUnion(Self.ancestry(of: path))
+    }
 
     // MARK: Notes
 
@@ -108,7 +149,7 @@ final class NotesModel {
     func add() {
         guard let note = try? store.create(folder: folderPath) else { return }
         newID = note.id
-        showsFolder = true
+        expand(folderPath)
         openID = note.id
     }
 
@@ -118,7 +159,11 @@ final class NotesModel {
     /// Saves the Title and Body as typed.
     func save(id: String, title: String, body: String) {
         guard (try? store.edit(id: id, title: title, body: body)) != nil else { return }
-        reloadRows()
+        if let folder = listed.first(where: { $0.value.contains { $0.id == id } })?.key {
+            listed[folder] = nil
+            changes += 1
+        }
+        reloadResults()
     }
 
     /// Whether Deleting the Note asks first: its Body has text.
@@ -130,7 +175,7 @@ final class NotesModel {
     func delete(id: String) {
         if openID == id { openID = nil }
         try? store.delete(id: id)
-        reloadRows()
+        filesChanged()
     }
 
     // MARK: Images
@@ -160,6 +205,7 @@ final class NotesModel {
     func addFolder(named name: String, in parent: String) throws -> String {
         let path = try store.createFolder(parent: parent, name: name)
         reloadTree()
+        expand(parent)
         folderPath = path
         return path
     }
@@ -179,7 +225,7 @@ final class NotesModel {
     /// open, even where the selected Folder doesn't list it.
     func moveNote(id: String, into folder: String) {
         guard (try? store.moveNote(id: id, folder: folder)) != nil else { return }
-        reloadRows()
+        filesChanged()
     }
 
     /// The selection follows a Folder that is now at `new`, and the tree is read again.
@@ -187,7 +233,9 @@ final class NotesModel {
         if selectedFolder == old || selectedFolder.hasPrefix(old + "/") {
             selectedFolder = new + String(selectedFolder.dropFirst(old.count))
         }
+        expanded = Set(expanded.map { $0 == old || $0.hasPrefix(old + "/") ? new + $0.dropFirst(old.count) : $0 })
         reloadTree()
+        filesChanged()
     }
 
     /// The Folder at `path` in the tree.
@@ -200,6 +248,28 @@ final class NotesModel {
             return nil
         }
         return find(in: tree)
+    }
+
+    /// The Folders in the Folder at `path` (empty for the top level), by name.
+    func folders(in path: String) -> [Folder] {
+        path.isEmpty ? tree : folder(at: path)?.folders ?? []
+    }
+
+    /// The Notes in the Folder at `path` (empty for the top level), newest changed first.
+    func notes(in path: String) -> [ListedNote] {
+        _ = changes
+        if let notes = listed[path] { return notes }
+        let notes = (try? store.notes(folder: path)) ?? []
+        listed[path] = notes
+        return notes
+    }
+
+    /// The path of the Folder that holds the Note `id`, looked for where it was last seen first.
+    private func folder(ofNote id: String) -> String? {
+        if let found = results.first(where: { $0.id == id }) { return found.folder }
+        if let seen = listed.first(where: { $0.value.contains { $0.id == id } }) { return seen.key }
+        func paths(_ level: [Folder]) -> [String] { level.flatMap { [$0.path] + paths($0.folders) } }
+        return ([""] + paths(tree)).first { path in notes(in: path).contains { $0.id == id } }
     }
 
     /// What Deleting the Folder at `path` would Delete, for the confirmation.
@@ -221,7 +291,7 @@ final class NotesModel {
             selectedFolder = path.contains("/") ? String(path[..<path.lastIndex(of: "/")!]) : ""
         }
         reloadTree()
-        reloadRows()
+        filesChanged()
     }
 
     /// Sync wrote or deleted Note files: the tree and lists show what is there now. A Folder it
@@ -236,15 +306,17 @@ final class NotesModel {
         if path != selectedFolder { selectedFolder = path }
         if let openID, note(id: openID) == nil { self.openID = nil }
         syncs += 1
-        reloadRows()
+        filesChanged()
     }
 
     private func reloadTree() {
         tree = (try? store.folders()) ?? []
     }
 
-    private func reloadRows() {
-        rows = (try? store.notes(folder: folderPath)) ?? []
+    /// Notes were added, Deleted or Moved: lists read them again.
+    private func filesChanged() {
+        listed = [:]
+        changes += 1
         reloadResults()
     }
 

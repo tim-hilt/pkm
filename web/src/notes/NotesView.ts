@@ -4,8 +4,8 @@ import { DescriptionField } from "../tasks/DescriptionField";
 import { RowMenu } from "../tasks/RowMenu";
 import { confirmButton, modal } from "../tasks/TaskDialogs";
 import { titleNodes } from "../tasks/TitleText";
-import { type ListedNote, type NotesModel, type SearchHit } from "./NotesModel";
-import { FolderOutline } from "./FolderOutline";
+import { type ListedNote, type NotesModel, type SearchHit, type TreeRow } from "./NotesModel";
+import { FolderRows, indent } from "./FolderRows";
 import { draggable } from "./FolderDrag";
 import { moveDialog } from "./FolderDialogs";
 import { TitleField } from "./TitleField";
@@ -13,13 +13,14 @@ import { TitleField } from "./TitleField";
 const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
 
 /**
- * The Notes Context: the Folder outline, the selected Folder's Notes, newest
- * changed first, and the open Note's editor, side by side; where the window is
- * narrow one over the other (the CSS decides, from `has-folder` and
- * `has-open`). A Note is Moved by dragging it onto a Folder or with "Move to…"
- * in its row's menu, and Deleted from its row's menu (right
- * click, long press), with ⌫ on a row or from the editor, asking first when
- * its Body has text. A port of the Swift `NotesView`.
+ * The Notes Context: the tree of Folders and Notes (each Folder's Folders by
+ * name, then its Notes newest changed first) and the open Note's editor, side
+ * by side; where the window is narrow the editor covers the tree (the CSS
+ * decides, from `has-open`). A Note is Moved by dragging it onto a Folder, the
+ * empty space for the top level, or with "Move to…" in its row's menu, and
+ * Deleted from its row's menu (right click, long press), with ⌫ on a row or
+ * from the editor, asking first when its Body has text. A port of the Swift
+ * `NotesView`.
  */
 export class NotesView {
   readonly element = make("main", "notes");
@@ -33,8 +34,7 @@ export class NotesView {
   private readonly detail = make("div", "notes-detail");
   private readonly failure = make("p", "tasks-failure");
   private readonly menu: RowMenu;
-  private readonly outline: FolderOutline;
-  private readonly folderName = make("span", "notes-folder");
+  private readonly folders: FolderRows;
   /** The Note the editor shows; the editor is built again for another. */
   private shown: string | undefined;
   /** The Images of the Note the editor shows. */
@@ -46,7 +46,7 @@ export class NotesView {
     this.failure.setAttribute("role", "alert");
     this.list.setAttribute("aria-label", "Notes");
     this.menu = new RowMenu(this.element);
-    this.outline = new FolderOutline(model, this.menu, this.element);
+    this.folders = new FolderRows(model, this.menu, this.element);
     this.search.type = "search";
     this.search.placeholder = "Search";
     this.search.ariaLabel = "Search Notes";
@@ -54,36 +54,39 @@ export class NotesView {
     const create = button("tasks-new", "", () => model.add());
     create.innerHTML = plusGlyph;
     create.title = create.ariaLabel = "New Note";
+    const scroll = make("div", "tasks-scroll", [this.list, this.empty, this.noResults]);
+    this.folders.dropsInto(scroll, "");
+    // A click beside the rows selects the top level, for new Notes and Folders there.
+    scroll.addEventListener("click", (event) => {
+      if (event.target === scroll || event.target === this.list) model.select("");
+    });
     const side = make("div", "notes-side", [
-      make("div", "notes-bar notes-nav", [
-        button("tasks-back", "Folders", () => model.leaveFolder()),
-        this.folderName,
+      make("div", "notes-bar", [
+        this.search,
+        button("tasks-back", "New Folder", () => this.folders.create(model.folder)),
       ]),
-      make("div", "notes-bar notes-find", [this.search]),
-      make("div", "tasks-scroll", [this.list, this.empty, this.noResults]),
+      scroll,
+      this.folders.refusal,
       this.failure,
     ]);
-    this.element.append(this.outline.element, side, this.detail, create, this.menu.element);
+    this.element.append(side, this.detail, create, this.menu.element);
     onNewKey(this.element, () => model.add());
     model.onChange = () => this.update();
     this.update();
   }
 
-  /** Shows the list and the open Note as the model has them. */
+  /** Shows the tree and the open Note as the model has them. */
   update(): void {
     const { model } = this;
     this.menu.hide();
-    this.element.classList.toggle("has-folder", model.showsFolder);
     this.element.classList.toggle("has-open", model.openId !== undefined);
-    this.outline.update();
-    this.folderName.textContent = model.folder.slice(model.folder.lastIndexOf("/") + 1) || "Notes";
     const searching = model.searchText.trim() !== "";
     this.list.replaceChildren(
       ...(searching
         ? model.results.map((hit) => this.result(hit))
-        : model.rows.map((row) => this.row(row))),
+        : model.tree.map((row) => this.row(row))),
     );
-    this.empty.hidden = searching || model.rows.length > 0;
+    this.empty.hidden = searching || model.tree.length > 0;
     this.noResults.hidden = !searching || model.results.length > 0;
     this.noResults.replaceChildren(
       make("strong", "", [`No Results for “${model.searchText.trim()}”`]),
@@ -93,12 +96,16 @@ export class NotesView {
     this.showEditor();
   }
 
-  private row(row: ListedNote): HTMLElement {
+  private row(row: TreeRow): HTMLElement {
+    if (row.kind === "folder") return this.folders.row(row.name, row.path, row.depth, row.expanded);
     const open = button("task-open note-open", "", () => this.model.open(row.id));
     open.append(...this.rowText(row));
+    // Past the Folders' disclosure triangle, under their names.
+    open.style.paddingLeft = `calc(${indent(row.depth)} + 1.25em)`;
     const item = make("li", "task-row note-row", [open]);
     if (row.id === this.model.openId) open.setAttribute("aria-current", "true");
     draggable(item, { note: row.id });
+    this.folders.dropsInto(item, row.folder);
     this.menu.attach(item, () => [
       {
         label: "Move to…",
@@ -112,7 +119,7 @@ export class NotesView {
     return item;
   }
 
-  /** A Search result: the Title, the snippet with the match in bold, and the Folder. */
+  /** A Search result: the Title, the snippet with the match in bold, and the Folder unless at the top level. */
   private result(hit: SearchHit): HTMLElement {
     const open = button("task-open note-open", "", () => this.model.openResult(hit));
     const { snippet, matchStart, matchEnd } = hit;
@@ -121,11 +128,11 @@ export class NotesView {
       make("b", "", [snippet.slice(matchStart, matchEnd)]),
       snippet.slice(matchEnd),
     ]);
-    const folder = hit.folder.slice(hit.folder.lastIndexOf("/") + 1) || "Notes";
+    const folder = hit.folder.slice(hit.folder.lastIndexOf("/") + 1);
     open.append(
       ...(hit.title === "" ? [] : [make("span", "task-title", titleNodes(hit.title))]),
       text,
-      make("span", "note-folder", [folder]),
+      ...(folder === "" ? [] : [make("span", "note-folder", [folder])]),
     );
     if (hit.id === this.model.openId) open.setAttribute("aria-current", "true");
     return make("li", "task-row note-row", [open]);

@@ -44,7 +44,7 @@ extension NotesModel {
             }
         }
         let model = NotesModel(store: store)
-        if opensNote { model.openID = model.rows.first { $0.title == "Reading list" }?.id }
+        if opensNote { model.openID = model.notes(in: "").first { $0.title == "Reading list" }?.id }
         return model
     }
 
