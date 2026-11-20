@@ -104,10 +104,136 @@ extension NSTextStorage {
 private let copyImageTitle = String(localized: "Copy Image to Clipboard")
 
 #if canImport(UIKit)
+    /// Points per frame to scroll when a finger at `y` is within `margin` of the visible `top` or `bottom`
+    /// edge, or beyond it; 0 elsewhere.
+    func autoscrollDelta(y: CGFloat, top: CGFloat, bottom: CGFloat, margin: CGFloat = 60) -> CGFloat {
+        let maximum: CGFloat = 16
+        if y < top + margin { return -maximum * min((top + margin - y) / margin, 1.5) }
+        if y > bottom - margin { return maximum * min((y - (bottom - margin)) / margin, 1.5) }
+        return 0
+    }
+
+    /// Scrolls the scroll view around a text view while a selection is dragged to its upper or lower edge,
+    /// extending the selection with it, and keeps the scroll position when the finger lifts.
+    @MainActor final class SelectionAutoscroller: NSObject, UIGestureRecognizerDelegate {
+        private weak var textView: UITextView?
+        private weak var scrollView: UIScrollView?
+        private var recognizer: UILongPressGestureRecognizer?
+        private var link: CADisplayLink?
+        private var touching = false
+        private var dragged = false
+        private var isExtending = false
+        private var finger = CGPoint.zero
+        private var anchor: Int?
+        private var previous = NSRange()
+        private var offsetAtLift: CGPoint?
+        private var lifted = Date.distantPast
+
+        func attach(_ view: UITextView, to scroll: UIScrollView?) {
+            guard scroll !== scrollView else { return }
+            if let recognizer { scrollView?.removeGestureRecognizer(recognizer) }
+            textView = view
+            scrollView = scroll
+            recognizer = nil
+            guard let scroll else { return }
+            let press = UILongPressGestureRecognizer(target: self, action: #selector(touched))
+            press.minimumPressDuration = 0
+            press.allowableMovement = .greatestFiniteMagnitude
+            press.cancelsTouchesInView = false
+            press.delegate = self
+            scroll.addGestureRecognizer(press)
+            recognizer = press
+        }
+
+        func gestureRecognizer(
+            _ recognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+        ) -> Bool { true }
+
+        /// Whether a selection is being dragged, or was a moment ago: scrolling to its end is unwanted.
+        func isHoldingScroll(selection: NSRange) -> Bool {
+            selection.length > 0 && dragged && (touching || Date().timeIntervalSince(lifted) < 0.5)
+        }
+
+        func selectionChanged(to range: NSRange) {
+            defer { previous = range }
+            guard touching, !isExtending else { return }
+            dragged = true
+            if range.location != previous.location, NSMaxRange(range) == NSMaxRange(previous) {
+                anchor = NSMaxRange(range)
+            } else if NSMaxRange(range) != NSMaxRange(previous), range.location == previous.location {
+                anchor = range.location
+            } else {
+                anchor = nil
+            }
+        }
+
+        @objc private func touched(_ press: UILongPressGestureRecognizer) {
+            switch press.state {
+            case .began:
+                touching = true
+                dragged = false
+                anchor = nil
+                finger = press.location(in: nil)
+                link = CADisplayLink(target: self, selector: #selector(tick))
+                link?.add(to: .main, forMode: .common)
+            case .changed:
+                finger = press.location(in: nil)
+            default:
+                touching = false
+                lifted = Date()
+                link?.invalidate()
+                link = nil
+                guard dragged, let scrollView else { return }
+                let offset = scrollView.contentOffset
+                DispatchQueue.main.async { [weak scrollView] in
+                    if let scrollView, !scrollView.isDragging, scrollView.contentOffset != offset {
+                        scrollView.setContentOffset(offset, animated: false)
+                    }
+                }
+            }
+        }
+
+        @objc private func tick() {
+            guard dragged, let anchor, let scrollView, let textView, !scrollView.isDragging else { return }
+            let frame = scrollView.convert(scrollView.bounds, to: nil)
+            let inset = scrollView.adjustedContentInset
+            let delta = autoscrollDelta(y: finger.y, top: frame.minY + inset.top, bottom: frame.maxY - inset.bottom)
+            let lowest = -inset.top
+            let highest = max(lowest, scrollView.contentSize.height + inset.bottom - scrollView.bounds.height)
+            let y = min(max(scrollView.contentOffset.y + delta, lowest), highest)
+            guard delta != 0, y != scrollView.contentOffset.y else { return }
+            scrollView.contentOffset.y = y
+            guard let position = textView.closestPosition(to: textView.convert(finger, from: nil)) else { return }
+            let at = textView.offset(from: textView.beginningOfDocument, to: position)
+            isExtending = true
+            textView.selectedRange = NSRange(location: min(anchor, at), length: abs(anchor - at))
+            isExtending = false
+        }
+    }
+
     private final class MarkdownTextView: UITextView {
         /// An edit is going in, whose own line break the delegate must not take for a Return.
         private var isApplying = false
         var images: ImageSource?
+        let autoscroller = SelectionAutoscroller()
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            var parent = superview
+            while let view = parent, !(view is UIScrollView) { parent = view.superview }
+            autoscroller.attach(self, to: parent as? UIScrollView)
+        }
+
+        /// Dragging a selection must not snap the scroll position to the selection's end.
+        override func scrollRectToVisible(_ rect: CGRect, animated: Bool) {
+            if !autoscroller.isHoldingScroll(selection: selectedRange) {
+                super.scrollRectToVisible(rect, animated: animated)
+            }
+        }
+
+        override func scrollRangeToVisible(_ range: NSRange) {
+            if !autoscroller.isHoldingScroll(selection: selectedRange) { super.scrollRangeToVisible(range) }
+        }
 
         override func paste(_ sender: Any?) {
             if images != nil, let picture = PictureInput.picture(in: .general) {
@@ -291,7 +417,10 @@ private let copyImageTitle = String(localized: "Copy Image to Clipboard")
                 restyle(view)
             }
 
-            func textViewDidChangeSelection(_ view: UITextView) { restyle(view) }
+            func textViewDidChangeSelection(_ view: UITextView) {
+                (view as? MarkdownTextView)?.autoscroller.selectionChanged(to: view.selectedRange)
+                restyle(view)
+            }
 
             func textViewDidBeginEditing(_ view: UITextView) {
                 parent.formatting = (view as? MarkdownTextView).map(formatter)
