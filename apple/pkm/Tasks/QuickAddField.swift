@@ -53,9 +53,28 @@ struct QuickAddField: View {
         // the next row over it (macOS).
         VStack(alignment: .leading, spacing: 8) {
             editor
-            if !suggestions.isEmpty { suggestionList }
+            if !suggestions.isEmpty {
+                suggestionList
+            } else {
+                #if os(iOS)
+                    if isFocused { tagButton }
+                #endif
+            }
         }
     }
+
+    #if os(iOS)
+        /// Types "@" for a Tag Shortcut. It sits below the editor, where a keyboard bar would cover text.
+        private var tagButton: some View {
+            Button {
+                text.replaceSelection(&selection, withCharacters: "@")
+            } label: {
+                Label("Tag", systemImage: "tag")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+        }
+    #endif
 
     private var suggestionList: some View {
         VStack(spacing: 2) {
@@ -91,13 +110,6 @@ struct QuickAddField: View {
             #if os(iOS)
                 .textInputAutocapitalization(.sentences)
                 .autocorrectionDisabled(false)
-                .toolbar {
-                    // "@" for Tag shortcuts; the mail keyboard's would shrink the space bar.
-                    ToolbarItemGroup(placement: .keyboard) {
-                        Button("@") { text.replaceSelection(&selection, withCharacters: "@") }
-                        Spacer()
-                    }
-                }
             #endif
             .onAppear {
                 draw()
