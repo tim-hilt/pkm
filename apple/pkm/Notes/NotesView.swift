@@ -427,6 +427,12 @@ private struct NoteEditor: View {
         }
         .onChange(of: title) { save() }
         .onChange(of: text) { save() }
+        // Sync may have merged another Device's edits in: shown, the next keystroke keeps them.
+        .onChange(of: model.syncs) {
+            guard isLoaded, let note = model.note(id: id) else { return }
+            if note.title != title { title = note.title }
+            if note.body != text { text = note.body }
+        }
         #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
         #endif

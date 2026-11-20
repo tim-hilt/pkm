@@ -62,6 +62,8 @@ export class NotesModel {
   newId: string | undefined;
   /** Why the last save failed; none after one that worked. */
   failure: string | undefined;
+  /** How often Sync changed the files: when it grows, an open editor takes the Note as saved. */
+  syncs = 0;
   /** The Images the open Note started with or added, for release when it is left. */
   private releasable: string[] = [];
   /** Called after the rows, the open Note or the failure changed. */
@@ -264,9 +266,28 @@ export class NotesModel {
     this.changed();
   }
 
-  /** Sync or another tab wrote or deleted Note files: reads them again. */
+  /**
+   * Sync or another tab wrote or deleted Note files: reads them again. A
+   * Folder they took leaves the selection for the nearest one still there,
+   * and an open Note they Deleted closes; one they Moved stays open.
+   */
   async syncDidChange(): Promise<void> {
     await this.files.reload();
+    const held = new Set(
+      this.store.folders().map((folder) => {
+        const { path } = folder;
+        folder.free();
+        return path;
+      }),
+    );
+    while (this.folder !== "" && !held.has(this.folder)) {
+      this.folder = this.folder.slice(0, Math.max(this.folder.lastIndexOf("/"), 0));
+    }
+    if (this.openId !== undefined && !this.note(this.openId)) {
+      this.openId = this.newId = undefined;
+      this.releasable = [];
+    }
+    this.syncs += 1;
     this.reload();
     this.onChange();
   }

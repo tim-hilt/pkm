@@ -50,7 +50,8 @@ pub trait Merge: Send + Sync {
 
     /// The Item's identity, the same wherever it lives, none if `bytes` have
     /// none (ADR-0031). With one, Sync pairs Items by it and follows an Item
-    /// Moved to another path; without, by path alone. Default: none.
+    /// Moved to another path; without, by path alone. Only asked of files
+    /// with the `extension` in a Context with directories. Default: none.
     fn identity(&self, _bytes: &[u8]) -> Option<String> {
         None
     }
@@ -236,8 +237,8 @@ impl Merge for Tasks {
 
 /// Notes: `<id>.md` files in Folder directories, merged three-way, the Body by
 /// line (ADR-0032), and the Images beside them, transferred unchanged
-/// (ADR-0029, ADR-0031). A file that isn't a Note is left where it is, and two versions that can't
-/// merge are not both kept: one Note has one file.
+/// (ADR-0029, ADR-0031). A file that isn't a Note is left where it is, and
+/// two versions that can't merge are not both kept: one Note has one file.
 pub struct Notes;
 
 impl Notes {

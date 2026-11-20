@@ -384,10 +384,46 @@ impl Storage for DirStorage {
     }
 
     fn delete_dir(&self, path: &str) -> io::Result<()> {
-        match fs::remove_dir(self.path(path)?) {
-            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
-            _ => Ok(()),
+        if remove_dir_if_empty(&self.path(path)?)? {
+            Ok(())
+        } else {
+            Err(io::ErrorKind::DirectoryNotEmpty.into())
         }
+    }
+}
+
+/// Removes the directory `dir` unless something is in it, which hidden files
+/// (Finder's `.DS_Store`) are not: they go with it. An iCloud placeholder (a
+/// blob not downloaded yet) or a hidden directory keeps it. Whether it is
+/// gone; one that isn't there is.
+#[cfg(feature = "native")]
+pub(crate) fn remove_dir_if_empty(dir: &Path) -> io::Result<bool> {
+    let entries = match fs::read_dir(dir) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(true),
+        entries => entries?,
+    };
+    let mut hidden = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.starts_with('.')
+            || DirStorage::placeholder_target(&name).is_some()
+            || !entry.file_type()?.is_file()
+        {
+            return Ok(false);
+        }
+        hidden.push(entry.path());
+    }
+    for file in hidden {
+        match fs::remove_file(file) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+    }
+    match fs::remove_dir(dir) {
+        Err(e) if e.kind() == io::ErrorKind::DirectoryNotEmpty => Ok(false),
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+        _ => Ok(true),
     }
 }
 
@@ -783,6 +819,20 @@ mod tests {
 
         storage.delete("Work/a.md").unwrap();
         assert!(!placeholder.exists());
+    }
+
+    #[test]
+    fn finders_hidden_files_go_with_a_deleted_directory_but_a_placeholder_keeps_it() {
+        let (alive, storage) = scratch_storage().unwrap();
+        storage.create_dir("Finder").unwrap();
+        storage.create_dir("Arriving").unwrap();
+        fs::write(alive.0.join("Finder/.DS_Store"), b"x").unwrap();
+        fs::write(alive.0.join("Arriving/.a.md.icloud"), b"stub").unwrap();
+
+        storage.delete_dir("Finder").unwrap();
+        assert!(!alive.0.join("Finder").exists());
+        storage.delete_dir("Arriving").unwrap_err();
+        assert!(alive.0.join("Arriving/.a.md.icloud").exists());
     }
 
     #[test]

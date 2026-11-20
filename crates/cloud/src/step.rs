@@ -47,8 +47,9 @@
 //! turns up under a new path, is a Move, not a delete and an add. The Item is
 //! merged three-way and ends at one path on both sides: the Move of the newer
 //! version if both sides Moved it, and the top level if the new directory was
-//! Deleted on the other side. A directory Sync emptied that nothing
-//! remembers is removed.
+//! Deleted on the other side. A Delete on the other side wins over a Move, as
+//! over any edit. A directory Sync emptied that nothing remembers is removed.
+//! Hidden files in a directory (Finder's `.DS_Store`) don't keep it.
 
 use std::cell::{RefCell, RefMut};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -249,9 +250,6 @@ impl SyncStep {
             remote: HashMap::new(),
             uploaded: Vec::new(),
             dirs: Dirs::default(),
-            cloud_blobs: Vec::new(),
-            deleted_blobs: BTreeSet::new(),
-            deleted_cloud_dirs: BTreeSet::new(),
         };
         Self {
             engine: Some(Box::pin(async move { engine.run_step().await })),
@@ -338,11 +336,6 @@ struct Engine {
     /// The directories of both sides and what is remembered of them; empty
     /// for a Context without directories.
     dirs: Dirs,
-    /// Every blob the cloud listing had, Items or not, and the ones this
-    /// step deleted: a directory is empty once all its blobs are deleted.
-    cloud_blobs: Vec<String>,
-    deleted_blobs: BTreeSet<String>,
-    deleted_cloud_dirs: BTreeSet<String>,
 }
 
 /// The directories of a Context with directories, as paths from its folder.
@@ -352,9 +345,27 @@ struct Dirs {
     cloud: BTreeSet<String>,
     /// The ones both sides had at the last Sync.
     synced: BTreeSet<String>,
+    /// Every blob the cloud listing had, Items or not, and the blobs and
+    /// directories this step deleted there: a cloud directory is empty once
+    /// all that was in it is deleted.
+    cloud_blobs: Vec<String>,
+    deleted_blobs: BTreeSet<String>,
+    deleted_cloud: BTreeSet<String>,
 }
 
 impl Dirs {
+    /// Whether every blob and directory the cloud had in `dir` is deleted.
+    fn cloud_is_empty(&self, dir: &str) -> bool {
+        let inside = |path: &&String| path.strip_prefix(dir).is_some_and(|r| r.starts_with('/'));
+        self.cloud_blobs
+            .iter()
+            .filter(inside)
+            .all(|blob| self.deleted_blobs.contains(blob))
+            && (self.cloud.iter())
+                .filter(inside)
+                .all(|sub| self.deleted_cloud.contains(sub))
+    }
+
     /// `path` and the directories above it, outermost first.
     fn chain(path: &str) -> impl Iterator<Item = &str> {
         path.match_indices('/')
@@ -375,6 +386,11 @@ impl Dirs {
 /// The key remembering a directory, beside the file names: they never end in `/`.
 fn dir_key(dir: &str) -> String {
     format!("{dir}/")
+}
+
+/// Whether no segment of `path` is hidden: Sync leaves those alone.
+fn is_visible_path(path: &str) -> bool {
+    path.split('/').all(|segment| !segment.starts_with('.'))
 }
 
 impl Engine {
@@ -556,8 +572,7 @@ impl Engine {
     /// folder itself, or, with directories, in any visible one.
     fn is_item_path(&self, path: &str) -> bool {
         if self.merge.has_directories() {
-            let (_, file) = path.rsplit_once('/').unwrap_or(("", path));
-            path.split('/').all(|segment| !segment.starts_with('.')) && self.merge.accepts(file)
+            is_visible_path(path) && self.merge.accepts(top_level(path))
         } else {
             !path.contains('/') && self.merge.accepts(path)
         }
@@ -592,9 +607,9 @@ impl Engine {
         self.dirs.cloud = parents
             .chain(tree.empty_dirs)
             .flat_map(|dir| Dirs::chain(&dir).map(str::to_owned).collect::<Vec<_>>())
-            .filter(|dir| dir.split('/').all(|s| !s.starts_with('.')))
+            .filter(|dir| is_visible_path(dir))
             .collect();
-        self.cloud_blobs = tree.blobs.into_iter().map(|blob| blob.name).collect();
+        self.dirs.cloud_blobs = tree.blobs.into_iter().map(|blob| blob.name).collect();
     }
 
     async fn list_local(&self) -> io::Result<Vec<LocalFile>> {
@@ -609,10 +624,7 @@ impl Engine {
 
     async fn list_local_dirs(&self) -> io::Result<BTreeSet<String>> {
         match self.ask(Request::ListLocalDirs).await? {
-            Response::Names(dirs) => Ok(dirs
-                .into_iter()
-                .filter(|dir| dir.split('/').all(|s| !s.starts_with('.')))
-                .collect()),
+            Response::Names(dirs) => Ok(dirs.into_iter().filter(|d| is_visible_path(d)).collect()),
             _ => Err(unexpected()),
         }
     }
@@ -728,7 +740,7 @@ impl Engine {
 
     async fn delete_cloud(&mut self, file: &str) -> io::Result<()> {
         self.ask(Request::DeleteCloud { file: file.into() }).await?;
-        self.deleted_blobs.insert(file.to_owned());
+        self.dirs.deleted_blobs.insert(file.to_owned());
         Ok(())
     }
 
@@ -773,13 +785,17 @@ impl Engine {
 
     /// The Items Moved since the last Sync: remembered paths gone on a side,
     /// whose Item (by `Merge::identity`) is at a new path on a side that lost
-    /// it, while the other side still has it or Moved it elsewhere. Reads only
-    /// what is new, and only if something remembered is gone.
+    /// it, while the other side still has it, Moved it elsewhere or Deleted
+    /// it. Reads only what is new, and only if something remembered is gone.
+    /// Only a Context with directories Moves Items.
     async fn find_moves(
         &self,
         local: &HashMap<String, LocalFile>,
         synced_names: &[String],
     ) -> io::Result<Vec<Moved>> {
+        if !self.merge.has_directories() {
+            return Ok(Vec::new());
+        }
         let synced: HashSet<&str> = synced_names
             .iter()
             .map(String::as_str)
@@ -801,9 +817,13 @@ impl Engine {
         }
         sources.sort();
         let wanted: HashSet<&String> = sources.iter().map(|(_, _, id)| id).collect();
+        // Only the Context's own files have an identity; the others it accepts
+        // (Images) aren't read for one.
+        let is_new = |path: &&String| {
+            !synced.contains(path.as_str()) && path.ends_with(self.merge.extension())
+        };
 
-        let mut new_local: Vec<&String> =
-            local.keys().filter(|p| !synced.contains(&***p)).collect();
+        let mut new_local: Vec<&String> = local.keys().filter(is_new).collect();
         new_local.sort();
         let mut at_local = HashMap::new();
         for path in new_local {
@@ -813,11 +833,7 @@ impl Engine {
                 at_local.entry(id).or_insert_with(|| path.clone());
             }
         }
-        let mut new_remote: Vec<&String> = self
-            .remote
-            .keys()
-            .filter(|p| !synced.contains(&***p))
-            .collect();
+        let mut new_remote: Vec<&String> = self.remote.keys().filter(is_new).collect();
         new_remote.sort();
         let mut at_remote = HashMap::new();
         for path in new_remote {
@@ -833,10 +849,11 @@ impl Engine {
             .filter_map(|(from, base, id)| {
                 let (here, there) = (local.contains_key(&from), self.remote.contains_key(&from));
                 let (to_local, to_remote) = (at_local.get(&id), at_remote.get(&id));
+                // Moved on one side; on the other still there, or Deleted.
                 let is_move = match (to_local, to_remote) {
                     (Some(l), Some(r)) => l != r && !here && !there,
-                    (Some(_), None) => !here && there,
-                    (None, Some(_)) => here && !there,
+                    (Some(_), None) => !here,
+                    (None, Some(_)) => !there,
                     (None, None) => false,
                 };
                 is_move.then(|| Moved {
@@ -855,17 +872,30 @@ impl Engine {
     async fn sync_move(&mut self, moved: &Moved) -> io::Result<()> {
         let local_path = moved.local.as_deref().unwrap_or(&moved.from);
         let remote_path = moved.remote.as_deref().unwrap_or(&moved.from);
-        let (Some(local), Some(remote)) = (
+        let (local, remote) = match (
             self.read_local(local_path).await?,
             self.fetch(remote_path).await?,
-        ) else {
-            return Ok(()); // gone since the listing
+        ) {
+            (Some(local), Some(remote)) => (local, remote),
+            // Deleted on the side that didn't Move it: a Delete wins over a
+            // Move as over any edit.
+            (Some(local), None) if moved.remote.is_none() => {
+                if self.remove_local(local_path, local).await? {
+                    self.forget(&moved.from).await?;
+                }
+                return Ok(());
+            }
+            (None, Some(_)) if moved.local.is_none() => {
+                self.delete_cloud(remote_path).await?;
+                return self.forget(&moved.from).await;
+            }
+            _ => return Ok(()), // gone since the listing
         };
         let Some(merged) = self.merge.merge(Some(&moved.base), &local, &remote) else {
             return Ok(());
         };
         let (mut target, from_local) = match (&moved.local, &moved.remote) {
-            (Some(l), Some(r)) if !self.merge.local_is_newer(&local, &remote) => {
+            (Some(_), Some(r)) if !self.merge.local_is_newer(&local, &remote) => {
                 (r.as_str(), false)
             }
             (Some(l), _) => (l.as_str(), true),
@@ -934,11 +964,11 @@ impl Engine {
     /// `prune_local_dirs` for the cloud, where a directory is empty once what
     /// the step deleted is all it had.
     async fn prune_cloud_dirs(&mut self, mut dir: &str) -> io::Result<()> {
-        while !dir.is_empty() && !self.dirs.synced.contains(dir) && self.cloud_dir_is_empty(dir) {
+        while !dir.is_empty() && !self.dirs.synced.contains(dir) && self.dirs.cloud_is_empty(dir) {
             self.ask(Request::DeleteCloudDir { path: dir.into() })
                 .await?;
             self.dirs.cloud.remove(dir);
-            self.deleted_cloud_dirs.insert(dir.to_owned());
+            self.dirs.deleted_cloud.insert(dir.to_owned());
             dir = parent_of(dir);
         }
         Ok(())
@@ -989,31 +1019,16 @@ impl Engine {
                     }
                 }
                 // Deleted here: Deleted in the cloud once nothing is left in it.
-                (false, true, true) if self.cloud_dir_is_empty(&dir) => {
+                (false, true, true) if self.dirs.cloud_is_empty(&dir) => {
                     self.ask(Request::DeleteCloudDir { path: dir.clone() })
                         .await?;
                     self.forget(&dir_key(&dir)).await?;
-                    self.deleted_cloud_dirs.insert(dir);
+                    self.dirs.deleted_cloud.insert(dir);
                 }
                 _ => {}
             }
         }
         Ok(())
-    }
-
-    /// Whether every blob and directory the cloud had in `dir` is deleted.
-    fn cloud_dir_is_empty(&self, dir: &str) -> bool {
-        let inside = |path: &&String| path.strip_prefix(dir).is_some_and(|r| r.starts_with('/'));
-        self.cloud_blobs
-            .iter()
-            .filter(inside)
-            .all(|blob| self.deleted_blobs.contains(blob))
-            && self
-                .dirs
-                .cloud
-                .iter()
-                .filter(inside)
-                .all(|sub| self.deleted_cloud_dirs.contains(sub))
     }
 
     /// Remembers that both sides have the directory. It has no bytes.
@@ -1292,7 +1307,7 @@ fn parent_of(path: &str) -> &str {
 
 /// An Item Moved since the last Sync: it was at `from`, with `base` as its
 /// remembered bytes, and is now at `local` here and/or `remote` in the cloud
-/// (none: it stayed at `from` on that side).
+/// (none: it stayed at `from` on that side, or was Deleted there).
 struct Moved {
     from: String,
     base: Vec<u8>,

@@ -151,6 +151,22 @@ describe("Folders", () => {
     expect(model.rows.map((row) => row.id)).toEqual([id]);
   });
 
+  it("leaves a Folder Sync Deleted for the one around it, and closes the open Note it took", async () => {
+    model.addFolder("Work", "");
+    model.addFolder("Plans", "Work");
+    model.add();
+    model.save(model.openId!, "Gone with it", "text");
+    await model.saving;
+    const syncs = model.syncs;
+    // What a Sync step does for a Folder Deleted elsewhere.
+    await storage.remove("Notes/Work/Plans");
+    await model.syncDidChange();
+    expect(model.folder).toBe("Work");
+    expect(model.openId).toBeUndefined();
+    expect(model.rows).toEqual([]);
+    expect(model.syncs).toBe(syncs + 1);
+  });
+
   it("Deleting a Folder removes its Notes, and the open one closes", async () => {
     model.addFolder("Work", "");
     model.add();

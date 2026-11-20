@@ -39,6 +39,8 @@ export class NotesView {
   private shown: string | undefined;
   /** The Images of the Note the editor shows. */
   private images: DescriptionImages | undefined;
+  /** The editor's fields, and the model's `syncs` when they last took the Note as saved. */
+  private fields: { title: TitleField; body: DescriptionField; syncs: number } | undefined;
 
   constructor(private readonly model: NotesModel) {
     this.failure.setAttribute("role", "alert");
@@ -141,11 +143,24 @@ export class NotesView {
     return [preview !== "" ? line(preview, "task-title") : make("span", "note-none", ["New Note"])];
   }
 
-  /** The editor of the open Note; built again only when another Note opens. */
+  /**
+   * The editor of the open Note; built again only when another Note opens.
+   * After Sync changed the files it takes the Note as Sync left it, so that
+   * the next keystroke doesn't save over what another Device wrote.
+   */
   private showEditor(): void {
     const id = this.model.openId;
-    if (id === this.shown) return;
+    if (id === this.shown) {
+      const { fields } = this;
+      if (id === undefined || !fields || fields.syncs === this.model.syncs) return;
+      fields.syncs = this.model.syncs;
+      const note = this.model.note(id);
+      if (note && note.title !== fields.title.value) fields.title.value = note.title;
+      if (note && note.body !== fields.body.value) fields.body.value = note.body;
+      return;
+    }
     this.shown = id;
+    this.fields = undefined;
     this.images?.dispose();
     this.images = undefined;
     const note = id === undefined ? undefined : this.model.note(id);
@@ -170,6 +185,7 @@ export class NotesView {
       button("tasks-back", "Delete", () => this.ask(id)),
     ]);
     this.detail.replaceChildren(bar, make("div", "notes-editor", [title.element, body.element]));
+    this.fields = { title, body, syncs: this.model.syncs };
     if (this.model.newId === id) title.focus();
   }
 

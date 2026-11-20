@@ -176,6 +176,22 @@ import Testing
         #expect(model.rows.map(\.id) == [id])
     }
 
+    @Test func aFolderSyncDeletedLeavesTheSelectionForTheOneAroundItAndClosesItsOpenNote() throws {
+        let model = try openModel()
+        try model.addFolder(named: "Work", in: "")
+        try model.addFolder(named: "Plans", in: "Work")
+        model.add()
+        model.save(id: try #require(model.openID), title: "Gone with it", body: "text")
+        let syncs = model.syncs
+        // What a Sync step does for a Folder Deleted elsewhere.
+        try FileManager.default.removeItem(at: root.appending(path: "Notes/Work/Plans"))
+        model.syncDidChange()
+        #expect(model.folderPath == "Work")
+        #expect(model.openID == nil)
+        #expect(model.rows.isEmpty)
+        #expect(model.syncs == syncs + 1)
+    }
+
     @Test func aMovedFolderKeepsItsSelectionAndRefusalsThrowTheirReason() throws {
         let model = try openModel()
         let work = try model.addFolder(named: "Work", in: "")
@@ -273,7 +289,7 @@ import Testing
         #expect(!fileExists(image))
     }
 
-    @Test func searchFindsNotesInAnyFolderAsTheTextChangesAndOpensAResult() throws {
+    @Test func searchFindsNotesInAnyFolderAsTheTextChanges() throws {
         let model = try openModel()
         try model.addFolder(named: "Trips", in: "")
         model.add()

@@ -56,6 +56,10 @@ export class TitleField {
     return (this.element.textContent ?? "").replace(/[\r\n]+/g, " ");
   }
 
+  set value(text: string) {
+    this.draw(text);
+  }
+
   focus(): void {
     this.element.focus();
   }

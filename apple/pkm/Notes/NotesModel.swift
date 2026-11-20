@@ -67,6 +67,9 @@ final class NotesModel {
     /// Whether the selected Folder's Notes are pushed over the tree, where the columns don't fit.
     private(set) var showsFolder = false
 
+    /// How often Sync changed the files: when it grows, an open editor takes the Note as saved.
+    private(set) var syncs = 0
+
     /// `defaults` holds the last Folder and Note, which open again unless they are gone; `nil`
     /// remembers nothing.
     init(store: NoteStore, defaults: UserDefaults? = nil) {
@@ -221,10 +224,18 @@ final class NotesModel {
         reloadRows()
     }
 
-    /// Sync wrote or deleted Note files: the tree and lists show what is there now. The open Note
-    /// stays as it is, which the editor holds.
+    /// Sync wrote or deleted Note files: the tree and lists show what is there now. A Folder it
+    /// took leaves the selection for the nearest one still there, and an open Note it Deleted
+    /// closes; one it Moved stays open.
     func syncDidChange() {
         reloadTree()
+        var path = selectedFolder
+        while !path.isEmpty, folder(at: path) == nil {
+            path = path.lastIndex(of: "/").map { String(path[..<$0]) } ?? ""
+        }
+        if path != selectedFolder { selectedFolder = path }
+        if let openID, note(id: openID) == nil { self.openID = nil }
+        syncs += 1
         reloadRows()
     }
 

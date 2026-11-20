@@ -15,7 +15,7 @@ use crate::merge::{Drawings, Merge};
 use crate::step::{
     LocalFile, Marks, Next, Progress, Request, Response, StepOutcome, SyncStep, Synced,
 };
-use crate::storage::{Storage, write_file_atomically};
+use crate::storage::{Storage, remove_dir_if_empty, write_file_atomically};
 
 /// What this Device remembers of each Item of one Context folder at its last
 /// Sync, in a folder of its own: never inside the Context folder, never
@@ -331,12 +331,7 @@ impl Runner<'_> {
                 Response::Done
             }
             Request::RemoveLocalDir { path } => {
-                Response::Happened(match fs::remove_dir(self.dir.join(path)) {
-                    Ok(()) => true,
-                    Err(e) if e.kind() == io::ErrorKind::NotFound => true,
-                    Err(e) if e.kind() == io::ErrorKind::DirectoryNotEmpty => false,
-                    Err(e) => return Err(e),
-                })
+                Response::Happened(remove_dir_if_empty(&self.dir.join(path))?)
             }
             Request::MakeCloudDir { path } => {
                 self.storage.create_dir(&path)?;
@@ -3407,6 +3402,51 @@ mod tests {
                 assert!(cloud.read("aaaaaaaaaaaa.md").is_some());
                 assert!(!cloud.has_dir("Work"), "{phone_first}");
             }
+        }
+
+        #[test]
+        fn a_note_moved_on_one_device_and_deleted_on_another_is_gone() {
+            for mover_first in [true, false] {
+                let cloud = Cloud::new();
+                let (phone, tablet) = (Device::new(), Device::new());
+                phone.write_note(A, &note("Plan", "one\n", NEW));
+                for device in [&phone, &tablet] {
+                    device.sync_notes(&cloud);
+                }
+                phone.move_note(A, MOVED, Some(LATER));
+                tablet.remove_note(A);
+                if mover_first {
+                    phone.sync_notes(&cloud);
+                    tablet.sync_notes(&cloud);
+                } else {
+                    tablet.sync_notes(&cloud);
+                    phone.sync_notes(&cloud);
+                }
+                converge(&cloud, [&phone, &tablet]);
+
+                for device in [&phone, &tablet] {
+                    assert!(device.read_note(MOVED).is_none(), "{mover_first}");
+                    assert!(device.read_note(A).is_none(), "{mover_first}");
+                }
+                assert!(cloud.read(MOVED).is_none() && cloud.read(A).is_none());
+            }
+        }
+
+        #[test]
+        fn a_folder_only_finder_left_hidden_files_in_is_deleted_everywhere() {
+            let cloud = Cloud::new();
+            let (phone, mac) = (Device::new(), Device::new());
+            phone.make_folder("Work");
+            for device in [&phone, &mac] {
+                device.sync_notes(&cloud);
+            }
+            mac.write_note("Work/.DS_Store", b"finder");
+            fs::write(cloud.dir.0.join("Work/.DS_Store"), b"finder").unwrap();
+
+            phone.delete_folder("Work");
+            converge(&cloud, [&phone, &mac]);
+
+            assert!(!mac.has_folder("Work") && !cloud.has_dir("Work"));
         }
 
         const PNG: &[u8] = b"\x89PNG\r\n\x1a\n pixels";

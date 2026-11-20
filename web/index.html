@@ -1611,10 +1611,8 @@
       .note-open {
         display: flex;
         flex-direction: column;
+        width: 100%;
         text-align: left;
-      }
-      .notes-find {
-        padding-top: 0;
       }
       .notes-search {
         flex: 1;
@@ -1649,7 +1647,9 @@
           /* Right of the shell's sidebar button. */
           padding-left: calc(max(4px, env(safe-area-inset-left)) + 52px);
         }
+        /* Below the bar with the Folder's name. */
         .notes .notes-find {
+          padding-top: 0;
           padding-left: 16px;
         }
         .notes-detail .tasks-back:first-child {
