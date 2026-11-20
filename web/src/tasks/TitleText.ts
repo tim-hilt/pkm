@@ -1,4 +1,4 @@
-import { Inline, parseTitle } from "../core/Core";
+import { Inline, ligatures, parseTitle } from "../core/Core";
 import { make } from "../Dom";
 import { isApplePlatform } from "../drawings/input/KeyboardShortcuts";
 
@@ -64,6 +64,20 @@ export function inlineRanges(
   });
 }
 
+/**
+ * The sequences of `text` to draw as one glyph (`md-lig`, the glyph in `data-glyph`),
+ * as ranges over the unchanged text; the CSS draws the glyph where the text is not edited.
+ */
+export function ligatureRanges(text: string): Range[] {
+  return ligatures(text).map((ligature) => {
+    const { start, end, glyph } = ligature;
+    ligature.free();
+    const element = make("span", "md-lig");
+    element.dataset.glyph = glyph;
+    return { start, end, element };
+  });
+}
+
 /** The Inline formatting spans of a Title as elements. */
 export function formatRanges(title: string): Range[] {
   return inlineRanges(titleSpans(title));
@@ -107,5 +121,5 @@ export function drawRanges(text: string, ranges: Range[]): (Node | string)[] {
 
 /** A Title as the rows and the Parent line show it: formatted; the CSS hides its markers (`.md-marker`). */
 export function titleNodes(title: string): (Node | string)[] {
-  return drawRanges(title, formatRanges(title));
+  return drawRanges(title, [...formatRanges(title), ...ligatureRanges(title)]);
 }

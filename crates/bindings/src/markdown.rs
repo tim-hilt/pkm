@@ -2,7 +2,7 @@
 //! `pkm_base::markdown`.
 
 use pkm_base::markdown::{
-    Block, BlockSpan, Description, Inline, InlineSpan, LinkSpan, TextEdit, TextRange,
+    Block, BlockSpan, Description, Inline, InlineSpan, Ligature, LinkSpan, TextEdit, TextRange,
 };
 
 /// What an inline span is formatted as.
@@ -144,4 +144,18 @@ pub fn image_targets(text: String) -> Vec<String> {
 #[uniffi::export]
 pub fn insert_image(text: String, start: u32, end: u32, reference: String) -> TextEdit {
     pkm_base::markdown::insert_image(&text, start, end, &reference)
+}
+
+/// A character sequence to draw as one glyph, `start..end` in UTF-16 code units.
+#[uniffi::remote(Record)]
+pub struct Ligature {
+    pub start: u32,
+    pub end: u32,
+    pub glyph: String,
+}
+
+/// The sequences of a Title or Description to draw as one glyph, in text order.
+#[uniffi::export]
+pub fn ligatures(text: String) -> Vec<Ligature> {
+    pkm_base::markdown::ligatures(&text)
 }

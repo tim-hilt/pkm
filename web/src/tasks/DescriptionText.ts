@@ -1,7 +1,7 @@
 import { Block, parseDescription } from "../core/Core";
 import { make } from "../Dom";
 import type { DescriptionImages } from "./DescriptionImages";
-import { type Range, type TitleSpan, drawRanges, inlineRanges } from "./TitleText";
+import { type Range, type TitleSpan, drawRanges, inlineRanges, ligatureRanges } from "./TitleText";
 
 /** The UTF-16 range of a Description that shows its Markdown raw. */
 export interface Raw {
@@ -93,6 +93,7 @@ export function descriptionNodes(
     marker(link.start, link.textStart, shown);
     marker(link.textEnd, link.end, shown);
   }
+  ranges.push(...ligatureRanges(text).filter(({ start, end }) => !isRaw(start, end)));
   const nodes = drawRanges(text, ranges);
   for (const [element, target] of pictures) {
     const image = make("img", "md-picture");

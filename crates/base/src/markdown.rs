@@ -342,6 +342,79 @@ pub fn parse_description(text: &str) -> Description {
     d
 }
 
+/// A character sequence a client draws as one glyph, `start..end` in UTF-16 units.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ligature {
+    pub start: u32,
+    pub end: u32,
+    pub glyph: String,
+}
+
+/// Longest first, so that `<=>` is not `<=` followed by `>`.
+const LIGATURES: [(&str, &str); 12] = [
+    ("<=>", "⇔"),
+    ("<->", "↔"),
+    ("==>", "⟹"),
+    ("<==", "⟸"),
+    ("-->", "⟶"),
+    ("<--", "⟵"),
+    ("...", "…"),
+    ("->", "→"),
+    ("<-", "←"),
+    ("=>", "⇒"),
+    ("!=", "≠"),
+    (">=", "≥"),
+];
+
+/// The sequences of a Title or Description to draw as one glyph, in text order.
+/// The text is unchanged. Code spans, code fences, link targets and Images keep
+/// their sequences. `<=` (`≤`) is tried last, so `<==` and `<=>` win.
+pub fn ligatures(text: &str) -> Vec<Ligature> {
+    let d = parse_description(text);
+    let mut skip: Vec<(u32, u32)> = Vec::new();
+    skip.extend(
+        d.inlines
+            .iter()
+            .filter(|s| s.kind == Inline::Code)
+            .map(|s| (s.start, s.end)),
+    );
+    skip.extend(
+        d.blocks
+            .iter()
+            .filter(|b| matches!(b.kind, Block::CodeFence | Block::Image))
+            .map(|b| (b.start, b.end)),
+    );
+    skip.extend(d.links.iter().map(|l| (l.text_end, l.end)));
+
+    let mut out = Vec::new();
+    let mut at = 0u32; // UTF-16 position of `i`
+    let mut rest = text;
+    while let Some(c) = rest.chars().next() {
+        let hit = LIGATURES
+            .iter()
+            .chain(&[("<=", "≤")])
+            .find(|(seq, _)| rest.starts_with(seq))
+            .filter(|(seq, _)| {
+                let end = at + seq.len() as u32; // ASCII: one unit each
+                !skip.iter().any(|&(s, e)| at < e && end > s)
+            });
+        if let Some(&(seq, glyph)) = hit {
+            let end = at + seq.len() as u32;
+            out.push(Ligature {
+                start: at,
+                end,
+                glyph: glyph.to_string(),
+            });
+            at = end;
+            rest = &rest[seq.len()..];
+        } else {
+            at += c.len_utf16() as u32;
+            rest = &rest[c.len_utf8()..];
+        }
+    }
+    out
+}
+
 /// The line a Task row shows for a Description: its first line with text, block
 /// markers stripped and links shown as their text, empty and Image-only lines
 /// skipped (a fence's lines count as text, as they are, its markers not). Empty
@@ -701,6 +774,40 @@ fn closing_backticks(chars: &[char], from: usize, len: usize) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn found(text: &str) -> Vec<(u32, u32, String)> {
+        ligatures(text)
+            .into_iter()
+            .map(|l| (l.start, l.end, l.glyph))
+            .collect()
+    }
+
+    #[test]
+    fn sequences_become_glyphs_longest_first() {
+        assert_eq!(found("a -> b"), [(2, 4, "→".into())]);
+        assert_eq!(found("a <=> b"), [(2, 5, "⇔".into())]);
+        assert_eq!(
+            found("a ==> b ... c"),
+            [(2, 5, "⟹".into()), (8, 11, "…".into())]
+        );
+        assert_eq!(
+            found("a <= b != c"),
+            [(2, 4, "≤".into()), (7, 9, "≠".into())]
+        );
+    }
+
+    #[test]
+    fn positions_count_utf16_units() {
+        assert_eq!(found("😀 -> x"), [(3, 5, "→".into())]);
+    }
+
+    #[test]
+    fn code_links_and_images_keep_their_sequences() {
+        assert!(found("`a->b`").is_empty());
+        assert!(found("```\na -> b\n```").is_empty());
+        assert!(found("![a](x->y.png)").is_empty());
+        assert_eq!(found("[a -> b](u->v)"), [(3, 5, "→".into())]);
+    }
 
     #[test]
     fn an_image_goes_on_a_line_of_its_own() {

@@ -8,7 +8,7 @@ import SwiftUI
 
 extension NSAttributedString.Key {
     /// What to draw in place of the characters it covers, when it is as long as they are: a bullet
-    /// for `-`, the number a list has reached. The text itself stays as typed.
+    /// for `-`, the number a list has reached, a glyph for a ligature like `->`. The text itself stays as typed.
     static let markerDisplay = NSAttributedString.Key("pkm.markerDisplay")
     /// The `NSTextAttachment` to draw in place of the character it covers, the first of an Image's
     /// line, whose other characters are hidden. The text itself stays as typed.
@@ -124,6 +124,15 @@ enum MarkdownStyler {
             // Raw, it is plain text: a tap puts the caret in it instead of opening it.
             guard rendered, let url = URL(string: link.target) else { continue }
             text.addAttribute(.link, value: url, range: NSRange(link.textStart, link.textEnd))
+        }
+
+        for ligature in ligatures(text: source) {
+            let range = NSRange(ligature.start, ligature.end)
+            guard !isRaw(range) else { continue }
+            // As long as the sequence, so that carets and ranges keep their meaning: the glyph, then
+            // word joiners, which draw nothing.
+            let padding = String(repeating: "\u{2060}", count: range.length - ligature.glyph.utf16.count)
+            text.addAttribute(.markerDisplay, value: ligature.glyph + padding, range: range)
         }
     }
 

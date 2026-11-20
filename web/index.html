@@ -1264,6 +1264,22 @@
       .tasks-quick-input:not(:focus) .md-marker {
         display: none;
       }
+      /* A sequence like -> is drawn as one glyph (→) where its text is not edited; the text stays. */
+      .task-title .md-lig,
+      .task-parent-title .md-lig,
+      .tasks-chip-title .md-lig,
+      .task-description .md-lig,
+      .tasks-description .md-lig {
+        font-size: 0;
+      }
+      .task-title .md-lig::before,
+      .task-parent-title .md-lig::before,
+      .tasks-chip-title .md-lig::before,
+      .task-description .md-lig::before,
+      .tasks-description .md-lig::before {
+        content: attr(data-glyph);
+        font-size: 1rem;
+      }
       .task-meta {
         display: flex;
         gap: 8px;

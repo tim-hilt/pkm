@@ -210,3 +210,26 @@ pub fn image_targets(text: &str) -> Vec<String> {
 pub fn insert_image(text: &str, start: u32, end: u32, reference: &str) -> TextEdit {
     pkm_base::markdown::insert_image(text, start, end, reference).into()
 }
+
+/// A character sequence to draw as one glyph, `start..end` in UTF-16 code units.
+#[wasm_bindgen]
+#[derive(Clone)]
+pub struct Ligature {
+    pub start: u32,
+    pub end: u32,
+    #[wasm_bindgen(getter_with_clone)]
+    pub glyph: String,
+}
+
+/// The sequences of a Title or Description to draw as one glyph, in text order.
+#[wasm_bindgen]
+pub fn ligatures(text: &str) -> Vec<Ligature> {
+    pkm_base::markdown::ligatures(text)
+        .into_iter()
+        .map(|l| Ligature {
+            start: l.start,
+            end: l.end,
+            glyph: l.glyph,
+        })
+        .collect()
+}
