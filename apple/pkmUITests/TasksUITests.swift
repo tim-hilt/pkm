@@ -117,6 +117,16 @@ import XCTest
         XCTAssertTrue(app.buttons["P1"].isSelected)
     }
 
+    func testATagIsToggledFromARowsContextMenu() {
+        app.staticTexts["Book the dentist"].press(forDuration: 1)
+        app.buttons["Tags…"].tap()
+        XCTAssertTrue(app.navigationBars["Tags"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Done"].exists)
+        app.buttons["home"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Book the dentist"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.navigationBars["Tags"].exists)
+    }
+
     func testAnImageIsCopiedFromItsMenu() {
         app.staticTexts["Buy milk"].firstMatch.tap()
         XCTAssertTrue(showsForm(of: "Buy milk"))

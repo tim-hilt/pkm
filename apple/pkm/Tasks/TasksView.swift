@@ -109,7 +109,7 @@ private struct TaskListView: View {
                                             Button("Reject", role: .destructive) { model.close(task, as: .rejected) }
                                         }
                                     }
-                                    .taskContextMenu(task)
+                                    .taskQuickActions(task)
                             }
                             // A drop lands within the Section: no target outside the row's Group.
                             .onMove { model.move(in: group.tag, from: $0, to: $1) }
@@ -273,44 +273,62 @@ struct TaskRow: View {
 }
 
 extension View {
-    /// The context menu of a Task row (long press, right click): the Priority palette, a divider,
-    /// then Reject. A pending Done (reverted at its circle) has none.
-    func taskContextMenu(_ task: ListedTask) -> some View {
-        modifier(TaskContextMenu(task: task))
+    /// The quick actions of a Task row: its context menu (long press, right click: the Priority
+    /// palette, "Tags…", a divider, then Reject) and, on iPhone and iPad, a leading swipe that opens
+    /// the same Tag picker. A pending Done (reverted at its circle) has neither.
+    func taskQuickActions(_ task: ListedTask) -> some View {
+        modifier(TaskQuickActions(task: task))
     }
 }
 
-private struct TaskContextMenu: ViewModifier {
+private struct TaskQuickActions: ViewModifier {
     @Environment(TasksModel.self) private var model
     let task: ListedTask
+    @State private var isPickingTags = false
 
     func body(content: Content) -> some View {
-        content.contextMenu {
-            if !task.done {
-                // The palette applies a tap at once; a row that moves does so animated.
-                Picker(
-                    "Priority",
-                    selection: Binding(
-                        get: { task.priority },
-                        set: { priority in withAnimation { model.setPriority(task, to: priority) } })
-                ) {
-                    ForEach(UInt8(1)...4, id: \.self) { priority in
-                        Label {
-                            Text(verbatim: "P\(priority)")
-                        } icon: {
-                            Image(systemName: "circle.fill").foregroundStyle(ListedTask.color(ofPriority: priority))
-                        }
-                        .labelStyle(.iconOnly)
-                        .tag(priority)
+        content
+            #if os(iOS)
+                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                    if !task.done {
+                        Button("Tags", systemImage: "tag") { isPickingTags = true }.tint(.indigo)
                     }
                 }
-                .pickerStyle(.palette)
-                Divider()
-                Button("Reject", systemImage: "xmark.circle", role: .destructive) {
-                    model.close(task, as: .rejected)
+            #endif
+            .contextMenu {
+                if !task.done {
+                    // The palette applies a tap at once; a row that moves does so animated.
+                    Picker(
+                        "Priority",
+                        selection: Binding(
+                            get: { task.priority },
+                            set: { priority in withAnimation { model.setPriority(task, to: priority) } })
+                    ) {
+                        ForEach(UInt8(1)...4, id: \.self) { priority in
+                            Label {
+                                Text(verbatim: "P\(priority)")
+                            } icon: {
+                                Image(systemName: "circle.fill").foregroundStyle(ListedTask.color(ofPriority: priority))
+                            }
+                            .labelStyle(.iconOnly)
+                            .tag(priority)
+                        }
+                    }
+                    .pickerStyle(.palette)
+                    Button("Tags…", systemImage: "tag") { isPickingTags = true }
+                    Divider()
+                    Button("Reject", systemImage: "xmark.circle", role: .destructive) {
+                        model.close(task, as: .rejected)
+                    }
                 }
             }
-        }
+            .sheet(isPresented: $isPickingTags) {
+                TagPicker(selected: (model.task(id: task.id) ?? task).tags.map(\.name)) { tag in
+                    isPickingTags = false
+                    // A row that leaves the Filter or changes Group does so animated.
+                    withAnimation { model.toggleTag(task, tag) }
+                }
+            }
     }
 }
 

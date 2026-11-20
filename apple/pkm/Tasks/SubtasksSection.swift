@@ -26,7 +26,7 @@ struct SubtasksSection: View {
                                 Button("Reject", role: .destructive) { model.close(subtask, as: .rejected) }
                             }
                         }
-                        .taskContextMenu(subtask)
+                        .taskQuickActions(subtask)
                 }
                 .onMove { model.moveSubtask(of: task.id, from: $0, to: $1) }
                 AddSubtaskRow(parent: task)

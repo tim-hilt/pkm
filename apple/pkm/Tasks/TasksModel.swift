@@ -298,6 +298,24 @@ final class TasksModel {
         reload()
     }
 
+    /// Adds `tag` to a Task if it lacks it, else removes it; as saved now (not as `task`, which may
+    /// be stale). Changes nothing else and leaves the edit stack alone, like `setPriority`. A new Tag
+    /// becomes known. False, saving nothing, if the Tag is invalid.
+    @discardableResult
+    func toggleTag(_ task: ListedTask, _ tag: String) -> Bool {
+        guard isValidTag(tag: tag) else { return false }
+        let saved = current(task)
+        let has = saved.tags.contains { $0.name == tag }
+        let done =
+            has
+            ? (try? store.removeTag(id: saved.id, tag: tag)) != nil
+            : (try? store.edit(
+                id: saved.id, title: saved.title, description: saved.description, priority: saved.priority,
+                addTags: [tag])) != nil
+        reload()
+        return done
+    }
+
     /// Commits Quick Add's Shortcuts to a Task being edited: its Title without them, a Priority
     /// Shortcut replacing `priority`, its Tags added to `tags` (never removed), saved in one write
     /// like `edit`. Returns the Task as saved, or nil, changing nothing, if only Shortcuts were typed

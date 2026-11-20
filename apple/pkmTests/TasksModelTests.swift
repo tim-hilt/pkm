@@ -921,6 +921,62 @@ import Testing
         #expect(model.isLeavingBlocked)
     }
 
+    @Test func aTagIsAddedAndRemovedWithoutTouchingTheRest() throws {
+        let model = try openModel()
+        model.add(title: "t", description: "d", priority: 2, tags: ["work"])
+        let task = model.tasks[0]
+        #expect(model.toggleTag(task, "home"))
+        var saved = try #require(model.task(id: task.id))
+        #expect(Set(saved.tags.map(\.name)) == ["work", "home"])
+        #expect((saved.priority, saved.title, saved.description) == (2, "t", "d"))
+        #expect(model.toggleTag(task, "work"))  // `task` is stale: it is toggled as saved now
+        saved = try #require(model.task(id: task.id))
+        #expect(saved.tags.map(\.name) == ["home"])
+    }
+
+    @Test func aNewTagBecomesKnownAndAnInvalidOneIsRefused() throws {
+        let model = try openModel()
+        model.add(title: "t")
+        #expect(!model.toggleTag(model.tasks[0], "No Good"))
+        #expect(model.tasks[0].tags.isEmpty)
+        #expect(model.toggleTag(model.tasks[0], "fresh"))
+        #expect(model.allTags.map(\.name).contains("fresh"))
+    }
+
+    @Test func aTaskLeavesAFilterWhenItsTagIsRemoved() throws {
+        let model = try openModelWithoutFavorites()
+        model.add(title: "t", tags: ["work"])
+        model.addFilter(title: "Work", query: "@work")
+        model.list = .filter(model.filters[0].id)
+        model.toggleTag(model.tasks[0], "work")
+        #expect(model.tasks.isEmpty)
+    }
+
+    @Test func aTaskChangesGroupWhenItsTagIsToggled() throws {
+        let model = try openModelWithoutFavorites()
+        model.add(title: "t", tags: ["work"])
+        model.add(title: "other", tags: ["work", "b"])  // makes "b" known
+        #expect(model.addFilter(title: "Work", query: "@work", groupBy: "b"))
+        model.list = .filter(model.filters[0].id)
+        let t = try #require(model.tasks.first { $0.title == "t" })
+        #expect(model.groups.first { $0.tag == "b" }?.tasks.map(\.title) == ["other"])
+        model.toggleTag(t, "b")
+        #expect(Set(model.groups.first { $0.tag == "b" }?.tasks.map(\.title) ?? []) == ["t", "other"])
+    }
+
+    @Test func aSubtasksTagChangesWhileItsParentsFormIsOpen() throws {
+        let model = try openModel()
+        model.add(title: "p")
+        let parent = model.tasks[0]
+        model.addSubtask(title: "s", under: parent)
+        model.startEditing(parent)
+        model.edit(parent, title: " ", description: "", priority: 4, tags: [])  // blocks leaving
+        model.toggleTag(model.subtasks(of: parent.id)[0], "work")
+        #expect(model.subtasks(of: parent.id)[0].tags.map(\.name) == ["work"])
+        #expect(model.editing == [parent.id])
+        #expect(model.isLeavingBlocked)
+    }
+
     @Test func theSortKeysComeFromTheCore() {
         #expect(sortKeys() == [.manual, .priority])
         #expect(sortWithKey(sort: .manual, key: .priority) == .priority(.ascending))
