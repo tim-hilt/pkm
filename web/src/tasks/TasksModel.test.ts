@@ -1461,3 +1461,95 @@ describe("setPriority", () => {
     expect(model.editing?.id).toBe(parent.id);
   });
 });
+
+describe("toggleTag", () => {
+  it("adds a missing Tag and removes a present one, keeping the other fields, as saved now", () => {
+    model.add("T", { description: "Body", priority: 3, tags: ["work"] });
+    const stale = first();
+    model.edit(stale, { title: "T2", description: "Body", priority: 2, tags: ["work"] });
+    expect(model.toggleTag(stale, "home")).toBe(true);
+    expect(model.find(stale.id)).toMatchObject({
+      title: "T2",
+      description: "Body",
+      priority: 2,
+      tags: ["work", "home"],
+    });
+    expect(model.toggleTag(stale, "work")).toBe(true);
+    expect(model.find(stale.id)?.tags).toEqual(["home"]);
+  });
+
+  it("makes a new Tag known", () => {
+    model.add("T");
+    model.toggleTag(first(), "fresh");
+    expect(model.allTags.map((t) => t.name)).toContain("fresh");
+  });
+
+  it("refuses an invalid Tag, saving nothing", async () => {
+    model.add("T");
+    await model.saved();
+    const saves = vi.fn();
+    model.onSaved = saves;
+    expect(model.toggleTag(first(), "No Good!")).toBe(false);
+    await model.saved();
+    expect(saves).not.toHaveBeenCalled();
+    expect(first().tags).toEqual([]);
+  });
+
+  it("writes once per toggle", async () => {
+    model.add("T");
+    await model.saved();
+    const saves = vi.fn();
+    model.onSaved = saves;
+    model.toggleTag(first(), "a");
+    await model.saved();
+    expect(saves).toHaveBeenCalledOnce();
+  });
+
+  it("removes a Task from a Filter whose Query it no longer matches", () => {
+    model.add("a", { tags: ["work"] });
+    model.add("b", { tags: ["work"] });
+    model.addFilter("Work", "@work");
+    model.list = { kind: "filter", id: model.filters.find((f) => f.title === "Work")!.id };
+    model.toggleTag(
+      model.tasks.find((t) => t.title === "a")!,
+      "work",
+    );
+    expect(titles()).toEqual(["b"]);
+  });
+
+  it("moves a Task to its new Groups in a Grouped Filter", () => {
+    deleteFavorites();
+    model.add("a", { tags: ["x"] });
+    model.add("other", { tags: ["y"] });
+    model.addFilter("Grouped", "*", "@x @y");
+    model.list = { kind: "filter", id: model.filters.find((f) => f.title === "Grouped")!.id };
+    const where = () => model.groups.map((g) => [g.tag, g.tasks.map((t) => t.title)]);
+    expect(where()).toEqual([
+      [undefined, []],
+      ["x", ["a"]],
+      ["y", ["other"]],
+    ]);
+    model.toggleTag(first(), "x");
+    model.toggleTag(first(), "y");
+    expect(where()).toEqual([
+      [undefined, []],
+      ["x", []],
+      ["y", ["a", "other"]],
+    ]);
+  });
+
+  it("changes a Subtask while the Parent's dialog is open, leaving the dialog's state alone", () => {
+    model.add("Parent");
+    const parent = first();
+    model.addSubtask("Sub", parent);
+    model.openLinked(parent.id);
+    model.edit(parent, { title: "", description: "", priority: 4, tags: [] });
+    expect(model.isLeavingBlocked).toBe(true);
+    const [sub] = model.subtasks(parent.id);
+    model.toggleTag(sub, "work");
+    expect(model.subtasks(parent.id)[0].tags).toEqual(["work"]);
+    expect(model.isLeavingBlocked).toBe(true);
+    expect(model.depth).toBe(1);
+    expect(model.editing?.id).toBe(parent.id);
+  });
+});

@@ -1,6 +1,7 @@
 import { Closing, rowPreview } from "../core/Core";
 import { make } from "../Dom";
 import type { RowMenuItem } from "./RowMenu";
+import { pickTagsDialog } from "./TagPicker";
 import { tagLabel } from "./TagLabel";
 import { titleNodes } from "./TitleText";
 import type { ListedTask, TasksModel } from "./TasksModel";
@@ -52,7 +53,7 @@ export function taskLine(
 
 /**
  * The row menu of a Task, as the list and the Subtasks section offer it: the
- * Priority palette, a divider, Reject. None while its Done is pending: that is
+ * Priority palette, "Tags…" (a dialog that toggles one Tag), a divider, Reject. None while its Done is pending: that is
  * Reverted at its circle.
  */
 export function taskMenuItems(task: ListedTask, model: TasksModel): RowMenuItem[] {
@@ -65,6 +66,14 @@ export function taskMenuItems(task: ListedTask, model: TasksModel): RowMenuItem[
         checked: priority === task.priority,
         run: () => model.setPriority(task, priority),
       })),
+    },
+    {
+      label: "Tags…",
+      run: () =>
+        pickTagsDialog(document.body, model, task.tags, {
+          kind: "one",
+          toggle: (tag) => model.toggleTag(task, tag),
+        }),
     },
     {
       label: "Reject",

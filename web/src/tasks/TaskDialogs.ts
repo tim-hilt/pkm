@@ -1,9 +1,10 @@
-import { TaskQuickAdd, imageTargets, isValidTag } from "../core/Core";
+import { TaskQuickAdd, imageTargets } from "../core/Core";
 import { button, make } from "../Dom";
 import { DescriptionImages } from "./DescriptionImages";
 import { DescriptionField } from "./DescriptionField";
 import { QuickAddField } from "./QuickAddField";
 import { SubtasksSection } from "./SubtasksSection";
+import { pickTagsDialog } from "./TagPicker";
 import { tagLabel } from "./TagLabel";
 import { titleNodes } from "./TitleText";
 import { type Blocker, type ListedTask, TasksModel } from "./TasksModel";
@@ -344,9 +345,12 @@ class TagField {
   }
 
   private pick(): void {
-    pickTagsDialog(this.parent, this.model, this.tags, (picked) => {
-      this.set(picked);
-      this.changed();
+    pickTagsDialog(this.parent, this.model, this.tags, {
+      kind: "many",
+      done: (picked) => {
+        this.set(picked);
+        this.changed();
+      },
     });
   }
 
@@ -363,85 +367,6 @@ class TagField {
           })),
     );
   }
-}
-
-/**
- * A modal list of every known Tag with a checkbox each, a search input at the
- * top that takes the focus on opening and also offers to create a Tag, and Done at the bottom right.
- * Done calls `done` with the Tags checked and closes; Cancel and Esc change nothing.
- */
-function pickTagsDialog(
-  parent: HTMLElement,
-  model: TasksModel,
-  chosen: string[],
-  done: (tags: string[]) => void,
-): void {
-  const selected = [...chosen];
-  const known = model.allTags;
-  const colors = new Map(known.map((t) => [t.name, t.color]));
-  const created: string[] = [];
-  const dialog = make("dialog", "tasks-dialog tasks-picker");
-  const heading = make("h2", "", ["Tags"]);
-  dialog.setAttribute("aria-labelledby", (heading.id = `tasks-dialog-${nextId++}`));
-  const confirm = button("tasks-confirm", "Done", () => {
-    done(selected);
-    dialog.close();
-  });
-  const list = make("ul", "tasks-picker-list");
-  const hint = make("p", "tasks-hint", ["Tags use a–z, 0–9, - and / only."]);
-  hint.hidden = true;
-  const search = textInput("");
-  search.type = "search";
-  search.placeholder = search.ariaLabel = "Search or create";
-  search.autocapitalize = "off";
-  search.autocomplete = "off";
-  search.spellcheck = false;
-  // showModal focuses it, which opens the keyboard on touch devices.
-  search.autofocus = true;
-
-  const creatable = () =>
-    isValidTag(search.value) && !colors.has(search.value) && !created.includes(search.value);
-  const create = () => {
-    created.push(search.value);
-    selected.push(search.value);
-    search.value = "";
-    show();
-  };
-  const show = () => {
-    const names = [...known.map((t) => t.name), ...created].filter((n) => n.includes(search.value));
-    const rows = names.sort().map((tag) => {
-      const box = make("input", "");
-      box.type = "checkbox";
-      box.checked = selected.includes(tag);
-      box.addEventListener("change", () => {
-        if (box.checked) selected.push(tag);
-        else selected.splice(selected.indexOf(tag), 1);
-      });
-      return make("li", "", [make("label", "", [tagLabel(tag, colors.get(tag)), box])]);
-    });
-    if (creatable()) {
-      rows.unshift(
-        make("li", "", [button("tasks-suggestion", `Create Tag '${search.value}'`, create)]),
-      );
-    }
-    list.replaceChildren(...rows);
-  };
-  search.addEventListener("input", () => {
-    const allowed = TasksModel.allowedTagText(search.value);
-    hint.hidden = allowed === search.value;
-    search.value = allowed;
-    show();
-  });
-  search.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    if (creatable()) create();
-  });
-  dialog.append(heading, search, list, hint, make("div", "tasks-actions", [confirm]));
-  dialog.addEventListener("close", () => dialog.remove());
-  show();
-  parent.append(dialog);
-  dialog.showModal();
 }
 
 /**

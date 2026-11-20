@@ -418,6 +418,21 @@ export class TasksModel {
   }
 
   /**
+   * Adds `tag` to a Task, as saved now, or removes it if the Task has it; a new
+   * Tag becomes known. Leaves the other fields and the edit stack alone, like
+   * `setPriority`. False, saving nothing, if the Tag is invalid.
+   */
+  toggleTag(task: ListedTask, tag: string): boolean {
+    if (!isValidTag(tag)) return false;
+    const saved = this.current(task);
+    const { store } = this.files;
+    return this.apply(() => {
+      if (saved.tags.includes(tag)) store.removeTag(saved.id, tag);
+      else store.edit(saved.id, saved.title, saved.description, saved.priority, [tag]);
+    });
+  }
+
+  /**
    * Commits the Shortcuts of Quick Add, the Title field of the edit view, to a
    * Task: its Title without them, a Priority Shortcut replacing `priority`, its
    * Tags added to `tags` (never removed), saved like `edit`. Returns the Task as
