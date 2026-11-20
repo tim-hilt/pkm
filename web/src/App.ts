@@ -75,6 +75,12 @@ export async function startApp(
       close: () => navigation.closeItem(),
     }).element,
   );
+  // A list the user opens gets its own History entry and address.
+  const listShown = tasks.onChange;
+  tasks.onChange = () => {
+    listShown();
+    if (!tasks.editing) navigation.showList(tasks.list);
+  };
   const noteFiles = await NoteFiles.open(storage);
   const notes = new NotesModel(noteFiles);
   noteFiles.onSaved = () => cloud.notesSaved();
@@ -140,6 +146,13 @@ export async function startApp(
     if (held !== undefined && held !== task) return navigation.openItem(held);
     tasks.openLinked(task);
     if (task !== undefined && !tasks.editing) return navigation.closeItem();
+    if (selected === "tasks" && task === undefined && !navigation.settings) {
+      // The address names the list; one that names none (or a Filter that is gone) gets the list shown.
+      const named = navigation.list;
+      const known = named?.kind === "filters" || tasks.filters.some((f) => f.id === named?.id);
+      if (named && known) tasks.list = named;
+      else navigation.settleList(tasks.list);
+    }
     if (drawing === undefined) void gallery.close();
     else if (gallery.openId === drawing) return;
     else if (gallery.drawings.some((entry) => entry.id === drawing))

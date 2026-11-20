@@ -5,6 +5,14 @@ export type Context = (typeof contexts)[number];
 /** The Contexts whose Items have a path of their own, `/<context>/<id>`. */
 const addressed: readonly Context[] = ["tasks", "drawings"];
 
+/** The list of the Tasks Context an address names: the Filters list, or a Filter's Tasks (`/tasks/filters`, `/tasks/filter/<id>`). */
+export type ListAddress = { kind: "filters" } | { kind: "filter"; id: string };
+
+function sameAddress(a: ListAddress | undefined, b: ListAddress | undefined): boolean {
+  if (!a || !b) return a === b;
+  return a.kind === "filters" ? b.kind === "filters" : b.kind === "filter" && a.id === b.id;
+}
+
 /** The browser's History, as far as navigation needs it. */
 export interface BrowserHistory {
   /** The path of the current entry. */
@@ -26,7 +34,7 @@ export type SettingsPage = (typeof settingsPages)[number];
 const lastContextKey = "lastContext";
 
 /** Where a path points: a Settings page, or a Context and, in Tasks and Drawings, the Item ID after it. */
-type Place = { settings: SettingsPage } | { context: Context; item?: string };
+type Place = { settings: SettingsPage } | { context: Context; item?: string; list?: ListAddress };
 
 /** The place of a path; `undefined` if it names none. What is below a Context but is no Item of it, or below Settings but is no page, is dropped. */
 function placeAt(path: string): Place | undefined {
@@ -37,6 +45,10 @@ function placeAt(path: string): Place | undefined {
   }
   const context = contexts.find((context) => context === first);
   if (!context) return undefined;
+  if (context === "tasks" && item === "filters" && deeper.length === 0)
+    return { context, list: { kind: "filters" } };
+  if (context === "tasks" && item === "filter" && deeper.length === 1 && deeper[0])
+    return { context, list: { kind: "filter", id: deeper[0] } };
   const isItem = addressed.includes(context) && item && deeper.length === 0;
   return isItem ? { context, item } : { context };
 }
@@ -44,6 +56,10 @@ function placeAt(path: string): Place | undefined {
 function pathOf(place: Place): string {
   if ("settings" in place)
     return place.settings === "main" ? "/settings" : `/settings/${place.settings}`;
+  if (place.list)
+    return place.list.kind === "filters"
+      ? `/${place.context}/filters`
+      : `/${place.context}/filter/${place.list.id}`;
   return place.item ? `/${place.context}/${place.item}` : `/${place.context}`;
 }
 
@@ -66,6 +82,8 @@ export class Navigation {
   settings: SettingsPage | undefined;
   /** The Item ID of the open Item in `selected`, if any. */
   item: string | undefined;
+  /** The Tasks list the address names, if it does. */
+  list: ListAddress | undefined;
   /** Called after `selected`, `settings` or `item` changed. */
   onChange: () => void = () => {};
   /** The Items of the entries `openItem` pushed since the list, so that going back leaves them all. */
@@ -106,6 +124,22 @@ export class Navigation {
     this.onChange();
   }
 
+  /** Shows the Tasks list `list`, as a new History entry unless the address names it already; only in the Tasks list. */
+  showList(list: ListAddress): void {
+    if (this.selected !== "tasks" || this.settings || this.item !== undefined) return;
+    if (sameAddress(this.list, list)) return;
+    this.history.push(pathOf({ context: "tasks", list }));
+    this.forgetPushed();
+    this.list = list;
+  }
+
+  /** Gives the current entry the address of the Tasks list `list`, without a new entry. */
+  settleList(list: ListAddress): void {
+    if (this.selected !== "tasks" || this.settings || this.item !== undefined) return;
+    this.history.replace(pathOf({ context: "tasks", list }));
+    this.list = list;
+  }
+
   /** Opens the Item `item` of the selected Context, as a new History entry, on top of the one open. */
   openItem(item: string): void {
     if (item === this.item) return;
@@ -133,6 +167,7 @@ export class Navigation {
     else this.history.replace(`/${this.selected}`);
     this.forgetPushed();
     this.item = undefined;
+    this.list = undefined;
     this.onChange();
   }
 
@@ -153,11 +188,13 @@ export class Navigation {
       this.selected = this.lastContext();
       this.settings = place.settings;
       this.item = undefined;
+      this.list = undefined;
       return;
     }
     this.selected = place.context;
     this.settings = undefined;
     this.item = place.item;
+    this.list = place.list;
     this.remembered.setItem(lastContextKey, place.context);
   }
 

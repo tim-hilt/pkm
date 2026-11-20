@@ -327,4 +327,28 @@ describe("Navigation", () => {
       expect(navigation.item).toBeUndefined();
     });
   });
+
+  it("opens the Tasks list of a path, keeping the path", () => {
+    const filters = open("/tasks/filters");
+    expect(filters.navigation.list).toEqual({ kind: "filters" });
+    const one = open("/tasks/filter/abc");
+    expect(one.navigation.list).toEqual({ kind: "filter", id: "abc" });
+    expect(one.navigation.item).toBeUndefined();
+    expect(one.history.entries).toEqual(["/tasks/filter/abc"]);
+  });
+
+  it("pushes an entry per Tasks list, and restores it on back", () => {
+    const { navigation, history } = open("/tasks/filters");
+    navigation.showList({ kind: "filter", id: "abc" });
+    navigation.showList({ kind: "filter", id: "abc" });
+    expect(history.entries).toEqual(["/tasks/filters", "/tasks/filter/abc"]);
+    history.back();
+    expect(navigation.list).toEqual({ kind: "filters" });
+  });
+
+  it("settles the address of the list shown without an entry", () => {
+    const { navigation, history } = open("/tasks");
+    navigation.settleList({ kind: "filter", id: "abc" });
+    expect(history.entries).toEqual(["/tasks/filter/abc"]);
+  });
 });
