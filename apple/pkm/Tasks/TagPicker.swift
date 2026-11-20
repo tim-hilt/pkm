@@ -102,18 +102,7 @@ struct TagPicker: View {
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
             #endif
-            #if os(iOS)
-                // A plain field: `searchable` in this sheet over another aborts on tapping it.
-                .safeAreaInset(edge: .bottom) {
-                    TextField("Search or create", text: $query)
-                    .accessibilityIdentifier("tag-search")
-                    .textFieldStyle(.roundedBorder)
-                    .textInputAutocapitalization(.never)
-                    .padding()
-                }
-            #else
-                .searchable(text: $query, prompt: "Search or create")
-            #endif
+            .searchable(text: $query, prompt: "Search or create")
             .autocorrectionDisabled()
             .onChange(of: query) { _, text in
                 let allowed = TasksModel.allowedTagText(text)
