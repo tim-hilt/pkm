@@ -62,7 +62,9 @@ extension NotesModel {
 }
 
 enum NotesLayout {
-    /// Whether the columns are pushed over each other rather than shown side by side.
+    /// Whether the columns are pushed over each other rather than shown side by side. Then the
+    /// lists have no selection: a selectable List takes a `NavigationLink(value:)`'s tap as a
+    /// selection of the value and pushes nothing.
     static func pushes(_ sizeClass: UserInterfaceSizeClass?) -> Bool { sizeClass == .compact }
 }
 
@@ -93,7 +95,7 @@ private struct FolderTree: View {
     }
 
     var body: some View {
-        List(selection: NotesLayout.pushes(sizeClass) ? .constant(nil) : selection) {
+        List(selection: NotesLayout.pushes(sizeClass) ? nil : selection) {
             row(path: "", title: "Notes", systemImage: "tray")
             OutlineGroup(model.tree, id: \.path, children: \.children) { folder in
                 row(path: folder.path, title: folder.name, systemImage: "folder")
@@ -292,7 +294,7 @@ private struct NoteList: View {
     private var isSearching: Bool { !model.searchText.isEmpty }
 
     var body: some View {
-        List(selection: NotesLayout.pushes(sizeClass) ? .constant(nil) : Bindable(model).openID) {
+        List(selection: NotesLayout.pushes(sizeClass) ? nil : Bindable(model).openID) {
             if isSearching {
                 ForEach(model.results, id: \.id) { result in
                     Group {
