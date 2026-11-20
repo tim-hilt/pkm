@@ -55,35 +55,38 @@ struct SubtasksSection: View {
 private struct AddSubtaskRow: View {
     @Environment(TasksModel.self) private var model
     let parent: ListedTask
-    @State private var isAdding = false
-    @State private var quickAdd = TaskQuickAdd()
+    @State private var quickAdd: TaskQuickAdd?
     /// Quick Add's Title, kept up to date by the field.
     @State private var title = ""
     @State private var revision = 0
 
     var body: some View {
-        if isAdding {
-            QuickAddField(quickAdd: quickAdd, title: $title, revision: revision, onSubmit: submit, onBlur: stop)
-                .accessibilityIdentifier("subtask-title")
+        if let quickAdd {
+            // Indented to line up with the Subtasks' Titles, past their circles.
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "circle").font(.title2).hidden()
+                QuickAddField(quickAdd: quickAdd, title: $title, revision: revision, onSubmit: submit, onBlur: stop)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("subtask-title")
         } else {
-            Button("Add Subtask", systemImage: "plus") { isAdding = true }
+            Button("Add Subtask", systemImage: "plus") { quickAdd = model.newQuickAdd() }
                 .accessibilityIdentifier("add-subtask")
         }
     }
 
     private func submit() {
-        guard !title.isEmpty else { return stop() }
+        guard let quickAdd, !title.isEmpty else { return stop() }
         guard
             model.addSubtask(
                 title: title, priority: quickAdd.priority() ?? 4, tags: quickAdd.tags(), under: parent)
         else { return }
-        quickAdd.replace(start: 0, end: UInt32(quickAdd.text().utf16.count), with: "")
+        self.quickAdd = model.newQuickAdd()
         revision += 1
     }
 
     private func stop() {
-        isAdding = false
-        quickAdd = TaskQuickAdd()
+        quickAdd = nil
         title = ""
     }
 }

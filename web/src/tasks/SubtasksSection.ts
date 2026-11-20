@@ -75,7 +75,7 @@ export class SubtasksSection {
   }
 
   private startAdding(): void {
-    const quickAdd = new TaskQuickAdd();
+    const quickAdd = this.model.newQuickAdd();
     const field = new QuickAddField(this.model, quickAdd, {
       submit: () => this.submit(),
       blur: () => this.stopAdding(),
@@ -92,7 +92,11 @@ export class SubtasksSection {
     const { field, quickAdd } = adding;
     if (field.title === "") return this.stopAdding();
     const extras = { priority: quickAdd.priority(), tags: quickAdd.tags() };
-    if (model.addSubtask(field.title, parent, extras)) field.clear();
+    if (model.addSubtask(field.title, parent, extras)) {
+      quickAdd.free();
+      adding.quickAdd = this.model.newQuickAdd();
+      field.use(adding.quickAdd);
+    }
   }
 
   refresh(): void {
