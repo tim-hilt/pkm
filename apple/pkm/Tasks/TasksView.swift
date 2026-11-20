@@ -312,8 +312,10 @@ private struct NewTaskSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                QuickAddField(quickAdd: quickAdd, title: $title, revision: revision, onSubmit: add)
-                    .accessibilityIdentifier("task-title")
+                QuickAddField(
+                    quickAdd: quickAdd, title: $title, revision: revision, refocusOnRevision: true, onSubmit: add
+                )
+                .accessibilityIdentifier("task-title")
                 MarkdownEditor(text: $description, placeholder: "Description", images: model.images)
                     .accessibilityIdentifier("task-description")
             }

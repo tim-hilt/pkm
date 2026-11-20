@@ -11,6 +11,8 @@ struct QuickAddField: View {
     /// Changes when the field must redraw because Quick Add was changed from outside (replaced, or
     /// its Priority Ignored).
     var revision = 0
+    /// A change of `revision` also takes the focus back, e.g. after Add, when it may be elsewhere.
+    var refocusOnRevision = false
     /// Tags the Task already has, which the list doesn't suggest.
     var taskTags: [String] = []
     /// Takes the keyboard focus when it appears.
@@ -105,7 +107,10 @@ struct QuickAddField: View {
                 draw()
                 if !isFocused && suggestions.isEmpty { onBlur() }
             }
-            .onChange(of: revision) { draw(placingCursor: true) }
+            .onChange(of: revision) {
+                if refocusOnRevision { isFocused = true }
+                draw(placingCursor: true)
+            }
             .overlay(alignment: .topLeading) {
                 if text.characters.isEmpty {
                     Text("Title").foregroundStyle(.tertiary).allowsHitTesting(false)
@@ -117,7 +122,22 @@ struct QuickAddField: View {
             .focusedSceneValue(\.formatText, formatting)
             .onKeyPress(.downArrow) { move(by: 1) }
             .onKeyPress(.upArrow) { move(by: -1) }
-            .onKeyPress(.tab) { pickSelected() ? .handled : .ignored }
+            .onKeyPress(.tab, phases: .down) { press in
+                if pickSelected() { return .handled }
+                #if os(macOS)
+                    // The editor would insert a tab; Tab moves on to the next field, Shift-Tab back.
+                    if press.modifiers.isSubset(of: .shift) {
+                        let window = NSApp.keyWindow
+                        if press.modifiers.contains(.shift) {
+                            window?.selectPreviousKeyView(nil)
+                        } else {
+                            window?.selectNextKeyView(nil)
+                        }
+                        return .handled
+                    }
+                #endif
+                return .ignored
+            }
             .onKeyPress(.escape) {
                 guard !suggestions.isEmpty else { return .ignored }
                 isClosed = true
