@@ -111,6 +111,7 @@ export class NotesView {
         label: "Move to…",
         run: () => moveDialog(this.element, this.model, (to) => this.model.moveNote(row.id, to)),
       },
+      { label: "Copy Note", run: () => this.copy(row.id) },
       { label: "Delete", danger: true, run: () => this.ask(row.id) },
     ]);
     item.addEventListener("keydown", (event) => {
@@ -187,13 +188,24 @@ export class NotesView {
     body.element.dataset.placeholder = "Note";
     const title = new TitleField(note.title, { change: save, submit: () => body.focus() });
     body.element.addEventListener("input", save);
+    const more = button("tasks-back", "⋯", () => {
+      const { right, bottom } = more.getBoundingClientRect();
+      this.menu.show([{ label: "Copy Note", run: () => this.copy(id) }], right, bottom, more);
+    });
+    more.ariaLabel = "More";
+    more.setAttribute("aria-haspopup", "menu");
     const bar = make("div", "notes-bar", [
       button("tasks-back", "Notes", () => this.model.open(undefined)),
-      button("tasks-back", "Delete", () => this.ask(id)),
+      make("div", "notes-bar-end", [button("tasks-back", "Delete", () => this.ask(id)), more]),
     ]);
     this.detail.replaceChildren(bar, make("div", "notes-editor", [title.element, body.element]));
     this.fields = { title, body, syncs: this.model.syncs };
     if (this.model.newId === id) title.focus();
+  }
+
+  /** Puts the Note's text on the clipboard. */
+  private copy(id: string): void {
+    void navigator.clipboard.writeText(this.model.copyText(id));
   }
 
   /** Deletes the Note, or asks first if its Body has text. */

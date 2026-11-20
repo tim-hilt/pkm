@@ -286,6 +286,7 @@ private struct FolderContents: View {
             .modifier(FolderDrop(path: path) { request(.refused($0)) })
             .swipeActions { Button("Delete", role: .destructive) { request(.deleteNote(row.id)) } }
             .contextMenu {
+                Button("Copy Note", systemImage: "doc.on.doc") { model.copy(id: row.id) }
                 Button("Move to…", systemImage: "folder") { request(.move(.note(row.id))) }
                 Button("Delete", systemImage: "trash", role: .destructive) { request(.deleteNote(row.id)) }
             }
@@ -506,6 +507,13 @@ private struct NoteEditor: View {
             guard isLoaded, let note = model.note(id: id) else { return }
             if note.title != title { title = note.title }
             if note.body != text { text = note.body }
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu("More", systemImage: "ellipsis.circle") {
+                    Button("Copy Note", systemImage: "doc.on.doc") { model.copy(id: id) }
+                }
+            }
         }
         #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)

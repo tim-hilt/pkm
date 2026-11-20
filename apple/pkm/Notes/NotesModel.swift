@@ -1,6 +1,12 @@
 import Foundation
 import Observation
 
+#if canImport(AppKit)
+    import AppKit
+#elseif canImport(UIKit)
+    import UIKit
+#endif
+
 /// The Notes Context's state: the Folder tree with the Notes of each Folder, the selected Folder and
 /// the open Note, from the core's store. It only forwards to the store; every Notes rule lives in the core.
 @MainActor @Observable
@@ -164,6 +170,23 @@ final class NotesModel {
             changes += 1
         }
         reloadResults()
+    }
+
+    /// The Note as text to copy: its Title, then its Body after a blank line; either may be missing.
+    func copyText(id: String) -> String {
+        guard let note = note(id: id) else { return "" }
+        return [note.title, note.body].filter { !$0.isEmpty }.joined(separator: "\n\n")
+    }
+
+    /// Puts the Note's text on the clipboard.
+    func copy(id: String) {
+        let text = copyText(id: id)
+        #if os(macOS)
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        #else
+            UIPasteboard.general.string = text
+        #endif
     }
 
     /// Whether Deleting the Note asks first: its Body has text.

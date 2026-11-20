@@ -222,6 +222,12 @@ export class NotesModel {
     this.changed();
   }
 
+  /** The Note as text to copy: its Title, then its Body after a blank line; either may be missing. */
+  copyText(id: string): string {
+    const { title = "", body = "" } = this.note(id) ?? {};
+    return [title, body].filter((part) => part !== "").join("\n\n");
+  }
+
   /** Whether Deleting the Note asks first: its Body has text. */
   confirmsDelete(id: string): boolean {
     return (this.note(id)?.body ?? "") !== "";

@@ -62,6 +62,17 @@ describe("the Notes list", () => {
   });
 });
 
+describe("Copy Note", () => {
+  it("is the Title, then the Body after a blank line", () => {
+    model.add();
+    const id = model.openId!;
+    model.save(id, "Plan", "one\ntwo");
+    expect(model.copyText(id)).toBe("Plan\n\none\ntwo");
+    model.save(id, "", "one");
+    expect(model.copyText(id)).toBe("one");
+  });
+});
+
 describe("Folders", () => {
   const names = () => model.folders.map((folder) => `${"-".repeat(folder.depth)}${folder.name}`);
 
