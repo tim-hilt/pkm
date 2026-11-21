@@ -60,7 +60,9 @@ if [ "$DEVICE" = mac ]; then
         echo "error: the screen is locked; unlock it to take a Mac screenshot" >&2
         exit 1
     fi
-    xcodebuild -quiet -scheme pkm -destination 'platform=macOS' -derivedDataPath "$DERIVED" build
+    # Signed ad hoc without the App Group, which needs a developer account; screenshots don't use it.
+    xcodebuild -quiet -scheme pkm -destination 'platform=macOS' -derivedDataPath "$DERIVED" build \
+        CODE_SIGN_IDENTITY=- CODE_SIGN_ENTITLEMENTS=
     app="$DERIVED/Build/Products/Debug/pkm.app"
     pkill -x 'pkm' 2>/dev/null || true
     while pgrep -xq 'pkm'; do sleep 0.2; done # so its window isn't the one captured

@@ -146,12 +146,7 @@ impl Bookmarks {
             });
         }
         let mut entropy = Entropy::from_system();
-        let id = loop {
-            let id = ItemId::new(&mut entropy);
-            if !self.files.exists(&self.path(&id)) {
-                break id;
-            }
-        };
+        let id = self.unused_id(&mut entropy);
         let cover = match details.cover.as_ref().and_then(|cover| images.get(cover)) {
             Some(bytes) => self.keep_image(&mut entropy, bytes)?,
             None => None,
@@ -364,11 +359,7 @@ impl Bookmarks {
     pub fn markup(&self, id: &str) -> io::Result<Markup> {
         let article = self.read_article(id)?;
         let mut markup = self.read_state(id).markup.listed();
-        markup.highlights = markup
-            .highlights
-            .into_iter()
-            .filter_map(|h| resolve(&article, h))
-            .collect();
+        markup.highlights = resolve(&article, markup.highlights);
         let length = utf16_length(&article);
         for comment in &mut markup.page_comments {
             comment.place.offset = comment.place.offset.min(length);
@@ -539,20 +530,21 @@ impl Bookmarks {
         Ok(self.bookmark_of(&file, &id))
     }
 
-    /// Settles what Sync leaves: Bookmarks that share an Address are merged
-    /// (`merge_duplicates`), and the state files of Bookmarks that are
-    /// Deleted or have no Article, which another Device's Markup brought
-    /// back, are removed. Gives the ids of the Bookmarks it changed or removed.
-    pub fn settle(&self) -> io::Result<Vec<String>> {
+    /// Settles what a Sync step left, given the ids of the Bookmarks it wrote
+    /// or deleted here (`changed`; other names are skipped): Bookmarks that
+    /// share an Address are merged (`merge_duplicates`), and of those in
+    /// `changed` that Sync Deleted or Dropped the Article of, the state that
+    /// another Device's Markup brought back is removed. Only those: a state
+    /// may arrive a step before its Bookmark or its Article. Gives the ids of
+    /// the Bookmarks it changed or removed.
+    pub fn settle(&self, changed: &[String]) -> io::Result<Vec<String>> {
         let mut touched = self.merge_duplicates()?;
-        for listed in self.files.list(&self.root.join(STATE_FOLDER))? {
-            let Some(id) = listed.name.strip_suffix(".json") else {
-                continue;
-            };
-            if self.read(id).is_ok_and(|bookmark| bookmark.has_article) {
+        for id in changed.iter().filter(|name| ItemId::parse(name).is_some()) {
+            let state = self.state_path(id);
+            if !self.files.exists(&state) || self.read(id).is_ok_and(|b| b.has_article) {
                 continue;
             }
-            ignore_not_found(self.files.remove(&self.state_path(id)))?;
+            ignore_not_found(self.files.remove(&state))?;
             touched.push(id.to_owned());
         }
         Ok(touched)
@@ -616,9 +608,7 @@ impl Bookmarks {
         } else {
             let length = utf16_length(&kept.body);
             theirs.progress = None;
-            theirs.markup.highlights = (theirs.markup.highlights.into_iter())
-                .filter_map(|highlight| resolve(&kept.body, highlight))
-                .collect();
+            theirs.markup.highlights = resolve(&kept.body, theirs.markup.highlights);
             theirs
                 .markup
                 .page_comments
@@ -664,12 +654,7 @@ impl Bookmarks {
                 }
                 Some(_) => {}
                 None => {
-                    let new_id = loop {
-                        let new_id = ItemId::new(&mut entropy);
-                        if !self.files.exists(&self.path(&new_id)) {
-                            break new_id;
-                        }
-                    };
+                    let new_id = self.unused_id(&mut entropy);
                     let cover = match theirs.cover.as_ref().and_then(|c| images.get(c)) {
                         Some(bytes) => self.keep_image(&mut entropy, bytes)?,
                         None => None,
@@ -781,6 +766,16 @@ impl Bookmarks {
 
     fn path(&self, id: &ItemId) -> PathBuf {
         self.root.join(format!("{id}.md"))
+    }
+
+    /// A new Item ID that no Bookmark here has.
+    fn unused_id(&self, entropy: &mut Entropy) -> ItemId {
+        loop {
+            let id = ItemId::new(entropy);
+            if !self.files.exists(&self.path(&id)) {
+                return id;
+            }
+        }
     }
 
     /// The hidden state file of `id`.
@@ -897,28 +892,31 @@ fn progress_of(offset: u64, last_read: u64, body: &str) -> ArticleProgress {
     }
 }
 
-/// `highlight` where its quoted text is: as it is if its offsets hold the
-/// text, else at the first place the text is in `article`; none if it isn't.
-fn resolve(article: &str, mut highlight: Highlight) -> Option<Highlight> {
-    let Anchor { start, end } = highlight.anchor;
+/// `highlights` where their quoted text is in `article`: each as it is if its
+/// offsets hold the text, else at the first place the text is; those whose
+/// text isn't there are left out.
+fn resolve(article: &str, highlights: Vec<Highlight>) -> Vec<Highlight> {
     let units: Vec<u16> = article.encode_utf16().collect();
-    let held = units.get(start as usize..end as usize);
-    if held.is_some_and(|held| {
-        held.iter()
-            .copied()
-            .eq(highlight.quoted_text.encode_utf16())
-    }) {
-        return Some(highlight);
-    }
-    let found = article
-        .find(&highlight.quoted_text)
-        .filter(|_| !highlight.quoted_text.is_empty())?;
-    let start = utf16_length(&article[..found]);
-    highlight.anchor = Anchor {
-        start,
-        end: start + utf16_length(&highlight.quoted_text),
+    let holds = |h: &Highlight| {
+        (units.get(h.anchor.start as usize..h.anchor.end as usize))
+            .is_some_and(|held| held.iter().copied().eq(h.quoted_text.encode_utf16()))
     };
-    Some(highlight)
+    let mut resolved = Vec::with_capacity(highlights.len());
+    for mut highlight in highlights {
+        if !holds(&highlight) {
+            let quoted = &highlight.quoted_text;
+            let Some(found) = article.find(quoted.as_str()).filter(|_| !quoted.is_empty()) else {
+                continue;
+            };
+            let start = utf16_length(&article[..found]);
+            highlight.anchor = Anchor {
+                start,
+                end: start + utf16_length(quoted),
+            };
+        }
+        resolved.push(highlight);
+    }
+    resolved
 }
 
 /// A new Item ID, for a Highlight or a page Comment.
@@ -2054,7 +2052,7 @@ mod tests {
             "2024-01-02T00:00:00Z",
         );
 
-        let mut touched = store.settle().unwrap();
+        let mut touched = store.settle(&[]).unwrap();
         touched.sort();
 
         assert_eq!(touched.len(), 2);
@@ -2062,27 +2060,33 @@ mod tests {
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].id, older.id);
         assert_eq!(all[0].tags, ["read", "later"]);
-        assert_eq!(store.settle().unwrap(), Vec::<String>::new());
+        assert_eq!(store.settle(&[]).unwrap(), Vec::<String>::new());
     }
 
     #[test]
-    fn settling_removes_the_states_of_bookmarks_that_are_gone_or_have_no_article() {
+    fn settling_removes_the_states_of_changed_bookmarks_that_are_gone_or_have_no_article() {
         let scratch = Scratch::new();
         let store = scratch.store();
         let read = saved_with_article(&store, "https://a.example/", "T", "alpha");
         store.save_progress(&read.id, 1).unwrap();
         let plain = plain(&store, "https://b.example/");
         let state = |id: &str| scratch.0.join(".state").join(format!("{id}.json"));
-        for id in [plain.id.as_str(), "zzzzzzzzzzzz"] {
-            fs::write(state(id), "12 3456").unwrap();
+        let (gone, ahead) = ("zzzzzzzzzzzz", "yyyyyyyyyyyy");
+        for id in [plain.id.as_str(), gone, ahead] {
+            fs::write(state(id), r#"{"markup":{}}"#).unwrap();
         }
 
-        let mut touched = store.settle().unwrap();
+        let changed = [&read.id, &plain.id, gone, "abc.png"].map(str::to_owned);
+        let mut touched = store.settle(&changed).unwrap();
         touched.sort();
 
-        assert_eq!(touched.len(), 2);
+        assert_eq!(touched, [plain.id.as_str(), gone]);
         assert!(state(&read.id).exists());
-        assert!(!state(&plain.id).exists() && !state("zzzzzzzzzzzz").exists());
+        assert!(!state(&plain.id).exists() && !state(gone).exists());
+        assert!(
+            state(ahead).exists(),
+            "a state may arrive before its Bookmark"
+        );
     }
 
     #[test]
@@ -2120,7 +2124,7 @@ mod tests {
             "2024-01-02T00:00:00Z",
         );
 
-        store.settle().unwrap();
+        store.settle(&[]).unwrap();
 
         let merged = store.read(&older.id).unwrap();
         assert!(merged.has_article);
@@ -2165,7 +2169,7 @@ mod tests {
             "2024-01-02T00:00:00Z",
         );
 
-        store.settle().unwrap();
+        store.settle(&[]).unwrap();
 
         assert_eq!(store.read_article(&older.id).unwrap(), "alpha beta\n");
         let markup = store.markup(&older.id).unwrap();

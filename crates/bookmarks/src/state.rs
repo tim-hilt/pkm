@@ -66,12 +66,9 @@ impl State {
         Self::parse(text).unwrap_or_default()
     }
 
-    /// The state stored as `text`; none if `text` isn't one. The first
-    /// version kept only `<offset> <last_read>`.
+    /// The state stored as `text`; none if `text` isn't one.
     pub(crate) fn parse(text: &str) -> Option<Self> {
-        let Ok(json) = json::parse(text) else {
-            return Self::parse_legacy(text);
-        };
+        let json = json::parse(text).ok()?;
         let markup = json.get("markup")?;
         let number = |key| json.get("progress")?.get(key)?.as_u64();
         Some(Self {
@@ -81,14 +78,6 @@ impl State {
                 .get("changes")
                 .map(MarkupChanges::from_json)
                 .unwrap_or_default(),
-        })
-    }
-
-    fn parse_legacy(line: &str) -> Option<Self> {
-        let (offset, last_read) = line.split_once(' ')?;
-        Some(Self {
-            progress: Some((offset.parse().ok()?, last_read.parse().ok()?)),
-            ..Self::default()
         })
     }
 
@@ -153,17 +142,10 @@ mod tests {
     }
 
     #[test]
-    fn the_first_versions_line_is_still_read() {
-        let state = State::decode("12 3456");
-        assert_eq!(state.progress, Some((12, 3456)));
-        assert!(state.markup.highlights.is_empty());
-    }
-
-    #[test]
     fn junk_is_no_state() {
         assert_eq!(State::decode("junk"), State::default());
         assert_eq!(State::decode(""), State::default());
-        for junk in ["junk", "", "{}", "1 x"] {
+        for junk in ["junk", "", "{}", "12 3456"] {
             assert_eq!(State::parse(junk), None, "{junk:?}");
         }
     }

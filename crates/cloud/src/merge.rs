@@ -68,10 +68,11 @@ pub trait Merge: Send + Sync {
     }
 
     /// Settles what the Items of `dir`, the Context folder on this Device,
-    /// have become after a step that Synced every folder of the Context: what
-    /// only the Context can see across Items, like two Items that are one.
-    /// Gives the names of the Items it changed or removed. Nothing by default.
-    fn settle(&self, _dir: &Path) -> io::Result<Vec<String>> {
+    /// have become after a step that Synced every folder of the Context and
+    /// wrote or deleted the Items named `changed` here: what only the Context
+    /// can see across Items, like two Items that are one. Gives the names of
+    /// the Items it changed or removed. Nothing by default.
+    fn settle(&self, _dir: &Path, _changed: &[String]) -> io::Result<Vec<String>> {
         Ok(Vec::new())
     }
 
@@ -211,10 +212,12 @@ impl Merge for BookStates {
 }
 
 /// Bookmarks: `<id>.md` files, merged three-way by field, and the images beside
-/// them, transferred unchanged (ADR-0029). Two Bookmarks of one Address that
-/// Devices Saved before they Synced are merged into the older after the step
-/// (`settle`). A file that isn't a Bookmark is left where it is, and two
-/// versions that can't merge are not both kept: one Bookmark has one file.
+/// them, transferred unchanged (ADR-0029). After the step (`settle`), two
+/// Bookmarks of one Address that Devices Saved before they Synced are merged
+/// into the older, and a Bookmark the step Deleted or Dropped the Article of
+/// loses the state Markup elsewhere brought back. A file that isn't a
+/// Bookmark is left where it is, and two versions that can't merge are not
+/// both kept: one Bookmark has one file.
 pub struct Bookmarks;
 
 impl Bookmarks {
@@ -247,8 +250,8 @@ impl Merge for Bookmarks {
         false
     }
 
-    fn settle(&self, dir: &Path) -> io::Result<Vec<String>> {
-        pkm_bookmarks::Bookmarks::open(dir)?.settle()
+    fn settle(&self, dir: &Path, changed: &[String]) -> io::Result<Vec<String>> {
+        pkm_bookmarks::Bookmarks::open(dir)?.settle(changed)
     }
 }
 
@@ -276,15 +279,6 @@ impl Merge for BookmarkStates {
 
     fn transfers_unparseable(&self) -> bool {
         false
-    }
-
-    /// The Bookmarks folder is the one above: a state that Markup on another
-    /// Device brought back for a Deleted Bookmark goes.
-    fn settle(&self, dir: &Path) -> io::Result<Vec<String>> {
-        match dir.parent() {
-            Some(bookmarks) => pkm_bookmarks::Bookmarks::open(bookmarks)?.settle(),
-            None => Ok(Vec::new()),
-        }
     }
 }
 

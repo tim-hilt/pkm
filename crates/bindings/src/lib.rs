@@ -682,7 +682,7 @@ impl CloudSync {
                 storage: book_states_storage,
                 merge: Arc::new(BookStates),
             },
-            // The files first: the state files are settled once they are in.
+            // The files first, so that a state seldom arrives before its Bookmark.
             SyncFolder {
                 name: Bookmarks::FOLDER.into(),
                 dir: bookmarks.to_path_buf(),

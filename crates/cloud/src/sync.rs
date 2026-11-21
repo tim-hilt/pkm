@@ -219,7 +219,7 @@ fn settle(folders: &[ContextFolder], outcomes: &mut [StepOutcome]) {
         if outcome.changed.is_empty() {
             continue;
         }
-        match folder.merge.settle(folder.dir) {
+        match folder.merge.settle(folder.dir, &outcome.changed) {
             Ok(names) => outcome.changed.extend(names),
             Err(error) => outcome.error = Some(error),
         }
@@ -1006,6 +1006,20 @@ mod tests {
             /// The Bookmarks on this Device.
             fn bookmark_store(&self) -> pkm_bookmarks::Bookmarks {
                 pkm_bookmarks::Bookmarks::open(&self.bookmarks.0).unwrap()
+            }
+
+            /// One Sync step over the Bookmarks' state files alone, as when the step's
+            /// upload of a Bookmark file failed.
+            fn sync_bookmark_states_only(&self, cloud: &Cloud) {
+                let states_state = SyncState::open(self.state.0.join("BookmarkStates")).unwrap();
+                let folders = [ContextFolder {
+                    dir: &self.bookmarks.0.join(".state"),
+                    state: &states_state,
+                    storage: &cloud.storage,
+                    merge: Arc::new(BookmarkStates),
+                }];
+                let outcomes = sync_context_folders(&folders, &AtomicBool::new(false), &|_| {});
+                assert!(outcomes[0].error.is_none(), "{:?}", outcomes[0].error);
             }
 
             /// One Sync step over the Bookmarks Context: the Bookmark files and images,
@@ -4156,6 +4170,23 @@ mod tests {
             fs::write(phone.bookmarks.0.join(".state/bbbbbbbbbbbb.json"), "junk").unwrap();
             sync_bookmarks_both(&cloud, &phone, &tablet);
             assert!(cloud.files().is_empty());
+        }
+
+        #[test]
+        fn a_state_that_arrives_before_its_bookmark_is_kept() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            let saved = save_bookmark(&phone, "https://a.example/", "alpha");
+            phone.bookmark_store().save_progress(&saved.id, 2).unwrap();
+
+            phone.sync_bookmark_states_only(&cloud);
+            tablet.sync_bookmarks(&cloud);
+            sync_bookmarks_both(&cloud, &phone, &tablet);
+
+            for device in [&phone, &tablet] {
+                let read = device.bookmark_store().read(&saved.id).unwrap();
+                assert_eq!(read.progress.map(|p| p.offset), Some(2));
+            }
         }
     }
 }

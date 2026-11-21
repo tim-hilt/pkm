@@ -224,8 +224,8 @@ final class BookmarksModel {
     }
 
     /// Adds the Article of the page as it is now (or the given `html` of it, see `prepare`) to a
-    /// Bookmark without one. A Bookmark Saved elsewhere gets it as a Bookmark Saved here, which
-    /// `takeShared` hands over. False if the page can't be downloaded or has no text, and nothing changes.
+    /// Bookmark without one. A Bookmark Saved elsewhere gets it as a Bookmark Saved here, which the
+    /// app takes in (`exchangeWithShareExtension`). False if the page can't be downloaded or has no text, and nothing changes.
     func addArticle(to bookmark: Bookmark, html: String? = nil) async -> Bool {
         guard !bookmark.hasArticle, let url = URL(string: bookmark.address) else { return false }
         let page = await fetch(bookmark.address, url: url, html: html, withCover: false)
