@@ -5,6 +5,7 @@ import SwiftUI
 /// Color or resets it to Default, and Delete, which a full swipe runs.
 struct ManageTagsView: View {
     @Environment(TasksModel.self) private var tasks
+    @Environment(BookmarksModel.self) private var bookmarks
     @State private var deletion = TagDeletion()
     @State private var editing: String?
 
@@ -41,13 +42,17 @@ struct ManageTagsView: View {
             isPresented: asking, titleVisibility: .visible
         ) {
             Button("Delete", role: .destructive) {
-                if let tag = deletion.pending { tasks.deleteTag(tag) }
+                if let tag = deletion.pending {
+                    bookmarks.removeTagEverywhere(tag)
+                    tasks.deleteTag(tag)  // last: it forgets the Tag
+                }
                 deletion.cancel()
             }
             Button("Cancel", role: .cancel) { deletion.cancel() }
         }
         .overlay { if tasks.allTags.isEmpty { Text("No Tags").foregroundStyle(.secondary) } }
         .navigationTitle("Tags")
+        .onAppear(perform: tasks.refreshTags)
     }
 
     /// The dialog shows while a Tag is pending; dismissing it cancels.

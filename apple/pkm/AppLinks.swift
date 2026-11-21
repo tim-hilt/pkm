@@ -9,18 +9,21 @@ struct AppLinks {
     let gallery: Gallery
     let library: LibraryModel
     let tasks: TasksModel
+    let bookmarks: BookmarksModel
 
     func follow(_ url: URL) {
         guard let link = navigation.follow(url) else { return }
         gallery.close()
         library.closeBook()
         tasks.openLinked(id: nil)
+        bookmarks.openLinked(id: nil)
         guard let itemID = link.itemID else { return }
         switch link.context {
         case .drawings: gallery.openDrawing(linkedItemID: itemID)
         case .books: library.openBook(id: itemID)
         case .tasks: tasks.openLinked(id: itemID)
-        case .notes, .bookmarks: break
+        case .bookmarks: bookmarks.openLinked(id: itemID)
+        case .notes: break
         }
     }
 }

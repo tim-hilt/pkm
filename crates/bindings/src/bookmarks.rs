@@ -37,6 +37,7 @@ pub struct Bookmark {
     pub published: String,
     pub saved: String,
     pub has_article: bool,
+    pub tags: Vec<String>,
 }
 
 /// The text of a page, see `pkm_bookmarks::Article`.
@@ -131,6 +132,11 @@ impl BookmarkStore {
         Ok(self.0.list()?)
     }
 
+    /// Every Bookmark carrying the Tag, newest Saved first.
+    pub fn bookmarks_tagged(&self, tag: String) -> Result<Vec<Bookmark>, BookmarksError> {
+        Ok(self.0.list_tagged(&tag)?)
+    }
+
     pub fn read(&self, id: String) -> Result<Bookmark, BookmarksError> {
         Ok(self.0.read(&id)?)
     }
@@ -148,6 +154,42 @@ impl BookmarkStore {
     /// The bytes of the image `name` that the Bookmark's Article shows.
     pub fn read_image(&self, id: String, name: String) -> Result<Vec<u8>, BookmarksError> {
         Ok(self.0.read_image(&id, &name)?)
+    }
+
+    /// Renames the Bookmark; a blank `title` changes nothing.
+    pub fn rename(&self, id: String, title: String) -> Result<Bookmark, BookmarksError> {
+        Ok(self.0.rename(&id, &title)?)
+    }
+
+    /// Puts a Tag on the Bookmark; fails for an invalid Tag.
+    pub fn add_tag(&self, id: String, tag: String) -> Result<Bookmark, BookmarksError> {
+        Ok(self.0.add_tag(&id, &tag)?)
+    }
+
+    /// Takes a Tag off the Bookmark; the Tag stays known.
+    pub fn remove_tag(&self, id: String, tag: String) -> Result<Bookmark, BookmarksError> {
+        Ok(self.0.remove_tag(&id, &tag)?)
+    }
+
+    /// Takes a Tag off every Bookmark, for Delete a Tag.
+    pub fn remove_tag_everywhere(&self, tag: String) -> Result<(), BookmarksError> {
+        Ok(self.0.remove_tag_everywhere(&tag)?)
+    }
+
+    /// Gives a Bookmark without an Article the `article`, with its `images` as in `save`.
+    /// A Bookmark that has one keeps it.
+    pub fn add_article(
+        &self,
+        id: String,
+        article: String,
+        images: HashMap<String, Vec<u8>>,
+    ) -> Result<Bookmark, BookmarksError> {
+        Ok(self.0.add_article(&id, &article, &images)?)
+    }
+
+    /// Takes the Article and its images off the Bookmark.
+    pub fn drop_article(&self, id: String) -> Result<Bookmark, BookmarksError> {
+        Ok(self.0.drop_article(&id)?)
     }
 
     /// Deletes the Bookmark with its Cover and images.

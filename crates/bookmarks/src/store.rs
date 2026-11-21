@@ -1,6 +1,6 @@
 //! The Bookmarks store: `<id>.md` files with the front matter `id`,
 //! `address`, `title`, `site`, `cover`, `excerpt`, `author`, `published` and
-//! `saved`, beside their Cover `<id>.<ext>` (Bookmarks ADR-0002). The body is
+//! `saved` and a list of `tags`, beside their Cover `<id>.<ext>` (Bookmarks ADR-0002). The body is
 //! the Article, if the Bookmark has one.
 
 use crate::address::normalise;
@@ -8,10 +8,12 @@ use crate::extract::Details;
 use crate::images;
 use pkm_base::clock::{iso8601, now_ms};
 use pkm_base::files::{DiskFiles, Files};
-use pkm_base::front_matter::Document;
+use pkm_base::front_matter::{Document, Value};
 use pkm_base::images::{extension, is_image_file};
 use pkm_base::item_id::ItemId;
 use pkm_base::random::Entropy;
+use pkm_base::tag;
+use pkm_base::tag_store::TagStore;
 use std::collections::HashMap;
 use std::fs;
 use std::io;
@@ -26,6 +28,7 @@ const EXCERPT: &str = "excerpt";
 const AUTHOR: &str = "author";
 const PUBLISHED: &str = "published";
 const SAVED: &str = "saved";
+const TAGS: &str = "tags";
 
 /// A Bookmark and its details. Empty where there is none, except `cover`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +47,8 @@ pub struct Bookmark {
     pub saved: String,
     /// Whether the Bookmark has an Article.
     pub has_article: bool,
+    /// Valid Tags, in the order they were added.
+    pub tags: Vec<String>,
 }
 
 /// What Saving gave.
@@ -59,6 +64,7 @@ pub struct Saved {
 pub struct Bookmarks {
     files: Arc<dyn Files>,
     root: PathBuf,
+    tags: TagStore,
 }
 
 impl Bookmarks {
@@ -74,9 +80,11 @@ impl Bookmarks {
 
     /// The Bookmarks in `root` on any `files`.
     pub fn open_in(files: Arc<dyn Files>, root: impl Into<PathBuf>) -> Self {
+        let root = root.into();
         Self {
+            tags: TagStore::beside(files.clone(), &root),
             files,
-            root: root.into(),
+            root,
         }
     }
 
@@ -118,7 +126,6 @@ impl Bookmarks {
             Some(bytes) => self.keep_image(&mut entropy, bytes)?,
             None => None,
         };
-        let one_line = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
         let title = [one_line(title), one_line(&details.title)]
             .into_iter()
             .find(|t| !t.is_empty())
@@ -140,26 +147,7 @@ impl Bookmarks {
         }
         file.set_scalar(SAVED, iso8601(now_ms()));
         if let Some(article) = article {
-            let mut kept: HashMap<String, Option<String>> = HashMap::new();
-            let mut failed = None;
-            let article = images::rewrite(article, |address| {
-                kept.entry(address.to_owned())
-                    .or_insert_with(|| {
-                        let bytes = images.get(address)?;
-                        self.keep_image(&mut entropy, bytes).unwrap_or_else(|e| {
-                            failed = Some(e);
-                            None
-                        })
-                    })
-                    .clone()
-            });
-            if let Some(error) = failed {
-                return Err(error);
-            }
-            let article = article.trim();
-            if !article.is_empty() {
-                file.body = format!("{article}\n");
-            }
+            file.body = self.keep_article(&mut entropy, article, images)?;
         }
         self.files.write(&self.path(&id), &file.render())?;
         Ok(Saved {
@@ -220,6 +208,105 @@ impl Bookmarks {
         self.files.read_bytes(&self.root.join(name))
     }
 
+    /// Every Bookmark carrying exactly `tag`, newest Saved first.
+    pub fn list_tagged(&self, tag: &str) -> io::Result<Vec<Bookmark>> {
+        let mut all = self.list()?;
+        all.retain(|b| b.tags.iter().any(|t| t == tag));
+        Ok(all)
+    }
+
+    /// Renames the Bookmark `id` (one line, like Saving does); a blank
+    /// `title` leaves it as it is. `NotFound` if there is no such Bookmark.
+    pub fn rename(&self, id: &str, title: &str) -> io::Result<Bookmark> {
+        let title = one_line(title);
+        self.modify(id, |file| {
+            if !title.is_empty() {
+                file.set_scalar(TITLE, title);
+            }
+        })
+    }
+
+    /// Puts `tag` on the Bookmark `id`, unless it has it; a new Tag joins the
+    /// Tags file. `InvalidInput` for an invalid Tag, `NotFound` if there is no
+    /// such Bookmark.
+    pub fn add_tag(&self, id: &str, tag: &str) -> io::Result<Bookmark> {
+        if !tag::is_valid(tag) {
+            return Err(io::ErrorKind::InvalidInput.into());
+        }
+        let bookmark = self.modify(id, |file| {
+            let mut tags = tags_of(file);
+            if !tags.iter().any(|t| t == tag) {
+                tags.push(tag.to_owned());
+                set_tags(file, tags);
+            }
+        })?;
+        self.tags.remember([tag.to_owned()])?;
+        Ok(bookmark)
+    }
+
+    /// Takes `tag` off the Bookmark `id`; one it doesn't have is as wanted.
+    /// The Tag stays known. `NotFound` if there is no such Bookmark.
+    pub fn remove_tag(&self, id: &str, tag: &str) -> io::Result<Bookmark> {
+        self.modify(id, |file| {
+            let mut tags = tags_of(file);
+            tags.retain(|t| t != tag);
+            set_tags(file, tags);
+        })
+    }
+
+    /// Takes `tag` off every Bookmark, for the app's Delete a Tag, which also
+    /// forgets the Tag itself. Repeating it after an interruption finishes the job.
+    pub fn remove_tag_everywhere(&self, tag: &str) -> io::Result<()> {
+        for bookmark in self.list_tagged(tag)? {
+            self.remove_tag(&bookmark.id, tag)?;
+        }
+        Ok(())
+    }
+
+    /// Gives the Bookmark `id` the `article` (see `save`, which also says what
+    /// becomes of `images`), if it has none: an Article is never replaced, so
+    /// that Markup stays where it was put. A blank `article` adds nothing.
+    /// `NotFound` if there is no such Bookmark.
+    pub fn add_article(
+        &self,
+        id: &str,
+        article: &str,
+        images: &HashMap<String, Vec<u8>>,
+    ) -> io::Result<Bookmark> {
+        let bookmark = self.read(id)?;
+        if bookmark.has_article {
+            return Ok(bookmark);
+        }
+        let body = self.keep_article(&mut Entropy::from_system(), article, images)?;
+        self.modify(id, |file| file.body = body)
+    }
+
+    /// Takes the Article and its images off the Bookmark `id`, which keeps its
+    /// details, Tags and Cover; one without an Article is as wanted.
+    /// `NotFound` if there is no such Bookmark.
+    pub fn drop_article(&self, id: &str) -> io::Result<Bookmark> {
+        let images = self.images_of(&self.read(id)?);
+        let bookmark = self.modify(id, |file| file.body.clear())?;
+        // After the file, so that an interruption leaves unused images, not a broken Article.
+        for name in images {
+            ignore_not_found(self.files.remove(&self.root.join(name)))?;
+        }
+        Ok(bookmark)
+    }
+
+    /// Applies `change` to the file of the Bookmark `id` and saves it, if that
+    /// changed anything. `NotFound` if there is no such Bookmark.
+    fn modify(&self, id: &str, change: impl FnOnce(&mut Document)) -> io::Result<Bookmark> {
+        let id = ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?;
+        let mut file = self.read_file(&id).ok_or(io::ErrorKind::NotFound)?;
+        let before = file.render();
+        change(&mut file);
+        if file.render() != before {
+            self.files.write(&self.path(&id), &file.render())?;
+        }
+        Ok(bookmark_of(&file, &id))
+    }
+
     /// Deletes the Bookmark `id` with its Cover and images; one that is gone
     /// already is as wanted.
     pub fn delete(&self, id: &str) -> io::Result<()> {
@@ -234,6 +321,39 @@ impl Bookmarks {
             self.files
                 .remove(&self.root.join(format!("{}.md", bookmark.id))),
         )
+    }
+
+    /// The body for `article`: its images kept beside the Bookmarks and
+    /// pointed at, those missing from `images` or no picture dropped; empty if
+    /// the Article is blank.
+    fn keep_article(
+        &self,
+        entropy: &mut Entropy,
+        article: &str,
+        images: &HashMap<String, Vec<u8>>,
+    ) -> io::Result<String> {
+        let mut kept: HashMap<String, Option<String>> = HashMap::new();
+        let mut failed = None;
+        let article = images::rewrite(article, |address| {
+            kept.entry(address.to_owned())
+                .or_insert_with(|| {
+                    let bytes = images.get(address)?;
+                    self.keep_image(entropy, bytes).unwrap_or_else(|e| {
+                        failed = Some(e);
+                        None
+                    })
+                })
+                .clone()
+        });
+        if let Some(error) = failed {
+            return Err(error);
+        }
+        let article = article.trim();
+        Ok(if article.is_empty() {
+            String::new()
+        } else {
+            format!("{article}\n")
+        })
     }
 
     /// Writes `bytes` beside the Bookmarks as a new `<random-id>.<ext>`; none
@@ -274,6 +394,26 @@ impl Bookmarks {
     }
 }
 
+/// `text` with its whitespace, line breaks included, as single spaces.
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The valid Tags of a file, in order.
+fn tags_of(file: &Document) -> Vec<String> {
+    let tags = file.list(TAGS).unwrap_or_default();
+    tags.iter().filter(|t| tag::is_valid(t)).cloned().collect()
+}
+
+/// An empty list is no property at all.
+fn set_tags(file: &mut Document, tags: Vec<String>) {
+    if tags.is_empty() {
+        file.remove(TAGS);
+    } else {
+        file.set(TAGS, Value::List(tags));
+    }
+}
+
 fn ignore_not_found(result: io::Result<()>) -> io::Result<()> {
     match result {
         Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
@@ -297,6 +437,7 @@ fn bookmark_of(file: &Document, id: &ItemId) -> Bookmark {
         published: text(PUBLISHED),
         saved: text(SAVED),
         has_article: !file.body.trim().is_empty(),
+        tags: tags_of(file),
     }
 }
 
@@ -781,5 +922,164 @@ mod tests {
         store.delete(&b.id).unwrap();
         assert_eq!(scratch.files().len(), 2);
         assert!(scratch.files().iter().any(|f| f.starts_with(&other.id)));
+    }
+
+    /// A Bookmark of `address`, without Article.
+    fn plain(store: &Bookmarks, address: &str) -> Bookmark {
+        store
+            .save(address, &details("T"), "", None, None, &HashMap::new())
+            .unwrap()
+            .bookmark
+    }
+
+    fn tags_file(scratch: &Scratch) -> String {
+        fs::read_to_string(scratch.0.parent().unwrap().join("Tags/tags.json")).unwrap_or_default()
+    }
+
+    #[test]
+    fn a_bookmark_can_be_renamed_and_a_blank_name_changes_nothing() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let b = plain(&store, "https://a.test/1");
+        assert_eq!(
+            store.rename(&b.id, " Mine\n now ").unwrap().title,
+            "Mine now"
+        );
+        assert_eq!(store.read(&b.id).unwrap().title, "Mine now");
+        assert_eq!(store.rename(&b.id, "  ").unwrap().title, "Mine now");
+        assert_eq!(
+            store.rename("nope", "x").unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+    }
+
+    #[test]
+    fn tags_are_added_once_in_order_removed_and_join_the_tags_file() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let b = plain(&store, "https://a.test/1");
+        store.add_tag(&b.id, "work").unwrap();
+        store.add_tag(&b.id, "home").unwrap();
+        assert_eq!(store.add_tag(&b.id, "work").unwrap().tags, ["work", "home"]);
+        assert!(
+            tags_file(&scratch).contains("\"work\"") && tags_file(&scratch).contains("\"home\"")
+        );
+        let text = fs::read_to_string(scratch.0.join(format!("{}.md", b.id))).unwrap();
+        assert!(text.contains("tags:\n  - work\n  - home\n"));
+        assert_eq!(store.remove_tag(&b.id, "work").unwrap().tags, ["home"]);
+        assert_eq!(store.read(&b.id).unwrap().tags, ["home"]);
+        // Removing it from the Bookmark leaves the Tag known.
+        assert!(tags_file(&scratch).contains("\"work\""));
+        assert_eq!(store.remove_tag(&b.id, "work").unwrap().tags, ["home"]);
+        assert_eq!(
+            store.add_tag(&b.id, "Not A Tag").unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+    }
+
+    #[test]
+    fn the_list_can_be_narrowed_to_a_tag() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let a = plain(&store, "https://a.test/1");
+        let b = plain(&store, "https://a.test/2");
+        store.add_tag(&b.id, "work").unwrap();
+        store.add_tag(&a.id, "work/x").unwrap();
+        let ids = |tag| -> Vec<String> {
+            store
+                .list_tagged(tag)
+                .unwrap()
+                .into_iter()
+                .map(|b| b.id)
+                .collect()
+        };
+        assert_eq!(ids("work"), [b.id]);
+        assert!(ids("none").is_empty());
+    }
+
+    #[test]
+    fn deleting_a_tag_removes_it_from_every_bookmark_but_leaves_the_others() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let a = plain(&store, "https://a.test/1");
+        let b = plain(&store, "https://a.test/2");
+        for tag in ["x", "y"] {
+            store.add_tag(&a.id, tag).unwrap();
+        }
+        store.add_tag(&b.id, "x").unwrap();
+        store.remove_tag_everywhere("x").unwrap();
+        assert_eq!(store.read(&a.id).unwrap().tags, ["y"]);
+        assert!(store.read(&b.id).unwrap().tags.is_empty());
+    }
+
+    #[test]
+    fn an_article_is_added_once_with_its_images_and_never_replaced() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let b = plain(&store, "https://a.test/1");
+        let added = store
+            .add_article(
+                &b.id,
+                "Text\n\n![i](https://i.test/1.png)\n\n![j](https://i.test/2.png)\n",
+                &downloaded(&[("https://i.test/1.png", PNG)]),
+            )
+            .unwrap();
+        assert!(added.has_article);
+        let text = store.read_article(&b.id).unwrap();
+        assert!(
+            text.starts_with("Text\n")
+                && !text.contains("2.png")
+                && !text.contains("https://i.test/1")
+        );
+        let again = store
+            .add_article(&b.id, "Other\n", &HashMap::new())
+            .unwrap();
+        assert!(again.has_article);
+        assert_eq!(store.read_article(&b.id).unwrap(), text);
+        assert_eq!(store.read(&b.id).unwrap().title, "T");
+    }
+
+    #[test]
+    fn a_blank_article_is_not_added() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let b = plain(&store, "https://a.test/1");
+        assert!(
+            !store
+                .add_article(&b.id, " \n", &HashMap::new())
+                .unwrap()
+                .has_article
+        );
+    }
+
+    #[test]
+    fn dropping_the_article_keeps_the_bookmark_its_tags_and_cover() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let b = store
+            .save(
+                "https://x.test/a",
+                &details("A"),
+                "",
+                Some(PNG),
+                Some("Text\n\n![i](https://i.test/1.png)\n"),
+                &downloaded(&[("https://i.test/1.png", PNG)]),
+            )
+            .unwrap()
+            .bookmark;
+        store.add_tag(&b.id, "keep").unwrap();
+        let dropped = store.drop_article(&b.id).unwrap();
+        assert!(!dropped.has_article);
+        assert_eq!(
+            (dropped.title.as_str(), &dropped.tags[..]),
+            ("A", &["keep".to_owned()][..])
+        );
+        assert_eq!(scratch.files().len(), 2, "{:?}", scratch.files());
+        assert!(store.read_cover(&b.id).is_ok());
+        assert_eq!(
+            store.read_article(&b.id).unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+        assert!(!store.drop_article(&b.id).unwrap().has_article);
     }
 }

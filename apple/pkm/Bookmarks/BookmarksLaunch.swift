@@ -7,7 +7,8 @@ extension BookmarksModel {
 
     /// The Bookmarks for this launch: the Bookmarks folder. For UI tests and screenshots (`-UITesting…`)
     /// it is temporary, with sample Bookmarks when launched with `-UITestingOpenBookmarks`, and the
-    /// first one's Article open in the Reader with `-UITestingOpenArticle`.
+    /// first one's Article open in the Reader with `-UITestingOpenArticle`, or its Details with
+    /// `-UITestingOpenBookmarkDetails`.
     @MainActor
     static func forLaunch() -> BookmarksModel {
         let arguments = ProcessInfo.processInfo.arguments
@@ -16,7 +17,8 @@ extension BookmarksModel {
         }
         let store = openOrTemporary(temporaryFolder())
         let opensArticle = arguments.contains("-UITestingOpenArticle")
-        if opensArticle || arguments.contains("-UITestingOpenBookmarks") {
+        let opensDetails = arguments.contains("-UITestingOpenBookmarkDetails")
+        if opensArticle || opensDetails || arguments.contains("-UITestingOpenBookmarks") {
             let samples = [
                 ("https://example.com/rust", "Rust in Action", "Example Blog"),
                 ("https://example.org/design", "A Philosophy of Software Design", "example.org"),
@@ -29,13 +31,17 @@ extension BookmarksModel {
             for (address, title, site) in samples.reversed() {
                 let details = Details(title: title, site: site, cover: nil, excerpt: "", author: "", published: "")
                 let article = address.hasSuffix("/rust") ? readArticle(html: sampleArticle, address: address) : nil
-                _ = try? store.save(
+                let saved = try? store.save(
                     address: address, details: details, title: "", cover: nil, article: article?.markdown,
                     images: article.map { _ in [sampleImageAddress: sampleImage] } ?? [:])
+                if let id = saved?.bookmark.id, address.hasSuffix("/rust") {
+                    for tag in ["rust", "reading/later"] { _ = try? store.addTag(id: id, tag: tag) }
+                }
             }
         }
         let model = BookmarksModel(store: store)
         if opensArticle { model.openID = model.bookmarks.first { $0.hasArticle }?.id }
+        if opensDetails { model.detailsID = model.bookmarks.first { $0.hasArticle }?.id }
         return model
     }
 

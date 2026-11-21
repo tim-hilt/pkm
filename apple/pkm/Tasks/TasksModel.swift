@@ -507,6 +507,9 @@ final class TasksModel {
         reload()
     }
 
+    /// Reads the known Tags again, after another Context put a new one on an Item.
+    func refreshTags() { allTags = store.tags() }
+
     /// The Tag Color of a Tag by name; Default if it isn't known.
     func tagEntry(_ name: String) -> TagEntry {
         allTags.first { $0.name == name } ?? TagEntry(name: name, color: nil)

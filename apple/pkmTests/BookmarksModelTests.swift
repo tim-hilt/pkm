@@ -166,4 +166,72 @@ import Testing
         #expect(names.count == 2 && names[0] == names[1])
         #expect(model.image(String(names[0]), of: saved.id) == draft.images["https://example.com/ok.png"])
     }
+
+    /// A model with the Bookmarks of `addresses` Saved, newest last, without Article.
+    private func saved(_ addresses: [String], pages: [String: Download] = [:]) async throws -> BookmarksModel {
+        let model = try model(serving(pages))
+        for address in addresses {
+            guard case .draft(let draft) = await model.prepare(address) else { continue }
+            model.save(draft, title: address, keepsArticle: false)
+        }
+        return model
+    }
+
+    @Test func aBookmarkIsRenamedAndTaggedAndTheTagsAreSetAsAWhole() async throws {
+        let model = try await saved(["https://example.com/a"])
+        let id = model.bookmarks[0].id
+        model.rename(id: id, to: "Mine")
+        model.setTags(["work", "home"], of: id)
+        #expect(model.bookmarks[0].title == "Mine" && model.bookmarks[0].tags == ["work", "home"])
+        model.setTags(["home", "new"], of: id)
+        #expect(model.bookmarks[0].tags == ["home", "new"])
+    }
+
+    @Test func theListIsNarrowedToATagAndBackAndADeletedTagLeavesTheNarrowing() async throws {
+        let model = try await saved(["https://example.com/a", "https://example.com/b"])
+        let (a, b) = (model.bookmarks[0].id, model.bookmarks[1].id)
+        model.setTags(["work"], of: a)
+        model.setTags(["home"], of: b)
+        #expect(model.tagsInUse == ["home", "work"])
+        model.tagFilter = "work"
+        #expect(model.shown.map(\.id) == [a])
+        model.removeTagEverywhere("work")
+        #expect(model.tagFilter == nil && model.shown.count == 2 && model.bookmarks.allSatisfy { $0.tags != ["work"] })
+        #expect(model.tagsInUse == ["home"])
+    }
+
+    @Test func theSaveSheetsTagsAreKept() async throws {
+        let model = try model(serving(["https://example.com/a": Self.page]))
+        guard case .draft(let draft) = await model.prepare("https://example.com/a") else { return }
+        let saved = try #require(model.save(draft, title: "", tags: ["read-later"], keepsArticle: false))
+        #expect(saved.tags == ["read-later"] && model.bookmarks[0].tags == ["read-later"])
+    }
+
+    @Test func anArticleIsAddedFromThePageAsItIsNowAndDroppedAgain() async throws {
+        let model = try await saved(["https://example.com/long"], pages: ["https://example.com/long": Self.shortPage])
+        let id = model.bookmarks[0].id
+        #expect(!model.bookmarks[0].hasArticle)
+        let added = await model.addArticle(to: model.bookmarks[0])
+        #expect(added && model.bookmarks[0].hasArticle)
+        #expect(model.article(of: model.bookmarks[0])?.contains("Welcome") == true)
+        model.dropArticle(id: id)
+        #expect(!model.bookmarks[0].hasArticle && model.bookmarks[0].title == "https://example.com/long")
+    }
+
+    @Test func noArticleIsAddedWhenThePageCantBeDownloaded() async throws {
+        let model = try await saved(["https://example.com/a"], pages: ["https://example.com/a": Self.shortPage])
+        let offline = try self.model(serving([:]))
+        #expect(await offline.addArticle(to: offline.bookmarks[0]) == false)
+        #expect(!offline.bookmarks[0].hasArticle)
+    }
+
+    @Test func aLinkShowsTheDetailsOfABookmarkAndAMissingOneShowsNone() async throws {
+        let model = try await saved(["https://example.com/a"])
+        let id = model.bookmarks[0].id
+        model.openID = id
+        model.openLinked(id: id)
+        #expect(model.detailsID == id && model.openID == nil)
+        model.openLinked(id: "missing")
+        #expect(model.detailsID == nil && model.openID == nil)
+    }
 }

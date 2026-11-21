@@ -15,4 +15,5 @@ pub mod markup;
 pub mod random;
 pub mod sha256;
 pub mod tag;
+pub mod tag_store;
 pub mod tags;

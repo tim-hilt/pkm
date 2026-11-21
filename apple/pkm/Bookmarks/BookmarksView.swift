@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// The Bookmarks Context: its Bookmarks, newest Saved first, each with Cover, Title and Site, and a
-/// mark if it has an Article. Tapping one opens its Article in the Reader, or else its page in the
-/// system's browser; swipe left or the context menu Delete it, after asking. "+" opens the Save sheet.
+/// its Tags and a mark if it has an Article, narrowed to one Tag from the menu. Tapping one opens its
+/// Article in the Reader, or else its page in the system's browser; swipe right or the context menu
+/// Edit it (its Details), swipe left or the context menu Delete it, after asking. "+" opens the Save sheet.
 struct BookmarksView: View {
     @Environment(BookmarksModel.self) private var model
     @Environment(\.openURL) private var openURL
@@ -10,17 +11,22 @@ struct BookmarksView: View {
     @State private var deleting: Bookmark?
 
     var body: some View {
-        List(model.bookmarks, id: \.id) { bookmark in
+        @Bindable var model = model
+        List(model.shown, id: \.id) { bookmark in
             Button {
                 open(bookmark)
             } label: {
                 BookmarkRow(bookmark: bookmark)
             }
             .buttonStyle(.plain)
+            .swipeActions(edge: .leading) {
+                Button("Edit", systemImage: "pencil") { model.detailsID = bookmark.id }.tint(.blue)
+            }
             .swipeActions(edge: .trailing) {
                 Button("Delete", systemImage: "trash", role: .destructive) { deleting = bookmark }
             }
             .contextMenu {
+                Button("Edit", systemImage: "pencil") { model.detailsID = bookmark.id }
                 Button("Delete", systemImage: "trash", role: .destructive) { deleting = bookmark }
             }
         }
@@ -32,8 +38,26 @@ struct BookmarksView: View {
                     description: Text("Tap + and enter the address of a page to Save it."))
             }
         }
+        .toolbar {
+            if !model.tagsInUse.isEmpty {
+                ToolbarItem {
+                    Menu("Tag", systemImage: "line.3.horizontal.decrease") {
+                        Picker("Tag", selection: $model.tagFilter) {
+                            Text("All Bookmarks").tag(String?.none)
+                            ForEach(model.tagsInUse, id: \.self) { Text($0).tag(Optional($0)) }
+                        }
+                    }
+                    .accessibilityIdentifier("bookmark-tag-filter")
+                }
+            }
+        }
         .addButton("Add Bookmark", identifier: "add-bookmark") { isSaving = true }
         .sheet(isPresented: $isSaving) { SaveSheet(open: open) }
+        .sheet(
+            item: Binding(
+                get: { model.bookmarks.first { $0.id == model.detailsID } },
+                set: { model.detailsID = $0?.id })
+        ) { BookmarkDetails(id: $0.id) }
         .navigationDestination(for: String.self) { ArticleReader(id: $0) }
         .confirmationDialog(
             deleting.map { "Delete “\($0.title)”?" } ?? "",
@@ -80,6 +104,10 @@ private struct BookmarkRow: View {
                     Text(bookmark.site).lineLimit(1)
                 }
                 .font(.caption).foregroundStyle(.secondary)
+                if !bookmark.tags.isEmpty {
+                    HStack(spacing: 4) { ForEach(bookmark.tags, id: \.self) { TagPill(tag: $0) } }
+                        .font(.caption2).lineLimit(1)
+                }
             }
         }
         .contentShape(Rectangle())
@@ -97,6 +125,8 @@ private struct SaveSheet: View {
     @State private var address = ""
     @State private var title = ""
     @State private var keepsArticle = false
+    @State private var tags: [String] = []
+    @State private var isPickingTags = false
     @State private var draft: SaveDraft?
     @State private var isWorking = false
     /// The share of downloads done, once the page is in.
@@ -122,6 +152,7 @@ private struct SaveSheet: View {
                 if let draft {
                     Section {
                         TextField("Title", text: $title).accessibilityIdentifier("bookmark-title")
+                        TagsRow(tags: tags) { isPickingTags = true }
                         if !draft.article.markdown.isEmpty {
                             Toggle("Keep Article", isOn: $keepsArticle).accessibilityIdentifier("keep-article")
                         }
@@ -140,7 +171,7 @@ private struct SaveSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     if let draft {
                         Button("Save") {
-                            model.save(draft, title: title, keepsArticle: keepsArticle)
+                            model.save(draft, title: title, tags: tags, keepsArticle: keepsArticle)
                             dismiss()
                         }
                     } else {
@@ -153,6 +184,12 @@ private struct SaveSheet: View {
                 if isWorking {
                     if let progress { ProgressView(value: progress).padding(40) } else { ProgressView() }
                 }
+            }
+        }
+        .sheet(isPresented: $isPickingTags) {
+            TagPicker(selected: tags) {
+                tags = $0
+                isPickingTags = false
             }
         }
         #if os(macOS)

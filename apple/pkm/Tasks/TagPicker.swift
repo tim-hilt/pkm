@@ -1,9 +1,8 @@
 import SwiftUI
 
-/// The line in a Task's sheet that shows its Tags as pills in their Tag Colors,
+/// The line in an Item's sheet that shows its Tags as pills in their Tag Colors,
 /// and opens the picker when tapped.
 struct TagsRow: View {
-    @Environment(TasksModel.self) private var model
     let tags: [String]
     let action: () -> Void
 
@@ -14,14 +13,7 @@ struct TagsRow: View {
                 if tags.isEmpty {
                     Text("Add Tags").foregroundStyle(.secondary)
                 } else {
-                    ForEach(tags, id: \.self) { tag in
-                        let style = model.tagEntry(tag).style(default: .secondary)
-                        Text(tag)
-                            .foregroundStyle(style)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .background(style.opacity(0.18), in: .capsule)
-                    }
+                    ForEach(tags, id: \.self) { TagPill(tag: $0) }
                 }
                 Spacer(minLength: 0)
             }
@@ -30,6 +22,21 @@ struct TagsRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("task-tags")
+    }
+}
+
+/// A Tag as a capsule in its Tag Color (grey if it has none), wherever Tags are listed.
+struct TagPill: View {
+    @Environment(TasksModel.self) private var model
+    let tag: String
+
+    var body: some View {
+        let style = model.tagEntry(tag).style(default: .secondary)
+        Text(tag)
+            .foregroundStyle(style)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .background(style.opacity(0.18), in: .capsule)
     }
 }
 

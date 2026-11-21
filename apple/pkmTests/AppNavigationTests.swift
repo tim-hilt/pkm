@@ -109,7 +109,9 @@ import Testing
 
 extension AppNavigationTests {
     /// A window's link handling over a temporary Drawings folder and Library.
-    private func makeLinks() throws -> (links: AppLinks, gallery: Gallery, library: LibraryModel, tasks: TasksModel) {
+    private func makeLinks() throws -> (
+        links: AppLinks, gallery: Gallery, library: LibraryModel, tasks: TasksModel, bookmarks: BookmarksModel
+    ) {
         let root = FileManager.default.temporaryDirectory
             .appending(path: "AppNavigationTests-\(UUID().uuidString)", directoryHint: .isDirectory)
         let drawings = root.appending(path: "Drawings", directoryHint: .isDirectory)
@@ -124,13 +126,15 @@ extension AppNavigationTests {
         let tasks = TasksModel(
             store: try TaskStore.withFavorites(
                 root: root.appending(path: "Tasks").path))
+        let bookmarks = BookmarksModel(store: try BookmarkStore.open(root: root.appending(path: "Bookmarks").path))
         let links = AppLinks(
-            navigation: AppNavigation(remembering: device()), gallery: gallery, library: library, tasks: tasks)
-        return (links, gallery, library, tasks)
+            navigation: AppNavigation(remembering: device()), gallery: gallery, library: library, tasks: tasks,
+            bookmarks: bookmarks)
+        return (links, gallery, library, tasks, bookmarks)
     }
 
     @Test func aDrawingLinkOpensTheDrawingAndAnUnknownOneShowsTheGallery() throws {
-        let (links, gallery, _, _) = try makeLinks()
+        let (links, gallery, _, _, _) = try makeLinks()
         let id = try #require(gallery.drawings.first?.id)
 
         links.follow(URL(string: "pkm://drawings/\(id)")!)
@@ -143,7 +147,7 @@ extension AppNavigationTests {
     }
 
     @Test func aBookLinkOpensTheBookAndAnUnknownOneShowsTheGallery() async throws {
-        let (links, gallery, library, _) = try makeLinks()
+        let (links, gallery, library, _, _) = try makeLinks()
         guard case .imported(let book) = await library.import(try writePDF(named: "book.pdf")) else {
             Issue.record("expected the Book to be imported")
             return
@@ -160,7 +164,7 @@ extension AppNavigationTests {
     }
 
     @Test func aTaskLinkOpensTheTaskOverTheFirstFavoriteShowingItAndAnUnknownOneShowsTheStartList() throws {
-        let (links, _, _, tasks) = try makeLinks()
+        let (links, _, _, tasks, _) = try makeLinks()
         tasks.add(title: "Later", tags: ["backlog"])
         let id = try #require(tasks.tasks.first?.id)
         let start = tasks.list
@@ -179,7 +183,7 @@ extension AppNavigationTests {
     }
 
     @Test func aContextLinkToTasksClosesAnOpenTask() throws {
-        let (links, _, _, tasks) = try makeLinks()
+        let (links, _, _, tasks, _) = try makeLinks()
         tasks.add(title: "Now")
         links.follow(URL(string: "pkm://tasks/\(tasks.tasks[0].id)")!)
         links.follow(URL(string: "pkm://tasks")!)
@@ -187,7 +191,7 @@ extension AppNavigationTests {
     }
 
     @Test func aLinkToAClosedSubtaskOpensNoSheet() throws {
-        let (links, _, _, tasks) = try makeLinks()
+        let (links, _, _, tasks, _) = try makeLinks()
         tasks.add(title: "Parent")
         _ = tasks.addSubtask(title: "Sub", under: tasks.tasks[0])
         let sub = tasks.tasks[1]
@@ -196,5 +200,23 @@ extension AppNavigationTests {
 
         links.follow(URL(string: "pkm://tasks/\(sub.id)")!)
         #expect(tasks.editing.isEmpty)
+    }
+
+    @Test func aBookmarkLinkOpensItsDetailsAndAMissingOneLeavesTheListShown() async throws {
+        let (links, _, _, _, bookmarks) = try makeLinks()
+        let draft = SaveDraft(
+            address: "https://example.com/a",
+            details: Details(
+                title: "A", site: "", cover: nil, excerpt: "", author: "", published: ""), cover: nil, images: [:],
+            article: Article(markdown: "", readsLikeArticle: false, images: []), failure: nil)
+        let id = try #require(bookmarks.save(draft, title: "", keepsArticle: false)).id
+
+        links.follow(URL(string: "pkm://bookmarks/\(id)")!)
+        #expect(links.navigation.selected == .bookmarks)
+        #expect(bookmarks.detailsID == id)
+
+        links.follow(URL(string: "pkm://bookmarks/missing")!)
+        #expect(links.navigation.selected == .bookmarks)
+        #expect(bookmarks.detailsID == nil && bookmarks.openID == nil)
     }
 }

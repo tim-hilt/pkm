@@ -401,7 +401,7 @@ impl Tasks {
     /// included, that fit no known Tag (marked as such, and no reason to
     /// refuse it), or why it can't be read.
     pub fn check_query(&self, text: &str) -> Result<Vec<String>, QueryError> {
-        let tags = self.read_tags();
+        let tags = self.tags.read();
         let known: Vec<&str> = tags.names().collect();
         Ok(Query::parse(text)?.unmatched(&known))
     }
@@ -412,7 +412,7 @@ impl Tasks {
     /// `UnknownGroupByTag` for a Tag that doesn't exist, and
     /// `InvalidGroupByTag` for a Wildcard or anything else that isn't a Tag.
     pub fn check_group_by(&self, text: &str) -> Result<Vec<String>, Error> {
-        let known = self.read_tags();
+        let known = self.tags.read();
         let mut tags: Vec<String> = Vec::new();
         for word in text.split_whitespace() {
             let tag = word.strip_prefix('@').unwrap_or(word);
@@ -549,7 +549,7 @@ impl Tasks {
             compare_positions(a.position, b.position).then_with(|| a.filter.id.cmp(&b.filter.id))
         });
         let tags = found.iter().flat_map(|s| s.filter.group_by.iter().cloned());
-        self.remember_tags(tags.collect::<BTreeSet<_>>())?;
+        self.tags.remember(tags.collect::<BTreeSet<_>>())?;
         Ok(found)
     }
 }

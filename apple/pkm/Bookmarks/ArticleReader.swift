@@ -29,6 +29,8 @@ struct ArticleReader: View {
             if let url = bookmark.flatMap({ URL(string: $0.address) }) {
                 Button("Open Page", systemImage: "safari") { openURL(url) }
             }
+            Button("Details", systemImage: "info.circle") { model.detailsID = id }
+                .accessibilityIdentifier("bookmark-details")
         }
         .accessibilityIdentifier("article-reader")
     }

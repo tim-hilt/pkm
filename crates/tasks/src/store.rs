@@ -15,6 +15,7 @@ use pkm_base::item_id::ItemId;
 use pkm_base::markdown::image_targets;
 use pkm_base::random::Entropy;
 use pkm_base::tag;
+use pkm_base::tag_store::TagStore;
 use pkm_base::tags::{Suggestions, Tags};
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -180,8 +181,7 @@ pub struct Tasks {
     root: PathBuf,
     /// The one Close that can still be reverted.
     pending: Mutex<Option<Pending>>,
-    /// Held while the Tags file is read and written back.
-    tags_lock: Mutex<()>,
+    tags: TagStore,
     /// Whole seconds of the last `created` given here.
     last_created: AtomicU64,
 }
@@ -200,11 +200,12 @@ impl Tasks {
     /// The Tasks in `root` on any `files`, which must hold the folder `root`
     /// (an empty one is none).
     pub fn open_in(files: Arc<dyn Files>, root: impl Into<PathBuf>) -> Self {
+        let root = root.into();
         Self {
+            tags: TagStore::beside(files.clone(), &root),
             files,
-            root: root.into(),
+            root,
             pending: Mutex::new(None),
-            tags_lock: Mutex::new(()),
             last_created: AtomicU64::new(0),
         }
     }
@@ -496,18 +497,18 @@ impl Tasks {
     /// What a Tag field offers for the typed `query`, see `Tags::suggest`.
     /// Reads the Tags file only, so a Tag no Task carries any more is found too.
     pub fn suggest_tags(&self, query: &str, leave_out: &[String]) -> io::Result<Suggestions> {
-        Ok(self.read_tags().suggest(query, leave_out))
+        Ok(self.tags.read().suggest(query, leave_out))
     }
 
     /// Every known Tag with its Tag Color.
     pub fn tags(&self) -> Tags {
-        self.read_tags()
+        self.tags.read()
     }
 
     /// Gives the Tag its Tag Color (`#rrggbb`), or Default for `None`. A Tag
     /// that isn't known is left alone; a malformed color is `InvalidData`.
     pub fn set_tag_color(&self, tag: &str, color: Option<&str>) -> io::Result<()> {
-        self.change_tags(|tags| {
+        self.tags.change(|tags| {
             let known = tags.contains(tag);
             if known && !tags.set_color(tag, color, &iso8601(now_ms())) {
                 return Err(io::Error::new(io::ErrorKind::InvalidData, "not #rrggbb"));
@@ -553,7 +554,7 @@ impl Tasks {
     /// Forgets `tag` and its Tag Color. A Task or Group by still carrying it
     /// brings it back, grey (ADR-0023).
     fn forget_tag(&self, tag: &str) -> io::Result<()> {
-        self.change_tags(|tags| Ok(tags.forget(tag)))
+        self.tags.change(|tags| Ok(tags.forget(tag)))
     }
 
     /// The file of the Open Task `id` and the Task it describes.
@@ -657,7 +658,7 @@ impl Tasks {
             read_tags.extend(tags);
             nodes.insert(node.task.id.clone(), node);
         }
-        self.remember_tags(read_tags)?;
+        self.tags.remember(read_tags)?;
         repair(&mut nodes);
         Ok(nodes)
     }
@@ -674,50 +675,7 @@ impl Tasks {
             return Err(io::ErrorKind::AlreadyExists.into());
         }
         self.files.write(&path, &file.render())?;
-        self.remember_tags(tags_of(file))
-    }
-
-    /// Where the Tags are: beside the Tasks folder, like every Context's.
-    fn tags_path(&self) -> PathBuf {
-        self.root.parent().unwrap_or(Path::new("")).join(Tags::FILE)
-    }
-
-    /// The Tags; none if there is no file or it isn't one.
-    fn read_tags(&self) -> Tags {
-        let text = self.files.read(&self.tags_path()).unwrap_or_default();
-        Tags::parse(&text)
-    }
-
-    /// Adds the valid `found` Tags to the Tags file, leaving known ones as
-    /// they are; reads nothing if none are found, writes nothing if all are
-    /// known.
-    fn remember_tags(&self, found: impl IntoIterator<Item = String>) -> io::Result<()> {
-        let mut found = found.into_iter().peekable();
-        if found.peek().is_none() {
-            return Ok(());
-        }
-        let updated = iso8601(now_ms());
-        self.change_tags(|tags| {
-            let mut changed = false;
-            for tag in found {
-                changed |= tags.add(&tag, &updated);
-            }
-            Ok(changed)
-        })
-    }
-
-    /// Reads the Tags, lets `change` change them and writes them back if it
-    /// says it did, all under `tags_lock`.
-    fn change_tags(&self, change: impl FnOnce(&mut Tags) -> io::Result<bool>) -> io::Result<()> {
-        let _held = self
-            .tags_lock
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let mut tags = self.read_tags();
-        if change(&mut tags)? {
-            self.files.write(&self.tags_path(), &tags.render())?;
-        }
-        Ok(())
+        self.tags.remember(tags_of(file))
     }
 }
 
