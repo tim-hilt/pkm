@@ -1,7 +1,8 @@
 //! The Bookmarks store: `<id>.md` files with the front matter `id`,
 //! `address`, `title`, `site`, `cover`, `excerpt`, `author`, `published` and
-//! `saved` and a list of `tags`, beside their Cover `<id>.<ext>` (Bookmarks ADR-0002). The body is
-//! the Article, if the Bookmark has one.
+//! `saved` and a list of `tags`; the body is the Article, if the Bookmark has
+//! one. The Cover and the Article's images are files beside them, each
+//! `<random-id>.<ext>` (Bookmarks ADR-0002, ADR-0029).
 
 use crate::address::normalise;
 use crate::extract::Details;
@@ -89,22 +90,21 @@ impl Bookmarks {
     }
 
     /// Saves the page at `address` with its `details` (see `extract`) unless
-    /// its Address is Saved already, which gives that Bookmark. `title` is the
-    /// user's, which a blank one leaves to the page's. `cover` holds the bytes
-    /// of the Cover; they are left out if they are no PNG, JPEG, GIF or
-    /// WebP, so that a broken image never costs the Bookmark. `article` is the
-    /// Article's Markdown (see `read_article`) if the Bookmark is to have one;
-    /// blank is none. `images` holds the bytes downloaded for the addresses
-    /// the Article names: those are kept beside the Bookmark and the Article
-    /// points at the files; an image that wasn't downloaded or is no PNG, JPEG,
-    /// GIF or WebP is dropped from the Article. `InvalidInput` for an
-    /// `address` that is none (see `normalise`).
+    /// its Address is Saved already, which gives that Bookmark unchanged.
+    /// `title` and `tags` are the user's: a blank `title` leaves it to the
+    /// page's, and invalid Tags are left out. `article` is the Article's
+    /// Markdown (see `read_article`) if the Bookmark is to have one; blank is
+    /// none. `images` holds the bytes downloaded for the Cover and the
+    /// addresses the Article names: those are kept beside the Bookmark and the
+    /// Article points at the files. An image that wasn't downloaded or is no
+    /// PNG, JPEG, GIF or WebP is left out, so that a broken image never costs
+    /// the Bookmark. `InvalidInput` for an `address` that is none (see `normalise`).
     pub fn save(
         &self,
         address: &str,
         details: &Details,
         title: &str,
-        cover: Option<&[u8]>,
+        tags: &[String],
         article: Option<&str>,
         images: &HashMap<String, Vec<u8>>,
     ) -> io::Result<Saved> {
@@ -122,7 +122,7 @@ impl Bookmarks {
                 break id;
             }
         };
-        let cover = match cover {
+        let cover = match details.cover.as_ref().and_then(|cover| images.get(cover)) {
             Some(bytes) => self.keep_image(&mut entropy, bytes)?,
             None => None,
         };
@@ -146,10 +146,18 @@ impl Bookmarks {
             }
         }
         file.set_scalar(SAVED, iso8601(now_ms()));
+        let mut kept_tags: Vec<String> = Vec::new();
+        for tag in tags.iter().filter(|t| tag::is_valid(t)) {
+            if !kept_tags.contains(tag) {
+                kept_tags.push(tag.clone());
+            }
+        }
+        set_tags(&mut file, kept_tags.clone());
         if let Some(article) = article {
             file.body = self.keep_article(&mut entropy, article, images)?;
         }
         self.files.write(&self.path(&id), &file.render())?;
+        self.tags.remember(kept_tags)?;
         Ok(Saved {
             bookmark: bookmark_of(&file, &id),
             existing: false,
@@ -481,14 +489,17 @@ mod tests {
         }
     }
 
+    /// Where the Cover of `details` is.
+    const COVER: &str = "https://i.test/cover.png";
+
     fn details(title: &str) -> Details {
         Details {
             title: title.into(),
+            cover: Some(COVER.into()),
             site: "Site".into(),
             excerpt: "About".into(),
             author: "Ann".into(),
             published: "2024-05-01".into(),
-            ..Details::default()
         }
     }
 
@@ -501,7 +512,7 @@ mod tests {
                 "https://Example.com/a?utm_source=x#top",
                 &details("Page"),
                 "",
-                None,
+                &[],
                 None,
                 &HashMap::new(),
             )
@@ -528,7 +539,7 @@ mod tests {
         let store = scratch.store();
         let title = |address: &str, details: &Details, typed: &str| {
             store
-                .save(address, details, typed, None, None, &HashMap::new())
+                .save(address, details, typed, &[], None, &HashMap::new())
                 .unwrap()
                 .bookmark
                 .title
@@ -553,9 +564,9 @@ mod tests {
                 "https://example.com/a",
                 &details("One"),
                 "",
-                Some(PNG),
+                &[],
                 None,
-                &HashMap::new(),
+                &downloaded(&[(COVER, PNG)]),
             )
             .unwrap();
         let again = store
@@ -563,7 +574,7 @@ mod tests {
                 "HTTPS://example.com/a?utm_medium=mail#x",
                 &details("Two"),
                 "",
-                None,
+                &[],
                 None,
                 &HashMap::new(),
             )
@@ -582,7 +593,7 @@ mod tests {
                 "ftp://x.test/a",
                 &details("X"),
                 "",
-                None,
+                &[],
                 None,
                 &HashMap::new(),
             )
@@ -624,9 +635,9 @@ mod tests {
                 "https://a.test/",
                 &details("A"),
                 "",
-                Some(PNG),
+                &[],
                 None,
-                &HashMap::new(),
+                &downloaded(&[(COVER, PNG)]),
             )
             .unwrap()
             .bookmark;
@@ -645,9 +656,9 @@ mod tests {
                 "https://a.test/",
                 &details("A"),
                 "",
-                Some(b"<html>"),
+                &[],
                 None,
-                &HashMap::new(),
+                &downloaded(&[(COVER, b"<html>")]),
             )
             .unwrap()
             .bookmark;
@@ -668,9 +679,9 @@ mod tests {
                 "https://a.test/keep",
                 &details("Keep"),
                 "",
-                Some(PNG),
+                &[],
                 None,
-                &HashMap::new(),
+                &downloaded(&[(COVER, PNG)]),
             )
             .unwrap()
             .bookmark;
@@ -679,9 +690,9 @@ mod tests {
                 "https://a.test/gone",
                 &details("Gone"),
                 "",
-                Some(PNG),
+                &[],
                 None,
-                &HashMap::new(),
+                &downloaded(&[(COVER, PNG)]),
             )
             .unwrap()
             .bookmark;
@@ -704,7 +715,7 @@ mod tests {
                 "https://a.test/1",
                 &details("One"),
                 "",
-                None,
+                &[],
                 Some("# Head\n\nText\n\n"),
                 &HashMap::new(),
             )
@@ -715,7 +726,7 @@ mod tests {
                 "https://a.test/2",
                 &details("Two"),
                 "",
-                None,
+                &[],
                 None,
                 &HashMap::new(),
             )
@@ -750,7 +761,7 @@ mod tests {
                     address,
                     &details("T"),
                     "",
-                    None,
+                    &[],
                     keep.then_some(article.markdown.as_str()),
                     &HashMap::new(),
                 )
@@ -773,7 +784,7 @@ mod tests {
                 "https://a.test/1",
                 &details("One"),
                 "",
-                None,
+                &[],
                 Some(" \n"),
                 &HashMap::new(),
             )
@@ -790,7 +801,7 @@ mod tests {
                 "https://a.test/1",
                 &details("One"),
                 "",
-                None,
+                &[],
                 Some("Text"),
                 &HashMap::new(),
             )
@@ -815,7 +826,7 @@ mod tests {
                 "https://x.test/a",
                 &details("A"),
                 "",
-                None,
+                &[],
                 Some(article),
                 &downloaded(images),
             )
@@ -879,7 +890,7 @@ mod tests {
                 "https://x.test/b",
                 &details("B"),
                 "",
-                None,
+                &[],
                 None,
                 &HashMap::new(),
             )
@@ -901,9 +912,9 @@ mod tests {
                 "https://x.test/a",
                 &details("A"),
                 "",
-                Some(PNG),
+                &[],
                 Some("![](https://i.test/1.png)\n"),
-                &downloaded(&[("https://i.test/1.png", JPEG)]),
+                &downloaded(&[(COVER, PNG), ("https://i.test/1.png", JPEG)]),
             )
             .unwrap()
             .bookmark;
@@ -912,7 +923,7 @@ mod tests {
                 "https://x.test/b",
                 &details("B"),
                 "",
-                None,
+                &[],
                 Some("![](https://i.test/2.png)\n"),
                 &downloaded(&[("https://i.test/2.png", PNG)]),
             )
@@ -927,7 +938,7 @@ mod tests {
     /// A Bookmark of `address`, without Article.
     fn plain(store: &Bookmarks, address: &str) -> Bookmark {
         store
-            .save(address, &details("T"), "", None, None, &HashMap::new())
+            .save(address, &details("T"), "", &[], None, &HashMap::new())
             .unwrap()
             .bookmark
     }
@@ -975,6 +986,38 @@ mod tests {
             store.add_tag(&b.id, "Not A Tag").unwrap_err().kind(),
             io::ErrorKind::InvalidInput
         );
+    }
+
+    #[test]
+    fn saving_puts_the_valid_tags_on_once_and_they_join_the_tags_file() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let tags = ["work", "Not A Tag", "home", "work"].map(String::from);
+        let b = store
+            .save(
+                "https://a.test/1",
+                &details("T"),
+                "",
+                &tags,
+                None,
+                &HashMap::new(),
+            )
+            .unwrap()
+            .bookmark;
+        assert_eq!(b.tags, ["work", "home"]);
+        assert_eq!(store.read(&b.id).unwrap().tags, ["work", "home"]);
+        assert!(tags_file(&scratch).contains("\"home\""));
+        let again = store
+            .save(
+                "https://a.test/1",
+                &details("T"),
+                "",
+                &["other".into()],
+                None,
+                &HashMap::new(),
+            )
+            .unwrap();
+        assert!(again.existing && again.bookmark.tags == ["work", "home"]);
     }
 
     #[test]
@@ -1061,9 +1104,9 @@ mod tests {
                 "https://x.test/a",
                 &details("A"),
                 "",
-                Some(PNG),
+                &[],
                 Some("Text\n\n![i](https://i.test/1.png)\n"),
-                &downloaded(&[("https://i.test/1.png", PNG)]),
+                &downloaded(&[(COVER, PNG), ("https://i.test/1.png", PNG)]),
             )
             .unwrap()
             .bookmark;

@@ -1,13 +1,15 @@
 import SwiftUI
 
-/// The Bookmarks Context: its Bookmarks, newest Saved first, each with Cover, Title and Site, and a
-/// its Tags and a mark if it has an Article, narrowed to one Tag from the menu. Tapping one opens its
-/// Article in the Reader, or else its page in the system's browser; swipe right or the context menu
-/// Edit it (its Details), swipe left or the context menu Delete it, after asking. "+" opens the Save sheet.
+/// The Bookmarks Context: its Bookmarks, newest Saved first, each with Cover, Title, Site, Tags and a
+/// mark if it has an Article, narrowed to one Tag from the menu. Tapping one opens its Article in the
+/// Reader, or else its page in the system's browser; swipe right or the context menu Edit it (its
+/// Details), swipe left or the context menu Delete it, after asking. "+" opens the Save sheet.
 struct BookmarksView: View {
     @Environment(BookmarksModel.self) private var model
     @Environment(\.openURL) private var openURL
     @State private var isSaving = false
+    /// The Bookmark the Save sheet found Saved already, whose Details show once the sheet is gone.
+    @State private var existing: String?
     @State private var deleting: Bookmark?
 
     var body: some View {
@@ -52,12 +54,8 @@ struct BookmarksView: View {
             }
         }
         .addButton("Add Bookmark", identifier: "add-bookmark") { isSaving = true }
-        .sheet(isPresented: $isSaving) { SaveSheet(open: open) }
-        .sheet(
-            item: Binding(
-                get: { model.bookmarks.first { $0.id == model.detailsID } },
-                set: { model.detailsID = $0?.id })
-        ) { BookmarkDetails(id: $0.id) }
+        .sheet(isPresented: $isSaving, onDismiss: showExisting) { SaveSheet { existing = $0.id } }
+        .bookmarkDetailsSheet(isInFront: model.openID == nil)
         .navigationDestination(for: String.self) { ArticleReader(id: $0) }
         .confirmationDialog(
             deleting.map { "Delete “\($0.title)”?" } ?? "",
@@ -67,6 +65,11 @@ struct BookmarksView: View {
             Button("Delete", role: .destructive) { model.delete(id: bookmark.id) }
         }
         .accessibilityIdentifier("bookmarks-list")
+    }
+
+    private func showExisting() {
+        model.detailsID = existing
+        existing = nil
     }
 
     /// Opens the Bookmark: its Article in the Reader, or else its page in the system's browser.
@@ -115,13 +118,13 @@ private struct BookmarkRow: View {
     }
 }
 
-/// The Save sheet: the Address, then the page's Title to rename before Saving, whether to keep its
-/// Article (the app's decision, which the user can flip), and the reason if the page couldn't be
-/// read. An Address Saved already opens its Bookmark instead.
+/// The Save sheet: the Address, then the page's Title to rename before Saving, its Tags, whether to
+/// keep its Article (the app's decision, which the user can flip), and the reason if the page
+/// couldn't be read. For an Address Saved already it closes and hands that Bookmark to `found`.
 private struct SaveSheet: View {
     @Environment(BookmarksModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    let open: (Bookmark) -> Void
+    let found: (Bookmark) -> Void
     @State private var address = ""
     @State private var title = ""
     @State private var keepsArticle = false
@@ -206,8 +209,8 @@ private struct SaveSheet: View {
         switch await model.prepare(address, progress: { progress = $0 }) {
         case .invalid: isInvalid = true
         case .existing(let bookmark):
+            found(bookmark)
             dismiss()
-            open(bookmark)
         case .draft(let ready):
             title = ready.details.title
             keepsArticle = ready.article.readsLikeArticle

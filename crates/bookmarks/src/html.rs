@@ -85,21 +85,15 @@ pub(crate) fn decode(text: &str) -> String {
         rest = &rest[amp..];
         let decoded = rest.find(';').filter(|&end| end <= 10).and_then(|end| {
             let name = &rest[1..end];
-            let character = match name {
-                "amp" => '&',
-                "lt" => '<',
-                "gt" => '>',
-                "quot" => '"',
-                "apos" => '\'',
-                "nbsp" => '\u{a0}',
-                _ => {
-                    let number = name.strip_prefix('#')?;
+            let character = match name.strip_prefix('#') {
+                Some(number) => {
                     let code = match number.strip_prefix(['x', 'X']) {
                         Some(hex) => u32::from_str_radix(hex, 16),
                         None => number.parse(),
                     };
                     char::from_u32(code.ok()?)?
                 }
+                None => NAMED.iter().find(|(n, _)| *n == name)?.1,
             };
             Some((character, end + 1))
         });
@@ -116,6 +110,88 @@ pub(crate) fn decode(text: &str) -> String {
     }
     out + rest
 }
+
+/// The named character references pages use in text; the full list of HTML
+/// has over 2000.
+const NAMED: &[(&str, char)] = &[
+    ("amp", '&'),
+    ("lt", '<'),
+    ("gt", '>'),
+    ("quot", '"'),
+    ("apos", '\''),
+    ("nbsp", '\u{a0}'),
+    ("shy", '\u{ad}'),
+    ("ensp", '\u{2002}'),
+    ("emsp", '\u{2003}'),
+    ("thinsp", '\u{2009}'),
+    ("zwnj", '\u{200c}'),
+    ("zwj", '\u{200d}'),
+    ("ndash", '–'),
+    ("mdash", '—'),
+    ("lsquo", '‘'),
+    ("rsquo", '’'),
+    ("sbquo", '‚'),
+    ("ldquo", '“'),
+    ("rdquo", '”'),
+    ("bdquo", '„'),
+    ("laquo", '«'),
+    ("raquo", '»'),
+    ("lsaquo", '‹'),
+    ("rsaquo", '›'),
+    ("hellip", '…'),
+    ("bull", '•'),
+    ("middot", '·'),
+    ("prime", '′'),
+    ("Prime", '″'),
+    ("copy", '©'),
+    ("reg", '®'),
+    ("trade", '™'),
+    ("deg", '°'),
+    ("sect", '§'),
+    ("para", '¶'),
+    ("dagger", '†'),
+    ("Dagger", '‡'),
+    ("times", '×'),
+    ("divide", '÷'),
+    ("plusmn", '±'),
+    ("minus", '−'),
+    ("le", '≤'),
+    ("ge", '≥'),
+    ("ne", '≠'),
+    ("asymp", '≈'),
+    ("infin", '∞'),
+    ("frac12", '½'),
+    ("frac14", '¼'),
+    ("frac34", '¾'),
+    ("larr", '←'),
+    ("rarr", '→'),
+    ("uarr", '↑'),
+    ("darr", '↓'),
+    ("harr", '↔'),
+    ("euro", '€'),
+    ("pound", '£'),
+    ("yen", '¥'),
+    ("cent", '¢'),
+    ("iexcl", '¡'),
+    ("iquest", '¿'),
+    ("szlig", 'ß'),
+    ("auml", 'ä'),
+    ("ouml", 'ö'),
+    ("uuml", 'ü'),
+    ("Auml", 'Ä'),
+    ("Ouml", 'Ö'),
+    ("Uuml", 'Ü'),
+    ("aacute", 'á'),
+    ("eacute", 'é'),
+    ("iacute", 'í'),
+    ("oacute", 'ó'),
+    ("uacute", 'ú'),
+    ("agrave", 'à'),
+    ("egrave", 'è'),
+    ("ecirc", 'ê'),
+    ("ccedil", 'ç'),
+    ("ntilde", 'ñ'),
+];
 
 /// A page as a tree. Node 0 is the root; every other node's `parent` is the
 /// node it was found in.
@@ -349,8 +425,8 @@ mod tests {
     #[test]
     fn character_references_are_decoded() {
         assert_eq!(
-            decode("a&amp;b &lt;&#65;&#x42;&gt; &nbsp;&bogus; &"),
-            "a&b <AB> \u{a0}&bogus; &"
+            decode("a&amp;b &lt;&#65;&#x42;&gt; &nbsp;&bogus; & &rsquo;&mdash;&hellip;"),
+            "a&b <AB> \u{a0}&bogus; & ’—…"
         );
     }
 

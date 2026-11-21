@@ -28,16 +28,19 @@ pub struct Article {
 /// absolute against `address`. Empty `html` gives no text.
 pub fn read_article(html: &str, address: &str) -> Article {
     let dom = Dom::parse(html);
-    let top = best_candidate(&dom).unwrap_or_else(|| body(&dom));
+    let main = main_text(&dom);
     let mut writer = Writer::new(&dom, address);
-    writer.node(top);
+    for &id in &main {
+        writer.node(id);
+    }
     let blocks = writer.finish();
     let prose: usize = blocks
         .iter()
         .filter(|b| b.kind == BlockKind::Paragraph)
         .map(|b| b.text.chars().count())
         .sum();
-    let (text, linked) = text_length(&dom, top);
+    let (text, linked) =
+        (main.iter().map(|&id| text_length(&dom, id))).fold((0, 0), |a, b| (a.0 + b.0, a.1 + b.1));
     let markdown = render(&blocks);
     let mut used = Vec::new();
     images::rewrite(&markdown, |address| {
@@ -174,9 +177,64 @@ fn is_hidden_or_chrome(dom: &Dom, id: usize) -> bool {
             && !words.iter().any(|w| ARTICLE.contains(&w.as_str())))
 }
 
-/// The element that holds the main text: the one whose paragraphs, those of
-/// its descendants and (half) those below its children score highest, less its link density.
-fn best_candidate(dom: &Dom) -> Option<usize> {
+/// The elements that hold the main text, in page order: the best candidate
+/// (see `scores`), or else the body, with
+/// - those of its siblings that score near it or are prose of their own, as
+///   on a page whose first paragraphs stand beside the rest;
+/// - those of its kind (tag and class; without a class, only siblings) that
+///   score at all, as on a page in `<section>`s of which one outscores the
+///   others, or one whose text an ad splits in two.
+fn main_text(dom: &Dom) -> Vec<usize> {
+    let scores = scores(dom);
+    let best = scores.iter().fold(
+        None,
+        |best: Option<(usize, f64)>, (&id, &score)| match best {
+            Some(b) if b.1 >= score => Some(b),
+            _ => Some((id, score)),
+        },
+    );
+    let Some((top, top_score)) = best.filter(|&(top, _)| top != Dom::ROOT) else {
+        return vec![best.map_or_else(|| body(dom), |(top, _)| top)];
+    };
+    let mut ancestors = vec![top];
+    while ancestors[ancestors.len() - 1] != Dom::ROOT {
+        ancestors.push(dom.parent(ancestors[ancestors.len() - 1]));
+    }
+    let threshold = (top_score * 0.2).max(10.0);
+    let class = dom.attribute(top, "class").filter(|c| !c.trim().is_empty());
+    let is_main = |id: usize| {
+        let score = scores.get(&id).copied();
+        let is_sibling = dom.parent(id) == dom.parent(top);
+        let alike = dom.name(id) == dom.name(top)
+            && dom.attribute(id, "class").filter(|c| !c.trim().is_empty()) == class
+            && (class.is_some() || is_sibling)
+            && !ancestors.contains(&id);
+        let near = is_sibling
+            && (score.is_some_and(|s| s >= threshold) || {
+                let (text, linked) = text_length(dom, id);
+                dom.name(id) == "p" && text >= 80 && linked * 4 < text
+            });
+        id == top || (alike && score.is_some()) || near
+    };
+    fn walk(dom: &Dom, id: usize, is_main: &impl Fn(usize) -> bool, found: &mut Vec<usize>) {
+        for &child in dom.children(id) {
+            if matches!(dom.part(child), Some(Part::Element(_))) && !is_left_out(dom, child) {
+                if is_main(child) {
+                    found.push(child);
+                } else {
+                    walk(dom, child, is_main, found);
+                }
+            }
+        }
+    }
+    let mut found = Vec::new();
+    walk(dom, Dom::ROOT, &is_main, &mut found);
+    found
+}
+
+/// The elements that hold paragraphs, each scored by its paragraphs, those
+/// of its descendants and (half) those below its children, less its link density.
+fn scores(dom: &Dom) -> BTreeMap<usize, f64> {
     let mut paragraphs = Vec::new();
     collect_paragraphs(dom, Dom::ROOT, &mut paragraphs);
     let mut scores: BTreeMap<usize, f64> = BTreeMap::new();
@@ -196,17 +254,11 @@ fn best_candidate(dom: &Dom) -> Option<usize> {
             }
         }
     }
+    for (&id, score) in &mut scores {
+        let (text, linked) = text_length(dom, id);
+        *score *= 1.0 - linked as f64 / text.max(1) as f64;
+    }
     scores
-        .into_iter()
-        .map(|(id, score)| {
-            let (text, linked) = text_length(dom, id);
-            (id, score * (1.0 - linked as f64 / text.max(1) as f64))
-        })
-        .fold(None, |best: Option<(usize, f64)>, found| match best {
-            Some(b) if b.1 >= found.1 => Some(b),
-            _ => Some(found),
-        })
-        .map(|(id, _)| id)
 }
 
 /// The `<p>`, `<pre>` and `<td>` elements that are not left out.
@@ -544,9 +596,15 @@ impl<'a> Writer<'a> {
         format!("{}{marker}", "  ".repeat(depth))
     }
 
-    /// An image as a block of its own, if it has an address to download.
+    /// An image as a block of its own, if it has an address to download and
+    /// is no spacer or tracking pixel.
     fn image(&mut self, id: usize) {
-        let Some(address) = image_address(self.dom, id).and_then(|a| resolve(self.base, &a)) else {
+        let tiny = ["width", "height"].iter().any(|key| {
+            (self.dom.attribute(id, key))
+                .is_some_and(|v| v.trim().parse::<u32>().is_ok_and(|n| n <= 2))
+        });
+        let address = image_address(self.dom, id).and_then(|a| resolve(self.base, &a));
+        let Some(address) = address.filter(|_| !tiny) else {
             return;
         };
         self.flush("", BlockKind::Paragraph);
@@ -682,7 +740,8 @@ fn largest(srcset: &str) -> Option<String> {
 }
 
 /// Whether a table holds data, which reads as rows, rather than laying out a
-/// page, which reads as its cells' content: that has headings or tables in it.
+/// page, which reads as its cells' content: that has headings or tables in
+/// it, or only one row or column.
 fn is_data_table(dom: &Dom, id: usize) -> bool {
     fn has_layout(dom: &Dom, id: usize) -> bool {
         dom.children(id).iter().any(|&c| {
@@ -692,7 +751,23 @@ fn is_data_table(dom: &Dom, id: usize) -> bool {
             ) || has_layout(dom, c)
         })
     }
-    !has_layout(dom, id)
+    /// The cell counts of the rows, as `rows` walks them.
+    fn widths(dom: &Dom, id: usize, found: &mut Vec<usize>) {
+        for &child in dom.children(id) {
+            match dom.name(child) {
+                "tr" => found.push(
+                    (dom.children(child).iter())
+                        .filter(|&&c| matches!(dom.name(c), "td" | "th"))
+                        .count(),
+                ),
+                "thead" | "tbody" | "tfoot" => widths(dom, child, found),
+                _ => {}
+            }
+        }
+    }
+    let mut rows = Vec::new();
+    widths(dom, id, &mut rows);
+    rows.len() > 1 && rows.iter().any(|&cells| cells > 1) && !has_layout(dom, id)
 }
 
 #[cfg(test)]
@@ -889,6 +964,83 @@ mod tests {
             markdown(&html),
             format!("## Title\n\n{}\n", prose(1).trim())
         );
+        // A page laid out in one cell, its paragraphs apart by `<br>`s.
+        let html = format!(
+            "<table><tr><td>July 2023<br><br>{}<br><br>{}</td></tr></table>",
+            prose(5),
+            prose(5)
+        );
+        let article = read_article(&html, ADDRESS);
+        assert!(article.reads_like_article);
+        assert!(article.markdown.starts_with("July 2023\n\nThe quick"));
+    }
+
+    #[test]
+    fn text_that_an_ad_splits_in_two_is_one_article() {
+        let html = format!(
+            r#"<body><div class="grid"><div class="post-content"><p>{}</p><p>{}</p></div></div>
+            <div class="ad-wrapper"><p>Buy this, buy that, buy everything, and be happy.</p></div>
+            <div class="grid"><div class="post-content"><p>Second half, {}</p></div></div>
+            <div class="grid"><section><p>Monthly briefing: sponsor me, and get a digest.</p></section></div></body>"#,
+            prose(3),
+            prose(3),
+            prose(1)
+        );
+        let text = markdown(&html);
+        assert!(text.contains("\n\nSecond half, The quick") && !text.contains("Buy"));
+        assert!(!text.contains("Monthly"));
+    }
+
+    #[test]
+    fn a_page_in_sections_keeps_every_section_and_the_paragraphs_beside_them() {
+        let section = |title: &str, n: usize| {
+            format!(
+                "<section><h2>{title}</h2><section><h3>{title}, first</h3><p>{}</p></section>\
+                 <section><h3>{title}, second</h3><p>{}</p></section></section>",
+                prose(n),
+                prose(n)
+            )
+        };
+        let html = format!(
+            "<body><div class='body'><p>{}</p>{}{}<aside><p>{}</p></aside>{}\
+             <section><h2>Short</h2><p>{}</p></section><section><ul><li>{}</li></ul></section></div>\
+             <div class='related'><p>{}</p></div></body>",
+            prose(2),
+            section("One", 4),
+            section("Two", 3),
+            prose(9),
+            section("Three", 2),
+            prose(1),
+            prose(1),
+            prose(9)
+        );
+        let headings: Vec<_> = (markdown(&html).lines())
+            .filter(|l| l.starts_with('#') || l.starts_with("The"))
+            .map(|l| l.split(',').next().unwrap().to_owned())
+            .collect();
+        assert_eq!(
+            headings,
+            [
+                "The quick brown fox",
+                "## One",
+                "### One",
+                "The quick brown fox",
+                "### One",
+                "The quick brown fox",
+                "## Two",
+                "### Two",
+                "The quick brown fox",
+                "### Two",
+                "The quick brown fox",
+                "## Three",
+                "### Three",
+                "The quick brown fox",
+                "### Three",
+                "The quick brown fox",
+                "## Short",
+                "The quick brown fox",
+            ]
+        );
     }
 
     #[test]
@@ -926,6 +1078,8 @@ mod tests {
         );
         assert_eq!(img(r#"data-src="lazy.png""#).len(), 1);
         assert_eq!(img(r#"srcset="  ""#).len(), 0);
+        assert_eq!(img(r#"src="pixel.gif" width="1" height="1""#).len(), 0);
+        assert_eq!(img(r#"src="spacer.gif" height="1" width="26""#).len(), 0);
     }
 
     #[test]

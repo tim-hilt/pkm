@@ -24,7 +24,8 @@ enum PageDownloadError: LocalizedError {
 }
 
 extension Download {
-    /// The most a page or image may take, so that a wrong Address can't fill the memory.
+    /// The most a page or image may take, so that a wrong Address isn't read and kept. It is checked
+    /// once the download is in, so it bounds what is kept, not the download itself.
     static let limit = 10_000_000
 
     /// Downloads with `URLSession`, failing for an error status or too much data.

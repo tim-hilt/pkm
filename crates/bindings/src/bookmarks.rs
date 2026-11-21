@@ -104,16 +104,17 @@ impl BookmarkStore {
         Ok(Self(Bookmarks::open(root)?))
     }
 
-    /// Saves the page at `address` unless it is Saved already, which gives that Bookmark.
-    /// A blank `title` leaves it to the page's; `cover` is the Cover's bytes, if downloaded;
-    /// `article` is the Article's Markdown if it is to have one; `images` the bytes downloaded for
-    /// the addresses in `Article.images`, by address: those that are missing are dropped from it.
+    /// Saves the page at `address` with the user's `title` and `tags` unless it is Saved already,
+    /// which gives that Bookmark unchanged. A blank `title` leaves it to the page's; invalid Tags are
+    /// left out. `article` is the Article's Markdown if it is to have one; `images` the bytes
+    /// downloaded for `Details.cover` and the addresses in `Article.images`, by address: those that
+    /// are missing are left out.
     pub fn save(
         &self,
         address: String,
         details: Details,
         title: String,
-        cover: Option<Vec<u8>>,
+        tags: Vec<String>,
         article: Option<String>,
         images: HashMap<String, Vec<u8>>,
     ) -> Result<Saved, BookmarksError> {
@@ -121,7 +122,7 @@ impl BookmarkStore {
             &address,
             &details,
             &title,
-            cover.as_deref(),
+            &tags,
             article.as_deref(),
             &images,
         )?)
@@ -217,7 +218,7 @@ mod tests {
                 address,
                 details,
                 String::new(),
-                None,
+                vec!["read".into()],
                 Some(article.markdown),
                 HashMap::new(),
             )
@@ -227,9 +228,15 @@ mod tests {
             (
                 rows[0].title.as_str(),
                 rows[0].address.as_str(),
+                &rows[0].tags[..],
                 saved.existing
             ),
-            ("Hi", "https://example.com/a", false)
+            (
+                "Hi",
+                "https://example.com/a",
+                &["read".to_owned()][..],
+                false
+            )
         );
         assert_eq!(
             store.read_article(rows[0].id.clone()).unwrap(),

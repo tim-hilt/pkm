@@ -32,6 +32,7 @@ struct ArticleReader: View {
             Button("Details", systemImage: "info.circle") { model.detailsID = id }
                 .accessibilityIdentifier("bookmark-details")
         }
+        .bookmarkDetailsSheet(isInFront: true)
         .accessibilityIdentifier("article-reader")
     }
 }

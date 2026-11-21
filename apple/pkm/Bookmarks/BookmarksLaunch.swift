@@ -31,12 +31,10 @@ extension BookmarksModel {
             for (address, title, site) in samples.reversed() {
                 let details = Details(title: title, site: site, cover: nil, excerpt: "", author: "", published: "")
                 let article = address.hasSuffix("/rust") ? readArticle(html: sampleArticle, address: address) : nil
-                let saved = try? store.save(
-                    address: address, details: details, title: "", cover: nil, article: article?.markdown,
-                    images: article.map { _ in [sampleImageAddress: sampleImage] } ?? [:])
-                if let id = saved?.bookmark.id, address.hasSuffix("/rust") {
-                    for tag in ["rust", "reading/later"] { _ = try? store.addTag(id: id, tag: tag) }
-                }
+                _ = try? store.save(
+                    address: address, details: details, title: "",
+                    tags: article == nil ? [] : ["rust", "reading/later"],
+                    article: article?.markdown, images: article == nil ? [:] : [sampleImageAddress: sampleImage])
             }
         }
         let model = BookmarksModel(store: store)

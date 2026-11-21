@@ -207,7 +207,7 @@ extension AppNavigationTests {
         let draft = SaveDraft(
             address: "https://example.com/a",
             details: Details(
-                title: "A", site: "", cover: nil, excerpt: "", author: "", published: ""), cover: nil, images: [:],
+                title: "A", site: "", cover: nil, excerpt: "", author: "", published: ""), images: [:],
             article: Article(markdown: "", readsLikeArticle: false, images: []), failure: nil)
         let id = try #require(bookmarks.save(draft, title: "", keepsArticle: false)).id
 

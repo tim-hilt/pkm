@@ -121,9 +121,13 @@ pub(crate) fn domain(address: &str) -> String {
 }
 
 /// The absolute `http(s)` address that `reference` (as in `src` or `content`)
-/// means on the page at `base`; `None` for anything else (`data:`, ...).
+/// means on the page at `base`, its `#` part kept; `None` for anything else
+/// (`data:`, ...) and for a place on the page itself (`#top`).
 pub(crate) fn resolve(base: &str, reference: &str) -> Option<String> {
-    let reference = reference.trim();
+    let (reference, fragment) = match reference.trim().split_once('#') {
+        Some((reference, fragment)) => (reference, format!("#{fragment}")),
+        None => (reference.trim(), String::new()),
+    };
     let base = Parts::of(base)?;
     let origin = format!("{}://{}", base.scheme, base.authority);
     let joined = if reference.contains("://") {
@@ -132,7 +136,7 @@ pub(crate) fn resolve(base: &str, reference: &str) -> Option<String> {
         format!("{}://{rest}", base.scheme)
     } else if reference.starts_with('/') {
         format!("{origin}{reference}")
-    } else if reference.is_empty() || reference.starts_with(['#', '?']) || reference.contains(':') {
+    } else if reference.is_empty() || reference.starts_with('?') || reference.contains(':') {
         return None;
     } else {
         let directory = base.path.rsplit_once('/').map_or("", |(dir, _)| dir);
@@ -140,7 +144,7 @@ pub(crate) fn resolve(base: &str, reference: &str) -> Option<String> {
     };
     Parts::of(&joined).map(|parts| {
         format!(
-            "{}://{}{}{}",
+            "{}://{}{}{}{fragment}",
             parts.scheme,
             parts.authority,
             dot_segments(parts.path),
@@ -243,7 +247,10 @@ mod tests {
                 "./x/../a.png?v=2",
                 Some("https://example.com/blog/a.png?v=2"),
             ),
+            ("https://x.test/a#part", Some("https://x.test/a#part")),
+            ("/b#c", Some("https://example.com/b#c")),
             ("data:image/png;base64,AAAA", None),
+            ("#top", None),
             ("", None),
         ] {
             assert_eq!(resolve(base, reference).as_deref(), expected, "{reference}");

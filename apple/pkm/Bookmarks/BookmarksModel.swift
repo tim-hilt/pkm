@@ -8,9 +8,8 @@ struct SaveDraft: Equatable {
     /// Normalised.
     let address: String
     let details: Details
-    let cover: Data?
-    /// The downloaded images of `article`, by the address it names them with; one that failed to
-    /// download is missing, which drops it from the Article when Saved.
+    /// The downloaded Cover and images of `article`, by their address; one that failed to download
+    /// is missing, which leaves it out when Saved.
     let images: [String: Data]
     /// The page's text, empty where there is none, and whether it reads like an Article.
     let article: Article
@@ -116,10 +115,7 @@ final class BookmarksModel {
             done += 1
             progress(Double(done) / Double(wanted.count + 1))
         }
-        let cover = withCover ? details.cover.flatMap { images[$0] } : nil
-        return SaveDraft(
-            address: address, details: details, cover: cover,
-            images: images.filter { article.images.contains($0.key) }, article: article, failure: failure)
+        return SaveDraft(address: address, details: details, images: images, article: article, failure: failure)
     }
 
     /// Downloads the images at `addresses`, a few at a time, as they finish, each stored as the
@@ -159,10 +155,9 @@ final class BookmarksModel {
     func save(_ draft: SaveDraft, title: String, tags: [String] = [], keepsArticle: Bool) -> Bookmark? {
         guard
             let saved = try? store.save(
-                address: draft.address, details: draft.details, title: title, cover: draft.cover,
-                article: keepsArticle ? draft.article.markdown : nil, images: keepsArticle ? draft.images : [:])
+                address: draft.address, details: draft.details, title: title, tags: tags,
+                article: keepsArticle ? draft.article.markdown : nil, images: draft.images)
         else { return nil }
-        if !saved.existing { setTags(tags, of: saved.bookmark.id) }
         reload()
         return bookmarks.first { $0.id == saved.bookmark.id } ?? saved.bookmark
     }

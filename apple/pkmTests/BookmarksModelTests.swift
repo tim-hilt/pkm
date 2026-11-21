@@ -35,7 +35,7 @@ import Testing
         }
         #expect(draft.address == "https://example.com/a")
         #expect(draft.details.title == "Hello" && draft.details.site == "The Site")
-        #expect(draft.cover != nil && draft.failure == nil)
+        #expect(draft.images.keys.sorted() == ["https://example.com/c.png"] && draft.failure == nil)
 
         let saved = try #require(model.save(draft, title: "Renamed", keepsArticle: false))
         #expect(model.bookmarks.map(\.id) == [saved.id])

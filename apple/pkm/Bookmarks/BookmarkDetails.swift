@@ -1,5 +1,26 @@
 import SwiftUI
 
+extension View {
+    /// Bookmark Details of `BookmarksModel.detailsID` as a sheet over this view while it `isInFront`:
+    /// on the Mac a sheet of a view under a pushed one waits until it shows again.
+    func bookmarkDetailsSheet(isInFront: Bool) -> some View {
+        modifier(BookmarkDetailsSheet(isInFront: isInFront))
+    }
+}
+
+private struct BookmarkDetailsSheet: ViewModifier {
+    @Environment(BookmarksModel.self) private var model
+    let isInFront: Bool
+
+    func body(content: Content) -> some View {
+        content.sheet(
+            item: Binding(
+                get: { isInFront ? model.bookmarks.first { $0.id == model.detailsID } : nil },
+                set: { model.detailsID = $0?.id })
+        ) { BookmarkDetails(id: $0.id) }
+    }
+}
+
 /// Bookmark Details: the Cover, the Title and Tags to change, what the page said about itself
 /// (Site, Address, Author, Published, Excerpt, shown as found), when it was Saved, and the actions on
 /// the Bookmark: Read, Open Page, Add or Drop Article, Delete. Dropping and Deleting always ask.
