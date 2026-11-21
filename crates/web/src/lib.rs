@@ -130,6 +130,7 @@ mirror_enum!(
     Distribution { Horizontally, Vertically }
 );
 
+mod bookmarks;
 mod markdown;
 mod notes;
 mod tasks;

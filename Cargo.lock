@@ -612,6 +612,7 @@ name = "pkm-web"
 version = "0.1.0"
 dependencies = [
  "pkm-base",
+ "pkm-bookmarks",
  "pkm-cloud",
  "pkm-drawing",
  "pkm-notes",

@@ -154,6 +154,8 @@ export class TasksModel {
   failure: string | undefined;
   /** Called after a change was written to storage, so that Sync follows. */
   onSaved: () => void = () => {};
+  /** Called with a Tag after it was Deleted, for the other Contexts to Remove it from their Items. */
+  onTagDeleted: (tag: string) => void = () => {};
   /** The Close the toast offers to Revert. */
   pendingClose: PendingClose | undefined;
   /** The IDs of the Tasks of the edit view, the first opened first: each Blocker or Subtask opened is pushed. */
@@ -679,6 +681,7 @@ export class TasksModel {
   /** Deletes a Tag: Removes it from every Task, Open or Closed, and forgets it and its Tag Color. */
   deleteTag(tag: string): void {
     this.apply(() => this.files.store.deleteTag(tag));
+    this.onTagDeleted(tag);
   }
 
   /** `text` without the characters a Tag can never contain. */

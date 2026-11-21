@@ -19,7 +19,7 @@ export type TagPicking =
  */
 export function pickTagsDialog(
   parent: HTMLElement,
-  model: TasksModel,
+  model: Pick<TasksModel, "allTags">,
   chosen: string[],
   picking: TagPicking,
 ): void {

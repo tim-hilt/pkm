@@ -91,6 +91,13 @@ describe("Navigation", () => {
     expect(history.entries).toEqual(["/tasks/abc123abc123"]);
   });
 
+  it("opens the Bookmark of a Bookmarks path, keeping the path", () => {
+    const { navigation, history } = open("/bookmarks/abc123abc123");
+    expect(navigation.selected).toBe("bookmarks");
+    expect(navigation.item).toBe("abc123abc123");
+    expect(history.entries).toEqual(["/bookmarks/abc123abc123"]);
+  });
+
   it("replaces a path below a Context without an Item list, or with a deeper path, by the Context's own", () => {
     expect(open("/books/abc").history.path).toBe("/books");
     expect(open("/tasks/abc/def").history.path).toBe("/tasks");

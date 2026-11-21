@@ -18,6 +18,10 @@ import { requestPersistenceOnFirstCall } from "./storage/PersistentStorage";
 import type { Excalifont } from "./drawings/text/Excalifont";
 import { browserHistory } from "./navigation/browserHistory";
 import { Navigation } from "./navigation/Navigation";
+import { BookmarkFiles } from "./bookmarks/BookmarkFiles";
+import { BookmarksModel } from "./bookmarks/BookmarksModel";
+import { BookmarksView } from "./bookmarks/BookmarksView";
+import { PageDownloader } from "./bookmarks/PageDownloader";
 import { NoteFiles } from "./notes/NoteFiles";
 import { NotesModel } from "./notes/NotesModel";
 import { NotesView } from "./notes/NotesView";
@@ -27,7 +31,7 @@ import { TasksModel } from "./tasks/TasksModel";
 import { TasksView } from "./tasks/TasksView";
 
 /**
- * The app: the shell with its five Contexts; the Tasks in their pane, and in
+ * The app: the shell with its five Contexts; the Tasks and Bookmarks in their panes, and in
  * Drawings the Gallery, from which a Drawing is opened into the Canvas, and
  * back. Drawings are kept saved as they change (autosave), and when the page
  * goes to the background.
@@ -86,6 +90,17 @@ export async function startApp(
   noteFiles.onSaved = () => cloud.notesSaved();
   cloud.onNotesChanged(() => void notes.syncDidChange());
   shell.pane("notes").append(new NotesView(notes).element);
+  const bookmarkFiles = await BookmarkFiles.open(storage);
+  const bookmarks = new BookmarksModel(bookmarkFiles, new PageDownloader(), () => tasks.allTags);
+  // The Tags file is shared: Tags a Bookmark added are known to the Tasks, and a Tag Deleted there leaves the Bookmarks.
+  bookmarkFiles.onTagsSaved = () => void tasks.syncDidChange();
+  tasks.onTagDeleted = (tag) => bookmarks.removeTagEverywhere(tag);
+  shell.pane("bookmarks").append(
+    new BookmarksView(bookmarks, {
+      openDetails: (id) => navigation.openItem(id),
+      closeDetails: () => navigation.closeItem(),
+    }).element,
+  );
   const pane = shell.pane("drawings");
 
   let canvas: { drawing: OpenDrawing; stop: () => void } | undefined;
@@ -134,13 +149,17 @@ export async function startApp(
     galleryView?.appearanceChanged();
   });
   gallery.onChange = show;
-  // The address decides what is open: no Item (or another Context) is the Gallery and the
-  // Tasks list, and an Item ID the Device does not have is dropped from the address.
+  // The address decides what is open: no Item (or another Context) is the Gallery, the
+  // Tasks list and the Bookmarks list, and an Item ID the Device does not have is dropped from the address.
   const followAddress = () => {
     shell.update();
     const { selected, item } = navigation;
     const task = selected === "tasks" ? item : undefined;
     const drawing = selected === "drawings" ? item : undefined;
+    const bookmark = selected === "bookmarks" ? item : undefined;
+    bookmarks.openLinked(bookmark);
+    // A Bookmark the Device does not have is dropped from the address.
+    if (bookmark !== undefined && !bookmarks.bookmark(bookmark)) return navigation.closeItem();
     // The Title on top is empty: the address is put back, whatever the browser went to.
     const held = selected === "tasks" && tasks.isLeavingBlocked ? tasks.editing?.id : undefined;
     if (held !== undefined && held !== task) return navigation.openItem(held);

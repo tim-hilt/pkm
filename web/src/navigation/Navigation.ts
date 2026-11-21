@@ -3,7 +3,7 @@ export const contexts = ["tasks", "notes", "drawings", "bookmarks", "books"] as 
 export type Context = (typeof contexts)[number];
 
 /** The Contexts whose Items have a path of their own, `/<context>/<id>`. */
-const addressed: readonly Context[] = ["tasks", "drawings"];
+const addressed: readonly Context[] = ["tasks", "drawings", "bookmarks"];
 
 /** The list of the Tasks Context an address names: the Filters list, or a Filter's Tasks (`/tasks/filters`, `/tasks/filter/<id>`). */
 export type ListAddress = { kind: "filters" } | { kind: "filter"; id: string };
@@ -33,7 +33,7 @@ export type SettingsPage = (typeof settingsPages)[number];
 
 const lastContextKey = "lastContext";
 
-/** Where a path points: a Settings page, or a Context and, in Tasks and Drawings, the Item ID after it. */
+/** Where a path points: a Settings page, or a Context and, in Tasks, Drawings and Bookmarks, the Item ID after it. */
 type Place = { settings: SettingsPage } | { context: Context; item?: string; list?: ListAddress };
 
 /** The place of a path; `undefined` if it names none. What is below a Context but is no Item of it, or below Settings but is no page, is dropped. */
@@ -64,8 +64,8 @@ function pathOf(place: Place): string {
 }
 
 /**
- * Where the user is: a Settings page, or the selected Context and, in Tasks and
- * Drawings, the open Item, kept in step with the address bar. Switching a Context or opening an Item
+ * Where the user is: a Settings page, or the selected Context and, in Tasks,
+ * Drawings and Bookmarks, the open Item, kept in step with the address bar. Switching a Context or opening an Item
  * pushes a History entry and back and forward restore both; a path that is
  * none is replaced by the Context's own path (or the last Context's), so no
  * entry is a dead end. The Context last shown is remembered in `remembered`

@@ -24,7 +24,6 @@ const presentation: Record<Context, { title: string; icon: string; placeholder?:
   bookmarks: {
     title: "Bookmarks",
     icon: icon('<path d="M6 3h12v18l-6-4-6 4z"/>'),
-    placeholder: "Coming soon",
   },
   books: {
     title: "Books",
