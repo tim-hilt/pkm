@@ -54,8 +54,6 @@ impl From<pkm_notes::Row> for ListedNote {
 pub struct SearchResult {
     pub id: String,
     pub title: String,
-    /// The path of its Folder; empty for the top level.
-    pub folder: String,
     /// Around the match in the Body, as typed.
     pub snippet: String,
     /// The match in `snippet`, in UTF-16 units (JavaScript's): `matched_start` up to `matched_end`.
@@ -72,42 +70,12 @@ impl From<pkm_notes::Found> for SearchResult {
         Self {
             id: found.id,
             title: found.title,
-            folder: found.folder,
             snippet: found.snippet.text,
             matched_start: found.snippet.matched.start as u32,
             matched_end: found.snippet.matched.end as u32,
             title_matched: found.title_matched,
         }
     }
-}
-
-/// A Folder as one row of the outline: the tree flattened, parents before
-/// their Folders, each level by name.
-#[wasm_bindgen(getter_with_clone)]
-pub struct FolderRow {
-    pub name: String,
-    /// Names from the top level, joined by `/`.
-    pub path: String,
-    /// How many Folders it is in: 0 at the top level.
-    pub depth: u32,
-}
-
-fn flatten(level: Vec<pkm_notes::Folder>, depth: u32, rows: &mut Vec<FolderRow>) {
-    for folder in level {
-        rows.push(FolderRow {
-            name: folder.name,
-            path: folder.path,
-            depth,
-        });
-        flatten(folder.folders, depth + 1, rows);
-    }
-}
-
-/// What a Folder holds, all the way down.
-#[wasm_bindgen]
-pub struct Counts {
-    pub notes: u32,
-    pub folders: u32,
 }
 
 /// The Notes, see `pkm_notes::Notes`.
@@ -129,24 +97,18 @@ impl NoteStore {
     }
 
     /// Opens the Notes from the saved files: `paths[i]` held `texts[i]`, in
-    /// storage paths (`Notes/<folder>/<id>.md`); `folders` are the storage
-    /// paths of the Folders saved, empty ones too.
+    /// storage paths (`Notes/<id>.md`).
     #[wasm_bindgen(constructor)]
-    pub fn new(paths: Vec<String>, texts: Vec<String>, folders: Vec<String>) -> NoteStore {
-        use pkm_notes::Files;
+    pub fn new(paths: Vec<String>, texts: Vec<String>) -> NoteStore {
         let files = Arc::new(MemoryFiles::default());
         for (path, text) in paths.into_iter().zip(texts) {
             files.load(Path::new(&path), text);
-        }
-        for folder in folders {
-            // Memory makes any folder.
-            drop(files.make_folder(Path::new(&folder)));
         }
         let notes = Notes::open_in(files.clone(), Notes::FOLDER);
         Self { files, notes }
     }
 
-    /// Puts an Image saved beside the Notes in memory, where Moves reach it;
+    /// Puts an Image saved beside the Notes in memory, for `readImage`;
     /// `path` is a storage path. Not counted as a change.
     #[wasm_bindgen(js_name = loadImage)]
     pub fn load_image(&self, path: &str, bytes: Vec<u8>) {
@@ -169,9 +131,9 @@ impl NoteStore {
         self.files.read_bytes(Path::new(path)).ok()
     }
 
-    /// Saves a new, empty Note in the Folder at `folder` (empty for the top level).
-    pub fn create(&self, folder: &str) -> Result<Note, JsError> {
-        self.notes.create(folder).map(Into::into).map_err(error)
+    /// Saves a new, empty Note.
+    pub fn create(&self) -> Result<Note, JsError> {
+        self.notes.create().map(Into::into).map_err(error)
     }
 
     pub fn read(&self, id: &str) -> Result<Note, JsError> {
@@ -214,63 +176,15 @@ impl NoteStore {
         self.notes.discard_if_empty(id).map_err(error)
     }
 
-    /// The Notes in the Folder at `folder` (empty for the top level), newest `updated` first.
-    pub fn notes(&self, folder: &str) -> Result<Vec<ListedNote>, JsError> {
-        let rows = self.notes.list(folder).map_err(error)?;
+    /// Every Note, newest `updated` first.
+    pub fn notes(&self) -> Result<Vec<ListedNote>, JsError> {
+        let rows = self.notes.list().map_err(error)?;
         Ok(rows.into_iter().map(Into::into).collect())
     }
 
-    /// The Notes in any Folder with `query` in the Title or Body, Title matches first, each newest first.
+    /// The Notes with `query` in the Title or Body, Title matches first, each newest first.
     pub fn search(&self, query: &str) -> Result<Vec<SearchResult>, JsError> {
         let found = self.notes.search(query).map_err(error)?;
         Ok(found.into_iter().map(Into::into).collect())
-    }
-
-    /// Every Folder, as the outline shows them.
-    pub fn folders(&self) -> Result<Vec<FolderRow>, JsError> {
-        let mut rows = Vec::new();
-        flatten(self.notes.folders().map_err(error)?, 0, &mut rows);
-        Ok(rows)
-    }
-
-    /// Makes a Folder in `parent` and returns its path; the error says why
-    /// the name is refused.
-    #[wasm_bindgen(js_name = createFolder)]
-    pub fn create_folder(&self, parent: &str, name: &str) -> Result<String, JsError> {
-        self.notes.create_folder(parent, name).map_err(error)
-    }
-
-    /// Renames the Folder at `path` and returns its new path.
-    #[wasm_bindgen(js_name = renameFolder)]
-    pub fn rename_folder(&self, path: &str, name: &str) -> Result<String, JsError> {
-        self.notes.rename_folder(path, name).map_err(error)
-    }
-
-    /// Moves the Note into the Folder at `folder` (empty for the top level).
-    #[wasm_bindgen(js_name = moveNote)]
-    pub fn move_note(&self, id: &str, folder: &str) -> Result<(), JsError> {
-        self.notes.move_note(id, folder).map_err(error)
-    }
-
-    /// Moves the Folder at `path` into the Folder `into` and returns its new
-    /// path; the error says why a Move is refused.
-    #[wasm_bindgen(js_name = moveFolder)]
-    pub fn move_folder(&self, path: &str, into: &str) -> Result<String, JsError> {
-        self.notes.move_folder(path, into).map_err(error)
-    }
-
-    /// Deletes the Folder at `path` with everything in it.
-    #[wasm_bindgen(js_name = deleteFolder)]
-    pub fn delete_folder(&self, path: &str) -> Result<(), JsError> {
-        self.notes.delete_folder(path).map_err(error)
-    }
-
-    /// The Notes and Folders in the Folder at `path`, all the way down.
-    pub fn count(&self, path: &str) -> Result<Counts, JsError> {
-        let counts = self.notes.count(path).map_err(error)?;
-        Ok(Counts {
-            notes: counts.notes,
-            folders: counts.folders,
-        })
     }
 }

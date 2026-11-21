@@ -32,19 +32,12 @@ extension NotesModel {
                 ("", "Buy oat milk\nand bread"),
             ]
             for (title, body) in samples.reversed() {
-                guard let note = try? store.create(folder: "") else { continue }
+                guard let note = try? store.create() else { continue }
                 _ = try? store.edit(id: note.id, title: title, body: body)
             }
         }
-        _ = try? store.createFolder(parent: "", name: "Recipes")
-        if let work = try? store.createFolder(parent: "", name: "Work") {
-            _ = try? store.createFolder(parent: work, name: "Plans")
-            if let note = try? store.create(folder: work) {
-                _ = try? store.edit(id: note.id, title: "Weekly review", body: "")
-            }
-        }
         let model = NotesModel(store: store)
-        if opensNote { model.openID = model.notes(in: "").first { $0.title == "Reading list" }?.id }
+        if opensNote { model.openID = model.notes.first { $0.title == "Reading list" }?.id }
         return model
     }
 

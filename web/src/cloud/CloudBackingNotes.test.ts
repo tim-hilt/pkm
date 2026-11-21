@@ -54,15 +54,10 @@ async function device(tabs?: MemoryTabGroup): Promise<Device> {
   return device;
 }
 
-/** Writes a Note in `folder` (a path, empty for the top level) on the Device, as the app does, and saves it. */
-async function createNote(
-  device: Device,
-  title: string,
-  body: string,
-  folder = "",
-): Promise<string> {
+/** Writes a Note on the Device, as the app does, and saves it. */
+async function createNote(device: Device, title: string, body: string): Promise<string> {
   const files = await NoteFiles.open(device.storage);
-  const note = files.store.create(folder);
+  const note = files.store.create();
   const { id } = note;
   note.free();
   files.store.edit(id, title, body).free();
@@ -71,9 +66,9 @@ async function createNote(
   return id;
 }
 
-async function titles(device: Device, folder = ""): Promise<string[]> {
+async function titles(device: Device): Promise<string[]> {
   const files = await NoteFiles.open(device.storage);
-  const rows = files.store.notes(folder);
+  const rows = files.store.notes();
   const found = rows.map((row) => row.title);
   rows.forEach((row) => row.free());
   return found;
@@ -119,53 +114,6 @@ describe("the Notes folder", () => {
 
     await sync(browser);
     expect(await titles(browser)).toEqual(["Roadmap"]);
-  });
-
-  it("Syncs a Note in a nested Folder and an empty Folder, in the same places", async () => {
-    const browser = await device();
-    const tablet = await device();
-    const files = await NoteFiles.open(browser.storage);
-    files.store.createFolder("", "Work");
-    files.store.createFolder("Work", "Plans");
-    files.store.createFolder("", "Later");
-    await files.save();
-    await createNote(browser, "Roadmap", "one\n", "Work/Plans");
-    await settle();
-
-    expect([...server.contents("pkm/Notes/Work/Plans").keys()]).toEqual([
-      expect.stringMatching(/^[a-z0-9]{12}\.md$/),
-    ]);
-    expect(server.hasFolder("pkm/Notes/Later")).toBe(true);
-
-    await sync(tablet);
-    expect(await titles(tablet, "Work/Plans")).toEqual(["Roadmap"]);
-    const folders = await NoteFiles.open(tablet.storage);
-    expect(folders.store.folders().map((row) => row.path)).toContain("Later");
-    expect(tablet.notesChanged).toBe(1);
-  });
-
-  it("Deletes a Folder on the other Device, with the Note edited there meanwhile", async () => {
-    const browser = await device();
-    const tablet = await device();
-    const id = await createNote(browser, "Roadmap", "one\n");
-    const files = await NoteFiles.open(browser.storage);
-    files.store.createFolder("", "Work");
-    files.store.moveNote(id, "Work");
-    await files.save();
-    await settle();
-    await sync(tablet);
-    expect(await titles(tablet, "Work")).toEqual(["Roadmap"]);
-
-    files.store.deleteFolder("Work");
-    await files.save();
-    const edited = await NoteFiles.open(tablet.storage);
-    edited.store.edit(id, "Roadmap", "one\ntwo\n").free();
-    await edited.save();
-    for (const one of [browser, tablet, browser]) await sync(one);
-
-    expect(server.hasFolder("pkm/Notes/Work")).toBe(false);
-    expect(server.contents("pkm/Notes/Work").size).toBe(0);
-    expect((await NoteFiles.open(tablet.storage)).store.folders()).toHaveLength(0);
   });
 
   it("tells the other tabs when one saved Note files", async () => {
