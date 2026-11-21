@@ -87,7 +87,8 @@ ipa: apple-project
 
 test: apple-project
 	cargo test --workspace --locked
-	$(XCTEST) -destination 'platform=macOS'
+	@# The App Group entitlement needs a provisioning profile, i.e. a developer account; tests run without it.
+	$(XCTEST) -destination 'platform=macOS' CODE_SIGN_IDENTITY=- CODE_SIGN_ENTITLEMENTS=
 
 test-ios: apple-project sim
 	$(XCTEST) -destination 'platform=iOS Simulator,name=$(SIM)'
