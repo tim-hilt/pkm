@@ -57,6 +57,20 @@ const draftOf = async (address: string): Promise<Draft> => {
   return prepared.draft;
 };
 
+describe("Saving a page handed over", () => {
+  it("keeps the Article of the HTML given, fetching only its images", async () => {
+    const html = PAGE.replace("A Post", "Logged In Post");
+    const prepared = await model.prepare("https://example.com/private", undefined, html);
+    if (prepared.kind !== "draft") throw new Error(prepared.kind);
+    expect([prepared.draft.title, prepared.draft.readsLikeArticle]).toEqual([
+      "Logged In Post",
+      true,
+    ]);
+    expect(served.asked).toEqual(["/cgi-bin/fetch?url=https%3A%2F%2Fexample.com%2Fpic.png"]);
+    model.discard(prepared.draft);
+  });
+});
+
 describe("Saving an Address", () => {
   it("downloads the page and its images through the script and Saves them", async () => {
     const draft = await draftOf("example.com/post#top");

@@ -186,17 +186,18 @@ export class BookmarksModel {
     this.onChange();
   }
 
-  /** The Save dialog's first step: the Address as typed (`https://` is assumed if it names no scheme), its page, Cover and the Article's images downloaded and read. An Address Saved already isn't downloaded. A download that fails, or none for a PDF or EPUB, leaves the Address alone to be Saved. `progress` is called with the downloads done and to do. */
+  /** The Save dialog's first step: the Address as typed (`https://` is assumed if it names no scheme), its page, Cover and the Article's images downloaded and read. An Address Saved already isn't downloaded. A download that fails, or none for a PDF or EPUB, leaves the Address alone to be Saved. `progress` is called with the downloads done and to do. A page handed over as `html` (by the bookmarklet) is used as it is instead of downloaded. */
   async prepare(
     typed: string,
     progress: (done: number, total: number) => void = () => {},
+    html?: string,
   ): Promise<Prepared> {
     const text = typed.trim();
     const address = normaliseAddress(text.includes("://") ? text : `https://${text}`);
     if (address === undefined) return { kind: "invalid" };
     const existing = this.bookmark(this.all.find((b) => b.address === address)?.id);
     if (existing) return { kind: "existing", bookmark: existing };
-    return { kind: "draft", draft: await this.fetch(address, true, progress) };
+    return { kind: "draft", draft: await this.fetch(address, true, progress, html) };
   }
 
   /** The page at `address`, its Cover if `withCover` and the Article's images downloaded and read. */
@@ -204,10 +205,11 @@ export class BookmarksModel {
     address: string,
     withCover: boolean,
     progress: (done: number, total: number) => void = () => {},
+    handed?: string,
   ): Promise<Draft> {
-    let html = "";
+    let html = handed ?? "";
     let failure: string | undefined;
-    if (!isDocumentAddress(address)) {
+    if (handed === undefined && !isDocumentAddress(address)) {
       try {
         html = await this.downloader.page(address);
       } catch (error) {

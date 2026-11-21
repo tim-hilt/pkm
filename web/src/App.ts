@@ -20,6 +20,7 @@ import { browserHistory } from "./navigation/browserHistory";
 import { Navigation } from "./navigation/Navigation";
 import { BookmarkFiles } from "./bookmarks/BookmarkFiles";
 import { BookmarksModel } from "./bookmarks/BookmarksModel";
+import { listenForHandedPages } from "./bookmarks/Bookmarklet";
 import { BookmarksView } from "./bookmarks/BookmarksView";
 import { PageDownloader } from "./bookmarks/PageDownloader";
 import { NoteFiles } from "./notes/NoteFiles";
@@ -95,13 +96,17 @@ export async function startApp(
   // The Tags file is shared: Tags a Bookmark added are known to the Tasks, and a Tag Deleted there leaves the Bookmarks.
   bookmarkFiles.onTagsSaved = () => void tasks.syncDidChange();
   tasks.onTagDeleted = (tag) => bookmarks.removeTagEverywhere(tag);
-  shell.pane("bookmarks").append(
-    new BookmarksView(bookmarks, {
-      openDetails: (id) => navigation.openItem(id),
-      closeDetails: () => navigation.closeItem(),
-      immersive: (on) => shell.setFocused(on),
-    }).element,
-  );
+  const bookmarksView = new BookmarksView(bookmarks, {
+    openDetails: (id) => navigation.openItem(id),
+    closeDetails: () => navigation.closeItem(),
+    immersive: (on) => shell.setFocused(on),
+  });
+  shell.pane("bookmarks").append(bookmarksView.element);
+  // The bookmarklet hands over the page of a browser tab, to Save as the user sees it.
+  listenForHandedPages(window, (page) => {
+    navigation.select("bookmarks");
+    bookmarksView.save(page);
+  });
   const pane = shell.pane("drawings");
 
   let canvas: { drawing: OpenDrawing; stop: () => void } | undefined;

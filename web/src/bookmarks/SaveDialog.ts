@@ -2,6 +2,7 @@ import { button, make } from "../Dom";
 import { confirmButton, field, modal, textInput } from "../tasks/TaskDialogs";
 import { pickTagsDialog } from "../tasks/TagPicker";
 import { tagLabel } from "../tasks/TagLabel";
+import type { HandedPage } from "./Bookmarklet";
 import type { BookmarkRow, BookmarksModel, Draft } from "./BookmarksModel";
 
 /** The Tags of a Bookmark as labels, with the button that picks them. */
@@ -31,12 +32,15 @@ export function tagsRow(
  * The Save dialog: the Address to paste, then the page downloaded through the server, with its
  * Title to rename, its Tags, whether to keep its Article (the app's decision, which the user can
  * flip), the progress of the downloads, and the reason if the page couldn't be read. An Address
- * Saved already closes the dialog and `found` shows that Bookmark. A port of the Swift `SaveSheet`.
+ * Saved already closes the dialog and `found` shows that Bookmark. A page `handed` over by the
+ * bookmarklet is read as it is, without a download, and its step is shown at once. A port of the
+ * Swift `SaveSheet`.
  */
 export function saveDialog(
   parent: HTMLElement,
   model: BookmarksModel,
   found: (bookmark: BookmarkRow) => void,
+  handed?: HandedPage,
 ): void {
   const address = textInput("");
   address.placeholder = address.ariaLabel = "Address";
@@ -77,10 +81,14 @@ export function saveDialog(
     note.textContent = "";
     const progress = make("progress", "");
     note.replaceChildren(progress);
-    const prepared = await model.prepare(address.value, (done, total) => {
-      progress.max = total;
-      progress.value = done;
-    });
+    const prepared = await model.prepare(
+      address.value,
+      (done, total) => {
+        progress.max = total;
+        progress.value = done;
+      },
+      handed?.html,
+    );
     working = next.disabled = false;
     note.replaceChildren();
     if (!dialog.isConnected) {
@@ -126,5 +134,10 @@ export function saveDialog(
     if (draft) model.discard(draft);
     draft = undefined;
   });
-  address.focus();
+  if (handed) {
+    address.value = handed.address;
+    void prepare();
+  } else {
+    address.focus();
+  }
 }

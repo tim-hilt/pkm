@@ -5,6 +5,7 @@ import { tagLabel } from "../tasks/TagLabel";
 import { ArticleReader } from "./ArticleReader";
 import { BookmarkDetails } from "./BookmarkDetails";
 import type { BookmarkHit, BookmarkRow, BookmarksModel } from "./BookmarksModel";
+import { type HandedPage, bookmarklet } from "./Bookmarklet";
 import { saveDialog } from "./SaveDialog";
 
 const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
@@ -33,6 +34,7 @@ export class BookmarksView {
   private readonly empty = make("div", "tasks-empty", [
     make("strong", "", ["No Bookmarks"]),
     make("span", "", ["Tap + and enter the address of a page to Save it."]),
+    button("tasks-back", "Copy Bookmarklet", () => void this.copyBookmarklet()),
   ]);
   private readonly noResults = make("div", "tasks-empty");
   private readonly search = make("input", "tasks-input notes-search");
@@ -102,8 +104,19 @@ export class BookmarksView {
     this.tags.value = model.tagFilter ?? "";
   }
 
-  private save(): void {
-    saveDialog(this.element, this.model, (bookmark) => this.places.openDetails(bookmark.id));
+  /** Opens the Save dialog, on `handed` if a bookmarklet brought a page. */
+  save(handed?: HandedPage): void {
+    saveDialog(
+      this.element,
+      this.model,
+      (bookmark) => this.places.openDetails(bookmark.id),
+      handed,
+    );
+  }
+
+  /** Copies the bookmarklet that Saves the page of a browser tab, to be pasted as a bookmark's address. */
+  private async copyBookmarklet(): Promise<void> {
+    await navigator.clipboard.writeText(bookmarklet(location.origin));
   }
 
   private row(bookmark: BookmarkRow, found?: BookmarkHit): HTMLElement {
