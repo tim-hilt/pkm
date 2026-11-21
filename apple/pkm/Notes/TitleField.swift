@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// The Title of a Note: one line with Inline formatting, raw while focused and formatted
-/// otherwise, and ⌘B, ⌘I and ⌘E on the selection. Unlike a Task's Title it has no Quick Add.
+/// otherwise, and ⌘B, ⌘I and ⌘E on the selection. Unlike a Task's Title it has no Quick Add. It is
+/// borderless and larger than the Body's headings, a heading of the page.
 struct TitleField: View {
     @Binding var text: String
     /// Takes the keyboard focus when it appears.
@@ -11,18 +12,21 @@ struct TitleField: View {
 
     var body: some View {
         TextField("Title", text: $text, selection: $selection)
-            .font(.title3)
+            .textFieldStyle(.plain)
+            .font(Self.font)
             .focused($isFocused)
             .foregroundStyle(isFocused ? .primary : Color.clear)
             .overlay(alignment: .leading) {
                 if !isFocused && !text.isEmpty {
-                    Text(AttributedString(title: text)).font(.title3).allowsHitTesting(false)
+                    Text(AttributedString(title: text)).font(Self.font).allowsHitTesting(false)
                 }
             }
             .focusedSceneValue(\.formatText, isFocused ? { format($0) } : nil)
             .onAppear { isFocused = autofocus }
             .accessibilityIdentifier("note-title")
     }
+
+    private static let font = Font.largeTitle.bold()
 
     /// Toggles Inline formatting on the selection, which stays selected.
     private func format(_ kind: Inline) {
