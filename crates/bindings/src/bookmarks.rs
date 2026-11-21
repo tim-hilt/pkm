@@ -2,6 +2,7 @@
 //! and the extraction of a page's details. The logic lives in `pkm-bookmarks`.
 
 use pkm_bookmarks::{Article, Bookmark, Bookmarks, Details, Saved};
+use std::collections::HashMap;
 
 /// Why the Bookmarks couldn't be read or saved.
 #[derive(Debug, uniffi::Error)]
@@ -43,6 +44,7 @@ pub struct Bookmark {
 pub struct Article {
     pub markdown: String,
     pub reads_like_article: bool,
+    pub images: Vec<String>,
 }
 
 /// What a page says about itself, see `pkm_bookmarks::Details`.
@@ -103,7 +105,8 @@ impl BookmarkStore {
 
     /// Saves the page at `address` unless it is Saved already, which gives that Bookmark.
     /// A blank `title` leaves it to the page's; `cover` is the Cover's bytes, if downloaded;
-    /// `article` is the Article's Markdown if it is to have one.
+    /// `article` is the Article's Markdown if it is to have one; `images` the bytes downloaded for
+    /// the addresses in `Article.images`, by address: those that are missing are dropped from it.
     pub fn save(
         &self,
         address: String,
@@ -111,6 +114,7 @@ impl BookmarkStore {
         title: String,
         cover: Option<Vec<u8>>,
         article: Option<String>,
+        images: HashMap<String, Vec<u8>>,
     ) -> Result<Saved, BookmarksError> {
         Ok(self.0.save(
             &address,
@@ -118,6 +122,7 @@ impl BookmarkStore {
             &title,
             cover.as_deref(),
             article.as_deref(),
+            &images,
         )?)
     }
 
@@ -140,7 +145,12 @@ impl BookmarkStore {
         Ok(self.0.read_article(&id)?)
     }
 
-    /// Deletes the Bookmark with its Cover.
+    /// The bytes of the image `name` that the Bookmark's Article shows.
+    pub fn read_image(&self, id: String, name: String) -> Result<Vec<u8>, BookmarksError> {
+        Ok(self.0.read_image(&id, &name)?)
+    }
+
+    /// Deletes the Bookmark with its Cover and images.
     pub fn delete(&self, id: String) -> Result<(), BookmarksError> {
         Ok(self.0.delete(&id)?)
     }
@@ -167,6 +177,7 @@ mod tests {
                 String::new(),
                 None,
                 Some(article.markdown),
+                HashMap::new(),
             )
             .unwrap();
         let rows = store.bookmarks().unwrap();

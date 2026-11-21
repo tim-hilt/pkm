@@ -2,10 +2,12 @@
 //! subset of ADR-0028. Readability-style scoring (text density, link density,
 //! class and id hints) finds the main text; menus, ads, comment sections,
 //! cookie banners and footers are left out; the page's `<head>` is `extract`'s.
-//! Pure: the client downloads, this only reads. Text only for now.
+//! Images stay as references to their addresses, and videos, iframes and
+//! embeds become links where they stood. Pure: the client downloads, this only reads.
 
 use crate::address::resolve;
-use crate::html::{Dom, Part};
+use crate::html::{Dom, Part, clean};
+use crate::images;
 use std::collections::BTreeMap;
 
 /// The text of a page, and whether the page reads like an article.
@@ -17,6 +19,9 @@ pub struct Article {
     /// Whether to keep `markdown` unless the user says otherwise: the main
     /// text is long, and mostly text rather than links.
     pub reads_like_article: bool,
+    /// The absolute addresses of the images `markdown` uses, each once, in
+    /// order, for the client to download and hand to Save.
+    pub images: Vec<String>,
 }
 
 /// The Article of the page at `address` whose HTML is `html`. Links are made
@@ -33,9 +38,18 @@ pub fn read_article(html: &str, address: &str) -> Article {
         .map(|b| b.text.chars().count())
         .sum();
     let (text, linked) = text_length(&dom, top);
+    let markdown = render(&blocks);
+    let mut used = Vec::new();
+    images::rewrite(&markdown, |address| {
+        if !used.iter().any(|a| a == address) {
+            used.push(address.to_owned());
+        }
+        Some(address.to_owned())
+    });
     Article {
         reads_like_article: prose >= MIN_PROSE && (linked as f64) < MAX_LINK_DENSITY * text as f64,
-        markdown: render(&blocks),
+        markdown,
+        images: used,
     }
 }
 
@@ -58,6 +72,10 @@ const LEFT_OUT: &[&str] = &[
     "link", "meta", "nav", "noscript", "object", "script", "select", "style", "svg", "template",
     "textarea", "video",
 ];
+
+/// Elements that play or show something the Article can't hold: they count
+/// no text, and become a link to what they showed.
+const EMBEDS: &[&str] = &["embed", "iframe", "object", "video"];
 
 /// Class and id words that mark chrome wherever they are.
 const CHROME: &[&str] = &[
@@ -130,10 +148,12 @@ fn is_any(word: &str, list: &[&str]) -> bool {
 
 /// Whether the element is chrome, hidden, or never text: it and all in it are left out.
 fn is_left_out(dom: &Dom, id: usize) -> bool {
+    LEFT_OUT.contains(&dom.name(id)) || is_hidden_or_chrome(dom, id)
+}
+
+/// Whether the element is hidden or marked as chrome, whatever it is.
+fn is_hidden_or_chrome(dom: &Dom, id: usize) -> bool {
     let name = dom.name(id);
-    if LEFT_OUT.contains(&name) {
-        return true;
-    }
     let attribute = |key| dom.attribute(id, key);
     let hidden = attribute("hidden").is_some()
         || attribute("aria-hidden") == Some("true")
@@ -387,10 +407,17 @@ impl<'a> Writer<'a> {
             Some(Part::Text(text)) => return self.text(text),
             Some(Part::Element(name)) => name,
         };
+        if EMBEDS.contains(&name) {
+            if !is_hidden_or_chrome(dom, id) {
+                self.embed(id);
+            }
+            return;
+        }
         if is_left_out(dom, id) {
             return;
         }
         match name {
+            "img" => self.image(id),
             "br" | "hr" => self.flush("", BlockKind::Paragraph),
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
                 self.flush("", BlockKind::Paragraph);
@@ -432,11 +459,7 @@ impl<'a> Writer<'a> {
                 let target = dom
                     .attribute(id, "href")
                     .and_then(|href| resolve(self.base, href))
-                    .map(|url| {
-                        url.replace(' ', "%20")
-                            .replace('(', "%28")
-                            .replace(')', "%29")
-                    });
+                    .map(|url| images::escape(&url));
                 match target {
                     Some(url) => self.span("[", &format!("]({url})"), id),
                     None => self.span("", "", id),
@@ -521,6 +544,40 @@ impl<'a> Writer<'a> {
         format!("{}{marker}", "  ".repeat(depth))
     }
 
+    /// An image as a block of its own, if it has an address to download.
+    fn image(&mut self, id: usize) {
+        let Some(address) = image_address(self.dom, id).and_then(|a| resolve(self.base, &a)) else {
+            return;
+        };
+        self.flush("", BlockKind::Paragraph);
+        let alt = clean(self.dom.attribute(id, "alt").unwrap_or_default());
+        self.line = images::reference(&alt, &address);
+        self.flush("", BlockKind::Paragraph);
+    }
+
+    /// A video, iframe or embed as a link, in a block of its own, where it stood.
+    fn embed(&mut self, id: usize) {
+        let dom = self.dom;
+        let source = [
+            dom.attribute(id, "src"),
+            dom.attribute(id, "data"),
+            dom.children(id).iter().find_map(|&c| {
+                (dom.name(c) == "source")
+                    .then(|| dom.attribute(c, "src"))
+                    .flatten()
+            }),
+        ]
+        .into_iter()
+        .flatten()
+        .find_map(|src| resolve(self.base, src));
+        let Some(address) = source else { return };
+        self.flush("", BlockKind::Paragraph);
+        let title = clean(dom.attribute(id, "title").unwrap_or_default()).replace(['[', ']'], "");
+        let label = if title.is_empty() { &address } else { &title };
+        self.line = format!("[{label}]({})", images::escape(&address));
+        self.flush("", BlockKind::Paragraph);
+    }
+
     /// Every line of the blocks inside, quoted.
     fn quote(&mut self, id: usize) {
         self.flush("", BlockKind::Paragraph);
@@ -580,6 +637,48 @@ impl<'a> Writer<'a> {
             }
         }
     }
+}
+
+/// Where an `<img>` has its picture: the largest of its `srcset`, else its
+/// `src` (or the lazy-loading `data-src`), else, in a `<picture>`, the
+/// largest of its first `<source>`.
+fn image_address(dom: &Dom, id: usize) -> Option<String> {
+    let own = |key: &str| dom.attribute(id, key).filter(|v| !v.trim().is_empty());
+    let from_source = || {
+        let picture = dom.parent(id);
+        if dom.name(picture) != "picture" {
+            return None;
+        }
+        let source = dom
+            .children(picture)
+            .iter()
+            .find(|&&c| dom.name(c) == "source")?;
+        dom.attribute(*source, "srcset").and_then(largest)
+    };
+    own("srcset")
+        .or(own("data-srcset"))
+        .and_then(largest)
+        .or_else(|| own("src").or(own("data-src")).map(|a| a.trim().to_owned()))
+        .or_else(from_source)
+}
+
+/// The address with the largest descriptor (`640w`, `2x`) in a `srcset`; the first on a tie.
+fn largest(srcset: &str) -> Option<String> {
+    let mut best: Option<(f64, &str)> = None;
+    for candidate in srcset.split(',') {
+        let mut parts = candidate.split_whitespace();
+        let Some(address) = parts.next() else {
+            continue;
+        };
+        let size = parts
+            .next()
+            .and_then(|d| d.trim_end_matches(['w', 'x']).parse::<f64>().ok())
+            .unwrap_or(1.0);
+        if best.is_none_or(|(b, _)| size > b) {
+            best = Some((size, address));
+        }
+    }
+    best.map(|(_, address)| address.to_owned())
 }
 
 /// Whether a table holds data, which reads as rows, rather than laying out a
@@ -716,7 +815,7 @@ mod tests {
     #[test]
     fn markers_never_wrap_white_space_or_nothing() {
         assert_eq!(
-            markdown("<p>a <b> bold </b> b <i></i><a href='/x'><img src=x></a>c</p>"),
+            markdown("<p>a <b> bold </b> b <i></i><a href='/x'><img alt=''></a>c</p>"),
             "a **bold** b c\n"
         );
     }
@@ -789,6 +888,72 @@ mod tests {
         assert_eq!(
             markdown(&html),
             format!("## Title\n\n{}\n", prose(1).trim())
+        );
+    }
+
+    #[test]
+    fn images_are_blocks_with_absolute_addresses_listed_once() {
+        let html = r#"<p>Before</p><img src="pic.png" alt="A [fox]">
+            <p>Text <img src="/a/b.jpg"> more <img src="pic.png"> <img src="data:image/gif;base64,xx"> <img></p>
+            <img src="//cdn.test/c d.png">"#;
+        let article = read_article(html, ADDRESS);
+        assert_eq!(
+            article.markdown,
+            "Before\n\n![A fox](https://blog.example.com/2024/post/pic.png)\n\nText\n\n\
+             ![](https://blog.example.com/a/b.jpg)\n\nmore\n\n![](https://blog.example.com/2024/post/pic.png)\n\n\
+             ![](https://cdn.test/c%20d.png)\n"
+        );
+        assert_eq!(
+            article.images,
+            [
+                "https://blog.example.com/2024/post/pic.png",
+                "https://blog.example.com/a/b.jpg",
+                "https://cdn.test/c%20d.png"
+            ]
+        );
+    }
+
+    #[test]
+    fn the_largest_srcset_candidate_is_the_image() {
+        let img = |attributes: &str| read_article(&format!("<img {attributes}>"), ADDRESS).images;
+        assert_eq!(
+            img(r#"src="small.png" srcset="small.png 320w, /big.png 1280w, mid.png 640w""#),
+            ["https://blog.example.com/big.png"]
+        );
+        assert_eq!(
+            img(r#"srcset="a.png 1x, b.png 2x""#),
+            ["https://blog.example.com/2024/post/b.png"]
+        );
+        assert_eq!(img(r#"data-src="lazy.png""#).len(), 1);
+        assert_eq!(img(r#"srcset="  ""#).len(), 0);
+    }
+
+    #[test]
+    fn a_picture_gives_its_img_or_else_its_source() {
+        let img = |html: &str| read_article(html, ADDRESS).images;
+        assert_eq!(
+            img(r#"<picture><source srcset="x.webp"><img src="x.jpg"></picture>"#),
+            ["https://blog.example.com/2024/post/x.jpg"]
+        );
+        assert_eq!(
+            img(r#"<picture><source srcset="x.webp 1x, y.webp 2x"><img alt="no src"></picture>"#),
+            ["https://blog.example.com/2024/post/y.webp"]
+        );
+    }
+
+    #[test]
+    fn videos_iframes_and_embeds_become_links_where_they_stood() {
+        let html = r#"<p>Watch:</p>
+            <iframe src="https://video.test/embed/1" title="A [talk]"></iframe>
+            <video controls><source src="/clip.mp4" type="video/mp4">Your browser cannot play this.</video>
+            <embed src="doc.pdf"><object data="o.swf"></object>
+            <iframe src="about:blank"></iframe><iframe class="ad-slot" src="https://ads.test/"></iframe>
+            <p>After</p>"#;
+        assert_eq!(
+            markdown(html),
+            "Watch:\n\n[A talk](https://video.test/embed/1)\n\n[https://blog.example.com/clip.mp4](https://blog.example.com/clip.mp4)\n\n\
+             [https://blog.example.com/2024/post/doc.pdf](https://blog.example.com/2024/post/doc.pdf)\n\n\
+             [https://blog.example.com/2024/post/o.swf](https://blog.example.com/2024/post/o.swf)\n\nAfter\n"
         );
     }
 

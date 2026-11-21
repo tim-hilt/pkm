@@ -9,6 +9,7 @@ mod address;
 mod article;
 mod extract;
 mod html;
+mod images;
 mod store;
 
 pub use address::{is_document, normalise};

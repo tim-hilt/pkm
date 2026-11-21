@@ -5,12 +5,14 @@
 
 use crate::address::normalise;
 use crate::extract::Details;
+use crate::images;
 use pkm_base::clock::{iso8601, now_ms};
 use pkm_base::files::{DiskFiles, Files};
 use pkm_base::front_matter::Document;
 use pkm_base::images::{extension, is_image_file};
 use pkm_base::item_id::ItemId;
 use pkm_base::random::Entropy;
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
@@ -84,7 +86,11 @@ impl Bookmarks {
     /// of the Cover; they are left out if they are no PNG, JPEG, GIF or
     /// WebP, so that a broken image never costs the Bookmark. `article` is the
     /// Article's Markdown (see `read_article`) if the Bookmark is to have one;
-    /// blank is none. `InvalidInput` for an `address` that is none (see `normalise`).
+    /// blank is none. `images` holds the bytes downloaded for the addresses
+    /// the Article names: those are kept beside the Bookmark and the Article
+    /// points at the files; an image that wasn't downloaded or is no PNG, JPEG,
+    /// GIF or WebP is dropped from the Article. `InvalidInput` for an
+    /// `address` that is none (see `normalise`).
     pub fn save(
         &self,
         address: &str,
@@ -92,6 +98,7 @@ impl Bookmarks {
         title: &str,
         cover: Option<&[u8]>,
         article: Option<&str>,
+        images: &HashMap<String, Vec<u8>>,
     ) -> io::Result<Saved> {
         let address = normalise(address).ok_or(io::ErrorKind::InvalidInput)?;
         if let Some(bookmark) = self.list()?.into_iter().find(|b| b.address == address) {
@@ -107,14 +114,10 @@ impl Bookmarks {
                 break id;
             }
         };
-        let cover = cover
-            .and_then(|bytes| Some((bytes, extension(bytes)?)))
-            .map(|(bytes, extension)| {
-                (bytes, format!("{}.{extension}", ItemId::new(&mut entropy)))
-            });
-        if let Some((bytes, name)) = &cover {
-            self.files.write_bytes(&self.root.join(name), bytes)?;
-        }
+        let cover = match cover {
+            Some(bytes) => self.keep_image(&mut entropy, bytes)?,
+            None => None,
+        };
         let one_line = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
         let title = [one_line(title), one_line(&details.title)]
             .into_iter()
@@ -126,7 +129,7 @@ impl Bookmarks {
         file.set_scalar(TITLE, title);
         for (key, value) in [
             (SITE, one_line(&details.site)),
-            (COVER, cover.map(|(_, name)| name).unwrap_or_default()),
+            (COVER, cover.unwrap_or_default()),
             (EXCERPT, one_line(&details.excerpt)),
             (AUTHOR, one_line(&details.author)),
             (PUBLISHED, one_line(&details.published)),
@@ -136,8 +139,27 @@ impl Bookmarks {
             }
         }
         file.set_scalar(SAVED, iso8601(now_ms()));
-        if let Some(article) = article.map(str::trim).filter(|a| !a.is_empty()) {
-            file.body = format!("{article}\n");
+        if let Some(article) = article {
+            let mut kept: HashMap<String, Option<String>> = HashMap::new();
+            let mut failed = None;
+            let article = images::rewrite(article, |address| {
+                kept.entry(address.to_owned())
+                    .or_insert_with(|| {
+                        let bytes = images.get(address)?;
+                        self.keep_image(&mut entropy, bytes).unwrap_or_else(|e| {
+                            failed = Some(e);
+                            None
+                        })
+                    })
+                    .clone()
+            });
+            if let Some(error) = failed {
+                return Err(error);
+            }
+            let article = article.trim();
+            if !article.is_empty() {
+                file.body = format!("{article}\n");
+            }
         }
         self.files.write(&self.path(&id), &file.render())?;
         Ok(Saved {
@@ -185,18 +207,58 @@ impl Bookmarks {
             .ok_or(io::ErrorKind::NotFound.into())
     }
 
-    /// Deletes the Bookmark `id` with its Cover; one that is gone already is as wanted.
+    /// The bytes of the image `name`, as the Article of the Bookmark `id`
+    /// names it; `NotFound` if there is no such Bookmark, or the Article
+    /// doesn't use it, or it is gone.
+    pub fn read_image(&self, id: &str, name: &str) -> io::Result<Vec<u8>> {
+        let bookmark = self.read(id)?;
+        let used = bookmark.cover.as_deref() == Some(name)
+            || self.images_of(&bookmark).iter().any(|n| n == name);
+        if !used {
+            return Err(io::ErrorKind::NotFound.into());
+        }
+        self.files.read_bytes(&self.root.join(name))
+    }
+
+    /// Deletes the Bookmark `id` with its Cover and images; one that is gone
+    /// already is as wanted.
     pub fn delete(&self, id: &str) -> io::Result<()> {
         let Ok(bookmark) = self.read(id) else {
             return Ok(());
         };
-        if let Some(cover) = bookmark.cover.filter(|name| is_image_file(name)) {
-            ignore_not_found(self.files.remove(&self.root.join(cover)))?;
+        let images = self.images_of(&bookmark);
+        for name in bookmark.cover.iter().chain(&images) {
+            ignore_not_found(self.files.remove(&self.root.join(name)))?;
         }
         ignore_not_found(
             self.files
                 .remove(&self.root.join(format!("{}.md", bookmark.id))),
         )
+    }
+
+    /// Writes `bytes` beside the Bookmarks as a new `<random-id>.<ext>`; none
+    /// if they are no PNG, JPEG, GIF or WebP.
+    fn keep_image(&self, entropy: &mut Entropy, bytes: &[u8]) -> io::Result<Option<String>> {
+        let Some(extension) = extension(bytes) else {
+            return Ok(None);
+        };
+        let name = format!("{}.{extension}", ItemId::new(entropy));
+        self.files.write_bytes(&self.root.join(&name), bytes)?;
+        Ok(Some(name))
+    }
+
+    /// The files of the images in the Bookmark's Article.
+    fn images_of(&self, bookmark: &Bookmark) -> Vec<String> {
+        let mut names = Vec::new();
+        if let Ok(article) = self.read_article(&bookmark.id) {
+            images::rewrite(&article, |name| {
+                if is_image_file(name) {
+                    names.push(name.to_owned());
+                }
+                Some(name.to_owned())
+            });
+        }
+        names
     }
 
     fn path(&self, id: &ItemId) -> PathBuf {
@@ -300,6 +362,7 @@ mod tests {
                 "",
                 None,
                 None,
+                &HashMap::new(),
             )
             .unwrap();
         assert!(!saved.existing);
@@ -324,7 +387,7 @@ mod tests {
         let store = scratch.store();
         let title = |address: &str, details: &Details, typed: &str| {
             store
-                .save(address, details, typed, None, None)
+                .save(address, details, typed, None, None, &HashMap::new())
                 .unwrap()
                 .bookmark
                 .title
@@ -351,6 +414,7 @@ mod tests {
                 "",
                 Some(PNG),
                 None,
+                &HashMap::new(),
             )
             .unwrap();
         let again = store
@@ -360,6 +424,7 @@ mod tests {
                 "",
                 None,
                 None,
+                &HashMap::new(),
             )
             .unwrap();
         assert!(again.existing);
@@ -372,7 +437,14 @@ mod tests {
         let scratch = Scratch::new();
         let error = scratch
             .store()
-            .save("ftp://x.test/a", &details("X"), "", None, None)
+            .save(
+                "ftp://x.test/a",
+                &details("X"),
+                "",
+                None,
+                None,
+                &HashMap::new(),
+            )
             .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
         assert!(scratch.files().is_empty());
@@ -407,7 +479,14 @@ mod tests {
         let scratch = Scratch::new();
         let store = scratch.store();
         let b = store
-            .save("https://a.test/", &details("A"), "", Some(PNG), None)
+            .save(
+                "https://a.test/",
+                &details("A"),
+                "",
+                Some(PNG),
+                None,
+                &HashMap::new(),
+            )
             .unwrap()
             .bookmark;
         let cover = b.cover.clone().unwrap();
@@ -421,7 +500,14 @@ mod tests {
         let scratch = Scratch::new();
         let store = scratch.store();
         let b = store
-            .save("https://a.test/", &details("A"), "", Some(b"<html>"), None)
+            .save(
+                "https://a.test/",
+                &details("A"),
+                "",
+                Some(b"<html>"),
+                None,
+                &HashMap::new(),
+            )
             .unwrap()
             .bookmark;
         assert_eq!(b.cover, None);
@@ -437,11 +523,25 @@ mod tests {
         let scratch = Scratch::new();
         let store = scratch.store();
         let keep = store
-            .save("https://a.test/keep", &details("Keep"), "", Some(PNG), None)
+            .save(
+                "https://a.test/keep",
+                &details("Keep"),
+                "",
+                Some(PNG),
+                None,
+                &HashMap::new(),
+            )
             .unwrap()
             .bookmark;
         let gone = store
-            .save("https://a.test/gone", &details("Gone"), "", Some(PNG), None)
+            .save(
+                "https://a.test/gone",
+                &details("Gone"),
+                "",
+                Some(PNG),
+                None,
+                &HashMap::new(),
+            )
             .unwrap()
             .bookmark;
         store.delete(&gone.id).unwrap();
@@ -465,11 +565,19 @@ mod tests {
                 "",
                 None,
                 Some("# Head\n\nText\n\n"),
+                &HashMap::new(),
             )
             .unwrap()
             .bookmark;
         let without = store
-            .save("https://a.test/2", &details("Two"), "", None, None)
+            .save(
+                "https://a.test/2",
+                &details("Two"),
+                "",
+                None,
+                None,
+                &HashMap::new(),
+            )
             .unwrap()
             .bookmark;
         assert!(with.has_article && !without.has_article);
@@ -503,6 +611,7 @@ mod tests {
                     "",
                     None,
                     keep.then_some(article.markdown.as_str()),
+                    &HashMap::new(),
                 )
                 .unwrap()
                 .bookmark
@@ -519,7 +628,14 @@ mod tests {
         let scratch = Scratch::new();
         let saved = scratch
             .store()
-            .save("https://a.test/1", &details("One"), "", None, Some(" \n"))
+            .save(
+                "https://a.test/1",
+                &details("One"),
+                "",
+                None,
+                Some(" \n"),
+                &HashMap::new(),
+            )
             .unwrap();
         assert!(!saved.bookmark.has_article);
     }
@@ -529,10 +645,141 @@ mod tests {
         let scratch = Scratch::new();
         let store = scratch.store();
         let b = store
-            .save("https://a.test/1", &details("One"), "", None, Some("Text"))
+            .save(
+                "https://a.test/1",
+                &details("One"),
+                "",
+                None,
+                Some("Text"),
+                &HashMap::new(),
+            )
             .unwrap()
             .bookmark;
         store.delete(&b.id).unwrap();
         assert!(scratch.files().is_empty());
+    }
+
+    const JPEG: &[u8] = b"\xff\xd8\xff\xe0 rest";
+
+    fn downloaded(pairs: &[(&str, &[u8])]) -> HashMap<String, Vec<u8>> {
+        pairs
+            .iter()
+            .map(|(a, b)| ((*a).to_owned(), b.to_vec()))
+            .collect()
+    }
+
+    fn saved_with_images(store: &Bookmarks, article: &str, images: &[(&str, &[u8])]) -> Bookmark {
+        store
+            .save(
+                "https://x.test/a",
+                &details("A"),
+                "",
+                None,
+                Some(article),
+                &downloaded(images),
+            )
+            .unwrap()
+            .bookmark
+    }
+
+    #[test]
+    fn article_images_are_kept_beside_the_bookmark_and_referenced() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let article = "Intro\n\n![one](https://i.test/1.png)\n\n![two](https://i.test/2.jpg)\n\n![again](https://i.test/1.png)\n";
+        let b = saved_with_images(
+            &store,
+            article,
+            &[
+                ("https://i.test/1.png", PNG),
+                ("https://i.test/2.jpg", JPEG),
+            ],
+        );
+        let text = store.read_article(&b.id).unwrap();
+        let names = |ext: &str| -> Vec<String> {
+            text.split("](")
+                .skip(1)
+                .map(|r| r.split(')').next().unwrap().to_owned())
+                .filter(|n| n.ends_with(ext))
+                .collect()
+        };
+        let (png, jpg) = (names(".png"), names(".jpg"));
+        assert_eq!((png.len(), jpg.len()), (2, 1));
+        assert_eq!(png[0], png[1], "one download, one file");
+        assert!(!text.contains("https://i.test"));
+        assert!(is_image_file(&png[0]) && is_image_file(&jpg[0]));
+        assert_eq!(store.read_image(&b.id, &png[0]).unwrap(), PNG);
+        assert_eq!(store.read_image(&b.id, &jpg[0]).unwrap(), JPEG);
+        assert_eq!(scratch.files().len(), 3);
+    }
+
+    #[test]
+    fn an_image_that_was_not_downloaded_or_is_none_is_dropped_without_failing_the_save() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let article =
+            "Intro\n\n![gone](https://i.test/gone.png)\n\n![bad](https://i.test/bad.png)\n\nEnd\n";
+        let b = saved_with_images(&store, article, &[("https://i.test/bad.png", b"<html>")]);
+        assert_eq!(store.read_article(&b.id).unwrap(), "Intro\n\nEnd\n");
+        assert_eq!(scratch.files().len(), 1);
+    }
+
+    #[test]
+    fn an_image_can_only_be_read_if_the_article_uses_it() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let a = saved_with_images(
+            &store,
+            "![](https://i.test/1.png)\n",
+            &[("https://i.test/1.png", PNG)],
+        );
+        let b = store
+            .save(
+                "https://x.test/b",
+                &details("B"),
+                "",
+                None,
+                None,
+                &HashMap::new(),
+            )
+            .unwrap()
+            .bookmark;
+        let name = store.read_article(&a.id).unwrap();
+        let name = name.trim().trim_start_matches("![](").trim_end_matches(')');
+        assert!(store.read_image(&a.id, name).is_ok());
+        assert!(store.read_image(&b.id, name).is_err());
+        assert!(store.read_image(&a.id, "../x.png").is_err());
+    }
+
+    #[test]
+    fn deleting_takes_the_article_images_and_the_cover_with_it() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let b = store
+            .save(
+                "https://x.test/a",
+                &details("A"),
+                "",
+                Some(PNG),
+                Some("![](https://i.test/1.png)\n"),
+                &downloaded(&[("https://i.test/1.png", JPEG)]),
+            )
+            .unwrap()
+            .bookmark;
+        let other = store
+            .save(
+                "https://x.test/b",
+                &details("B"),
+                "",
+                None,
+                Some("![](https://i.test/2.png)\n"),
+                &downloaded(&[("https://i.test/2.png", PNG)]),
+            )
+            .unwrap()
+            .bookmark;
+        assert_eq!(scratch.files().len(), 5);
+        store.delete(&b.id).unwrap();
+        assert_eq!(scratch.files().len(), 2);
+        assert!(scratch.files().iter().any(|f| f.starts_with(&other.id)));
     }
 }

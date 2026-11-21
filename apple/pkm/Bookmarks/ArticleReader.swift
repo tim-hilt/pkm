@@ -12,10 +12,13 @@ struct ArticleReader: View {
     var body: some View {
         ScrollView {
             if let bookmark, let markdown = model.article(of: bookmark) {
-                ArticleText(markdown: markdown)
-                    .frame(maxWidth: 680)
-                    .padding()
-                    .frame(maxWidth: .infinity)
+                ArticleText(
+                    markdown: markdown,
+                    images: ImageSource(add: { _ in nil }, read: { model.image($0, of: id) })
+                )
+                .frame(maxWidth: 680)
+                .padding()
+                .frame(maxWidth: .infinity)
             }
         }
         .navigationTitle(bookmark?.title ?? "")
@@ -32,20 +35,31 @@ struct ArticleReader: View {
 }
 
 /// Markdown drawn as the Reader shows it: a TextKit 2 text view that can be selected from but not
-/// edited, as high as its text.
+/// edited, as high as its text. Images are drawn from the kept files, so offline too.
 private struct ArticleText {
     let markdown: String
+    let images: ImageSource
 
-    func style(_ storage: NSTextStorage) { MarkdownStyler.style(storage, caret: nil) }
+    /// What the text view's delegate and the drawn images need to outlive an update.
+    final class Coordinator {
+        let display = MarkerDisplay()
+        let attachments: ImageAttachments
+        init(_ images: ImageSource) { attachments = ImageAttachments(images) }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(images) }
+
+    func style(_ storage: NSTextStorage, _ coordinator: Coordinator) {
+        MarkdownStyler.style(storage, caret: nil, images: coordinator.attachments)
+    }
 }
 
 #if canImport(UIKit)
     extension ArticleText: UIViewRepresentable {
-        func makeCoordinator() -> MarkerDisplay { MarkerDisplay() }
-
         func makeUIView(context: Context) -> UITextView {
             let view = UITextView(usingTextLayoutManager: true)
-            (view.textLayoutManager?.textContentManager as? NSTextContentStorage)?.delegate = context.coordinator
+            (view.textLayoutManager?.textContentManager as? NSTextContentStorage)?.delegate =
+                context.coordinator.display
             view.isEditable = false
             view.isScrollEnabled = false
             view.backgroundColor = .clear
@@ -57,7 +71,7 @@ private struct ArticleText {
         func updateUIView(_ view: UITextView, context: Context) {
             guard view.text != markdown else { return }
             view.text = markdown
-            style(view.textStorage)
+            style(view.textStorage, context.coordinator)
         }
 
         func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
@@ -69,11 +83,10 @@ private struct ArticleText {
     }
 #else
     extension ArticleText: NSViewRepresentable {
-        func makeCoordinator() -> MarkerDisplay { MarkerDisplay() }
-
         func makeNSView(context: Context) -> NSTextView {
             let view = NSTextView(usingTextLayoutManager: true)
-            (view.textLayoutManager?.textContentManager as? NSTextContentStorage)?.delegate = context.coordinator
+            (view.textLayoutManager?.textContentManager as? NSTextContentStorage)?.delegate =
+                context.coordinator.display
             view.isEditable = false
             view.drawsBackground = false
             view.isVerticallyResizable = false
@@ -87,7 +100,7 @@ private struct ArticleText {
         func updateNSView(_ view: NSTextView, context: Context) {
             guard view.string != markdown else { return }
             view.string = markdown
-            if let storage = view.textStorage { style(storage) }
+            if let storage = view.textStorage { style(storage, context.coordinator) }
         }
 
         func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSTextView, context: Context) -> CGSize? {

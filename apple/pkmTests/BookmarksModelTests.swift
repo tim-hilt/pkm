@@ -138,4 +138,32 @@ import Testing
         model.delete(id: saved.id)
         #expect(model.pushedPath.isEmpty)
     }
+
+    private static let pictures = Download(
+        data: Data(
+            ("<title>Pics</title><article><p>"
+                + String(repeating: "Plenty of prose, indeed, and more of it. ", count: 20)
+                + "</p><img src=\"/ok.png\" alt=\"Fine\"><img src=\"/missing.png\">"
+                + "<img srcset=\"/small.png 1x, /ok.png 2x\"></article>").utf8),
+        mimeType: "text/html", textEncoding: "utf-8")
+
+    @Test func anArticleKeepsItsImagesAndDropsTheOnesThatFailed() async throws {
+        let model = try model(
+            serving(["https://example.com/pics": Self.pictures, "https://example.com/ok.png": Self.png]))
+        var steps: [Double] = []
+        guard case .draft(let draft) = await model.prepare("https://example.com/pics", progress: { steps.append($0) })
+        else {
+            Issue.record("expected a draft")
+            return
+        }
+        #expect(draft.images.keys.sorted() == ["https://example.com/ok.png"])
+        #expect(steps.last == 1 && steps == steps.sorted())
+
+        let saved = try #require(model.save(draft, title: "", keepsArticle: true))
+        let text = try #require(model.article(of: saved))
+        #expect(!text.contains("http") && !text.contains("missing"))
+        let names = text.split(separator: "(").dropFirst().map { $0.prefix { $0 != ")" } }
+        #expect(names.count == 2 && names[0] == names[1])
+        #expect(model.image(String(names[0]), of: saved.id) == draft.images["https://example.com/ok.png"])
+    }
 }

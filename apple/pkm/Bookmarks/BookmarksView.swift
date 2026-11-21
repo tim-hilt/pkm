@@ -99,6 +99,8 @@ private struct SaveSheet: View {
     @State private var keepsArticle = false
     @State private var draft: SaveDraft?
     @State private var isWorking = false
+    /// The share of downloads done, once the page is in.
+    @State private var progress: Double?
     @State private var isInvalid = false
 
     var body: some View {
@@ -147,7 +149,11 @@ private struct SaveSheet: View {
                     }
                 }
             }
-            .overlay { if isWorking { ProgressView() } }
+            .overlay {
+                if isWorking {
+                    if let progress { ProgressView(value: progress).padding(40) } else { ProgressView() }
+                }
+            }
         }
         #if os(macOS)
             .frame(minWidth: 380, minHeight: 220)
@@ -158,8 +164,9 @@ private struct SaveSheet: View {
         guard !isWorking else { return }
         isWorking = true
         isInvalid = false
+        progress = nil
         defer { isWorking = false }
-        switch await model.prepare(address) {
+        switch await model.prepare(address, progress: { progress = $0 }) {
         case .invalid: isInvalid = true
         case .existing(let bookmark):
             dismiss()

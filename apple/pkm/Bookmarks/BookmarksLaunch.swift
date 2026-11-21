@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 
 extension BookmarksModel {
     /// The Bookmarks folder in the app's Documents, which Files and Finder show.
@@ -29,7 +30,8 @@ extension BookmarksModel {
                 let details = Details(title: title, site: site, cover: nil, excerpt: "", author: "", published: "")
                 let article = address.hasSuffix("/rust") ? readArticle(html: sampleArticle, address: address) : nil
                 _ = try? store.save(
-                    address: address, details: details, title: "", cover: nil, article: article?.markdown)
+                    address: address, details: details, title: "", cover: nil, article: article?.markdown,
+                    images: article.map { _ in [sampleImageAddress: sampleImage] } ?? [:])
             }
         }
         let model = BookmarksModel(store: store)
@@ -37,7 +39,26 @@ extension BookmarksModel {
         return model
     }
 
-    /// A page to read: headings, Inline formatting, links, lists, a quote, code and a table.
+    private static let sampleImageAddress = "https://example.com/figure.png"
+
+    /// A picture for the sample Article: a gradient.
+    private static var sampleImage: Data {
+        let context = CGContext(
+            data: nil, width: 640, height: 320, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let colors = [
+            CGColor(red: 0.2, green: 0.5, blue: 0.9, alpha: 1), CGColor(red: 0.9, green: 0.4, blue: 0.3, alpha: 1),
+        ]
+        let gradient = CGGradient(colorsSpace: nil, colors: colors as CFArray, locations: nil)!
+        context.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: 640, y: 320), options: [])
+        let png = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(png, "public.png" as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, context.makeImage()!, nil)
+        CGImageDestinationFinalize(destination)
+        return png as Data
+    }
+
+    /// A page to read: headings, Inline formatting, links, lists, a quote, code, an image and a table.
     private static let sampleArticle = """
         <body><nav><a href="/">Home</a> <a href="/blog">Blog</a></nav><article>
         <h1>Rust in Action</h1>
@@ -46,6 +67,7 @@ extension BookmarksModel {
         <code>cargo</code> does the rest.</p>
         <h2>What you need</h2>
         <ul><li>A recent toolchain<ul><li>via rustup</li></ul></li><li>An editor</li><li>Some patience</li></ul>
+        <img src="/figure.png" alt="A figure">
         <blockquote><p>Make it work, make it right, make it fast.</p></blockquote>
         <h4>A first program</h4>
         <pre><code>fn main() {
