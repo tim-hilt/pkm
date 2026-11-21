@@ -2,7 +2,8 @@
 //! for what the web app does: Save, list, Tags, Article.
 //!
 //! The store works on files in memory as the Notes' does, but the client does
-//! not hand in the images: it reads them from its storage when shown.
+//! not hand in the images: it reads them from its storage when shown, and
+//! unloads those the store wrote once they are saved.
 
 use pkm_base::highlight_colors::{HighlightColor, Preferences};
 use pkm_bookmarks::{Anchor, Bookmarks, Highlight, MemoryFiles, PageComment, Place, Rgb};
@@ -298,6 +299,12 @@ impl BookmarkStore {
     #[wasm_bindgen(js_name = loadFile)]
     pub fn load_file(&self, path: &str, text: String) {
         self.files.load(Path::new(path), text);
+    }
+
+    /// Lets go of an image saved to storage, which is read from there; not a change.
+    #[wasm_bindgen(js_name = unloadFile)]
+    pub fn unload_file(&self, path: &str) {
+        self.files.unload(Path::new(path));
     }
 
     /// The paths written or removed since the last call; `fileBytes` holds what to save, none for a removed one.

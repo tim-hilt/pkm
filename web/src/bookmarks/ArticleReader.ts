@@ -100,21 +100,15 @@ export class ArticleReader {
     layout.observe(article);
     this.cleanup.push(() => layout.disconnect());
     this.listen(document, "selectionchange", () => this.selectionChanged());
-    this.listen(document, "keydown", (event) => {
-      const key = event as KeyboardEvent;
-      this.key(key);
-      if ((key.metaKey || key.ctrlKey) && key.key === "f" && this.element.isConnected) {
-        key.preventDefault();
-        this.find.open();
-      }
-    });
+    this.listen(document, "keydown", (event) => this.key(event as KeyboardEvent));
   }
 
   /** Keeps Reading Progress, takes down what the Reader drew and lets the view show its surroundings. */
   dispose(): void {
+    // First, as closing it keeps its Comment, which draws the Markup again.
+    this.popover.dismiss();
     this.spot.dispose();
     this.ink.dispose();
-    this.popover.dismiss();
     for (const undo of this.cleanup) undo();
     if (this.isImmersive) this.actions.immersive(false);
   }
@@ -124,15 +118,17 @@ export class ArticleReader {
     this.cleanup.push(() => target.removeEventListener(event, listener));
   }
 
+  /** Escape leaves Immersive Mode, else the Reader; Cmd/Ctrl+F is Find. Only while the Reader is on screen: another Context hides it, a dialog covers it. */
   private key(event: KeyboardEvent): void {
-    if (
-      event.key !== "Escape" ||
-      !this.element.isConnected ||
-      document.querySelector("dialog[open]")
-    )
-      return;
-    if (this.isImmersive) this.setImmersive(false);
-    else this.actions.back();
+    const shown = this.element.getClientRects().length > 0;
+    if (!shown || document.querySelector("dialog[open]")) return;
+    if (event.key === "Escape") {
+      if (this.isImmersive) this.setImmersive(false);
+      else this.actions.back();
+    } else if ((event.metaKey || event.ctrlKey) && event.key === "f") {
+      event.preventDefault();
+      this.find.open();
+    }
   }
 
   private setImmersive(on: boolean): void {

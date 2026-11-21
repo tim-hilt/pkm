@@ -11,5 +11,5 @@ A browser can't fetch another site's page (CORS), so the web app couldn't Save a
 ## Consequences
 
 - The web app's server is no longer static files only.
-- The image's base is BusyBox (about 1.3 MB), as the script needs a shell and its applets.
+- The image's base is BusyBox (about 0.9 MB instead of a 69 KB bare `httpd`), as the script needs a shell and its applets.
 - Downloads are logged out: paywalled or login-only pages give no Article from a pasted Address.

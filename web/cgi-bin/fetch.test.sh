@@ -29,6 +29,7 @@ script redirect-loop 'printf "Status: 302\r\nLocation: /cgi-bin/redirect-loop\r\
 script redirect-ftp 'printf "Status: 302\r\nLocation: ftp://example.com/x\r\n\r\n"'
 # A chunked body: "Hello, " and "chunks" as two chunks.
 script chunked 'printf "Content-Type: text/html\r\nTransfer-Encoding: chunked\r\n\r\n7\r\nHello, \r\n6\r\nchunks\r\n0\r\n\r\n"'
+script broken-chunks 'printf "Content-Type: text/html\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nHello\r\n"'
 script slow 'sleep 10; printf "Content-Type: text/html\r\n\r\nlate"'
 busybox httpd -f -p "127.0.0.1:$port" -h "$site" &
 server=$!
@@ -55,6 +56,7 @@ check "HTML keeps its type" "$base/page.html" 200 'Content-Type: text/html'
 check "HTML is sandboxed" "$base/page.html" 200 'Content-Security-Policy: sandbox'
 check "image downloads" "$base/pic.png" 200 'Content-Type: image/png'
 check "chunked body" "$base/cgi-bin/chunked" 200 '^Hello, chunks$'
+check "broken chunks" "$base/cgi-bin/broken-chunks" 502 'broken response'
 check "redirect is followed" "$base/cgi-bin/redirect-to-page" 200 '<title>Hello</title>'
 check "relative redirect is followed" "$base/cgi-bin/redirect-relative" 200 'Content-Type: image/png'
 check "redirect to a private address" "$base/cgi-bin/redirect-private" 403 'private'

@@ -187,6 +187,12 @@ impl MemoryFiles {
         memory.files.insert(path.to_owned(), (bytes, written));
     }
 
+    /// Lets go of a file the client has saved and reads from its own storage
+    /// (an Image), so that memory doesn't hold it; not a change.
+    pub fn unload(&self, path: &Path) {
+        self.memory().files.remove(path);
+    }
+
     /// The files written since the last call, each once, sorted.
     pub fn take_changes(&self) -> Vec<PathBuf> {
         std::mem::take(&mut self.memory().changed)
@@ -348,6 +354,17 @@ mod tests {
             io::ErrorKind::NotFound
         );
         assert_eq!(files.take_changes(), [path]);
+    }
+
+    #[test]
+    fn an_unloaded_file_is_no_longer_held_and_no_change() {
+        let files = MemoryFiles::default();
+        let path = Path::new("Bookmarks/a.png");
+        files.write_bytes(path, b"png").unwrap();
+        files.take_changes();
+        files.unload(path);
+        assert!(!files.exists(path));
+        assert!(files.take_changes().is_empty());
     }
 
     #[test]

@@ -14,7 +14,7 @@ const COLORS = "Colors/colors.json";
  * The Bookmarks, kept in the Origin Private File System: `Bookmarks/<id>.md`, their state files
  * beside them, and the images. The core's store works on text files in memory; this opens it from
  * them and saves what it changed, one write after another. Images are not held in memory: they are
- * read from storage when shown. The Tags file is shared with the Tasks, so the store is given
+ * read from storage when shown, and those the store wrote are let go once saved. The Tags file is shared with the Tasks, so the store is given
  * the current one before it changes Tags (`refreshTags`).
  */
 export class BookmarkFiles {
@@ -99,6 +99,7 @@ export class BookmarkFiles {
       for (const { path, bytes } of changes) {
         if (bytes === undefined) await this.storage.remove(path);
         else await this.storage.write(path, bytes);
+        if (bytes && isImage(path)) this.store.unloadFile(path);
       }
       if (changes.some(({ path }) => path === TAGS)) this.onTagsSaved();
       this.onSaved();
@@ -113,6 +114,10 @@ export class BookmarkFiles {
     return this.writing;
   }
 }
+
+/** Whether `path` is an image beside the Bookmarks. */
+const isImage = (path: string) =>
+  path.startsWith(`${BookmarkStore.folder()}/`) && imageName.test(path.split("/")[1] ?? "");
 
 /** A store of what `Bookmarks/` and the Tags file hold now. */
 async function load(storage: FileStorage): Promise<BookmarkStore> {

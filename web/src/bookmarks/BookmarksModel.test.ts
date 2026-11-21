@@ -36,6 +36,7 @@ function script(pages: Record<string, { type: string; body: string | Uint8Array 
 let storage: MemoryStorage;
 let served: ReturnType<typeof script>;
 let pages: Parameters<typeof script>[0];
+let files: BookmarkFiles;
 let model: BookmarksModel;
 beforeEach(async () => {
   storage = new MemoryStorage();
@@ -44,11 +45,8 @@ beforeEach(async () => {
     "https://example.com/pic.png": { type: "image/png", body: PNG },
   };
   served = script(pages);
-  model = new BookmarksModel(
-    await BookmarkFiles.open(storage),
-    new PageDownloader(served.send),
-    () => [],
-  );
+  files = await BookmarkFiles.open(storage);
+  model = new BookmarksModel(files, new PageDownloader(served.send), () => []);
 });
 
 const draftOf = async (address: string): Promise<Draft> => {
@@ -93,6 +91,9 @@ describe("Saving an Address", () => {
     expect(article).toContain("Some words worth reading.");
     const image = /([a-z0-9]+\.png)/.exec(article)![1]!;
     expect(await storage.read(`Bookmarks/${image}`)).toEqual(PNG);
+    // Saved, the image is read from storage, not held in memory.
+    expect(files.store.fileBytes(`Bookmarks/${image}`)).toBeUndefined();
+    expect(await files.readImage(image)).toEqual(PNG);
     expect((await storage.files("Bookmarks")).some((f) => f.name === `${saved.id}.md`)).toBe(true);
     // The new Tag is known to everything that reads the Tags file.
     expect(new TextDecoder().decode(await storage.read("Tags/tags.json"))).toContain("read");
@@ -200,6 +201,14 @@ describe("the list", () => {
     expect(model.article(saved.id)).toBeUndefined();
     const files = (await storage.files("Bookmarks")).map((f) => f.name);
     expect(files.some((name) => name.endsWith(".png"))).toBe(false);
+  });
+
+  it("Adds the Article of a page handed over, without downloading it", async () => {
+    const saved = await save("https://example.com/private");
+    served.asked.length = 0;
+    expect(await model.addArticle(saved.id, PAGE)).toBe(true);
+    expect(model.article(saved.id)).toContain("Some words worth reading.");
+    expect(served.asked).toEqual(["/cgi-bin/fetch?url=https%3A%2F%2Fexample.com%2Fpic.png"]);
   });
 
   it("does not Add an Article when the page can't be downloaded", async () => {

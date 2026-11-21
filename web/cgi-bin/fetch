@@ -203,19 +203,20 @@ read_response() {
 		esac
 	done
 	case $chunked in
-	*[Cc]hunked*) dechunk <&4 >"$work/body" ;;
+	*[Cc]hunked*) dechunk <&4 >"$work/body" || refuse 502 "the site sent a broken response" ;;
 	*) cat <&4 >"$work/body" ;;
 	esac
 	exec 4<&-
 }
 
 # Copies a chunked body from stdin to stdout, de-chunked (some sites chunk
-# even HTTP/1.0 responses). `head -c` reads exactly the bytes asked for.
+# even HTTP/1.0 responses); fails on a broken chunk size. `head -c` reads
+# exactly the bytes asked for.
 dechunk() {
 	while read -r size; do
 		size=${size%"$cr"}
 		size=${size%%;*}
-		case $size in "" | *[!0-9a-fA-F]*) refuse 502 "the site sent a broken response" ;; esac
+		case $size in "" | *[!0-9a-fA-F]*) return 1 ;; esac
 		size=$((0x$size))
 		[ $size -gt 0 ] || break
 		head -c $size

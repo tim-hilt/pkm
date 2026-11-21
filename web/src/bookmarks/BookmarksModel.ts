@@ -218,7 +218,9 @@ export class BookmarksModel {
     }
     const details = extractDetails(html, address);
     const article = readArticle(html, address);
-    const wanted = [...article.images];
+    const { markdown, readsLikeArticle } = article;
+    const wanted = article.images;
+    article.free();
     if (withCover && details.cover && !wanted.includes(details.cover)) wanted.push(details.cover);
     const images = new Map<string, Uint8Array>();
     let done = 1;
@@ -231,8 +233,8 @@ export class BookmarksModel {
     return {
       address,
       title: details.title,
-      markdown: article.markdown,
-      readsLikeArticle: article.readsLikeArticle,
+      markdown,
+      readsLikeArticle,
       failure,
       details,
       images,
@@ -301,11 +303,11 @@ export class BookmarksModel {
     this.changed();
   }
 
-  /** Adds the Article of the page as it is now to a Bookmark without one. False if the page can't be downloaded or has no text, and nothing changes. */
-  async addArticle(id: string): Promise<boolean> {
+  /** Adds the Article of the page as it is now to a Bookmark without one: downloaded, or the `html` handed over (as in `prepare`). False if the page can't be downloaded or has no text, and nothing changes. */
+  async addArticle(id: string, html?: string): Promise<boolean> {
     const bookmark = this.bookmark(id);
     if (!bookmark || bookmark.hasArticle) return false;
-    const page = await this.fetch(bookmark.address, false);
+    const page = await this.fetch(bookmark.address, false, undefined, html);
     try {
       if (page.failure !== undefined || page.markdown === "") return false;
       withImages(page.images, (images) => this.store.addArticle(id, page.markdown, images).free());

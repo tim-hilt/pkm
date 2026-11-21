@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 # The web app as a static site (issue 16): the core as wasm, the bundle, then
-# BusyBox httpd, with a CGI script that fetches pages. The build stages run on the build platform; only the last
-# stage is of the target platform (linux/arm64 for the Pi).
+# BusyBox httpd, with a CGI script that fetches pages. The build stages run on
+# the build platform; only the last stage is of the target platform
+# (linux/arm64 for the Pi).
 
 # 1. The core as wasm in web/generated, built by the same script as `make web-wasm`.
 FROM --platform=$BUILDPLATFORM rust:slim AS wasm

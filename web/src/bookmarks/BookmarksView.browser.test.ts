@@ -66,6 +66,23 @@ describe("BookmarksView", () => {
       "http://192.168.1.2/admin",
     );
   });
+
+  it("Adds the Article of a handed page to its Bookmark Saved without one", async () => {
+    const { model, view, places } = await open(
+      async () => new Response("could not download the Address\n", { status: 502 }),
+    );
+    const prepared = await model.prepare("https://blog.example/foxes");
+    if (prepared.kind !== "draft") throw new Error("expected a draft");
+    const { id } = await model.save(prepared.draft, "", [], false);
+
+    view.save({ address: "https://blog.example/foxes", html: ARTICLE });
+    const dialog = () => view.element.querySelector("dialog");
+    await wait(() => dialog()?.textContent?.includes("without its Article") === true);
+    dialog()!.querySelector<HTMLElement>(".tasks-confirm")!.click();
+    await wait(() => model.bookmark(id)?.hasArticle === true);
+    expect(places.opened).toEqual([id]);
+    expect(dialog()).toBeNull();
+  });
 });
 
 const paragraphs = Array.from(
@@ -190,5 +207,15 @@ describe("the Reader", () => {
     await userEvent.keyboard("{Escape}");
     expect(places.immersions).toEqual([true, false]);
     expect(query(".bookmarks-reader").classList.contains("is-immersive")).toBe(false);
+  });
+
+  it("leaves Escape and Find alone while another Context hides it", async () => {
+    const { model, view } = await reading();
+    view.element.hidden = true;
+    await userEvent.keyboard("{Escape}");
+    const find = new KeyboardEvent("keydown", { key: "f", metaKey: true, cancelable: true });
+    document.dispatchEvent(find);
+    expect(model.openId).toBeDefined();
+    expect(find.defaultPrevented).toBe(false);
   });
 });
