@@ -215,7 +215,9 @@ private let copyImageTitle = String(localized: "Copy Image to Clipboard")
         /// An edit is going in, whose own line break the delegate must not take for a Return.
         private var isApplying = false
         var images: ImageSource?
-        let autoscroller = SelectionAutoscroller()
+        /// Lazy: `init(usingTextLayoutManager:)` skips the initial values of stored properties, and a
+        /// `let` left nil crashed the first `didMoveToWindow`.
+        private(set) lazy var autoscroller = SelectionAutoscroller()
 
         override func didMoveToWindow() {
             super.didMoveToWindow()

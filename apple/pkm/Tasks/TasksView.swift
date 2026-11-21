@@ -297,7 +297,9 @@ private struct TaskQuickActions: ViewModifier {
             #endif
             .contextMenu {
                 if !task.done {
-                    // The palette applies a tap at once; a row that moves does so animated.
+                    // The palette applies a tap at once and closes the menu (it would stay open);
+                    // a row that moves does so animated. Menus ignore a symbol's foregroundStyle:
+                    // `tint` colours the circles.
                     Picker(
                         "Priority",
                         selection: Binding(
@@ -308,13 +310,14 @@ private struct TaskQuickActions: ViewModifier {
                             Label {
                                 Text(verbatim: "P\(priority)")
                             } icon: {
-                                Image(systemName: "circle.fill").foregroundStyle(ListedTask.color(ofPriority: priority))
+                                Image(systemName: "circle.fill")
                             }
-                            .labelStyle(.iconOnly)
+                            .tint(ListedTask.color(ofPriority: priority))
                             .tag(priority)
                         }
                     }
                     .pickerStyle(.palette)
+                    .menuActionDismissBehavior(.enabled)
                     Button("Tags…", systemImage: "tag") { isPickingTags = true }
                     Divider()
                     Button("Reject", systemImage: "xmark.circle", role: .destructive) {

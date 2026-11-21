@@ -111,20 +111,39 @@ import XCTest
         app.staticTexts["Book the dentist"].press(forDuration: 1)
         XCTAssertTrue(app.buttons["Reject"].waitForExistence(timeout: 5))
         app.buttons["P1"].tap()
+        XCTAssertTrue(app.buttons["Reject"].waitForNonExistence(timeout: 5), "the menu closes")
 
-        app.staticTexts["Book the dentist"].press(forDuration: 1)
-        XCTAssertTrue(app.buttons["P1"].waitForExistence(timeout: 5))
+        app.staticTexts["Book the dentist"].tap()
+        XCTAssertTrue(showsForm(of: "Book the dentist"))
         XCTAssertTrue(app.buttons["P1"].isSelected)
     }
 
     func testATagIsToggledFromARowsContextMenu() {
         app.staticTexts["Book the dentist"].press(forDuration: 1)
         app.buttons["Tags…"].tap()
-        XCTAssertTrue(app.navigationBars["Tags"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["Done"].exists)
+        let picker = app.navigationBars["Tags"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        XCTAssertFalse(picker.buttons["Done"].exists)  // a row's circle is "Done" too
         app.buttons["home"].firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["Book the dentist"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.navigationBars["Tags"].exists)
+        XCTAssertTrue(picker.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["health home"].waitForExistence(timeout: 5))
+    }
+
+    func testATagCreatedInTheQuickPickerIsAdded() {
+        app.staticTexts["Book the dentist"].press(forDuration: 1)
+        app.buttons["Tags…"].tap()
+        let picker = app.navigationBars["Tags"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        let search = app.searchFields["Search or create"]
+        // The keyboard opens only when search is tapped; a tap while the sheet still rises is lost.
+        for _ in 0..<3 where !app.keys["e"].exists {
+            search.tap()
+            _ = app.keys["e"].waitForExistence(timeout: 2)
+        }
+        search.typeText("errand")
+        app.buttons["Create Tag 'errand'"].tap()
+        XCTAssertTrue(picker.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["health errand"].waitForExistence(timeout: 5))
     }
 
     func testAnImageIsCopiedFromItsMenu() {

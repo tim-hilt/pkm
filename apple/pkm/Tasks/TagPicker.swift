@@ -40,26 +40,28 @@ struct TagsRow: View {
 struct TagPicker: View {
     @Environment(TasksModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    private let done: (([String]) -> Void)?
-    private let toggleOne: ((String) -> Void)?
+    private let picking: Picking
     @State private var selected: [String]
     /// Tags created here, which are known only once the Task is saved.
     @State private var created: [String] = []
     @State private var query = ""
     @State private var refusedText = false
 
+    private enum Picking {
+        case many(done: ([String]) -> Void)
+        case one(toggle: (String) -> Void)
+    }
+
     /// Multi-select: `done` gets the checked Tags.
     init(selected: [String], done: @escaping ([String]) -> Void) {
         _selected = State(initialValue: selected)
-        self.done = done
-        toggleOne = nil
+        picking = .many(done: done)
     }
 
     /// Single-toggle: `toggle` gets the one Tag tapped or created, then the picker is over.
     init(selected: [String], toggle: @escaping (String) -> Void) {
         _selected = State(initialValue: selected)
-        done = nil
-        toggleOne = toggle
+        picking = .one(toggle: toggle)
     }
 
     /// Known and created Tags that contain what is searched, in alphabetical order.
@@ -75,7 +77,7 @@ struct TagPicker: View {
     }
 
     private func toggle(_ tag: String) {
-        if let toggleOne { return toggleOne(tag) }
+        if case .one(let toggle) = picking { return toggle(tag) }
         if let index = selected.firstIndex(of: tag) { selected.remove(at: index) } else { selected.append(tag) }
     }
 
@@ -89,7 +91,7 @@ struct TagPicker: View {
                 }
                 if canCreate {
                     Button("Create Tag '\(query)'") {
-                        if let toggleOne { return toggleOne(query) }
+                        if case .one(let toggle) = picking { return toggle(query) }
                         created.append(query)
                         selected.append(query)
                         query = ""
@@ -124,11 +126,12 @@ struct TagPicker: View {
                 if refusedText { query = allowed }
             }
             .toolbar {
-                if let done {
+                switch picking {
+                case .many(let done):
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Done") { done(selected) }
                     }
-                } else {
+                case .one:
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Cancel") { dismiss() }
                     }

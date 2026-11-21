@@ -14,8 +14,8 @@ export type TagPicking =
  * A modal list of every known Tag with a checkbox each, and a search input at
  * the top that takes the focus on opening and also offers to create a Tag.
  * "many": Done, at the bottom right, calls `done` with the Tags checked and
- * closes. "one": there is no Done; checking or unchecking a Tag, or creating
- * one, calls `toggle` with it and closes. Cancel and Esc change nothing.
+ * closes. "one": Cancel instead of Done; checking or unchecking a Tag, or
+ * creating one, calls `toggle` with it and closes. Cancel and Esc change nothing.
  */
 export function pickTagsDialog(
   parent: HTMLElement,
@@ -42,7 +42,7 @@ export function pickTagsDialog(
   // showModal focuses it, which opens the keyboard on touch devices.
   search.autofocus = true;
 
-  /** Ends a pick of one Tag; in "many" it only records the choice. */
+  /** A Tag checked or unchecked: "one" toggles it and closes, "many" only records it. */
   const pick = (tag: string, checked: boolean) => {
     if (picking.kind === "one") {
       picking.toggle(tag);
@@ -53,9 +53,9 @@ export function pickTagsDialog(
   const creatable = () =>
     isValidTag(search.value) && !colors.has(search.value) && !created.includes(search.value);
   const create = () => {
-    const tag = search.value;
-    created.push(tag);
-    pick(tag, true);
+    pick(search.value, true);
+    if (picking.kind === "one") return;
+    created.push(search.value);
     search.value = "";
     show();
   };
@@ -87,14 +87,15 @@ export function pickTagsDialog(
     if (creatable()) create();
   });
   dialog.append(heading, search, list, hint);
-  if (picking.kind === "many") {
-    const { done } = picking;
-    const confirm = button("tasks-confirm", "Done", () => {
-      done(selected);
-      dialog.close();
-    });
-    dialog.append(make("div", "tasks-actions", [confirm]));
-  }
+  // Without Esc (touch), Cancel is the only way out of "one", which has no Done.
+  const action =
+    picking.kind === "one"
+      ? button("", "Cancel", () => dialog.close())
+      : button("tasks-confirm", "Done", () => {
+          picking.done(selected);
+          dialog.close();
+        });
+  dialog.append(make("div", "tasks-actions", [action]));
   dialog.addEventListener("close", () => dialog.remove());
   show();
   parent.append(dialog);

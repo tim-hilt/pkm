@@ -53,8 +53,8 @@ export function taskLine(
 
 /**
  * The row menu of a Task, as the list and the Subtasks section offer it: the
- * Priority palette, "Tags…" (a dialog that toggles one Tag), a divider, Reject. None while its Done is pending: that is
- * Reverted at its circle.
+ * Priority palette, "Tags…" (a dialog that toggles one Tag), a divider,
+ * Reject. None while its Done is pending: that is Reverted at its circle.
  */
 export function taskMenuItems(task: ListedTask, model: TasksModel): RowMenuItem[] {
   if (task.done) return [];
