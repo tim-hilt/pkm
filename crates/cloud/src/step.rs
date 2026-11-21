@@ -36,23 +36,8 @@
 //! A file that can't be parsed never replaces a Drawing on the other side: it
 //! is skipped, and left as it is on both sides.
 //!
-//! A Context with directories (`Merge::has_directories`, ADR-0031) names its
-//! Items by their path, and its directories are Synced too: one the other side
-//! lacks is made, one Deleted on a side is Deleted on the other once nothing is
-//! left in it. A new Item in a directory the other Device Deleted lands at the
-//! top level instead of bringing the directory back.
-//!
-//! A Context whose Items have an identity (`Merge::identity`) follows an Item
-//! Moved to another path: a path remembered but gone on one side, whose Item
-//! turns up under a new path, is a Move, not a delete and an add. The Item is
-//! merged three-way and ends at one path on both sides: the Move of the newer
-//! version if both sides Moved it, and the top level if the new directory was
-//! Deleted on the other side. A Delete on the other side wins over a Move, as
-//! over any edit. A directory Sync emptied that nothing remembers is removed.
-//! Hidden files in a directory (Finder's `.DS_Store`) don't keep it.
-
 use std::cell::{RefCell, RefMut};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
@@ -62,7 +47,7 @@ use std::task::{Context, Poll, Waker};
 use std::sync::Arc;
 
 use crate::merge::Merge;
-use crate::storage::Tree;
+use crate::storage::Blob;
 
 /// How long a file must have been left alone for its stamp to be trusted:
 /// file systems with coarse clocks can give two writes the same time.
@@ -108,14 +93,10 @@ pub struct Marks {
 /// `StorageFull` for a full cloud.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
-    /// List the cloud folder, with its directories at any depth. Answer
-    /// `Response::Cloud`.
+    /// List the cloud folder. Answer `Response::Cloud`.
     ListCloud,
     /// List the local Drawings with their stamps. Answer `Response::Local`.
     ListLocal,
-    /// List the local directories at any depth, as paths. Only for a Context
-    /// with directories. Answer `Response::Names`.
-    ListLocalDirs,
     /// Read a local Drawing, none if there is none. Answer `Response::Bytes`.
     ReadLocal { file: String },
     /// Read the remembered marker and stamp. Answer `Response::Marks`.
@@ -137,15 +118,6 @@ pub enum Request {
     WriteStamp { file: String, stamp: String },
     /// Forget everything remembered of a name. Answer `Done`.
     ForgetSynced { file: String },
-    /// Make a local directory and the ones above it. Answer `Done`.
-    MakeLocalDir { path: String },
-    /// Remove a local directory only if nothing is in it (gone counts as
-    /// removed). Answer `Response::Happened`.
-    RemoveLocalDir { path: String },
-    /// Make a cloud directory and the ones above it. Answer `Done`.
-    MakeCloudDir { path: String },
-    /// Delete a cloud directory the step found empty. Answer `Done`.
-    DeleteCloudDir { path: String },
     /// Download a blob, none if it is gone. Answer `Response::Bytes`.
     Download { file: String },
     /// Upload bytes as a blob, replacing any. Answer `Done`.
@@ -174,7 +146,7 @@ pub enum Request {
 /// The result of a `Request`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Response {
-    Cloud(Tree),
+    Cloud(Vec<Blob>),
     Local(Vec<LocalFile>),
     Names(Vec<String>),
     Bytes(Option<Vec<u8>>),
@@ -249,7 +221,6 @@ impl SyncStep {
             total: 0,
             remote: HashMap::new(),
             uploaded: Vec::new(),
-            dirs: Dirs::default(),
         };
         Self {
             engine: Some(Box::pin(async move { engine.run_step().await })),
@@ -333,64 +304,6 @@ struct Engine {
     remote: HashMap<String, String>,
     /// The Drawings put in the cloud, whose new markers are not known yet.
     uploaded: Vec<(String, Vec<u8>)>,
-    /// The directories of both sides and what is remembered of them; empty
-    /// for a Context without directories.
-    dirs: Dirs,
-}
-
-/// The directories of a Context with directories, as paths from its folder.
-#[derive(Default)]
-struct Dirs {
-    local: BTreeSet<String>,
-    cloud: BTreeSet<String>,
-    /// The ones both sides had at the last Sync.
-    synced: BTreeSet<String>,
-    /// Every blob the cloud listing had, Items or not, and the blobs and
-    /// directories this step deleted there: a cloud directory is empty once
-    /// all that was in it is deleted.
-    cloud_blobs: Vec<String>,
-    deleted_blobs: BTreeSet<String>,
-    deleted_cloud: BTreeSet<String>,
-}
-
-impl Dirs {
-    /// Whether every blob and directory the cloud had in `dir` is deleted.
-    fn cloud_is_empty(&self, dir: &str) -> bool {
-        let inside = |path: &&String| path.strip_prefix(dir).is_some_and(|r| r.starts_with('/'));
-        self.cloud_blobs
-            .iter()
-            .filter(inside)
-            .all(|blob| self.deleted_blobs.contains(blob))
-            && (self.cloud.iter())
-                .filter(inside)
-                .all(|sub| self.deleted_cloud.contains(sub))
-    }
-
-    /// `path` and the directories above it, outermost first.
-    fn chain(path: &str) -> impl Iterator<Item = &str> {
-        path.match_indices('/')
-            .map(|(i, _)| &path[..i])
-            .chain([path])
-    }
-
-    /// Whether a directory above `file` was Deleted on the side `gone`
-    /// lacks, while the other still has it: the Device that made `file`
-    /// hasn't seen the Delete.
-    fn deleted_above(&self, file: &str, gone: &BTreeSet<String>) -> bool {
-        file.rsplit_once('/').is_some_and(|(dir, _)| {
-            Self::chain(dir).any(|d| self.synced.contains(d) && !gone.contains(d))
-        })
-    }
-}
-
-/// The key remembering a directory, beside the file names: they never end in `/`.
-fn dir_key(dir: &str) -> String {
-    format!("{dir}/")
-}
-
-/// Whether no segment of `path` is hidden: Sync leaves those alone.
-fn is_visible_path(path: &str) -> bool {
-    path.split('/').all(|segment| !segment.starts_with('.'))
 }
 
 impl Engine {
@@ -413,12 +326,7 @@ impl Engine {
     }
 
     async fn run(&mut self) -> io::Result<()> {
-        let tree = self.list_cloud().await?;
-        self.remote = self.items_of(&tree);
-        if self.merge.has_directories() {
-            self.note_cloud(tree);
-        }
-        let synced_names = self.list_synced_names().await?;
+        self.remote = self.items_of(&self.list_cloud().await?);
         // Taken before any Drawing is read: a stamp shows what was read only
         // if the file didn't change between the two.
         let stamps: HashMap<String, LocalFile> = self
@@ -429,34 +337,7 @@ impl Engine {
             .collect();
         let mut files: BTreeSet<String> = self.remote.keys().cloned().collect();
         files.extend(stamps.keys().cloned());
-        files.extend(
-            synced_names
-                .iter()
-                .filter(|name| !name.ends_with('/'))
-                .cloned(),
-        );
-        if self.merge.has_directories() {
-            self.dirs.local = self.list_local_dirs().await?;
-            self.dirs.synced = synced_names
-                .iter()
-                .filter_map(|name| name.strip_suffix('/'))
-                .map(str::to_owned)
-                .collect();
-        }
-        let moves = self.find_moves(&stamps, &synced_names).await?;
-        for moved in &moves {
-            for path in [
-                Some(&moved.from),
-                moved.local.as_ref(),
-                moved.remote.as_ref(),
-            ]
-            .into_iter()
-            .flatten()
-            {
-                files.remove(path);
-            }
-        }
-        self.total += moves.len() as u32;
+        files.extend(self.list_synced().await?);
 
         // A Drawing is read only if it may have changed, and once if nothing
         // is to be done with it.
@@ -490,17 +371,6 @@ impl Engine {
         pending.sort_by_key(|(_, action)| *action == Action::DeleteLocal);
 
         // Read again: the app may have written a Drawing meanwhile.
-        for moved in moves {
-            let result = self.sync_move(&moved).await;
-            self.done += 1;
-            self.report();
-            if let Err(error) = result {
-                self.record(error);
-                if self.outcome().access_lost {
-                    return Ok(());
-                }
-            }
-        }
         for (file, _) in pending {
             if let Err(error) = self.sync_drawing(&file).await {
                 self.record(error);
@@ -509,7 +379,6 @@ impl Engine {
                 }
             }
         }
-        self.sync_dirs().await?;
         self.remember_uploads().await
     }
 
@@ -568,48 +437,26 @@ impl Engine {
         ))
     }
 
-    /// Whether `path`, from the Context folder, is an Item's: a file of the
-    /// folder itself, or, with directories, in any visible one.
+    /// Whether `path` is an Item's: a file of the folder itself, not one in
+    /// a subdirectory, which Sync leaves alone.
     fn is_item_path(&self, path: &str) -> bool {
-        if self.merge.has_directories() {
-            is_visible_path(path) && self.merge.accepts(top_level(path))
-        } else {
-            !path.contains('/') && self.merge.accepts(path)
-        }
+        !path.contains('/') && self.merge.accepts(path)
     }
 
-    async fn list_cloud(&self) -> io::Result<Tree> {
+    async fn list_cloud(&self) -> io::Result<Vec<Blob>> {
         match self.ask(Request::ListCloud).await? {
-            Response::Cloud(tree) => Ok(tree),
+            Response::Cloud(blobs) => Ok(blobs),
             _ => Err(unexpected()),
         }
     }
 
-    /// The cloud's Items with their markers. The listing goes into
-    /// subdirectories (ADR-0031); only a Context with directories has Items
-    /// there.
-    fn items_of(&self, tree: &Tree) -> HashMap<String, String> {
-        tree.blobs
+    /// The cloud's Items with their markers.
+    fn items_of(&self, blobs: &[Blob]) -> HashMap<String, String> {
+        blobs
             .iter()
             .filter(|blob| self.is_item_path(&blob.name))
             .map(|blob| (blob.name.clone(), blob.marker.clone()))
             .collect()
-    }
-
-    /// Notes the cloud's blobs and directories, for the directory step.
-    /// Directories with blobs in them are not listed as such: the paths of
-    /// the blobs say it.
-    fn note_cloud(&mut self, tree: Tree) {
-        let parents = tree
-            .blobs
-            .iter()
-            .filter_map(|blob| blob.name.rsplit_once('/').map(|(dir, _)| dir.to_owned()));
-        self.dirs.cloud = parents
-            .chain(tree.empty_dirs)
-            .flat_map(|dir| Dirs::chain(&dir).map(str::to_owned).collect::<Vec<_>>())
-            .filter(|dir| is_visible_path(dir))
-            .collect();
-        self.dirs.cloud_blobs = tree.blobs.into_iter().map(|blob| blob.name).collect();
     }
 
     async fn list_local(&self) -> io::Result<Vec<LocalFile>> {
@@ -622,26 +469,12 @@ impl Engine {
         }
     }
 
-    async fn list_local_dirs(&self) -> io::Result<BTreeSet<String>> {
-        match self.ask(Request::ListLocalDirs).await? {
-            Response::Names(dirs) => Ok(dirs.into_iter().filter(|d| is_visible_path(d)).collect()),
-            _ => Err(unexpected()),
-        }
-    }
-
-    /// What is remembered: Items' names, and the directories' as `dir_key`s.
-    async fn list_synced_names(&self) -> io::Result<Vec<String>> {
+    /// The names that are remembered.
+    async fn list_synced(&self) -> io::Result<Vec<String>> {
         match self.ask(Request::ListSynced).await? {
             Response::Names(names) => Ok(names),
             _ => Err(unexpected()),
         }
-    }
-
-    /// The Items' names that are remembered.
-    async fn list_synced(&self) -> io::Result<Vec<String>> {
-        let mut names = self.list_synced_names().await?;
-        names.retain(|name| !name.ends_with('/'));
-        Ok(names)
     }
 
     async fn read_marks(&self, file: &str) -> io::Result<Marks> {
@@ -705,17 +538,7 @@ impl Engine {
             (Action::Upload, Some(local), Some(marker), Some(base)) => {
                 self.upload_onto_base(file, &marker, local, &base).await
             }
-            (Action::Upload, Some(local), None, None)
-                if self.dirs.deleted_above(file, &self.dirs.cloud) =>
-            {
-                self.rehome_local(file, local).await
-            }
             (Action::Upload, Some(local), ..) => self.upload(file, local).await,
-            (Action::Download, _, Some(_), None)
-                if self.dirs.deleted_above(file, &self.dirs.local) =>
-            {
-                self.rehome_remote(file).await
-            }
             (Action::Download, _, Some(marker), _) => self.download(file, &marker, None).await,
             (Action::FirstMeeting, Some(local), Some(marker), _) => {
                 self.first_meeting(file, &marker, local).await
@@ -725,7 +548,7 @@ impl Engine {
                     .await
             }
             (Action::DeleteRemote, ..) => {
-                self.delete_cloud(file).await?;
+                self.ask(Request::DeleteCloud { file: file.into() }).await?;
                 self.forget(file).await
             }
             (Action::DeleteLocal, Some(local), ..) => self.delete_local(file, local).await,
@@ -736,304 +559,6 @@ impl Engine {
             self.report();
         }
         result
-    }
-
-    async fn delete_cloud(&mut self, file: &str) -> io::Result<()> {
-        self.ask(Request::DeleteCloud { file: file.into() }).await?;
-        self.dirs.deleted_blobs.insert(file.to_owned());
-        Ok(())
-    }
-
-    /// A new local Item in a directory another Device Deleted: it moves to the
-    /// top level, and is uploaded there. Left where it is if the name is taken.
-    async fn rehome_local(&mut self, file: &str, local: Vec<u8>) -> io::Result<()> {
-        let top = top_level(file);
-        if self.remote.contains_key(top) || self.read_local(top).await?.is_some() {
-            return Ok(());
-        }
-        let happened = self
-            .guarded(Request::RenameLocal {
-                from: file.into(),
-                to: top.into(),
-                expected: local.clone(),
-            })
-            .await?;
-        if !happened {
-            return Ok(()); // the app wrote it meanwhile
-        }
-        let changed = [self.merge.name_of(file), self.merge.name_of(top)];
-        self.outcome().changed.extend(changed);
-        self.upload(top, local).await
-    }
-
-    /// A new cloud Item in a directory this Device Deleted: it comes to the
-    /// top level here and in the cloud. Left where it is if the name is taken.
-    async fn rehome_remote(&mut self, file: &str) -> io::Result<()> {
-        let top = top_level(file);
-        let Some(bytes) = self.fetch(file).await? else {
-            return Ok(()); // deleted since the listing
-        };
-        if (!self.merge.transfers_unparseable() && !self.merge.is_item(&bytes))
-            || self.remote.contains_key(top)
-            || !self.replace_local(top, &bytes, None).await?
-        {
-            return Ok(());
-        }
-        self.upload(top, bytes).await?;
-        self.delete_cloud(file).await
-    }
-
-    /// The Items Moved since the last Sync: remembered paths gone on a side,
-    /// whose Item (by `Merge::identity`) is at a new path on a side that lost
-    /// it, while the other side still has it, Moved it elsewhere or Deleted
-    /// it. Reads only what is new, and only if something remembered is gone.
-    /// Only a Context with directories Moves Items.
-    async fn find_moves(
-        &self,
-        local: &HashMap<String, LocalFile>,
-        synced_names: &[String],
-    ) -> io::Result<Vec<Moved>> {
-        if !self.merge.has_directories() {
-            return Ok(Vec::new());
-        }
-        let synced: HashSet<&str> = synced_names
-            .iter()
-            .map(String::as_str)
-            .filter(|name| !name.ends_with('/'))
-            .collect();
-        let mut sources = Vec::new();
-        for path in &synced {
-            if local.contains_key(*path) && self.remote.contains_key(*path) {
-                continue;
-            }
-            if let Some(base) = self.read_synced(path).await?
-                && let Some(id) = self.merge.identity(&base.bytes)
-            {
-                sources.push((path.to_string(), base.bytes, id));
-            }
-        }
-        if sources.is_empty() {
-            return Ok(Vec::new());
-        }
-        sources.sort();
-        let wanted: HashSet<&String> = sources.iter().map(|(_, _, id)| id).collect();
-        // Only the Context's own files have an identity; the others it accepts
-        // (Images) aren't read for one.
-        let is_new = |path: &&String| {
-            !synced.contains(path.as_str()) && path.ends_with(self.merge.extension())
-        };
-
-        let mut new_local: Vec<&String> = local.keys().filter(is_new).collect();
-        new_local.sort();
-        let mut at_local = HashMap::new();
-        for path in new_local {
-            if let Some(bytes) = self.read_local(path).await?
-                && let Some(id) = self.merge.identity(&bytes).filter(|id| wanted.contains(id))
-            {
-                at_local.entry(id).or_insert_with(|| path.clone());
-            }
-        }
-        let mut new_remote: Vec<&String> = self.remote.keys().filter(is_new).collect();
-        new_remote.sort();
-        let mut at_remote = HashMap::new();
-        for path in new_remote {
-            if let Some(bytes) = self.fetch(path).await?
-                && let Some(id) = self.merge.identity(&bytes).filter(|id| wanted.contains(id))
-            {
-                at_remote.entry(id).or_insert_with(|| path.clone());
-            }
-        }
-
-        Ok(sources
-            .into_iter()
-            .filter_map(|(from, base, id)| {
-                let (here, there) = (local.contains_key(&from), self.remote.contains_key(&from));
-                let (to_local, to_remote) = (at_local.get(&id), at_remote.get(&id));
-                // Moved on one side; on the other still there, or Deleted.
-                let is_move = match (to_local, to_remote) {
-                    (Some(l), Some(r)) => l != r && !here && !there,
-                    (Some(_), None) => !here,
-                    (None, Some(_)) => !there,
-                    (None, None) => false,
-                };
-                is_move.then(|| Moved {
-                    from,
-                    base,
-                    local: to_local.cloned(),
-                    remote: to_remote.cloned(),
-                })
-            })
-            .collect())
-    }
-
-    /// Puts a Moved Item, merged, at one path on both sides, and takes the old
-    /// paths away after the new one is written: the app, seeing the old one
-    /// go, finds the new one and follows the Item.
-    async fn sync_move(&mut self, moved: &Moved) -> io::Result<()> {
-        let local_path = moved.local.as_deref().unwrap_or(&moved.from);
-        let remote_path = moved.remote.as_deref().unwrap_or(&moved.from);
-        let (local, remote) = match (
-            self.read_local(local_path).await?,
-            self.fetch(remote_path).await?,
-        ) {
-            (Some(local), Some(remote)) => (local, remote),
-            // Deleted on the side that didn't Move it: a Delete wins over a
-            // Move as over any edit.
-            (Some(local), None) if moved.remote.is_none() => {
-                if self.remove_local(local_path, local).await? {
-                    self.forget(&moved.from).await?;
-                }
-                return Ok(());
-            }
-            (None, Some(_)) if moved.local.is_none() => {
-                self.delete_cloud(remote_path).await?;
-                return self.forget(&moved.from).await;
-            }
-            _ => return Ok(()), // gone since the listing
-        };
-        let Some(merged) = self.merge.merge(Some(&moved.base), &local, &remote) else {
-            return Ok(());
-        };
-        let (mut target, from_local) = match (&moved.local, &moved.remote) {
-            (Some(_), Some(r)) if !self.merge.local_is_newer(&local, &remote) => {
-                (r.as_str(), false)
-            }
-            (Some(l), _) => (l.as_str(), true),
-            (None, Some(r)) => (r.as_str(), false),
-            (None, None) => return Ok(()),
-        };
-        // Into a directory the other side Deleted: to the top level instead.
-        let other = if from_local {
-            &self.dirs.cloud
-        } else {
-            &self.dirs.local
-        };
-        if self.dirs.deleted_above(target, other) {
-            target = top_level(target);
-        }
-        let taken = (target != remote_path && self.remote.contains_key(target))
-            || (target != local_path && self.read_local(target).await?.is_some());
-        if taken {
-            return Ok(());
-        }
-
-        if local_path != target {
-            if !self.replace_local(target, &merged, None).await? {
-                return Ok(());
-            }
-        } else if merged != local && !self.replace_local(target, &merged, Some(&local)).await? {
-            return Ok(());
-        }
-        if remote_path == target && merged == remote {
-            let marker = self.remote[target].clone();
-            self.remember(target, &remote, &marker).await?;
-        } else {
-            self.upload(target, merged).await?;
-        }
-        // The old paths go last, and what is remembered of the old one after
-        // them: until then a failed step finds the Move again.
-        if local_path != target && self.remove_local(local_path, local).await? {
-            self.prune_local_dirs(parent_of(local_path)).await?;
-        }
-        if remote_path != target {
-            self.delete_cloud(remote_path).await?;
-            self.prune_cloud_dirs(parent_of(remote_path)).await?;
-        }
-        if moved.from != target {
-            self.forget(&moved.from).await?;
-        }
-        Ok(())
-    }
-
-    /// Removes `dir` here if Moves emptied it, and the directories above it
-    /// that are just as empty, as long as nothing remembers them: those the
-    /// directory step decides about, and one remembered stays.
-    async fn prune_local_dirs(&mut self, mut dir: &str) -> io::Result<()> {
-        while !dir.is_empty() && !self.dirs.synced.contains(dir) {
-            let path = dir.to_owned();
-            if !self.guarded(Request::RemoveLocalDir { path }).await? {
-                break;
-            }
-            self.dirs.local.remove(dir);
-            self.outcome().changed.push(dir_key(dir));
-            dir = parent_of(dir);
-        }
-        Ok(())
-    }
-
-    /// `prune_local_dirs` for the cloud, where a directory is empty once what
-    /// the step deleted is all it had.
-    async fn prune_cloud_dirs(&mut self, mut dir: &str) -> io::Result<()> {
-        while !dir.is_empty() && !self.dirs.synced.contains(dir) && self.dirs.cloud_is_empty(dir) {
-            self.ask(Request::DeleteCloudDir { path: dir.into() })
-                .await?;
-            self.dirs.cloud.remove(dir);
-            self.dirs.deleted_cloud.insert(dir.to_owned());
-            dir = parent_of(dir);
-        }
-        Ok(())
-    }
-
-    /// Makes the directories of both sides agree (the Context's directories
-    /// as in the module docs), the deepest first, after the Items. Decided on
-    /// what the step found; what it did since is only that Items went.
-    async fn sync_dirs(&mut self) -> io::Result<()> {
-        let mut all: Vec<String> = self
-            .dirs
-            .local
-            .iter()
-            .chain(&self.dirs.cloud)
-            .chain(&self.dirs.synced)
-            .cloned()
-            .collect();
-        all.sort_by_key(|dir| std::cmp::Reverse(dir.matches('/').count()));
-        all.dedup();
-        for dir in all {
-            let (local, cloud, synced) = (
-                self.dirs.local.contains(&dir),
-                self.dirs.cloud.contains(&dir),
-                self.dirs.synced.contains(&dir),
-            );
-            match (local, cloud, synced) {
-                (true, true, false) => self.remember_dir(&dir).await?,
-                (true, false, false) => {
-                    self.ask(Request::MakeCloudDir { path: dir.clone() })
-                        .await?;
-                    self.remember_dir(&dir).await?;
-                }
-                (false, true, false) => {
-                    self.ask(Request::MakeLocalDir { path: dir.clone() })
-                        .await?;
-                    self.outcome().changed.push(dir_key(&dir));
-                    self.remember_dir(&dir).await?;
-                }
-                (false, false, true) => self.forget(&dir_key(&dir)).await?,
-                // Deleted elsewhere: Deleted here once nothing is left in it.
-                (true, false, true) => {
-                    if self
-                        .guarded(Request::RemoveLocalDir { path: dir.clone() })
-                        .await?
-                    {
-                        self.outcome().changed.push(dir_key(&dir));
-                        self.forget(&dir_key(&dir)).await?;
-                    }
-                }
-                // Deleted here: Deleted in the cloud once nothing is left in it.
-                (false, true, true) if self.dirs.cloud_is_empty(&dir) => {
-                    self.ask(Request::DeleteCloudDir { path: dir.clone() })
-                        .await?;
-                    self.forget(&dir_key(&dir)).await?;
-                    self.dirs.deleted_cloud.insert(dir);
-                }
-                _ => {}
-            }
-        }
-        Ok(())
-    }
-
-    /// Remembers that both sides have the directory. It has no bytes.
-    async fn remember_dir(&self, dir: &str) -> io::Result<()> {
-        self.remember(&dir_key(dir), &[], "").await
     }
 
     /// The cloud's Drawing changed since the last Sync: merges it with the
@@ -1300,26 +825,6 @@ impl Engine {
     }
 }
 
-/// The directory of `path`; empty at the top level.
-fn parent_of(path: &str) -> &str {
-    path.rsplit_once('/').map_or("", |(dir, _)| dir)
-}
-
-/// An Item Moved since the last Sync: it was at `from`, with `base` as its
-/// remembered bytes, and is now at `local` here and/or `remote` in the cloud
-/// (none: it stayed at `from` on that side, or was Deleted there).
-struct Moved {
-    from: String,
-    base: Vec<u8>,
-    local: Option<String>,
-    remote: Option<String>,
-}
-
-/// The file name of `path`: where it lands at the top level.
-fn top_level(path: &str) -> &str {
-    path.rsplit_once('/').map_or(path, |(_, file)| file)
-}
-
 /// What a step does for one name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Action {
@@ -1382,7 +887,6 @@ fn decide(local: Option<&[u8]>, remote: Option<&str>, base: Option<&Synced>) -> 
 mod tests {
     use super::*;
     use crate::merge::Drawings;
-    use crate::storage::Blob;
 
     /// A Device and a cloud in memory, answering a step's requests.
     #[derive(Default)]
@@ -1406,21 +910,15 @@ mod tests {
         fn answer(&mut self, request: Request) -> Response {
             self.requests.push(request.clone());
             match request {
-                Request::ListCloud => Response::Cloud(Tree {
-                    blobs: self
-                        .cloud
+                Request::ListCloud => Response::Cloud(
+                    self.cloud
                         .iter()
                         .map(|(name, bytes)| Blob {
                             name: name.clone(),
                             marker: Self::marker(bytes),
                         })
                         .collect(),
-                    empty_dirs: Vec::new(),
-                }),
-                Request::ListLocalDirs => Response::Names(Vec::new()),
-                Request::MakeLocalDir { .. } | Request::MakeCloudDir { .. } => Response::Done,
-                Request::DeleteCloudDir { .. } => Response::Done,
-                Request::RemoveLocalDir { .. } => Response::Happened(true),
+                ),
                 Request::ListLocal => Response::Local(
                     self.local
                         .iter()

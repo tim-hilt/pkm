@@ -15,7 +15,7 @@
 //! carries `Authorization: Basic`, so no client ever waits for a challenge.
 
 use crate::percent::{decode, encode};
-use crate::storage::{Blob, ConnectError, Tree};
+use crate::storage::{Blob, ConnectError};
 use pkm_base::base64;
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
@@ -122,26 +122,20 @@ impl WebDav {
         }
     }
 
-    /// Everything in the folder and below it: one `PROPFIND` of Depth 1 per
-    /// directory.
-    pub fn scan(&self) -> impl Exchange<Output = io::Result<Tree>> + use<> {
-        Scan {
-            dav: self.clone(),
-            dir: String::new(),
-            pending: Vec::new(),
-            tree: Tree::default(),
-        }
-    }
-
-    /// Makes the directory `path` in the folder, and the ones above it; fine
-    /// if they exist. Also makes the folder and `pkm` if they are missing.
-    pub fn create_dir(&self, path: &str) -> impl Exchange<Output = io::Result<()>> + use<> {
-        let mut urls = vec![self.parent.clone(), self.root.clone()];
-        urls.extend(self.ancestors(path, true));
-        MakeFolders {
-            dav: self.clone(),
-            urls,
-            next: 0,
+    /// The blobs in the folder.
+    pub fn list(&self) -> impl Exchange<Output = io::Result<Vec<Blob>>> + use<> {
+        Single {
+            request: Some(self.propfind(&self.root, "1")),
+            read: |answer: HttpAnswer| {
+                refuse(answer.status)?;
+                match answer.status {
+                    207 => {}
+                    404 => return Ok(Vec::new()),
+                    status => return Err(unexpected("PROPFIND", status)),
+                }
+                let xml = String::from_utf8_lossy(&answer.body);
+                parse_listing(&xml).map_err(io::Error::other)
+            },
         }
     }
 
@@ -192,8 +186,6 @@ impl WebDav {
             temp: format!("{incoming}/{}", encode(temp)),
             dav: self.clone(),
             destination: self.url(name),
-            parents: self.ancestors(name, false),
-            parents_made: false,
             incoming,
             data,
             phase: if incoming_exists {
@@ -207,24 +199,9 @@ impl WebDav {
         }
     }
 
-    /// The URL of the blob or directory `path` in the folder.
-    fn url(&self, path: &str) -> String {
-        let encoded: Vec<_> = path.split('/').map(encode).collect();
-        format!("{}/{}", self.root, encoded.join("/"))
-    }
-
-    /// The URLs of the directories above `path`, outermost first, and
-    /// `path` itself if `own`.
-    fn ancestors(&self, path: &str, own: bool) -> Vec<String> {
-        let segments: Vec<_> = path.split('/').collect();
-        let count = if own {
-            segments.len()
-        } else {
-            segments.len() - 1
-        };
-        (1..=count)
-            .map(|n| self.url(&segments[..n].join("/")))
-            .collect()
+    /// The URL of the blob `name` in the folder.
+    fn url(&self, name: &str) -> String {
+        format!("{}/{}", self.root, encode(name))
     }
 
     fn request(
@@ -382,9 +359,6 @@ enum PutPhase {
     },
     Upload,
     Move,
-    /// Making the directory of that index of `parents`, which the blob's
-    /// directories are missing.
-    MakeParent(usize),
     /// Deleting the temporary blob after the error.
     Clean(io::Error),
 }
@@ -394,10 +368,6 @@ struct Put {
     incoming: String,
     temp: String,
     destination: String,
-    /// The URLs of the directories above the destination, outermost first.
-    parents: Vec<String>,
-    /// Whether they have been made: a second refusal is final.
-    parents_made: bool,
     data: Vec<u8>,
     phase: PutPhase,
 }
@@ -413,18 +383,6 @@ impl Put {
         self.phase = PutPhase::Upload;
         let data = std::mem::take(&mut self.data);
         self.dav.request("PUT", self.temp.clone(), &[], data)
-    }
-
-    fn move_into_place(&mut self) -> HttpRequest {
-        self.phase = PutPhase::Move;
-        let headers = [("Destination", &*self.destination), ("Overwrite", "T")];
-        self.dav
-            .request("MOVE", self.temp.clone(), &headers, Vec::new())
-    }
-
-    fn make_parent(&mut self, index: usize) -> HttpRequest {
-        self.phase = PutPhase::MakeParent(index);
-        self.dav.mkcol(&self.parents[index])
     }
 
     fn clean(&mut self, error: io::Error) -> Turn<io::Result<()>> {
@@ -461,28 +419,20 @@ impl Exchange for Put {
             },
             PutPhase::Upload => match (refused, status) {
                 (Err(error), _) => self.clean(error),
-                (_, 200..=299) => Turn::Send(self.move_into_place()),
+                (_, 200..=299) => {
+                    self.phase = PutPhase::Move;
+                    let headers = [("Destination", &*self.destination), ("Overwrite", "T")];
+                    Turn::Send(
+                        self.dav
+                            .request("MOVE", self.temp.clone(), &headers, Vec::new()),
+                    )
+                }
                 _ => self.clean(unexpected("PUT", status)),
             },
             PutPhase::Move => match (refused, status) {
                 (Err(error), _) => self.clean(error),
                 (_, 200..=299) => Turn::Done(Ok(())),
-                // 409: the blob's directories are missing; some servers
-                // (rclone) say 403.
-                (_, 403 | 409) if !self.parents.is_empty() && !self.parents_made => {
-                    self.parents_made = true;
-                    Turn::Send(self.make_parent(0))
-                }
                 _ => self.clean(unexpected("MOVE", status)),
-            },
-            PutPhase::MakeParent(index) => match (refused, status) {
-                (Err(error), _) => self.clean(error),
-                // 405: it exists already.
-                (_, 200..=299 | 405) if index + 1 < self.parents.len() => {
-                    Turn::Send(self.make_parent(index + 1))
-                }
-                (_, 200..=299 | 405) => Turn::Send(self.move_into_place()),
-                _ => self.clean(unexpected("MKCOL", status)),
             },
             PutPhase::Clean(error) => Turn::Done(Err(error)),
         }
@@ -494,119 +444,6 @@ impl Exchange for Put {
             PutPhase::Clean(first) => Err(first),
             _ => Err(error),
         }
-    }
-}
-
-/// Walks the folder, a directory per request.
-struct Scan {
-    dav: WebDav,
-    /// The directory being listed, relative to the folder; empty for it.
-    dir: String,
-    /// The directories still to list.
-    pending: Vec<String>,
-    tree: Tree,
-}
-
-impl Scan {
-    fn propfind_dir(&self) -> HttpRequest {
-        let url = if self.dir.is_empty() {
-            self.dav.root.clone()
-        } else {
-            self.dav.url(&self.dir)
-        };
-        self.dav.propfind(&url, "1")
-    }
-}
-
-impl Exchange for Scan {
-    type Output = io::Result<Tree>;
-
-    fn start(&mut self) -> HttpRequest {
-        self.propfind_dir()
-    }
-
-    fn answer(&mut self, answer: HttpAnswer) -> Turn<Self::Output> {
-        let status = answer.status;
-        if let Err(error) = refuse(status) {
-            return Turn::Done(Err(error));
-        }
-        match status {
-            207 => {
-                let xml = String::from_utf8_lossy(&answer.body);
-                let listed = url_path(&self.propfind_dir().url);
-                let entries = match parse_listing(&xml, &listed) {
-                    Ok(entries) => entries,
-                    Err(error) => return Turn::Done(Err(io::Error::other(error))),
-                };
-                if entries.is_empty() && !self.dir.is_empty() {
-                    self.tree.empty_dirs.push(self.dir.clone());
-                }
-                for child in entries {
-                    let path = if self.dir.is_empty() {
-                        child.name
-                    } else {
-                        format!("{}/{}", self.dir, child.name)
-                    };
-                    match child.kind {
-                        ChildKind::File { marker } => {
-                            self.tree.blobs.push(Blob { name: path, marker });
-                        }
-                        ChildKind::Dir => self.pending.push(path),
-                    }
-                }
-            }
-            // The folder is made with the first put; a directory deleted
-            // meanwhile is gone.
-            404 => {}
-            _ => return Turn::Done(Err(unexpected("PROPFIND", status))),
-        }
-        match self.pending.pop() {
-            Some(next) => {
-                self.dir = next;
-                Turn::Send(self.propfind_dir())
-            }
-            None => Turn::Done(Ok(std::mem::take(&mut self.tree))),
-        }
-    }
-
-    fn failed(&mut self, error: io::Error) -> Self::Output {
-        Err(error)
-    }
-}
-
-/// Makes folders in turn, each in the one before.
-struct MakeFolders {
-    dav: WebDav,
-    urls: Vec<String>,
-    next: usize,
-}
-
-impl Exchange for MakeFolders {
-    type Output = io::Result<()>;
-
-    fn start(&mut self) -> HttpRequest {
-        self.next = 1;
-        self.dav.mkcol(&self.urls[0])
-    }
-
-    fn answer(&mut self, answer: HttpAnswer) -> Turn<Self::Output> {
-        let status = answer.status;
-        match (refuse(status), status) {
-            (Err(error), _) => Turn::Done(Err(error)),
-            // 405: it exists already.
-            (_, 200..=299 | 405) => match self.urls.get(self.next) {
-                Some(url) => {
-                    self.next += 1;
-                    Turn::Send(self.dav.mkcol(url))
-                }
-                None => Turn::Done(Ok(())),
-            },
-            _ => Turn::Done(Err(unexpected("MKCOL", status))),
-        }
-    }
-
-    fn failed(&mut self, error: io::Error) -> Self::Output {
-        Err(error)
     }
 }
 
@@ -630,34 +467,10 @@ fn unexpected(method: &str, status: u16) -> io::Error {
     io::Error::other(format!("{method} answered with status {status}"))
 }
 
-/// A file or directory in a `PROPFIND` answer.
-pub(crate) struct Child {
-    pub name: String,
-    pub kind: ChildKind,
-}
-
-pub(crate) enum ChildKind {
-    Dir,
-    /// The marker is the ETag, or the modified time and size for a server
-    /// without ETags.
-    File {
-        marker: String,
-    },
-}
-
-/// The decoded path of `url`, which may be a path already, without a
-/// trailing slash.
-fn url_path(url: &str) -> String {
-    let path = match url.split_once("://") {
-        Some((_, rest)) => rest.find('/').map_or("", |slash| &rest[slash..]),
-        None => url,
-    };
-    decode(path).trim_end_matches('/').to_owned()
-}
-
-/// What is in the directory at path `listed` according to a `PROPFIND` answer
-/// of Depth 1: the children, but not the directory itself and no hidden ones.
-pub(crate) fn parse_listing(xml: &str, listed: &str) -> Result<Vec<Child>, quick_xml::Error> {
+/// The blobs in a `PROPFIND` answer: its files, but no directories (the
+/// listed one included) and no hidden files. The marker is the ETag, or the
+/// modified time and size for a server without ETags.
+pub(crate) fn parse_listing(xml: &str) -> Result<Vec<Blob>, quick_xml::Error> {
     #[derive(PartialEq, Clone, Copy)]
     enum Reading {
         Nothing,
@@ -675,7 +488,7 @@ pub(crate) fn parse_listing(xml: &str, listed: &str) -> Result<Vec<Child>, quick
         is_dir: bool,
     }
     let mut reader = Reader::from_str(xml);
-    let mut children = Vec::new();
+    let mut blobs = Vec::new();
     let mut entry = Entry::default();
     let mut reading = Reading::Nothing;
     let mut text = String::new();
@@ -719,7 +532,7 @@ pub(crate) fn parse_listing(xml: &str, listed: &str) -> Result<Vec<Child>, quick
                     // A missing value (a 404 `propstat`) stays as it was.
                     let value = text.trim().to_owned();
                     match reading {
-                        Reading::Href => entry.href = value,
+                        Reading::Href => entry.href = decode(&value),
                         Reading::Length => entry.size = value,
                         Reading::Etag => entry.etag = value,
                         Reading::Modified => entry.modified = value,
@@ -728,29 +541,23 @@ pub(crate) fn parse_listing(xml: &str, listed: &str) -> Result<Vec<Child>, quick
                     reading = Reading::Nothing;
                 }
                 "response" => {
-                    let path = url_path(&entry.href);
-                    let name = path.rsplit('/').next().unwrap_or("");
-                    if path != listed && !name.is_empty() && !name.starts_with('.') {
-                        let kind = if entry.is_dir {
-                            ChildKind::Dir
-                        } else if entry.etag.is_empty() {
-                            ChildKind::File {
-                                marker: format!("{}-{}", entry.modified, entry.size),
-                            }
+                    let href = entry.href.trim_end_matches('/');
+                    let name = href.rsplit('/').next().unwrap_or("");
+                    if !entry.is_dir && !name.is_empty() && !name.starts_with('.') {
+                        let marker = if entry.etag.is_empty() {
+                            format!("{}-{}", entry.modified, entry.size)
                         } else {
-                            ChildKind::File {
-                                marker: entry.etag.clone(),
-                            }
+                            entry.etag.clone()
                         };
-                        children.push(Child {
+                        blobs.push(Blob {
                             name: name.to_owned(),
-                            kind,
+                            marker,
                         });
                     }
                 }
                 _ => {}
             },
-            Event::Eof => return Ok(children),
+            Event::Eof => return Ok(blobs),
             _ => {}
         }
     }
@@ -879,83 +686,31 @@ mod tests {
         assert_eq!(connect.failed(error), Err(ConnectError::Unreachable));
     }
 
-    fn dir_xml(entries: &[(&str, bool)]) -> String {
-        let responses: String = entries
-            .iter()
-            .map(|(href, dir)| {
-                let kind = if *dir {
-                    "<D:collection/>"
-                } else {
-                    "<D:getetag>\"e\"</D:getetag>"
-                };
-                format!("<D:response><D:href>{href}</D:href><D:propstat><D:prop><D:resourcetype>{}</D:resourcetype>{kind}</D:prop></D:propstat></D:response>", if *dir { "<D:collection/>" } else { "" })
-            })
-            .collect();
-        format!(r#"<D:multistatus xmlns:D="DAV:">{responses}</D:multistatus>"#)
-    }
-
     #[test]
-    fn scanning_asks_for_depth_one_of_each_directory_and_reads_the_answers() {
-        let mut scan = dav().scan();
-        let request = scan.start();
+    fn listing_asks_for_depth_one_and_reads_the_answer() {
+        let mut list = dav().list();
+        let request = list.start();
         assert_eq!(line(&request), "PROPFIND https://host/dav/pkm/Drawings");
         assert!(request.headers.contains(&("Depth", "1".to_owned())));
-        let top = dir_xml(&[
-            ("/dav/pkm/Drawings/", true),
-            ("/dav/pkm/Drawings/a", false),
-            ("/dav/pkm/Drawings/Work%20x", true),
-            ("/dav/pkm/Drawings/Ideas", true),
-        ]);
-        let Turn::Send(next) = scan.answer(answer(207, &top)) else {
-            panic!("no second request");
-        };
-        let mut visited = vec![line(&next)];
-        // Work x holds a file and a directory; Ideas holds nothing.
-        let inner = dir_xml(&[
-            ("/dav/pkm/Drawings/Ideas/", true),
-            ("/dav/pkm/Drawings/Ideas/.hidden", false),
-        ]);
-        let work = dir_xml(&[
-            ("https://host/dav/pkm/Drawings/Work%20x/", true),
-            ("https://host/dav/pkm/Drawings/Work%20x/b.md", false),
-            ("https://host/dav/pkm/Drawings/Work%20x/Sub", true),
-        ]);
-        let sub = dir_xml(&[("/dav/pkm/Drawings/Work%20x/Sub/", true)]);
-        let mut turn = scan.answer(answer(207, &inner));
-        for body in [&work, &sub] {
-            let Turn::Send(next) = turn else {
-                panic!("not asked");
-            };
-            visited.push(line(&next));
-            turn = scan.answer(answer(207, body));
-        }
-        let Turn::Done(Ok(mut tree)) = turn else {
+        let xml = r#"<D:multistatus xmlns:D="DAV:"><D:response><D:href>/a</D:href>
+            <D:propstat><D:prop><D:getetag>"e"</D:getetag></D:prop></D:propstat></D:response></D:multistatus>"#;
+        let Turn::Done(Ok(blobs)) = list.answer(answer(207, xml)) else {
             panic!("not done");
         };
-        visited.sort();
         assert_eq!(
-            visited,
-            [
-                "PROPFIND https://host/dav/pkm/Drawings/Ideas",
-                "PROPFIND https://host/dav/pkm/Drawings/Work%20x",
-                "PROPFIND https://host/dav/pkm/Drawings/Work%20x/Sub",
-            ]
+            blobs,
+            [Blob {
+                name: "a".into(),
+                marker: "\"e\"".into()
+            }]
         );
-        tree.blobs.sort_by(|a, b| a.name.cmp(&b.name));
-        let names: Vec<_> = tree.blobs.iter().map(|b| b.name.as_str()).collect();
-        assert_eq!(names, ["Work x/b.md", "a"]);
-        tree.empty_dirs.sort();
-        assert_eq!(tree.empty_dirs, ["Ideas", "Work x/Sub"]);
     }
 
     #[test]
-    fn scanning_a_missing_folder_is_empty_and_problems_are_errors() {
-        assert_eq!(
-            run(dav().scan(), &[answer(404, "")]).1.unwrap(),
-            Tree::default()
-        );
+    fn listing_a_missing_folder_is_empty_and_problems_are_errors() {
+        assert!(run(dav().list(), &[answer(404, "")]).1.unwrap().is_empty());
         let kind = |status| {
-            run(dav().scan(), &[answer(status, "")])
+            run(dav().list(), &[answer(status, "")])
                 .1
                 .unwrap_err()
                 .kind()
@@ -966,34 +721,9 @@ mod tests {
     }
 
     #[test]
-    fn creating_a_directory_makes_each_folder_from_pkm_down() {
-        let answers = [
-            answer(405, ""),
-            answer(405, ""),
-            answer(201, ""),
-            answer(201, ""),
-        ];
-        let (sent, result) = run(dav().create_dir("Work/Plans"), &answers);
-        assert_eq!(
-            sent,
-            [
-                "MKCOL https://host/dav/pkm",
-                "MKCOL https://host/dav/pkm/Drawings",
-                "MKCOL https://host/dav/pkm/Drawings/Work",
-                "MKCOL https://host/dav/pkm/Drawings/Work/Plans",
-            ]
-        );
-        assert!(result.is_ok());
-        let refused = [answer(201, ""), answer(201, ""), answer(409, "")];
-        assert!(run(dav().create_dir("a/b"), &refused).1.is_err());
-    }
-
-    #[test]
     fn getting_gives_the_body_none_or_an_error() {
         let (sent, result) = run(dav().get("a b"), &[answer(200, "hi")]);
         assert_eq!(sent, ["GET https://host/dav/pkm/Drawings/a%20b"]);
-        let (sent, _) = run(dav().get("Work/a b"), &[answer(200, "hi")]);
-        assert_eq!(sent, ["GET https://host/dav/pkm/Drawings/Work/a%20b"]);
         assert_eq!(result.unwrap(), Some(b"hi".to_vec()));
         assert_eq!(run(dav().get("x"), &[answer(404, "")]).1.unwrap(), None);
         let error = run(dav().get("x"), &[answer(401, "")]).1.unwrap_err();
@@ -1033,51 +763,6 @@ mod tests {
         );
         assert!(moved.headers.contains(&("Overwrite", "T".to_owned())));
         assert!(matches!(put.answer(answer(204, "")), Turn::Done(Ok(()))));
-    }
-
-    #[test]
-    fn putting_into_a_missing_directory_makes_it_and_moves_again() {
-        let answers = [
-            answer(201, ""), // PUT
-            answer(409, ""), // MOVE: no directory
-            answer(201, ""), // MKCOL Work
-            answer(405, ""), // MKCOL Work/Plans: there already
-            answer(201, ""), // MOVE
-        ];
-        let (sent, result) = run(dav().put("Work/Plans/a", "t", Vec::new(), true), &answers);
-        let moved = "MOVE https://host/dav/pkm/Drawings/.incoming/t";
-        assert_eq!(
-            sent[1..],
-            [
-                moved,
-                "MKCOL https://host/dav/pkm/Drawings/Work",
-                "MKCOL https://host/dav/pkm/Drawings/Work/Plans",
-                moved,
-            ]
-        );
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn putting_gives_up_when_the_directories_do_not_help() {
-        let answers = [
-            answer(201, ""),
-            answer(409, ""),
-            answer(201, ""),
-            answer(409, ""),
-            answer(204, ""), // cleaning up
-        ];
-        let (sent, result) = run(dav().put("Work/a", "t", Vec::new(), true), &answers);
-        assert_eq!(sent.len(), 5);
-        assert!(sent[4].starts_with("DELETE "));
-        assert!(result.is_err());
-        // A flat name has no directories to make.
-        let answers = [answer(201, ""), answer(409, ""), answer(204, "")];
-        assert!(
-            run(dav().put("a", "t", Vec::new(), true), &answers)
-                .1
-                .is_err()
-        );
     }
 
     #[test]
@@ -1205,7 +890,7 @@ mod tests {
     }
 
     #[test]
-    fn parsing_gives_the_children_but_no_hidden_files_or_the_listed_directory() {
+    fn listing_gives_files_but_no_directories_hidden_files_or_the_listed_directory() {
         let xml = r#"<?xml version="1.0" encoding="utf-8"?>
             <D:multistatus xmlns:D="DAV:">
               <D:response><D:href>/dav/pkm/</D:href>
@@ -1226,26 +911,17 @@ mod tests {
               </D:response>
             </D:multistatus>"#;
 
-        let children = parse_listing(xml, "/dav/pkm").unwrap();
+        let blobs = parse_listing(xml).unwrap();
 
         // The ETag is the marker; without one, modified time and size are.
         let expected = [
             ("a b&c.excalidraw", "\"e1\""),
             ("x", "Mon, 01 Jan 2024 10:00:00 GMT-7"),
         ];
-        let listed: Vec<_> = children
+        let listed: Vec<_> = blobs
             .iter()
-            .filter_map(|c| match &c.kind {
-                ChildKind::File { marker } => Some((c.name.as_str(), marker.as_str())),
-                ChildKind::Dir => None,
-            })
+            .map(|b| (b.name.as_str(), b.marker.as_str()))
             .collect();
         assert_eq!(listed, expected);
-        let dirs: Vec<_> = children
-            .iter()
-            .filter(|c| matches!(c.kind, ChildKind::Dir))
-            .map(|c| c.name.as_str())
-            .collect();
-        assert_eq!(dirs, ["sub"]);
     }
 }

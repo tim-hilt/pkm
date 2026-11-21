@@ -76,15 +76,9 @@ export class MemoryWebDav {
         this.store(to, file.bytes);
         return new Response(null, { status: 204 });
       }
-      case "DELETE": {
-        if (this.files.delete(inside)) return new Response(null, { status: 204 });
-        if (!inside || !this.folders.has(inside)) return new Response(null, { status: 404 });
-        // A collection goes with everything in it.
-        const within = (path: string) => path === inside || path.startsWith(`${inside}/`);
-        for (const folder of [...this.folders]) if (within(folder)) this.folders.delete(folder);
-        for (const path of [...this.files.keys()]) if (within(path)) this.files.delete(path);
+      case "DELETE":
+        if (!this.files.delete(inside)) return new Response(null, { status: 404 });
         return new Response(null, { status: 204 });
-      }
       default:
         return new Response(null, { status: 405 });
     }

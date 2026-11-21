@@ -15,7 +15,7 @@ use crate::merge::{Drawings, Merge};
 use crate::step::{
     LocalFile, Marks, Next, Progress, Request, Response, StepOutcome, SyncStep, Synced,
 };
-use crate::storage::{Storage, remove_dir_if_empty, write_file_atomically};
+use crate::storage::{Storage, write_file_atomically};
 
 /// What this Device remembers of each Item of one Context folder at its last
 /// Sync, in a folder of its own: never inside the Context folder, never
@@ -43,19 +43,7 @@ impl SyncState {
         }
     }
 
-    /// Where the state of `file`, a path from the Context folder, lives in
-    /// the folders of `bytes`, `markers` and `stamps`: one flat file, with `/`
-    /// (and the `%` that escapes it) escaped.
-    fn key(file: &str) -> String {
-        file.replace('%', "%25").replace('/', "%2F")
-    }
-
-    fn unkey(key: &str) -> String {
-        key.replace("%2F", "/").replace("%25", "%")
-    }
-
     fn get(&self, file: &str) -> io::Result<Option<Synced>> {
-        let file = &Self::key(file);
         let read = |kind: &str| match fs::read(self.dir.join(kind).join(file)) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
             other => other.map(Some),
@@ -71,7 +59,7 @@ impl SyncState {
 
     /// The cloud blob's change marker as last seen, without the bytes.
     fn marker(&self, file: &str) -> io::Result<Option<String>> {
-        match fs::read_to_string(self.dir.join("markers").join(Self::key(file))) {
+        match fs::read_to_string(self.dir.join("markers").join(file)) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(e) if e.kind() == io::ErrorKind::InvalidData => Ok(None),
             other => other.map(Some),
@@ -81,7 +69,7 @@ impl SyncState {
     /// The stamp the local file had when it was read and found equal to the
     /// remembered bytes. Gone as soon as those change.
     fn stamp(&self, file: &str) -> io::Result<Option<String>> {
-        match fs::read_to_string(self.dir.join("stamps").join(Self::key(file))) {
+        match fs::read_to_string(self.dir.join("stamps").join(file)) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(e) if e.kind() == io::ErrorKind::InvalidData => Ok(None),
             other => other.map(Some),
@@ -91,14 +79,11 @@ impl SyncState {
     /// Remembers that the local file with `stamp` holds the remembered bytes.
     /// `stamp` must have been taken before the read that showed it.
     fn set_stamp(&self, file: &str, stamp: &str) -> io::Result<()> {
-        write_file_atomically(
-            &self.dir.join("stamps").join(Self::key(file)),
-            stamp.as_bytes(),
-        )
+        write_file_atomically(&self.dir.join("stamps").join(file), stamp.as_bytes())
     }
 
     fn remove_stamp(&self, file: &str) -> io::Result<()> {
-        match fs::remove_file(self.dir.join("stamps").join(Self::key(file))) {
+        match fs::remove_file(self.dir.join("stamps").join(file)) {
             Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
             _ => Ok(()),
         }
@@ -109,15 +94,13 @@ impl SyncState {
     /// other bytes.
     fn set(&self, file: &str, bytes: &[u8], marker: &str) -> io::Result<()> {
         self.remove_stamp(file)?;
-        let key = Self::key(file);
-        write_file_atomically(&self.dir.join("bytes").join(&key), bytes)?;
-        write_file_atomically(&self.dir.join("markers").join(&key), marker.as_bytes())
+        write_file_atomically(&self.dir.join("bytes").join(file), bytes)?;
+        write_file_atomically(&self.dir.join("markers").join(file), marker.as_bytes())
     }
 
     fn remove(&self, file: &str) -> io::Result<()> {
-        let key = Self::key(file);
         for kind in ["stamps", "markers", "bytes"] {
-            match fs::remove_file(self.dir.join(kind).join(&key)) {
+            match fs::remove_file(self.dir.join(kind).join(file)) {
                 Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
                 _ => {}
             }
@@ -129,7 +112,7 @@ impl SyncState {
         Ok(
             files_in(&self.dir.join("markers"), |name| !name.starts_with('.'))?
                 .into_iter()
-                .map(|(key, _)| Self::unkey(&key))
+                .map(|(name, _)| name)
                 .collect(),
         )
     }
@@ -306,9 +289,8 @@ struct Runner<'a> {
 impl Runner<'_> {
     fn answer(&self, request: Request) -> io::Result<Response> {
         Ok(match request {
-            Request::ListCloud => Response::Cloud(self.storage.scan()?),
+            Request::ListCloud => Response::Cloud(self.storage.list()?),
             Request::ListLocal => Response::Local(self.list_local()?),
-            Request::ListLocalDirs => Response::Names(self.list_local_dirs()?),
             Request::ReadLocal { file } => Response::Bytes(self.read_local(&file)?),
             Request::ReadMarks { file } => Response::Marks(Marks {
                 marker: self.state.marker(&file)?,
@@ -345,32 +327,13 @@ impl Runner<'_> {
                 self.storage.delete(&file)?;
                 Response::Done
             }
-            Request::MakeLocalDir { path } => {
-                fs::create_dir_all(self.dir.join(path))?;
-                Response::Done
-            }
-            Request::RemoveLocalDir { path } => {
-                Response::Happened(remove_dir_if_empty(&self.dir.join(path))?)
-            }
-            Request::MakeCloudDir { path } => {
-                self.storage.create_dir(&path)?;
-                Response::Done
-            }
-            Request::DeleteCloudDir { path } => {
-                self.storage.delete_dir(&path)?;
-                Response::Done
-            }
             Request::WriteLocal {
                 file,
                 bytes,
                 expected,
             } => Response::Happened(
                 if self.read_local(&file)?.as_deref() == expected.as_deref() {
-                    let path = self.dir.join(&file);
-                    if let Some(parent) = path.parent() {
-                        fs::create_dir_all(parent)?;
-                    }
-                    write_file_atomically(&path, &bytes)?;
+                    write_file_atomically(&self.dir.join(&file), &bytes)?;
                     true
                 } else {
                     false
@@ -396,29 +359,13 @@ impl Runner<'_> {
     }
 
     fn list_local(&self) -> io::Result<Vec<LocalFile>> {
-        let found = if self.merge.has_directories() {
-            nested_files_in(self.dir, &|name| self.merge.accepts(name))?
-        } else {
-            files_in(self.dir, |name| self.merge.accepts(name))?
-        };
-        Ok(found
+        Ok(files_in(self.dir, |name| self.merge.accepts(name))?
             .into_iter()
             .map(|(file, meta)| LocalFile {
                 file,
                 ..stamp_of(&meta)
             })
             .collect())
-    }
-
-    /// Every visible directory below the Context folder, as paths.
-    fn list_local_dirs(&self) -> io::Result<Vec<String>> {
-        let mut dirs = Vec::new();
-        walk(self.dir, "", &mut |path, meta| {
-            if meta.is_dir() {
-                dirs.push(path.to_owned());
-            }
-        })?;
-        Ok(dirs)
     }
 
     fn read_local(&self, file: &str) -> io::Result<Option<Vec<u8>>> {
@@ -475,42 +422,6 @@ fn files_in(dir: &Path, wanted: impl Fn(&str) -> bool) -> io::Result<Vec<(String
         }
     }
     Ok(files)
-}
-
-/// The files at any depth below `dir` that `wanted` accepts by their own
-/// name, as `/`-separated paths with their metadata. Hidden directories are
-/// not entered.
-fn nested_files_in(
-    dir: &Path,
-    wanted: &dyn Fn(&str) -> bool,
-) -> io::Result<Vec<(String, fs::Metadata)>> {
-    let mut files = Vec::new();
-    walk(dir, "", &mut |path, meta| {
-        let name = path.rsplit_once('/').map_or(path, |(_, name)| name);
-        if meta.is_file() && wanted(name) {
-            files.push((path.to_owned(), meta.clone()));
-        }
-    })?;
-    Ok(files)
-}
-
-/// Calls `visit` with the path and metadata of every visible file and
-/// directory below `dir`, the paths starting with `prefix`.
-fn walk(dir: &Path, prefix: &str, visit: &mut dyn FnMut(&str, &fs::Metadata)) -> io::Result<()> {
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') {
-            continue;
-        }
-        let path = format!("{prefix}{name}");
-        let meta = entry.metadata()?;
-        visit(&path, &meta);
-        if meta.is_dir() {
-            walk(&entry.path(), &format!("{path}/"), visit)?;
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -582,21 +493,9 @@ mod tests {
                 self.check(&self.all_fail)?;
                 self.inner.list()
             }
-            fn scan(&self) -> io::Result<crate::storage::Tree> {
-                self.check(&self.all_fail)?;
-                self.inner.scan()
-            }
-            fn create_dir(&self, path: &str) -> io::Result<()> {
-                self.check(&self.all_fail)?;
-                self.inner.create_dir(path)
-            }
             fn delete(&self, name: &str) -> io::Result<()> {
                 self.check(&self.all_fail)?;
                 self.inner.delete(name)
-            }
-            fn delete_dir(&self, path: &str) -> io::Result<()> {
-                self.check(&self.all_fail)?;
-                self.inner.delete_dir(path)
             }
         }
 
@@ -811,19 +710,9 @@ mod tests {
                 self.calls.lock().unwrap().lists += 1;
                 self.inner.list()
             }
-            fn scan(&self) -> io::Result<crate::storage::Tree> {
-                self.calls.lock().unwrap().lists += 1;
-                self.inner.scan()
-            }
-            fn create_dir(&self, path: &str) -> io::Result<()> {
-                self.inner.create_dir(path)
-            }
             fn delete(&self, name: &str) -> io::Result<()> {
                 self.calls.lock().unwrap().deletes.push(name.into());
                 self.inner.delete(name)
-            }
-            fn delete_dir(&self, path: &str) -> io::Result<()> {
-                self.inner.delete_dir(path)
             }
         }
 
@@ -855,10 +744,6 @@ mod tests {
 
             fn read(&self, file: &str) -> Option<Vec<u8>> {
                 fs::read(self.dir.0.join(file)).ok()
-            }
-
-            fn has_dir(&self, path: &str) -> bool {
-                self.dir.0.join(path).is_dir()
             }
 
             /// The Drawings in the cloud folder, not the storage's own bookkeeping.
@@ -1083,43 +968,8 @@ mod tests {
                 changed
             }
 
-            /// Writes a Note file; `file` may be a path in Folders, which are made.
             fn write_note(&self, file: &str, bytes: &[u8]) {
-                let path = self.note_files.0.join(file);
-                fs::create_dir_all(path.parent().unwrap()).unwrap();
-                fs::write(path, bytes).unwrap();
-            }
-
-            /// Moves a Note file to another path, as the store does: the file
-            /// keeps its bytes but for the new `updated`, if given.
-            fn move_note(&self, from: &str, to: &str, updated: Option<&str>) {
-                let target = self.note_files.0.join(to);
-                fs::create_dir_all(target.parent().unwrap()).unwrap();
-                let source = self.note_files.0.join(from);
-                if let Some(updated) = updated {
-                    let text = fs::read_to_string(&source).unwrap();
-                    let old = text.lines().find(|l| l.starts_with("updated: ")).unwrap();
-                    fs::write(&source, text.replace(old, &format!("updated: {updated}"))).unwrap();
-                }
-                fs::rename(source, target).unwrap();
-            }
-
-            /// Renames a Folder with everything in it; its Notes are untouched.
-            fn rename_folder(&self, from: &str, to: &str) {
-                fs::rename(self.note_files.0.join(from), self.note_files.0.join(to)).unwrap();
-            }
-
-            fn make_folder(&self, path: &str) {
-                fs::create_dir_all(self.note_files.0.join(path)).unwrap();
-            }
-
-            /// Deletes a Folder with everything in it.
-            fn delete_folder(&self, path: &str) {
-                fs::remove_dir_all(self.note_files.0.join(path)).unwrap();
-            }
-
-            fn has_folder(&self, path: &str) -> bool {
-                self.note_files.0.join(path).is_dir()
+                fs::write(self.note_files.0.join(file), bytes).unwrap();
             }
 
             fn read_note(&self, file: &str) -> Option<String> {
@@ -3233,129 +3083,10 @@ mod tests {
             );
         }
 
-        const A: &str = "Work/Plans/aaaaaaaaaaaa.md";
+        const A: &str = "aaaaaaaaaaaa.md";
         const NEW: &str = "2024-01-02T00:00:00Z";
-
-        #[test]
-        fn a_note_in_a_nested_folder_reaches_the_other_device_and_the_cloud() {
-            let cloud = Cloud::new();
-            let (phone, tablet) = (Device::new(), Device::new());
-            phone.write_note(A, &note("Plan", "one\n", NEW));
-            phone.sync_notes(&cloud);
-            tablet.sync_notes(&cloud);
-
-            assert!(cloud.read(A).is_some());
-            assert_eq!(
-                tablet.read_note(A).unwrap(),
-                text(note("Plan", "one\n", NEW))
-            );
-
-            // An edit in it travels back, in the same place.
-            tablet.write_note(A, &note("Plan", "one\ntwo\n", "2024-01-03T00:00:00Z"));
-            tablet.sync_notes(&cloud);
-            phone.sync_notes(&cloud);
-            assert!(phone.read_note(A).unwrap().ends_with("one\ntwo\n"));
-        }
-
-        #[test]
-        fn an_empty_folder_reaches_the_other_device_and_the_cloud() {
-            let cloud = Cloud::new();
-            let (phone, tablet) = (Device::new(), Device::new());
-            phone.make_folder("Work/Later");
-            phone.sync_notes(&cloud);
-            tablet.sync_notes(&cloud);
-
-            assert!(cloud.has_dir("Work/Later"));
-            assert!(tablet.has_folder("Work/Later"));
-        }
-
-        #[test]
-        fn deleting_an_empty_folder_deletes_it_on_the_other_device_and_in_the_cloud() {
-            let cloud = Cloud::new();
-            let (phone, tablet) = (Device::new(), Device::new());
-            phone.make_folder("Work/Later");
-            phone.make_folder("Ideas");
-            for device in [&phone, &tablet] {
-                device.sync_notes(&cloud);
-            }
-
-            phone.delete_folder("Work");
-            phone.sync_notes(&cloud);
-            tablet.sync_notes(&cloud);
-
-            assert!(!cloud.has_dir("Work"));
-            assert!(!tablet.has_folder("Work"));
-            assert!(tablet.has_folder("Ideas"));
-            // Nothing comes back.
-            phone.sync_notes(&cloud);
-            assert!(!phone.has_folder("Work"));
-        }
-
-        #[test]
-        fn deleting_a_folder_deletes_the_notes_in_it_that_another_device_only_edited() {
-            let cloud = Cloud::new();
-            let (phone, tablet) = (Device::new(), Device::new());
-            phone.write_note(A, &note("Plan", "one\n", NEW));
-            for device in [&phone, &tablet] {
-                device.sync_notes(&cloud);
-            }
-
-            phone.delete_folder("Work");
-            tablet.write_note(A, &note("Plan", "one\ntwo\n", "2024-01-03T00:00:00Z"));
-            for device in [&phone, &tablet, &phone] {
-                device.sync_notes(&cloud);
-            }
-
-            assert!(cloud.read(A).is_none() && !cloud.has_dir("Work"));
-            for device in [&phone, &tablet] {
-                assert!(!device.has_folder("Work"));
-            }
-        }
-
-        const B: &str = "Work/Plans/bbbbbbbbbbbb.md";
-
-        #[test]
-        fn a_note_created_in_a_folder_another_device_deleted_lands_at_the_top_level() {
-            // Whichever Device Syncs first.
-            for phone_first in [true, false] {
-                let cloud = Cloud::new();
-                let (phone, tablet) = (Device::new(), Device::new());
-                phone.write_note(A, &note("Plan", "one\n", NEW));
-                for device in [&phone, &tablet] {
-                    device.sync_notes(&cloud);
-                }
-
-                phone.delete_folder("Work");
-                tablet.write_note(B, &note_of("bbbbbbbbbbbb", "Fresh", "x\n", NEW));
-                let order = if phone_first {
-                    [&phone, &tablet, &phone]
-                } else {
-                    [&tablet, &phone, &tablet]
-                };
-                for device in order {
-                    device.sync_notes(&cloud);
-                }
-                for device in [&phone, &tablet] {
-                    device.sync_notes(&cloud);
-                }
-
-                for device in [&phone, &tablet] {
-                    assert!(
-                        device.read_note("bbbbbbbbbbbb.md").is_some(),
-                        "{phone_first}"
-                    );
-                    assert!(device.read_note(B).is_none());
-                    assert!(device.read_note(A).is_none());
-                    assert!(!device.has_folder("Work"), "{phone_first}");
-                }
-                assert!(cloud.read("bbbbbbbbbbbb.md").is_some());
-                assert!(!cloud.has_dir("Work"), "{phone_first}");
-            }
-        }
-
-        const MOVED: &str = "Archive/aaaaaaaaaaaa.md";
-        const LATER: &str = "2024-01-03T00:00:00Z";
-        const LATEST: &str = "2024-01-04T00:00:00Z";
+        const PNG: &[u8] = b"\x89PNG\r\n\x1a\n pixels";
+        const IMAGE: &str = "cccccccccccc.png";
 
         fn converge(cloud: &Cloud, devices: [&Device; 2]) {
             for device in [devices[0], devices[1], devices[0], devices[1]] {
@@ -3364,220 +3095,40 @@ mod tests {
         }
 
         #[test]
-        fn a_note_moved_on_one_device_and_edited_on_another_ends_up_moved_and_edited() {
-            // Whichever Device Syncs first.
-            for mover_first in [true, false] {
-                let cloud = Cloud::new();
-                let (phone, tablet) = (Device::new(), Device::new());
-                phone.write_note(A, &note("Plan", "one\ntwo\n", NEW));
-                for device in [&phone, &tablet] {
-                    device.sync_notes(&cloud);
-                }
-                phone.move_note(A, MOVED, Some(LATER));
-                tablet.write_note(A, &note("Plan", "one\ntwo\nthree\n", LATEST));
-                if mover_first {
-                    phone.sync_notes(&cloud);
-                    tablet.sync_notes(&cloud);
-                } else {
-                    tablet.sync_notes(&cloud);
-                    phone.sync_notes(&cloud);
-                }
-                converge(&cloud, [&phone, &tablet]);
+        fn a_note_with_an_image_reaches_the_other_device_and_the_cloud_as_flat_files() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            let note = note("Plan", "![](cccccccccccc.png)\n", NEW);
+            phone.write_note(A, &note);
+            phone.write_note(IMAGE, PNG);
+            phone.write_note("notes.png", PNG); // no Image of Notes
+            converge(&cloud, [&phone, &tablet]);
 
-                for device in [&phone, &tablet] {
-                    let text = device.read_note(MOVED).unwrap();
-                    assert!(text.ends_with("one\ntwo\nthree\n"), "{mover_first} {text}");
-                    assert!(device.read_note(A).is_none(), "{mover_first}");
-                }
-                assert!(cloud.read(MOVED).is_some() && cloud.read(A).is_none());
-            }
+            assert_eq!(tablet.read_note_bytes(A).unwrap(), note);
+            assert_eq!(tablet.read_note_bytes(IMAGE).unwrap(), PNG);
+            assert_eq!(cloud.read(A).unwrap(), note);
+            assert_eq!(cloud.read(IMAGE).unwrap(), PNG);
+            assert!(cloud.read("notes.png").is_none());
+            assert_eq!(cloud.files(), [A, IMAGE]);
         }
 
         #[test]
-        fn a_move_reports_the_old_and_the_new_file_as_changed() {
+        fn a_stray_subdirectory_in_the_cloud_notes_folder_is_left_alone_and_not_downloaded() {
             let cloud = Cloud::new();
             let (phone, tablet) = (Device::new(), Device::new());
-            phone.write_note(A, &note("Plan", "one\n", NEW));
-            for device in [&phone, &tablet] {
-                device.sync_notes(&cloud);
-            }
-            phone.move_note(A, MOVED, Some(LATER));
-            phone.sync_notes(&cloud);
-            let changes = tablet.sync_notes_changed(&cloud);
+            fs::create_dir(cloud.dir.0.join("Old")).unwrap();
+            cloud.write("Old/aaaaaaaaaaaa.md", &note("Plan", "one\n", NEW));
+
+            converge(&cloud, [&phone, &tablet]);
+
             assert_eq!(
-                changes,
-                [
-                    "Archive/",
-                    "Archive/aaaaaaaaaaaa",
-                    "Work/Plans/aaaaaaaaaaaa"
-                ]
+                cloud.read("Old/aaaaaaaaaaaa.md").unwrap(),
+                note("Plan", "one\n", NEW)
             );
+            assert!(phone.read_note(A).is_none() && tablet.read_note(A).is_none());
         }
-
-        #[test]
-        fn two_moves_of_one_note_take_the_newer() {
-            for phone_first in [true, false] {
-                let cloud = Cloud::new();
-                let (phone, tablet) = (Device::new(), Device::new());
-                phone.write_note(A, &note("Plan", "one\n", NEW));
-                for device in [&phone, &tablet] {
-                    device.sync_notes(&cloud);
-                }
-                phone.move_note(A, "Mine/aaaaaaaaaaaa.md", Some(LATER));
-                tablet.move_note(A, "Yours/aaaaaaaaaaaa.md", Some(LATEST));
-                if phone_first {
-                    phone.sync_notes(&cloud);
-                    tablet.sync_notes(&cloud);
-                } else {
-                    tablet.sync_notes(&cloud);
-                    phone.sync_notes(&cloud);
-                }
-                converge(&cloud, [&phone, &tablet]);
-
-                for device in [&phone, &tablet] {
-                    assert!(device.read_note("Yours/aaaaaaaaaaaa.md").is_some());
-                    assert!(device.read_note("Mine/aaaaaaaaaaaa.md").is_none());
-                    assert!(!device.has_folder("Mine"), "{phone_first}");
-                    // Emptied by the Move, but a Folder of its own.
-                    assert!(device.has_folder("Work/Plans"), "{phone_first}");
-                }
-                assert!(cloud.read("Yours/aaaaaaaaaaaa.md").is_some());
-                assert!(!cloud.has_dir("Mine") && cloud.has_dir("Work/Plans"));
-            }
-        }
-
-        #[test]
-        fn a_folder_renamed_differently_on_two_devices_ends_with_the_later_synced_name() {
-            let cloud = Cloud::new();
-            let (phone, tablet) = (Device::new(), Device::new());
-            phone.write_note("Work/aaaaaaaaaaaa.md", &note("Plan", "one\n", NEW));
-            phone.write_note(
-                "Work/Deep/bbbbbbbbbbbb.md",
-                &note_of("bbbbbbbbbbbb", "Deep", "d\n", NEW),
-            );
-            for device in [&phone, &tablet] {
-                device.sync_notes(&cloud);
-            }
-            phone.rename_folder("Work", "Jobs");
-            tablet.rename_folder("Work", "Tasks");
-            converge(&cloud, [&phone, &tablet]);
-
-            for device in [&phone, &tablet] {
-                // The tablet Synced last.
-                assert!(device.read_note("Tasks/aaaaaaaaaaaa.md").is_some());
-                assert!(device.read_note("Tasks/Deep/bbbbbbbbbbbb.md").is_some());
-                assert!(!device.has_folder("Jobs") && !device.has_folder("Work"));
-            }
-            assert!(cloud.read("Tasks/aaaaaaaaaaaa.md").is_some());
-            assert!(!cloud.has_dir("Jobs") && !cloud.has_dir("Work"));
-        }
-
-        #[test]
-        fn a_folder_emptied_by_a_synced_move_goes_but_one_empty_before_stays() {
-            let cloud = Cloud::new();
-            let (phone, tablet) = (Device::new(), Device::new());
-            phone.write_note("From/aaaaaaaaaaaa.md", &note("Plan", "one\n", NEW));
-            phone.make_folder("Kept");
-            for device in [&phone, &tablet] {
-                device.sync_notes(&cloud);
-            }
-            phone.move_note("From/aaaaaaaaaaaa.md", "aaaaaaaaaaaa.md", Some(LATER));
-            phone.delete_folder("From");
-            converge(&cloud, [&phone, &tablet]);
-
-            assert!(tablet.read_note("aaaaaaaaaaaa.md").is_some());
-            assert!(!tablet.has_folder("From") && !cloud.has_dir("From"));
-            assert!(tablet.has_folder("Kept") && cloud.has_dir("Kept"));
-        }
-
-        #[test]
-        fn a_note_moved_into_a_folder_another_device_deleted_lands_at_the_top_level() {
-            for phone_first in [true, false] {
-                let cloud = Cloud::new();
-                let (phone, tablet) = (Device::new(), Device::new());
-                phone.write_note("aaaaaaaaaaaa.md", &note("Plan", "one\n", NEW));
-                phone.make_folder("Work");
-                for device in [&phone, &tablet] {
-                    device.sync_notes(&cloud);
-                }
-                phone.delete_folder("Work");
-                tablet.move_note("aaaaaaaaaaaa.md", "Work/aaaaaaaaaaaa.md", Some(LATER));
-                if phone_first {
-                    phone.sync_notes(&cloud);
-                    tablet.sync_notes(&cloud);
-                } else {
-                    tablet.sync_notes(&cloud);
-                    phone.sync_notes(&cloud);
-                }
-                converge(&cloud, [&phone, &tablet]);
-
-                for device in [&phone, &tablet] {
-                    assert!(
-                        device.read_note("aaaaaaaaaaaa.md").is_some(),
-                        "{phone_first}"
-                    );
-                    assert!(!device.has_folder("Work"), "{phone_first}");
-                }
-                assert!(cloud.read("aaaaaaaaaaaa.md").is_some());
-                assert!(!cloud.has_dir("Work"), "{phone_first}");
-            }
-        }
-
-        #[test]
-        fn a_note_moved_on_one_device_and_deleted_on_another_is_gone() {
-            for mover_first in [true, false] {
-                let cloud = Cloud::new();
-                let (phone, tablet) = (Device::new(), Device::new());
-                phone.write_note(A, &note("Plan", "one\n", NEW));
-                for device in [&phone, &tablet] {
-                    device.sync_notes(&cloud);
-                }
-                phone.move_note(A, MOVED, Some(LATER));
-                tablet.remove_note(A);
-                if mover_first {
-                    phone.sync_notes(&cloud);
-                    tablet.sync_notes(&cloud);
-                } else {
-                    tablet.sync_notes(&cloud);
-                    phone.sync_notes(&cloud);
-                }
-                converge(&cloud, [&phone, &tablet]);
-
-                for device in [&phone, &tablet] {
-                    assert!(device.read_note(MOVED).is_none(), "{mover_first}");
-                    assert!(device.read_note(A).is_none(), "{mover_first}");
-                }
-                assert!(cloud.read(MOVED).is_none() && cloud.read(A).is_none());
-            }
-        }
-
-        #[test]
-        fn a_folder_only_finder_left_hidden_files_in_is_deleted_everywhere() {
-            let cloud = Cloud::new();
-            let (phone, mac) = (Device::new(), Device::new());
-            phone.make_folder("Work");
-            for device in [&phone, &mac] {
-                device.sync_notes(&cloud);
-            }
-            mac.write_note("Work/.DS_Store", b"finder");
-            fs::write(cloud.dir.0.join("Work/.DS_Store"), b"finder").unwrap();
-
-            phone.delete_folder("Work");
-            converge(&cloud, [&phone, &mac]);
-
-            assert!(!mac.has_folder("Work") && !cloud.has_dir("Work"));
-        }
-
-        const PNG: &[u8] = b"\x89PNG\r\n\x1a\n pixels";
-        const IMAGE: &str = "Work/Plans/cccccccccccc.png";
 
         impl Device {
-            fn move_image(&self, from: &str, to: &str) {
-                let target = self.note_files.0.join(to);
-                fs::create_dir_all(target.parent().unwrap()).unwrap();
-                fs::rename(self.note_files.0.join(from), target).unwrap();
-            }
-
             fn remove_note(&self, file: &str) {
                 fs::remove_file(self.note_files.0.join(file)).unwrap();
             }
@@ -3588,48 +3139,11 @@ mod tests {
         }
 
         #[test]
-        fn an_image_arrives_with_its_note_unmerged() {
-            let cloud = Cloud::new();
-            let (phone, tablet) = (Device::new(), Device::new());
-            phone.write_note(A, &note("Plan", "![](cccccccccccc.png)\n", NEW));
-            phone.write_note(IMAGE, PNG);
-            phone.write_note("Work/Plans/notes.png", PNG); // no Image of Notes
-            converge(&cloud, [&phone, &tablet]);
-
-            assert_eq!(tablet.read_note_bytes(IMAGE).unwrap(), PNG);
-            assert_eq!(cloud.read(IMAGE).unwrap(), PNG);
-            assert!(cloud.read("Work/Plans/notes.png").is_none());
-        }
-
-        #[test]
-        fn an_image_follows_its_note_when_moved() {
-            let cloud = Cloud::new();
-            let (phone, tablet) = (Device::new(), Device::new());
-            phone.write_note(A, &note("Plan", "![](cccccccccccc.png)\n", NEW));
-            phone.write_note(IMAGE, PNG);
-            converge(&cloud, [&phone, &tablet]);
-
-            phone.move_note(A, MOVED, Some(LATER));
-            phone.move_image(IMAGE, "Archive/cccccccccccc.png");
-            converge(&cloud, [&phone, &tablet]);
-
-            for device in [&phone, &tablet] {
-                assert!(device.read_note(MOVED).is_some());
-                assert_eq!(
-                    device.read_note_bytes("Archive/cccccccccccc.png").unwrap(),
-                    PNG
-                );
-                assert!(device.read_note_bytes(IMAGE).is_none());
-            }
-            assert!(cloud.read(IMAGE).is_none());
-        }
-
-        #[test]
         fn an_image_stays_when_one_of_two_notes_showing_it_is_deleted() {
             let cloud = Cloud::new();
             let (phone, tablet) = (Device::new(), Device::new());
             let shows = "![](cccccccccccc.png)\n";
-            let other = "Work/Plans/bbbbbbbbbbbb.md";
+            let other = "bbbbbbbbbbbb.md";
             phone.write_note(A, &note("Plan", shows, NEW));
             phone.write_note(other, &note_of("bbbbbbbbbbbb", "Other", shows, NEW));
             phone.write_note(IMAGE, PNG);
@@ -3644,33 +3158,6 @@ mod tests {
                 assert_eq!(device.read_note_bytes(IMAGE).unwrap(), PNG);
             }
             assert!(cloud.read(A).is_none() && cloud.read(IMAGE).is_some());
-        }
-
-        #[test]
-        fn a_nested_note_keeps_its_own_sync_history_beside_a_top_level_one_of_the_same_name() {
-            let cloud = Cloud::new();
-            let (phone, tablet) = (Device::new(), Device::new());
-            phone.write_note("aaaaaaaaaaaa.md", &note("Top", "t\n", NEW));
-            phone.write_note(
-                "Work/bbbbbbbbbbbb.md",
-                &note_of("bbbbbbbbbbbb", "In", "w\n", NEW),
-            );
-            for device in [&phone, &tablet, &phone] {
-                device.sync_notes(&cloud);
-            }
-            tablet.write_note(
-                "Work/bbbbbbbbbbbb.md",
-                &note_of("bbbbbbbbbbbb", "In", "w2\n", "2024-01-03T00:00:00Z"),
-            );
-            tablet.sync_notes(&cloud);
-            phone.sync_notes(&cloud);
-            assert!(
-                phone
-                    .read_note("Work/bbbbbbbbbbbb.md")
-                    .unwrap()
-                    .ends_with("w2\n")
-            );
-            assert!(phone.read_note("aaaaaaaaaaaa.md").unwrap().ends_with("t\n"));
         }
 
         #[test]

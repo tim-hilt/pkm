@@ -10,10 +10,8 @@ export interface DavResult {
   message: string;
   /** What a `get` found. */
   data?: Uint8Array;
-  /** What a `scan` found: the blobs at any depth, by path. */
+  /** What a `list` found. */
   blobs: { name: string; marker: string }[];
-  /** The paths of the empty directories a `scan` found. */
-  emptyDirs: string[];
 }
 
 /**
@@ -60,7 +58,6 @@ export async function runExchange(exchange: DavExchange, send: Fetch): Promise<D
       message: outcome.message,
       data: outcome.data,
       blobs: outcome.names.map((name, i) => ({ name, marker: outcome.markers[i] })),
-      emptyDirs: outcome.emptyDirs,
     };
     outcome.free();
     return result;

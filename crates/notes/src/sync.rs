@@ -62,22 +62,6 @@ pub fn merge(base: Option<&[u8]>, local: &[u8], remote: &[u8]) -> Option<Vec<u8>
     Some(merged.render().into_bytes())
 }
 
-/// The Note's Item ID, which stays the same wherever the Note is Moved to.
-/// None if `bytes` aren't a Note.
-pub fn identity(bytes: &[u8]) -> Option<String> {
-    parse(bytes)?.scalar("id").map(str::to_owned)
-}
-
-/// Whether `local` is at least as new as `remote`, two versions of one Note:
-/// then its Move wins over the other's. Equal `updated` (a Folder renamed
-/// without touching its Notes) goes to `local`, the Device Syncing later.
-pub fn local_is_newer(local: &[u8], remote: &[u8]) -> bool {
-    match (parse(local), parse(remote)) {
-        (Some(local), Some(remote)) => updated(&local) >= updated(&remote),
-        _ => true,
-    }
-}
-
 /// Whether a file of this name is a Note's or an Image's: not hidden.
 pub fn accepts(file: &str) -> bool {
     !file.starts_with('.') && (file.ends_with(".md") || is_image_file(file))
@@ -90,8 +74,7 @@ pub fn is_item(bytes: &[u8]) -> bool {
 
 /// Whether two Notes are one Note: they share an id; two Images, if they are
 /// the same bytes. None if either isn't a Note or an Image, or they differ in
-/// kind. An Image has no `identity`: its unique file name pairs it by path,
-/// and a Move is a delete and an add (ADR-0031).
+/// kind.
 pub fn same_item(a: &[u8], b: &[u8]) -> Option<bool> {
     match (is_image(a), is_image(b)) {
         (true, true) => Some(a == b),
@@ -201,23 +184,6 @@ mod tests {
     }
 
     #[test]
-    fn a_notes_identity_is_its_item_id() {
-        assert_eq!(
-            identity(&note("Plan", "", T0)).as_deref(),
-            Some("aaaaaaaaaaaa")
-        );
-        assert_eq!(identity(b"just text"), None);
-    }
-
-    #[test]
-    fn the_later_updated_wins_a_move_and_a_tie_goes_to_local() {
-        let (old, new) = (note("Plan", "", T0), note("Plan", "", T1));
-        assert!(local_is_newer(&new, &old));
-        assert!(!local_is_newer(&old, &new));
-        assert!(local_is_newer(&old, &old));
-    }
-
-    #[test]
     fn images_are_items_that_are_the_same_only_by_their_bytes() {
         let png = b"\x89PNG\r\n\x1a\n a";
         let note = note("Plan", "", T0);
@@ -225,7 +191,6 @@ mod tests {
         assert_eq!(same_item(png, png), Some(true));
         assert_eq!(same_item(png, b"\x89PNG\r\n\x1a\n b"), Some(false));
         assert_eq!(same_item(png, &note), None);
-        assert_eq!(identity(png), None);
     }
 
     #[test]

@@ -5,7 +5,7 @@
 //! mean; this sends it with ureq: HTTPS only, blocking (no async runtime).
 
 use crate::http::tls_config;
-use crate::storage::{ConnectError, Storage, Tree, check_path, unique_name};
+use crate::storage::{Blob, ConnectError, Storage, check_name, unique_name};
 use crate::webdav_protocol::{Exchange, HttpAnswer, HttpRequest, Turn, WebDav};
 use std::fmt;
 use std::io::{self, Cursor, Read};
@@ -135,7 +135,7 @@ impl WebDavStorage {
 
 impl Storage for WebDavStorage {
     fn put(&self, name: &str, data: &mut dyn Read) -> io::Result<()> {
-        check_path(name)?;
+        check_name(name)?;
         let mut bytes = Vec::new();
         data.read_to_end(&mut bytes)?;
         // The temporary names of all Devices share one folder.
@@ -151,28 +151,18 @@ impl Storage for WebDavStorage {
     }
 
     fn get(&self, name: &str) -> io::Result<Option<Box<dyn Read + Send>>> {
-        check_path(name)?;
+        check_name(name)?;
         let body = self.run(self.protocol.get(name))?;
         Ok(body.map(|bytes| Box::new(Cursor::new(bytes)) as Box<dyn Read + Send>))
     }
 
-    fn scan(&self) -> io::Result<Tree> {
-        self.run(self.protocol.scan())
-    }
-
-    fn create_dir(&self, path: &str) -> io::Result<()> {
-        check_path(path)?;
-        self.run(self.protocol.create_dir(path))
+    fn list(&self) -> io::Result<Vec<Blob>> {
+        self.run(self.protocol.list())
     }
 
     fn delete(&self, name: &str) -> io::Result<()> {
-        check_path(name)?;
+        check_name(name)?;
         self.run(self.protocol.delete(name))
-    }
-
-    fn delete_dir(&self, path: &str) -> io::Result<()> {
-        // The same request: a collection is deleted like a blob.
-        self.delete(path)
     }
 }
 

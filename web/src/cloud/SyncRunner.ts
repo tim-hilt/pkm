@@ -24,7 +24,7 @@ export interface StepContext {
   run: SyncRun;
   protocol: WebDavProtocol;
   send: Fetch;
-  /** The folder's files: Drawings, Book Files, the Books' state or Notes and their Folders. */
+  /** The folder's files: Drawings, Book Files, the Books' state or Notes. */
   files: SyncFolder;
   state: SyncState;
   /** Set once a put has found the folder for uploads there; shared by the steps of one cloud folder. */
@@ -38,8 +38,7 @@ export interface StepContext {
 /**
  * Runs one Sync step: answers the step machine's requests with the Drawing
  * store, the Sync state and the WebDAV protocol over `fetch`, until it is
- * done. The stamp of a local Drawing is its modification time and size. A
- * Context with directories (Notes) names its files by path.
+ * done. The stamp of a local Drawing is its modification time and size.
  * Returns `undefined` if the step was cancelled. The caller frees `run`.
  */
 export async function runSyncStep(context: StepContext): Promise<StepResult | undefined> {
@@ -86,12 +85,11 @@ async function answer(
   const { kind, file } = request;
   switch (kind) {
     case "listCloud": {
-      const result = await runExchange(protocol.scan(), send);
+      const result = await runExchange(protocol.list(), send);
       if (result.error) return run.fail(result.error, result.message);
       return run.answerCloud(
         result.blobs.map((b) => b.name),
         result.blobs.map((b) => b.marker),
-        result.emptyDirs,
       );
     }
     case "listLocal": {
@@ -101,24 +99,6 @@ async function answer(
         listed.map((f) => `${f.modified} ${f.size}`),
         Float64Array.from(listed, (f) => f.modified),
       );
-    }
-    case "listLocalDirs":
-      return run.answerNames((await files.folders?.()) ?? []);
-    case "makeLocalDir":
-      await files.makeFolder?.(file);
-      return run.answerDone();
-    case "removeLocalDir":
-      return run.answerHappened((await files.removeFolderIfEmpty?.(file)) ?? false);
-    case "makeCloudDir": {
-      const result = await runExchange(protocol.createDir(file), send);
-      if (result.error) return run.fail(result.error, result.message);
-      return run.answerDone();
-    }
-    case "deleteCloudDir": {
-      // The step found it empty; a collection is deleted like a blob.
-      const result = await runExchange(protocol.delete(file), send);
-      if (result.error) return run.fail(result.error, result.message);
-      return run.answerDone();
     }
     case "readLocal":
       return run.answerBytes(await files.read(file));

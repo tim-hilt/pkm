@@ -44,29 +44,6 @@ pub trait Merge: Send + Sync {
     /// Item. None if either isn't an Item.
     fn same_item(&self, a: &[u8], b: &[u8]) -> Option<bool>;
 
-    /// Whether the Context keeps its Items in directories (ADR-0031). Then
-    /// Items are paired by their path from the Context folder, `/` separated,
-    /// and directories, empty ones too, are Synced. False by default: Items
-    /// are the files directly in the folder.
-    fn has_directories(&self) -> bool {
-        false
-    }
-
-    /// The Item's identity, the same wherever it lives, none if `bytes` have
-    /// none (ADR-0031). With one, Sync pairs Items by it and follows an Item
-    /// Moved to another path; without, by path alone. Only asked of files
-    /// with the `extension` in a Context with directories. Default: none.
-    fn identity(&self, _bytes: &[u8]) -> Option<String> {
-        None
-    }
-
-    /// Whether `local` wins over `remote`, two versions of one Item Moved to
-    /// different paths: the Move of the newer one stands. Only asked for Items
-    /// with an `identity`.
-    fn local_is_newer(&self, _local: &[u8], _remote: &[u8]) -> bool {
-        true
-    }
-
     /// Settles what the Items of `dir`, the Context folder on this Device,
     /// have become after a step that Synced every folder of the Context and
     /// wrote or deleted the Items named `changed` here: what only the Context
@@ -319,9 +296,8 @@ impl Merge for Tasks {
     }
 }
 
-/// Notes: `<id>.md` files in Folder directories, merged three-way, the Body by
-/// line (ADR-0032), and the Images beside them, transferred unchanged
-/// (ADR-0029, ADR-0031). A file that isn't a Note is left where it is, and
+/// Notes: `<id>.md` files, merged three-way, the Body by line (ADR-0032), and
+/// the Images beside them, transferred unchanged (ADR-0029). A file that isn't a Note is left where it is, and
 /// two versions that can't merge are not both kept: one Note has one file.
 pub struct Notes;
 
@@ -349,18 +325,6 @@ impl Merge for Notes {
 
     fn accepts(&self, file: &str) -> bool {
         notes::accepts(file)
-    }
-
-    fn identity(&self, bytes: &[u8]) -> Option<String> {
-        notes::identity(bytes)
-    }
-
-    fn local_is_newer(&self, local: &[u8], remote: &[u8]) -> bool {
-        notes::local_is_newer(local, remote)
-    }
-
-    fn has_directories(&self) -> bool {
-        true
     }
 
     fn transfers_unparseable(&self) -> bool {
@@ -462,35 +426,5 @@ impl Merge for Filters {
 
     fn transfers_unparseable(&self) -> bool {
         false
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn only_notes_keep_their_items_in_directories() {
-        assert!(Notes.has_directories());
-        let flat: [&dyn Merge; 9] = [
-            &Drawings,
-            &Books,
-            &BookStates,
-            &Bookmarks,
-            &BookmarkStates,
-            &Tasks,
-            &TagsFile,
-            &ColorsFile,
-            &Filters,
-        ];
-        assert!(flat.iter().all(|merge| !merge.has_directories()));
-    }
-
-    #[test]
-    fn only_notes_give_their_items_an_identity() {
-        let note = b"---\nid: aaaaaaaaaaaa\ntitle: x\nupdated: 2024-01-01T00:00:00Z\n---\n";
-        assert_eq!(Notes.identity(note).as_deref(), Some("aaaaaaaaaaaa"));
-        assert_eq!(Tasks.identity(note), None);
-        assert_eq!(Drawings.identity(b"{}"), None);
     }
 }

@@ -375,21 +375,9 @@ mod tests {
             self.check()?;
             self.inner.list()
         }
-        fn scan(&self) -> io::Result<crate::storage::Tree> {
-            self.check()?;
-            self.inner.scan()
-        }
-        fn create_dir(&self, path: &str) -> io::Result<()> {
-            self.check()?;
-            self.inner.create_dir(path)
-        }
         fn delete(&self, name: &str) -> io::Result<()> {
             self.check()?;
             self.inner.delete(name)
-        }
-        fn delete_dir(&self, path: &str) -> io::Result<()> {
-            self.check()?;
-            self.inner.delete_dir(path)
         }
     }
 
@@ -490,19 +478,7 @@ mod tests {
                 marker: "1".into(),
             }])
         }
-        fn scan(&self) -> io::Result<crate::storage::Tree> {
-            Ok(crate::storage::Tree {
-                blobs: self.list()?,
-                ..Default::default()
-            })
-        }
-        fn create_dir(&self, _: &str) -> io::Result<()> {
-            Ok(())
-        }
         fn delete(&self, _: &str) -> io::Result<()> {
-            Ok(())
-        }
-        fn delete_dir(&self, _: &str) -> io::Result<()> {
             Ok(())
         }
     }

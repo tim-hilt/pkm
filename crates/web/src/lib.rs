@@ -1120,7 +1120,6 @@ pub struct DavOutcome {
     data: Option<Vec<u8>>,
     names: Vec<String>,
     markers: Vec<String>,
-    empty_dirs: Vec<String>,
 }
 
 #[wasm_bindgen]
@@ -1144,7 +1143,7 @@ impl DavOutcome {
         self.data.clone()
     }
 
-    /// The paths of the blobs a `scan` found.
+    /// The names of the blobs a `list` found.
     #[wasm_bindgen(getter)]
     pub fn names(&self) -> Vec<String> {
         self.names.clone()
@@ -1154,12 +1153,6 @@ impl DavOutcome {
     #[wasm_bindgen(getter)]
     pub fn markers(&self) -> Vec<String> {
         self.markers.clone()
-    }
-
-    /// The paths of the empty directories a `scan` found.
-    #[wasm_bindgen(getter, js_name = emptyDirs)]
-    pub fn empty_dirs(&self) -> Vec<String> {
-        self.empty_dirs.clone()
     }
 }
 
@@ -1392,22 +1385,12 @@ impl WebDavProtocol {
         DavExchange::new(self.0.connect(), DavOutcome::connect)
     }
 
-    /// Everything in the folder and the directories below it.
-    pub fn scan(&self) -> DavExchange {
-        DavExchange::new(self.0.scan(), |result| {
-            DavOutcome::of(result, |tree, outcome| {
+    pub fn list(&self) -> DavExchange {
+        DavExchange::new(self.0.list(), |result| {
+            DavOutcome::of(result, |blobs, outcome| {
                 (outcome.names, outcome.markers) =
-                    tree.blobs.into_iter().map(|b| (b.name, b.marker)).unzip();
-                outcome.empty_dirs = tree.empty_dirs;
+                    blobs.into_iter().map(|b| (b.name, b.marker)).unzip();
             })
-        })
-    }
-
-    /// Makes the directory `path` and the ones above it.
-    #[wasm_bindgen(js_name = createDir)]
-    pub fn create_dir(&self, path: &str) -> DavExchange {
-        DavExchange::new(self.0.create_dir(path), |result| {
-            DavOutcome::of(result, |(), _| {})
         })
     }
 
@@ -1435,7 +1418,6 @@ impl WebDavProtocol {
 // ---- The Sync step and its schedule (ADR-0016) ----
 
 use pkm_cloud::step::{LocalFile, Marks, Synced};
-use pkm_cloud::storage::Tree;
 use pkm_cloud::{
     Blob, BookStates, BookmarkStates, Bookmarks, Books, ColorsFile, Drawings, Filters, Next,
     Notes as NoteFiles, Request, Response, Schedule, Status, StepOutcome, SyncStep, TagsFile,
@@ -1446,16 +1428,12 @@ use std::time::Duration;
 /// What a Sync step asks the client to do; `kind` says which request it is
 /// and the other fields are the ones it uses (the others stay empty).
 ///
-/// Kinds: `listCloud`, `listLocal`, `listLocalDirs`, `readLocal` (file), `readMarks` (file),
+/// Kinds: `listCloud`, `listLocal`, `readLocal` (file), `readMarks` (file),
 /// `readSynced` (file), `listSynced`, `writeSynced` (file, bytes, marker),
 /// `writeStamp` (file, stamp), `forgetSynced` (file), `download` (file),
-/// `upload` (file, bytes), `deleteCloud` (file), `makeLocalDir` (file),
-/// `removeLocalDir` (file; only if empty), `makeCloudDir` (file),
-/// `deleteCloudDir` (file), `writeLocal` (file, bytes,
+/// `upload` (file, bytes), `deleteCloud` (file), `writeLocal` (file, bytes,
 /// expected: none means only if absent), `renameLocal` (file, to, expected)
-/// and `deleteLocal` (file, expected). Names are file names, or for a Context
-/// with directories (Notes) `/`-separated paths; `file` is a path for the
-/// directory kinds.
+/// and `deleteLocal` (file, expected). Names are file names.
 #[wasm_bindgen(getter_with_clone)]
 pub struct SyncRequest {
     pub kind: String,
@@ -1484,23 +1462,6 @@ impl SyncRequest {
         match request {
             Request::ListCloud => Self::of("listCloud"),
             Request::ListLocal => Self::of("listLocal"),
-            Request::ListLocalDirs => Self::of("listLocalDirs"),
-            Request::MakeLocalDir { path } => Self {
-                file: path,
-                ..Self::of("makeLocalDir")
-            },
-            Request::RemoveLocalDir { path } => Self {
-                file: path,
-                ..Self::of("removeLocalDir")
-            },
-            Request::MakeCloudDir { path } => Self {
-                file: path,
-                ..Self::of("makeCloudDir")
-            },
-            Request::DeleteCloudDir { path } => Self {
-                file: path,
-                ..Self::of("deleteCloudDir")
-            },
             Request::ListSynced => Self::of("listSynced"),
             Request::ReadLocal { file } => Self {
                 file,
@@ -1683,21 +1644,19 @@ impl SyncRun {
         self.advance(None)
     }
 
-    /// The blobs of the cloud folder at any depth: names (paths) and markers
-    /// in the same order, and the paths of its empty directories.
+    /// The blobs of the cloud folder: names and markers in the same order.
     #[wasm_bindgen(js_name = answerCloud)]
     pub fn answer_cloud(
         &mut self,
         names: Vec<String>,
         markers: Vec<String>,
-        empty_dirs: Vec<String>,
     ) -> Option<SyncRequest> {
         let blobs = names
             .into_iter()
             .zip(markers)
             .map(|(name, marker)| Blob { name, marker })
             .collect();
-        self.advance(Some(Ok(Response::Cloud(Tree { blobs, empty_dirs }))))
+        self.advance(Some(Ok(Response::Cloud(blobs))))
     }
 
     /// The local Drawings: file names, stamps and modification times (ms) in

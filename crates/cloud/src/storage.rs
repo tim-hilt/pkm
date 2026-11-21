@@ -1,9 +1,8 @@
 //! The storage interface every Cloud Provider implements (ADR-0012), and the
 //! directory storage: the stand-in cloud of tests, later iCloud Drive.
 //!
-//! A storage is plain remote file storage: named blobs in one folder and its
-//! subdirectories (ADR-0031), no transactions, no server logic. Everything
-//! above it is in the Sync engine.
+//! A storage is plain remote file storage: named blobs in one folder, no
+//! transactions, no server logic. Everything above it is in the Sync engine.
 
 use std::fmt;
 #[cfg(feature = "native")]
@@ -63,82 +62,41 @@ impl fmt::Display for ConnectError {
 
 impl std::error::Error for ConnectError {}
 
-/// What a storage holds, as `Storage::scan` finds it.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Tree {
-    /// Every blob at any depth, named by its path.
-    pub blobs: Vec<Blob>,
-    /// The paths of the directories with nothing in them, in no order.
-    pub empty_dirs: Vec<String>,
-}
-
-/// Named blobs in a folder and its subdirectories.
+/// Named blobs in one folder.
 ///
-/// A name is a path relative to the folder, `/` separated, like
-/// `Work/Plans/a.md`. Every segment is plain: non-empty, not `.` or `..`, and
-/// not starting with a dot. Anything else is `InvalidInput`. A flat storage
-/// only uses one-segment names.
+/// Names are plain: non-empty, without `/`, not `.` or `..`, and not starting
+/// with a dot. Anything else is `InvalidInput`.
 ///
 /// Errors are `io::Error`s. Credentials the storage rejects are
 /// `PermissionDenied`, and a storage without space left is `StorageFull`, so
 /// both can be told from being offline.
 pub trait Storage: Send + Sync {
     /// Stores everything `data` yields as the blob `name`, replacing any
-    /// previous one, and creates the directories above it. A blob is never
-    /// visible under `name` before all of it is written, and a failed `put`
-    /// (`data` erroring too) leaves no trace.
+    /// previous one. A blob is never visible under `name` before all of it is
+    /// written, and a failed `put` (`data` erroring too) leaves no trace.
     fn put(&self, name: &str, data: &mut dyn Read) -> io::Result<()>;
 
     /// The content of blob `name`; none if there is no such blob.
     fn get(&self, name: &str) -> io::Result<Option<Box<dyn Read + Send>>>;
 
-    /// All blobs at any depth, in no order.
-    fn list(&self) -> io::Result<Vec<Blob>> {
-        Ok(self.scan()?.blobs)
-    }
+    /// All blobs, in no order.
+    fn list(&self) -> io::Result<Vec<Blob>>;
 
-    /// Everything in the storage in one walk: all blobs and the empty
-    /// directories. Directories persist when their last blob is deleted.
-    fn scan(&self) -> io::Result<Tree>;
-
-    /// The directory `path` with the ones above it; fine if it exists.
-    fn create_dir(&self, path: &str) -> io::Result<()>;
-
-    /// Deletes blob `name`, leaving its directories. Deleting a blob that
-    /// isn't there does nothing.
+    /// Deletes blob `name`. Deleting a blob that isn't there does nothing.
     fn delete(&self, name: &str) -> io::Result<()>;
-
-    /// Deletes the directory `path`, which the caller found empty. Fine if it
-    /// isn't there. A provider that can't check emptiness deletes what is in
-    /// it too, so never call it for a directory that holds something.
-    fn delete_dir(&self, path: &str) -> io::Result<()>;
 }
 
 #[cfg(feature = "native")]
-/// Whether `segment` is one a path may have, see `Storage`.
-pub(crate) fn is_plain(segment: &str) -> bool {
-    !segment.is_empty() && !segment.contains('/') && !segment.starts_with('.')
-}
-
-#[cfg(feature = "native")]
-/// Checks that every segment of `path`, a blob name or directory path, is
-/// plain, see `Storage`.
-pub(crate) fn check_path(path: &str) -> io::Result<()> {
-    if path.split('/').all(is_plain) {
+/// Checks that `name` is a plain blob name, see `Storage`.
+pub(crate) fn check_name(name: &str) -> io::Result<()> {
+    if !name.is_empty() && !name.contains('/') && !name.starts_with('.') {
         Ok(())
     } else {
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("{path:?} is not a blob name"),
+            format!("{name:?} is not a blob name"),
         ))
     }
-}
-
-#[cfg(feature = "native")]
-/// `path` split into the directory it is in (empty at the top) and its last
-/// segment.
-pub(crate) fn split_last(path: &str) -> (&str, &str) {
-    path.rsplit_once('/').unwrap_or(("", path))
 }
 
 #[cfg(feature = "native")]
@@ -253,11 +211,9 @@ impl DirStorage {
         Ok(storage)
     }
 
-    /// The placeholder `.<file>.icloud` of blob `name`, beside where it
-    /// will be.
+    /// The placeholder `.<name>.icloud` of blob `name`.
     fn placeholder(&self, name: &str) -> PathBuf {
-        let (dir, file) = split_last(name);
-        self.root.join(dir).join(format!(".{file}.icloud"))
+        self.root.join(format!(".{name}.icloud"))
     }
 
     /// The name of the blob a placeholder file stands for.
@@ -268,7 +224,6 @@ impl DirStorage {
             .filter(|name| !name.is_empty())
     }
 
-    /// Asks for blob `name` to be downloaded.
     fn download(&self, name: &str) {
         if let Some(request) = &self.request_download {
             request(&self.root.join(name));
@@ -276,63 +231,18 @@ impl DirStorage {
     }
 
     fn path(&self, name: &str) -> io::Result<PathBuf> {
-        check_path(name)?;
+        check_name(name)?;
         Ok(self.root.join(name))
     }
 
-    /// Adds what is in directory `dir` (a path, empty for the root) and below
-    /// it to `tree`. Returns whether anything is in it; a placeholder counts.
-    fn walk(&self, dir: &str, tree: &mut Tree) -> io::Result<bool> {
-        let mut occupied = false;
-        for entry in fs::read_dir(self.root.join(dir))? {
-            let entry = entry?;
-            let meta = entry.metadata()?;
-            let file_name = entry.file_name().to_string_lossy().into_owned();
-            let in_dir = |file: &str| {
-                if dir.is_empty() {
-                    file.to_owned()
-                } else {
-                    format!("{dir}/{file}")
-                }
-            };
-            let name = in_dir(&file_name);
-            if let Some(target) = Self::placeholder_target(&file_name) {
-                self.download(&in_dir(target));
-                occupied = true;
-            } else if file_name.starts_with('.') {
-                continue;
-            } else if meta.is_dir() {
-                occupied = true;
-                if !self.walk(&name, tree)? {
-                    tree.empty_dirs.push(name);
-                }
-            } else if meta.is_file() {
-                occupied = true;
-                let modified = meta
-                    .modified()?
-                    .duration_since(UNIX_EPOCH)
-                    .map_or(0, |t| t.as_nanos());
-                tree.blobs.push(Blob {
-                    name,
-                    marker: format!("{modified}-{}", meta.len()),
-                });
-            }
-        }
-        Ok(occupied)
-    }
-
     /// Streams `data` into a new file in `INCOMING`, then renames it to
-    /// `path`, making its directories after the data is in, so a failing
-    /// `data` leaves none. A failure leaves no staged file.
+    /// `path`. A failure leaves no staged file.
     fn write_atomically(&self, path: &Path, data: &mut dyn Read) -> io::Result<()> {
         let staged = self.root.join(INCOMING).join(unique_name());
         let written = (|| {
             let mut file = File::create_new(&staged)?;
             io::copy(data, &mut file)?;
             flush_ordered(&file)?;
-            if let Some(dir) = path.parent() {
-                fs::create_dir_all(dir)?;
-            }
             fs::rename(&staged, path)
         })();
         if written.is_err() {
@@ -363,14 +273,26 @@ impl Storage for DirStorage {
         }
     }
 
-    fn scan(&self) -> io::Result<Tree> {
-        let mut tree = Tree::default();
-        self.walk("", &mut tree)?;
-        Ok(tree)
-    }
-
-    fn create_dir(&self, path: &str) -> io::Result<()> {
-        fs::create_dir_all(self.path(path)?)
+    fn list(&self) -> io::Result<Vec<Blob>> {
+        let mut blobs = Vec::new();
+        for entry in fs::read_dir(&self.root)? {
+            let entry = entry?;
+            let meta = entry.metadata()?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if let Some(target) = Self::placeholder_target(&name) {
+                self.download(target);
+            } else if meta.is_file() && !name.starts_with('.') {
+                let modified = meta
+                    .modified()?
+                    .duration_since(UNIX_EPOCH)
+                    .map_or(0, |t| t.as_nanos());
+                blobs.push(Blob {
+                    name,
+                    marker: format!("{modified}-{}", meta.len()),
+                });
+            }
+        }
+        Ok(blobs)
     }
 
     fn delete(&self, name: &str) -> io::Result<()> {
@@ -381,49 +303,6 @@ impl Storage for DirStorage {
             }
         }
         Ok(())
-    }
-
-    fn delete_dir(&self, path: &str) -> io::Result<()> {
-        if remove_dir_if_empty(&self.path(path)?)? {
-            Ok(())
-        } else {
-            Err(io::ErrorKind::DirectoryNotEmpty.into())
-        }
-    }
-}
-
-/// Removes the directory `dir` unless something is in it, which hidden files
-/// (Finder's `.DS_Store`) are not: they go with it. An iCloud placeholder (a
-/// blob not downloaded yet) or a hidden directory keeps it. Whether it is
-/// gone; one that isn't there is.
-#[cfg(feature = "native")]
-pub(crate) fn remove_dir_if_empty(dir: &Path) -> io::Result<bool> {
-    let entries = match fs::read_dir(dir) {
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(true),
-        entries => entries?,
-    };
-    let mut hidden = Vec::new();
-    for entry in entries {
-        let entry = entry?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if !name.starts_with('.')
-            || DirStorage::placeholder_target(&name).is_some()
-            || !entry.file_type()?.is_file()
-        {
-            return Ok(false);
-        }
-        hidden.push(entry.path());
-    }
-    for file in hidden {
-        match fs::remove_file(file) {
-            Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
-            _ => {}
-        }
-    }
-    match fs::remove_dir(dir) {
-        Err(e) if e.kind() == io::ErrorKind::DirectoryNotEmpty => Ok(false),
-        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
-        _ => Ok(true),
     }
 }
 
@@ -484,12 +363,6 @@ pub(crate) mod contract {
             .collect();
         names.sort();
         names
-    }
-
-    pub fn empty_dirs(storage: &dyn Storage) -> Vec<String> {
-        let mut dirs = storage.scan().unwrap().empty_dirs;
-        dirs.sort();
-        dirs
     }
 
     fn marker(storage: &dyn Storage, name: &str) -> String {
@@ -589,91 +462,6 @@ pub(crate) mod contract {
         assert!(storage.list().unwrap().is_empty());
     }
 
-    pub fn a_nested_blob_reads_back_lists_and_deletes_by_its_path(storage: &dyn Storage) {
-        put_bytes(storage, "top.md", b"1");
-        put_bytes(storage, "Work/Plans/a b.md", b"22");
-        put_bytes(storage, "Work/b.md", b"333");
-
-        assert_eq!(names(storage), ["Work/Plans/a b.md", "Work/b.md", "top.md"]);
-        let bytes = get_bytes(storage, "Work/Plans/a b.md").unwrap();
-        assert_eq!(bytes.as_deref(), Some(&b"22"[..]));
-        assert!(get_bytes(storage, "Plans/a b.md").unwrap().is_none());
-
-        put_bytes(storage, "Work/Plans/a b.md", b"again");
-        assert_eq!(
-            get_bytes(storage, "Work/Plans/a b.md").unwrap().unwrap(),
-            b"again"
-        );
-        storage.delete("Work/Plans/a b.md").unwrap();
-        storage.delete("Work/Plans/a b.md").unwrap();
-        storage.delete("Nowhere/x.md").unwrap();
-        assert_eq!(names(storage), ["Work/b.md", "top.md"]);
-    }
-
-    pub fn the_same_file_name_in_two_directories_is_two_blobs(storage: &dyn Storage) {
-        put_bytes(storage, "a/x.md", b"in a");
-        put_bytes(storage, "b/x.md", b"in b");
-        put_bytes(storage, "x.md", b"top");
-
-        assert_eq!(get_bytes(storage, "a/x.md").unwrap().unwrap(), b"in a");
-        assert_eq!(get_bytes(storage, "b/x.md").unwrap().unwrap(), b"in b");
-        assert_eq!(get_bytes(storage, "x.md").unwrap().unwrap(), b"top");
-        assert_eq!(names(storage), ["a/x.md", "b/x.md", "x.md"]);
-    }
-
-    pub fn created_directories_are_listed_while_empty(storage: &dyn Storage) {
-        assert!(empty_dirs(storage).is_empty());
-        storage.create_dir("Ideas").unwrap();
-        storage.create_dir("Work/Plans/2025").unwrap();
-        storage.create_dir("Work/Plans/2025").unwrap();
-
-        assert_eq!(empty_dirs(storage), ["Ideas", "Work/Plans/2025"]);
-        assert!(names(storage).is_empty());
-
-        put_bytes(storage, "Ideas/a.md", b"1");
-        assert_eq!(empty_dirs(storage), ["Work/Plans/2025"]);
-    }
-
-    pub fn a_directory_stays_when_its_last_blob_is_deleted(storage: &dyn Storage) {
-        put_bytes(storage, "Work/Plans/a.md", b"1");
-        assert!(empty_dirs(storage).is_empty());
-
-        storage.delete("Work/Plans/a.md").unwrap();
-
-        assert_eq!(empty_dirs(storage), ["Work/Plans"]);
-    }
-
-    pub fn a_deleted_directory_is_gone_and_a_missing_one_is_fine(storage: &dyn Storage) {
-        storage.create_dir("Work/Plans").unwrap();
-        storage.create_dir("Ideas").unwrap();
-
-        storage.delete_dir("Work/Plans").unwrap();
-        storage.delete_dir("Nowhere/Plans").unwrap();
-
-        assert_eq!(empty_dirs(storage), ["Ideas", "Work"]);
-    }
-
-    pub fn paths_with_an_unplain_segment_are_invalid_input(storage: &dyn Storage) {
-        let bad = [
-            "", "/x", "a//b", "a/", "../x", "a/../b", "./x", "a/.b/c", ".hidden",
-        ];
-        for path in bad {
-            let invalid = |result: io::Result<()>| {
-                assert_eq!(
-                    result.unwrap_err().kind(),
-                    io::ErrorKind::InvalidInput,
-                    "{path}"
-                );
-            };
-            invalid(storage.put(path, &mut &b"x"[..]));
-            invalid(storage.get(path).map(drop));
-            invalid(storage.delete(path));
-            invalid(storage.create_dir(path));
-            invalid(storage.delete_dir(path));
-        }
-        assert!(storage.scan().unwrap().blobs.is_empty());
-    }
-
     macro_rules! storage_contract_tests {
         ($make:expr) => {
             $crate::storage::contract::storage_contract_tests!(
@@ -685,13 +473,7 @@ pub(crate) mod contract {
                 listing_gives_the_names_of_all_blobs,
                 the_marker_changes_when_the_blob_is_overwritten,
                 a_blob_is_not_visible_while_it_is_written,
-                a_failed_put_leaves_nothing_behind,
-                a_nested_blob_reads_back_lists_and_deletes_by_its_path,
-                the_same_file_name_in_two_directories_is_two_blobs,
-                created_directories_are_listed_while_empty,
-                a_directory_stays_when_its_last_blob_is_deleted,
-                a_deleted_directory_is_gone_and_a_missing_one_is_fine,
-                paths_with_an_unplain_segment_are_invalid_input
+                a_failed_put_leaves_nothing_behind
             );
         };
         ($make:expr, $($check:ident),+) => {
@@ -795,44 +577,18 @@ mod tests {
     }
 
     #[test]
-    fn the_incoming_folder_is_no_valid_path() {
+    fn names_that_could_leave_the_storage_are_invalid_input() {
         let (_alive, storage) = scratch_storage().unwrap();
-        for path in [".incoming", ".incoming/x"] {
-            assert!(storage.put(path, &mut &b"x"[..]).is_err(), "{path}");
+        for name in ["", "../x", "a/b", "/x", ".incoming", ".hidden", ".."] {
+            let put = storage.put(name, &mut &b"x"[..]);
+            assert_eq!(
+                put.unwrap_err().kind(),
+                io::ErrorKind::InvalidInput,
+                "{name}"
+            );
+            assert!(storage.get(name).is_err(), "{name}");
+            assert!(storage.delete(name).is_err(), "{name}");
         }
-    }
-
-    #[test]
-    fn placeholders_in_directories_are_found_downloaded_and_deleted() {
-        let (alive, storage, asked) = storage_asking_downloads();
-        fs::create_dir(alive.0.join("Work")).unwrap();
-        let placeholder = alive.0.join("Work").join(".a.md.icloud");
-        fs::write(&placeholder, b"stub").unwrap();
-
-        // The directory has something in it, which is not there yet.
-        let tree = storage.scan().unwrap();
-        assert_eq!(tree, Tree::default());
-        assert!(get_bytes(&storage, "Work/a.md").unwrap().is_none());
-        let asked = asked.lock().unwrap();
-        assert!(!asked.is_empty());
-        assert!(asked.iter().all(|p| p == &alive.0.join("Work/a.md")));
-
-        storage.delete("Work/a.md").unwrap();
-        assert!(!placeholder.exists());
-    }
-
-    #[test]
-    fn finders_hidden_files_go_with_a_deleted_directory_but_a_placeholder_keeps_it() {
-        let (alive, storage) = scratch_storage().unwrap();
-        storage.create_dir("Finder").unwrap();
-        storage.create_dir("Arriving").unwrap();
-        fs::write(alive.0.join("Finder/.DS_Store"), b"x").unwrap();
-        fs::write(alive.0.join("Arriving/.a.md.icloud"), b"stub").unwrap();
-
-        storage.delete_dir("Finder").unwrap();
-        assert!(!alive.0.join("Finder").exists());
-        storage.delete_dir("Arriving").unwrap_err();
-        assert!(alive.0.join("Arriving/.a.md.icloud").exists());
     }
 
     #[test]
