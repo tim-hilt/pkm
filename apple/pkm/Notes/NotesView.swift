@@ -146,7 +146,7 @@ private struct ResultRow: View {
     }
 }
 
-/// A Note in the list: its Title formatted, or the Body's first line, or "New Note".
+/// A Note in the list: its Title formatted, or the Body's first line, or "New Note", and its Tags.
 private struct NoteRow: View {
     let row: ListedNote
 
@@ -163,6 +163,10 @@ private struct NoteRow: View {
             } else {
                 Text("New Note").foregroundStyle(.secondary)
             }
+            if !row.tags.isEmpty {
+                HStack(spacing: 4) { ForEach(row.tags, id: \.self) { TagPill(tag: $0) } }
+                    .font(.caption).lineLimit(1)
+            }
         }
     }
 }
@@ -170,8 +174,11 @@ private struct NoteRow: View {
 /// The Title and Body of one Note, saved as typed.
 private struct NoteEditor: View {
     @Environment(NotesModel.self) private var model
+    @Environment(TasksModel.self) private var tasks
     let id: String
     @State private var title = ""
+    @State private var tags: [String] = []
+    @State private var isPickingTags = false
     @State private var text = ""
     /// The Note is read; what is typed before is no edit.
     @State private var isLoaded = false
@@ -180,6 +187,7 @@ private struct NoteEditor: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 TitleField(text: $title, autofocus: model.newID == id)
+                TagsRow(tags: tags) { isPickingTags = true }
                 MarkdownEditor(text: $text, placeholder: "Note", images: model.images(for: id))
                     .accessibilityIdentifier("note-body")
             }
@@ -187,7 +195,7 @@ private struct NoteEditor: View {
         }
         .onAppear {
             guard !isLoaded, let note = model.note(id: id) else { return }
-            (title, text) = (note.title, note.body)
+            (title, text, tags) = (note.title, note.body, note.tags)
             isLoaded = true
         }
         .onChange(of: title) { save() }
@@ -197,6 +205,15 @@ private struct NoteEditor: View {
             guard isLoaded, let note = model.note(id: id) else { return }
             if note.title != title { title = note.title }
             if note.body != text { text = note.body }
+            tags = note.tags
+        }
+        .sheet(isPresented: $isPickingTags) {
+            TagPicker(selected: tags) {
+                model.setTags($0, of: id)
+                tags = model.note(id: id)?.tags ?? tags
+                tasks.refreshTags()
+                isPickingTags = false
+            }
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {

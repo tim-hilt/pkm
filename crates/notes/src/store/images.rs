@@ -87,7 +87,7 @@ mod tests {
     fn an_added_image_is_kept_byte_for_byte_beside_its_note_and_read_back() {
         let scratch = Scratch::new();
         let notes = scratch.store();
-        let id = notes.create().unwrap().id;
+        let id = notes.create(&[]).unwrap().id;
         let reference = notes.add_image(&id, PNG).unwrap();
         assert!(reference.ends_with(".png") && ItemId::parse(&reference[..12]).is_some());
         assert_eq!(fs_read(&scratch, &reference), PNG);
@@ -99,7 +99,7 @@ mod tests {
     fn other_formats_are_refused_and_only_images_can_be_read() {
         let scratch = Scratch::new();
         let notes = scratch.store();
-        let id = notes.create().unwrap().id;
+        let id = notes.create(&[]).unwrap().id;
         let error = notes.add_image(&id, b"II*\0 rest").unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         assert_eq!(
@@ -116,7 +116,7 @@ mod tests {
     fn release_deletes_only_unshown_images_of_the_given() {
         let scratch = Scratch::new();
         let notes = scratch.store();
-        let id = notes.create().unwrap().id;
+        let id = notes.create(&[]).unwrap().id;
         let (shown, loose, other) = (
             notes.add_image(&id, PNG).unwrap(),
             notes.add_image(&id, PNG).unwrap(),
@@ -135,7 +135,7 @@ mod tests {
     fn an_image_two_notes_show_stays_until_both_let_go() {
         let scratch = Scratch::new();
         let notes = scratch.store();
-        let (a, b) = (notes.create().unwrap().id, notes.create().unwrap().id);
+        let (a, b) = (notes.create(&[]).unwrap().id, notes.create(&[]).unwrap().id);
         let image = notes.add_image(&a, PNG).unwrap();
         show(&notes, &a, &[&image]);
         show(&notes, &b, &[&image]);
@@ -155,7 +155,7 @@ mod tests {
     fn deleting_a_note_deletes_its_images_unless_another_shows_them() {
         let scratch = Scratch::new();
         let notes = scratch.store();
-        let (a, b) = (notes.create().unwrap().id, notes.create().unwrap().id);
+        let (a, b) = (notes.create(&[]).unwrap().id, notes.create(&[]).unwrap().id);
         let (own, shared) = (
             notes.add_image(&a, PNG).unwrap(),
             notes.add_image(&a, PNG).unwrap(),

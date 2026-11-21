@@ -133,7 +133,7 @@ impl NoteStore {
 
     /// Saves a new, empty Note.
     pub fn create(&self) -> Result<Note, JsError> {
-        self.notes.create().map(Into::into).map_err(error)
+        self.notes.create(&[]).map(Into::into).map_err(error)
     }
 
     pub fn read(&self, id: &str) -> Result<Note, JsError> {

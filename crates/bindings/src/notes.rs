@@ -29,6 +29,8 @@ pub struct Note {
     pub id: String,
     pub title: String,
     pub body: String,
+    /// In the order they were added.
+    pub tags: Vec<String>,
 }
 
 /// A Note as one row of the list, see `pkm_notes::Row` (named apart from
@@ -41,6 +43,7 @@ pub struct ListedNote {
     pub preview: String,
     /// UTC ISO 8601.
     pub updated: String,
+    pub tags: Vec<String>,
 }
 
 impl From<Row> for ListedNote {
@@ -50,6 +53,7 @@ impl From<Row> for ListedNote {
             title: row.title,
             preview: row.preview,
             updated: row.updated,
+            tags: row.tags,
         }
     }
 }
@@ -92,9 +96,9 @@ impl NoteStore {
         Ok(Self(Notes::open(root)?))
     }
 
-    /// Saves a new, empty Note.
-    pub fn create(&self) -> Result<Note, NotesError> {
-        Ok(self.0.create()?)
+    /// Saves a new Note, empty but for the valid `tags` to start with.
+    pub fn create(&self, tags: Vec<String>) -> Result<Note, NotesError> {
+        Ok(self.0.create(&tags)?)
     }
 
     pub fn read(&self, id: String) -> Result<Note, NotesError> {
@@ -104,6 +108,16 @@ impl NoteStore {
     /// Sets the Title and Body as typed and bumps `updated`.
     pub fn edit(&self, id: String, title: String, body: String) -> Result<Note, NotesError> {
         Ok(self.0.edit(&id, &title, &body)?)
+    }
+
+    /// Puts the Tag on the Note, unless it has it; a new Tag joins the Tags file.
+    pub fn add_tag(&self, id: String, tag: String) -> Result<Note, NotesError> {
+        Ok(self.0.add_tag(&id, &tag)?)
+    }
+
+    /// Takes the Tag off the Note; it stays known.
+    pub fn remove_tag(&self, id: String, tag: String) -> Result<Note, NotesError> {
+        Ok(self.0.remove_tag(&id, &tag)?)
     }
 
     pub fn delete(&self, id: String) -> Result<(), NotesError> {
@@ -149,7 +163,8 @@ mod tests {
     fn a_note_written_through_the_bindings_is_listed() {
         let dir = std::env::temp_dir().join(format!("pkm-bindings-notes-{}", std::process::id()));
         let store = NoteStore::open(dir.join("Notes").to_string_lossy().into_owned()).unwrap();
-        let note = store.create().unwrap();
+        let note = store.create(vec!["work".into()]).unwrap();
+        store.add_tag(note.id.clone(), "home".into()).unwrap();
         store
             .edit(note.id.clone(), "Title".into(), "- first\n".into())
             .unwrap();
@@ -158,6 +173,8 @@ mod tests {
             (rows[0].title.as_str(), rows[0].preview.as_str()),
             ("Title", "first")
         );
+        assert_eq!(rows[0].tags, ["work", "home"]);
+        assert_eq!(store.read(note.id.clone()).unwrap().tags, ["work", "home"]);
         let found = store.search("TITLE".into()).unwrap();
         assert_eq!(
             (found[0].id.as_str(), found[0].title_matched),

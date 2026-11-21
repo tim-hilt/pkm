@@ -1,14 +1,17 @@
 //! The Notes store: `<id>.md` files in one flat folder, each with the front
-//! matter `id`, `title` and `updated` and the Body as the file's body.
+//! matter `id`, `title`, `updated` and, if it has Tags, `tags`, and the Body as
+//! the file's body.
 
 mod images;
 
 use pkm_base::clock::{iso8601, now_ms};
 use pkm_base::files::{DiskFiles, Files};
-use pkm_base::front_matter::Document;
+use pkm_base::front_matter::{Document, Value};
 use pkm_base::item_id::ItemId;
 use pkm_base::markdown::{image_targets, row_preview};
 use pkm_base::random::Entropy;
+use pkm_base::tag;
+use pkm_base::tag_store::TagStore;
 use pkm_search::{Needle, Snippet, start_of};
 use std::fs;
 use std::io;
@@ -17,13 +20,17 @@ use std::sync::Arc;
 
 const TITLE: &str = "title";
 const UPDATED: &str = "updated";
+const TAGS: &str = "tags";
 
-/// A Note: its Title (one line, maybe empty) and Body, both as typed.
+/// A Note: its Title (one line, maybe empty) and Body, both as typed, and its
+/// Tags.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Note {
     pub id: String,
     pub title: String,
     pub body: String,
+    /// Valid Tags, in the order they were added.
+    pub tags: Vec<String>,
 }
 
 /// A Note as one row of the list.
@@ -36,6 +43,7 @@ pub struct Row {
     pub preview: String,
     /// When it last changed, as UTC ISO 8601.
     pub updated: String,
+    pub tags: Vec<String>,
 }
 
 /// A Note that Search found.
@@ -54,6 +62,7 @@ pub struct Found {
 pub struct Notes {
     files: Arc<dyn Files>,
     root: PathBuf,
+    tags: TagStore,
 }
 
 impl Notes {
@@ -70,14 +79,18 @@ impl Notes {
     /// The Notes in `root` on any `files`, which must hold the folder `root`
     /// (an empty one is none).
     pub fn open_in(files: Arc<dyn Files>, root: impl Into<PathBuf>) -> Self {
+        let root = root.into();
         Self {
+            tags: TagStore::beside(files.clone(), &root),
             files,
-            root: root.into(),
+            root,
         }
     }
 
-    /// Saves a new, empty Note under a fresh Item ID.
-    pub fn create(&self) -> io::Result<Note> {
+    /// Saves a new Note, empty but for the valid `tags` to start with (each
+    /// once, in order; they join the Tags file), under a fresh Item ID.
+    pub fn create(&self, tags: &[String]) -> io::Result<Note> {
+        let tags = distinct_valid(tags);
         let mut entropy = Entropy::from_system();
         loop {
             let id = ItemId::new(&mut entropy);
@@ -88,8 +101,10 @@ impl Notes {
             file.set_scalar("id", id.as_str());
             file.set_scalar(TITLE, "");
             file.set_scalar(UPDATED, iso8601(now_ms()));
+            set_tags(&mut file, tags.clone());
             self.files
                 .write(&self.root.join(file_name(&id)), &file.render())?;
+            self.tags.remember(tags)?;
             return Ok(note_of(&file, &id));
         }
     }
@@ -110,8 +125,44 @@ impl Notes {
         file.set_scalar(TITLE, title.replace(['\r', '\n'], " "));
         file.body = body.to_owned();
         if file.render() != before {
-            file.set_scalar(UPDATED, iso8601(now_ms()));
-            self.files.write(&path, &file.render())?;
+            self.touch(&path, &mut file)?;
+        }
+        Ok(note_of(&file, &id))
+    }
+
+    /// Bumps `updated` and saves `file` at `path`.
+    fn touch(&self, path: &Path, file: &mut Document) -> io::Result<()> {
+        file.set_scalar(UPDATED, iso8601(now_ms()));
+        self.files.write(path, &file.render())
+    }
+
+    /// Puts `tag` on the Note `id`, unless it has it; a new Tag joins the Tags
+    /// file. `InvalidInput` for an invalid Tag, `NotFound` if there is no such
+    /// Note.
+    pub fn add_tag(&self, id: &str, tag: &str) -> io::Result<Note> {
+        if !tag::is_valid(tag) {
+            return Err(io::ErrorKind::InvalidInput.into());
+        }
+        let (id, path, mut file) = self.find(id)?;
+        let mut tags = tags_of(&file);
+        if !tags.iter().any(|t| t == tag) {
+            tags.push(tag.to_owned());
+            set_tags(&mut file, tags);
+            self.touch(&path, &mut file)?;
+        }
+        self.tags.remember([tag.to_owned()])?;
+        Ok(note_of(&file, &id))
+    }
+
+    /// Takes `tag` off the Note `id`; one it doesn't have is as wanted. The
+    /// Tag stays known. `NotFound` if there is no such Note.
+    pub fn remove_tag(&self, id: &str, tag: &str) -> io::Result<Note> {
+        let (id, path, mut file) = self.find(id)?;
+        let mut tags = tags_of(&file);
+        if tags.iter().any(|t| t == tag) {
+            tags.retain(|t| t != tag);
+            set_tags(&mut file, tags);
+            self.touch(&path, &mut file)?;
         }
         Ok(note_of(&file, &id))
     }
@@ -130,7 +181,7 @@ impl Notes {
     }
 
     /// Deletes the Note `id` if its Title and Body are empty (only whitespace
-    /// counts as empty), for a client leaving it.
+    /// counts as empty, Tags don't count), for a client leaving it.
     pub fn discard_if_empty(&self, id: &str) -> io::Result<()> {
         match self.read(id) {
             Ok(note) if note.title.trim().is_empty() && note.body.trim().is_empty() => {
@@ -153,6 +204,7 @@ impl Notes {
                     id: note.id,
                     title: note.title,
                     updated: file.scalar(UPDATED).unwrap_or_default().to_owned(),
+                    tags: note.tags,
                 }
             })
             .collect();
@@ -236,6 +288,33 @@ fn note_of(file: &Document, id: &ItemId) -> Note {
         id: id.as_str().to_owned(),
         title: file.scalar(TITLE).unwrap_or_default().to_owned(),
         body: file.body.clone(),
+        tags: tags_of(file),
+    }
+}
+
+/// The valid Tags of a file, in order.
+fn tags_of(file: &Document) -> Vec<String> {
+    let tags = file.list(TAGS).unwrap_or_default();
+    distinct_valid(tags)
+}
+
+/// The valid `tags`, each once, in order.
+fn distinct_valid(tags: &[String]) -> Vec<String> {
+    let mut kept: Vec<String> = Vec::new();
+    for tag in tags.iter().filter(|t| tag::is_valid(t)) {
+        if !kept.contains(tag) {
+            kept.push(tag.clone());
+        }
+    }
+    kept
+}
+
+/// An empty list is no property at all.
+fn set_tags(file: &mut Document, tags: Vec<String>) {
+    if tags.is_empty() {
+        file.remove(TAGS);
+    } else {
+        file.set(TAGS, Value::List(tags));
     }
 }
 
@@ -297,7 +376,7 @@ mod tests {
     fn a_created_note_is_empty_and_kept_as_a_file_named_by_its_id() {
         let scratch = Scratch::new();
         let notes = scratch.store();
-        let note = notes.create().unwrap();
+        let note = notes.create(&[]).unwrap();
         assert_eq!((note.title.as_str(), note.body.as_str()), ("", ""));
         assert_eq!(notes.read(&note.id).unwrap(), note);
         let text = scratch.text(&note.id);
@@ -305,11 +384,107 @@ mod tests {
         assert!(text.ends_with("Z\n---\n"));
     }
 
+    fn tags_file(scratch: &Scratch) -> String {
+        fs::read_to_string(scratch.0.parent().unwrap().join("Tags/tags.json")).unwrap_or_default()
+    }
+
+    fn tags(names: &[&str]) -> Vec<String> {
+        names.iter().map(|n| (*n).to_owned()).collect()
+    }
+
+    #[test]
+    fn tags_are_added_once_in_order_removed_and_join_the_tags_file() {
+        let scratch = Scratch::new();
+        let notes = scratch.store();
+        let id = notes.create(&[]).unwrap().id;
+        assert!(!scratch.text(&id).contains("tags"));
+        notes.add_tag(&id, "work").unwrap();
+        notes.add_tag(&id, "home").unwrap();
+        assert_eq!(notes.add_tag(&id, "work").unwrap().tags, ["work", "home"]);
+        assert!(
+            tags_file(&scratch).contains("\"work\"") && tags_file(&scratch).contains("\"home\"")
+        );
+        assert!(scratch.text(&id).contains("tags:\n  - work\n  - home\n"));
+        assert_eq!(notes.remove_tag(&id, "work").unwrap().tags, ["home"]);
+        assert_eq!(notes.read(&id).unwrap().tags, ["home"]);
+        assert_eq!(notes.list().unwrap()[0].tags, ["home"]);
+        assert!(tags_file(&scratch).contains("\"work\""));
+        assert_eq!(notes.remove_tag(&id, "work").unwrap().tags, ["home"]);
+        notes.remove_tag(&id, "home").unwrap();
+        assert!(!scratch.text(&id).contains("tags"));
+    }
+
+    #[test]
+    fn an_invalid_tag_is_refused_and_a_missing_note_not_found() {
+        let scratch = Scratch::new();
+        let notes = scratch.store();
+        let id = notes.create(&[]).unwrap().id;
+        let before = scratch.text(&id);
+        assert_eq!(
+            notes.add_tag(&id, "Not A Tag").unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+        assert_eq!(scratch.text(&id), before);
+        let missing = notes.add_tag("aaaaaaaaaaaa", "work").unwrap_err();
+        assert_eq!(missing.kind(), io::ErrorKind::NotFound);
+        let missing = notes.remove_tag("aaaaaaaaaaaa", "work").unwrap_err();
+        assert_eq!(missing.kind(), io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn changing_tags_bumps_updated_and_a_known_one_writes_nothing() {
+        let scratch = Scratch::new();
+        let notes = scratch.store();
+        let id = "aaaaaaaaaaaa";
+        let old = "2020-01-01T00:00:00Z";
+        scratch.write("aaaaaaaaaaaa.md", &note_file(id, "T", old, ""));
+        notes.remove_tag(id, "work").unwrap();
+        assert_eq!(notes.list().unwrap()[0].updated, old);
+        notes.add_tag(id, "work").unwrap();
+        let added = notes.list().unwrap()[0].updated.clone();
+        assert!(added.as_str() > old);
+        scratch.write("aaaaaaaaaaaa.md", &scratch.text(id).replace(&added, old));
+        notes.add_tag(id, "work").unwrap();
+        assert_eq!(notes.list().unwrap()[0].updated, old);
+        notes.remove_tag(id, "work").unwrap();
+        assert!(notes.list().unwrap()[0].updated.as_str() > old);
+    }
+
+    #[test]
+    fn a_note_is_created_with_its_valid_tags_once_and_they_join_the_tags_file() {
+        let scratch = Scratch::new();
+        let notes = scratch.store();
+        let note = notes
+            .create(&tags(&["work", "Not A Tag", "home", "work"]))
+            .unwrap();
+        assert_eq!(note.tags, ["work", "home"]);
+        assert_eq!(notes.read(&note.id).unwrap().tags, ["work", "home"]);
+        assert!(tags_file(&scratch).contains("\"home\""));
+        assert!(notes.create(&[]).unwrap().tags.is_empty());
+    }
+
+    #[test]
+    fn a_note_with_tags_but_nothing_written_is_discarded() {
+        let scratch = Scratch::new();
+        let notes = scratch.store();
+        let id = notes.create(&tags(&["work"])).unwrap().id;
+        notes.discard_if_empty(&id).unwrap();
+        assert!(!scratch.exists(&id));
+    }
+
+    #[test]
+    fn an_edit_keeps_tags() {
+        let scratch = Scratch::new();
+        let notes = scratch.store();
+        let id = notes.create(&tags(&["work"])).unwrap().id;
+        assert_eq!(notes.edit(&id, "T", "b").unwrap().tags, ["work"]);
+    }
+
     #[test]
     fn an_edit_keeps_title_and_body_as_typed_in_the_file() {
         let scratch = Scratch::new();
         let notes = scratch.store();
-        let id = notes.create().unwrap().id;
+        let id = notes.create(&[]).unwrap().id;
         let body = "# Heading\n\n  - **bold**: x \n";
         let edited = notes.edit(&id, "A *Title*: here ", body).unwrap();
         assert_eq!(edited.title, "A *Title*: here ");
@@ -322,7 +497,7 @@ mod tests {
     fn a_title_stays_one_line() {
         let scratch = Scratch::new();
         let notes = scratch.store();
-        let id = notes.create().unwrap().id;
+        let id = notes.create(&[]).unwrap().id;
         assert_eq!(notes.edit(&id, "a\nb\r\nc", "").unwrap().title, "a b  c");
     }
 
@@ -371,12 +546,12 @@ mod tests {
     fn a_note_with_nothing_in_it_is_discarded() {
         let scratch = Scratch::new();
         let notes = scratch.store();
-        let empty = notes.create().unwrap().id;
-        let blank = notes.create().unwrap().id;
+        let empty = notes.create(&[]).unwrap().id;
+        let blank = notes.create(&[]).unwrap().id;
         notes.edit(&blank, " ", "\n").unwrap();
-        let titled = notes.create().unwrap().id;
+        let titled = notes.create(&[]).unwrap().id;
         notes.edit(&titled, "T", "").unwrap();
-        let written = notes.create().unwrap().id;
+        let written = notes.create(&[]).unwrap().id;
         notes.edit(&written, "", "text").unwrap();
         for id in [&empty, &blank, &titled, &written] {
             notes.discard_if_empty(id).unwrap();
@@ -390,7 +565,7 @@ mod tests {
     fn a_deleted_note_is_gone() {
         let scratch = Scratch::new();
         let notes = scratch.store();
-        let id = notes.create().unwrap().id;
+        let id = notes.create(&[]).unwrap().id;
         notes.delete(&id).unwrap();
         assert!(notes.list().unwrap().is_empty());
         assert_eq!(notes.read(&id).unwrap_err().kind(), io::ErrorKind::NotFound);
@@ -405,7 +580,7 @@ mod tests {
     fn files_that_are_no_note_are_skipped() {
         let scratch = Scratch::new();
         let notes = scratch.store();
-        let kept = notes.create().unwrap().id;
+        let kept = notes.create(&[]).unwrap().id;
         let note = note_file("cccccccccccc", "x", "2020-01-01T00:00:00Z", "");
         scratch.write("cccccccccccc.txt", &note);
         scratch.write(".cccccccccccc.md", &note);
@@ -419,7 +594,7 @@ mod tests {
     fn notes_in_a_subdirectory_are_ignored_and_never_deleted() {
         let scratch = Scratch::new();
         let notes = scratch.store();
-        let top = notes.create().unwrap().id;
+        let top = notes.create(&[]).unwrap().id;
         let note = note_file("aaaaaaaaaaaa", "T", "2020-01-01T00:00:00Z", "cafe\n");
         scratch.write("Work/aaaaaaaaaaaa.md", &note);
         assert_eq!(ids(&notes), [top]);

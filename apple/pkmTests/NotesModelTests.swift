@@ -37,6 +37,22 @@ import Testing
         #expect(model.note(id: id)?.body == "- first line\n")
     }
 
+    @Test func aNotesTagsAreSetInOrderListedAndKnownToTheApp() throws {
+        let model = try openModel()
+        model.add()
+        let id = try #require(model.openID)
+        model.setTags(["work", "home"], of: id)
+        #expect(model.note(id: id)?.tags == ["work", "home"])
+        model.setTags(["home", "play"], of: id)
+        #expect(model.note(id: id)?.tags == ["home", "play"])
+        #expect(model.notes.first?.tags == ["home", "play"])
+        model.setTags([], of: id)
+        #expect(model.notes.first?.tags == [])
+        // A Note with Tags but nothing written is still discarded.
+        model.openID = nil
+        #expect(model.notes.isEmpty)
+    }
+
     @Test func aNoteIsDeletedAndOnlyAskedAboutWithABody() throws {
         let model = try openModel()
         model.add()

@@ -73,7 +73,7 @@ final class NotesModel {
 
     /// Adds an empty Note and opens it, for its Title to be typed.
     func add() {
-        guard let note = try? store.create() else { return }
+        guard let note = try? store.create(tags: []) else { return }
         newID = note.id
         openID = note.id
     }
@@ -87,6 +87,15 @@ final class NotesModel {
         listed = nil
         changes += 1
         reloadResults()
+    }
+
+    /// Gives the Note exactly `tags`: those it lacks are added in order, the others removed. Tags
+    /// the app didn't know become known to the core's Tags file.
+    func setTags(_ tags: [String], of id: String) {
+        guard let current = note(id: id)?.tags else { return }
+        for tag in current where !tags.contains(tag) { _ = try? store.removeTag(id: id, tag: tag) }
+        for tag in tags where !current.contains(tag) { _ = try? store.addTag(id: id, tag: tag) }
+        filesChanged()
     }
 
     /// The Note as text to copy: its Title, then its Body after a blank line; either may be missing.

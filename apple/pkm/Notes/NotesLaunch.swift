@@ -17,7 +17,7 @@ extension NotesModel {
         let opensNote = arguments.contains("-UITestingOpenNote")
         if opensNote || arguments.contains("-UITestingOpenNotes") {
             let samples = [
-                ("Reply to Anna", "About the trip: *train* or **plane**?\n"),
+                ("Reply to Anna", "About the trip: *train* or **plane**?\n", ["personal"]),
                 (
                     "Reading list",
                     """
@@ -27,12 +27,13 @@ extension NotesModel {
                     1. First
                     1. Second
                     > Read a little every day
-                    """
+                    """,
+                    ["books", "personal"]
                 ),
-                ("", "Buy oat milk\nand bread"),
+                ("", "Buy oat milk\nand bread", []),
             ]
-            for (title, body) in samples.reversed() {
-                guard let note = try? store.create() else { continue }
+            for (title, body, tags) in samples.reversed() {
+                guard let note = try? store.create(tags: tags) else { continue }
                 _ = try? store.edit(id: note.id, title: title, body: body)
             }
         }
