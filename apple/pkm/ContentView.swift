@@ -140,11 +140,13 @@ extension ContentView {
         cloud.startSyncing(
             drawings: gallery.drawingsDirectory,
             books: LibraryModel.documentsFolder,
+            bookmarks: BookmarksModel.documentsFolder,
             tasks: TasksModel.documentsFolder,
             notes: NotesModel.documentsFolder,
             stateDirectory: stateDirectory,
             onChanged: { [gallery] names in gallery.syncDidChange(names) },
             onBooksChanged: { [library] _ in library.syncDidChange() },
+            onBookmarksChanged: { [bookmarks] _ in bookmarks.syncDidChange() },
             onTasksChanged: { [tasks] _ in tasks.syncDidChange() },
             onNotesChanged: { [notes] _ in notes.syncDidChange() })
     }

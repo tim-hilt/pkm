@@ -4,10 +4,13 @@
 
 use pkm_base::highlight_colors::Preferences;
 use pkm_base::tags::Tags;
+use pkm_bookmarks::sync as bookmarks;
 use pkm_books::sync as books;
 use pkm_drawing::{are_same_drawing, is_drawing, merge_drawings};
 use pkm_notes::sync as notes;
 use pkm_tasks::sync::{self as tasks, filters};
+use std::io;
+use std::path::Path;
 
 /// The merge hook of one Context folder.
 pub trait Merge: Send + Sync {
@@ -62,6 +65,14 @@ pub trait Merge: Send + Sync {
     /// with an `identity`.
     fn local_is_newer(&self, _local: &[u8], _remote: &[u8]) -> bool {
         true
+    }
+
+    /// Settles what the Items of `dir`, the Context folder on this Device,
+    /// have become after a step that Synced every folder of the Context: what
+    /// only the Context can see across Items, like two Items that are one.
+    /// Gives the names of the Items it changed or removed. Nothing by default.
+    fn settle(&self, _dir: &Path) -> io::Result<Vec<String>> {
+        Ok(Vec::new())
     }
 
     /// Whether a file of this name is an Item of the Context.
@@ -196,6 +207,84 @@ impl Merge for BookStates {
 
     fn transfers_unparseable(&self) -> bool {
         false
+    }
+}
+
+/// Bookmarks: `<id>.md` files, merged three-way by field, and the images beside
+/// them, transferred unchanged (ADR-0029). Two Bookmarks of one Address that
+/// Devices Saved before they Synced are merged into the older after the step
+/// (`settle`). A file that isn't a Bookmark is left where it is, and two
+/// versions that can't merge are not both kept: one Bookmark has one file.
+pub struct Bookmarks;
+
+impl Bookmarks {
+    /// The Context's folder on the Device and in the cloud (`pkm/Bookmarks`).
+    pub const FOLDER: &str = pkm_bookmarks::Bookmarks::FOLDER;
+}
+
+impl Merge for Bookmarks {
+    fn extension(&self) -> &str {
+        ".md"
+    }
+
+    fn merge(&self, base: Option<&[u8]>, local: &[u8], remote: &[u8]) -> Option<Vec<u8>> {
+        bookmarks::merge(base, local, remote)
+    }
+
+    fn is_item(&self, bytes: &[u8]) -> bool {
+        bookmarks::is_item(bytes)
+    }
+
+    fn same_item(&self, a: &[u8], b: &[u8]) -> Option<bool> {
+        bookmarks::same_item(a, b)
+    }
+
+    fn accepts(&self, file: &str) -> bool {
+        bookmarks::accepts(file)
+    }
+
+    fn transfers_unparseable(&self) -> bool {
+        false
+    }
+
+    fn settle(&self, dir: &Path) -> io::Result<Vec<String>> {
+        pkm_bookmarks::Bookmarks::open(dir)?.settle()
+    }
+}
+
+/// The Bookmarks' state files: `.state/<id>.json` in the Bookmarks folder,
+/// merged like the Books' (`pkm_bookmarks::sync`).
+pub struct BookmarkStates;
+
+impl Merge for BookmarkStates {
+    fn extension(&self) -> &str {
+        ".json"
+    }
+
+    fn merge(&self, _base: Option<&[u8]>, local: &[u8], remote: &[u8]) -> Option<Vec<u8>> {
+        bookmarks::merge_state(local, remote)
+    }
+
+    fn is_item(&self, bytes: &[u8]) -> bool {
+        bookmarks::is_state(bytes)
+    }
+
+    /// One file name, one state: Sync pairs them by name.
+    fn same_item(&self, a: &[u8], b: &[u8]) -> Option<bool> {
+        (bookmarks::is_state(a) && bookmarks::is_state(b)).then_some(true)
+    }
+
+    fn transfers_unparseable(&self) -> bool {
+        false
+    }
+
+    /// The Bookmarks folder is the one above: a state that Markup on another
+    /// Device brought back for a Deleted Bookmark goes.
+    fn settle(&self, dir: &Path) -> io::Result<Vec<String>> {
+        match dir.parent() {
+            Some(bookmarks) => pkm_bookmarks::Bookmarks::open(bookmarks)?.settle(),
+            None => Ok(Vec::new()),
+        }
     }
 }
 
@@ -389,10 +478,12 @@ mod tests {
     #[test]
     fn only_notes_keep_their_items_in_directories() {
         assert!(Notes.has_directories());
-        let flat: [&dyn Merge; 7] = [
+        let flat: [&dyn Merge; 9] = [
             &Drawings,
             &Books,
             &BookStates,
+            &Bookmarks,
+            &BookmarkStates,
             &Tasks,
             &TagsFile,
             &ColorsFile,

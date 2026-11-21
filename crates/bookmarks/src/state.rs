@@ -61,33 +61,53 @@ pub(crate) struct State {
 }
 
 impl State {
-    /// The state stored as `text`; the default if it is none. The first
-    /// version kept only `<offset> <last_read>`.
+    /// The state stored as `text`; the default if it is none.
     pub(crate) fn decode(text: &str) -> Self {
+        Self::parse(text).unwrap_or_default()
+    }
+
+    /// The state stored as `text`; none if `text` isn't one. The first
+    /// version kept only `<offset> <last_read>`.
+    pub(crate) fn parse(text: &str) -> Option<Self> {
         let Ok(json) = json::parse(text) else {
-            return Self::decode_legacy(text);
+            return Self::parse_legacy(text);
         };
+        let markup = json.get("markup")?;
         let number = |key| json.get("progress")?.get(key)?.as_u64();
-        Self {
+        Some(Self {
             progress: number("offset").zip(number("last_read")),
-            markup: json
-                .get("markup")
-                .map(Markup::from_json)
-                .unwrap_or_default(),
+            markup: Markup::from_json(markup),
             changes: json
                 .get("changes")
                 .map(MarkupChanges::from_json)
                 .unwrap_or_default(),
-        }
+        })
     }
 
-    fn decode_legacy(line: &str) -> Self {
-        let progress = line
-            .split_once(' ')
-            .and_then(|(offset, last_read)| Some((offset.parse().ok()?, last_read.parse().ok()?)));
-        Self {
-            progress,
+    fn parse_legacy(line: &str) -> Option<Self> {
+        let (offset, last_read) = line.split_once(' ')?;
+        Some(Self {
+            progress: Some((offset.parse().ok()?, last_read.parse().ok()?)),
             ..Self::default()
+        })
+    }
+
+    /// This state and `other`, the same Bookmark's on another Device, as one:
+    /// Markup united by id with each change going to the later one and
+    /// deletions kept, and the latest Reading Progress. Commutative and
+    /// idempotent.
+    pub(crate) fn merged(&self, other: &Self) -> Self {
+        Self {
+            // The later reading; a tie goes to the larger offset, so the
+            // result doesn't depend on the order.
+            progress: match (self.progress, other.progress) {
+                (Some(a), Some(b)) => Some(if (a.1, a.0) >= (b.1, b.0) { a } else { b }),
+                (a, b) => a.or(b),
+            },
+            markup: self
+                .markup
+                .merged(&self.changes, &other.markup, &other.changes),
+            changes: self.changes.merged(&other.changes),
         }
     }
 
@@ -143,5 +163,35 @@ mod tests {
     fn junk_is_no_state() {
         assert_eq!(State::decode("junk"), State::default());
         assert_eq!(State::decode(""), State::default());
+        for junk in ["junk", "", "{}", "1 x"] {
+            assert_eq!(State::parse(junk), None, "{junk:?}");
+        }
+    }
+
+    #[test]
+    fn states_merge_to_the_later_reading_and_all_markup() {
+        let highlight = |id: &str| Highlight {
+            id: id.into(),
+            anchor: Anchor { start: 1, end: 2 },
+            quoted_text: "a".into(),
+            color: Rgb { r: 1, g: 2, b: 3 },
+            created: 5,
+            comment: None,
+        };
+        let mut left = State {
+            progress: Some((10, 100)),
+            ..State::default()
+        };
+        left.markup.highlights.push(highlight("l"));
+        let mut right = State {
+            progress: Some((3, 200)),
+            ..State::default()
+        };
+        right.markup.highlights.push(highlight("r"));
+        let merged = left.merged(&right);
+        assert_eq!(merged.progress, Some((3, 200)));
+        assert_eq!(merged.markup.highlights.len(), 2);
+        assert_eq!(merged, right.merged(&left));
+        assert_eq!(merged.merged(&merged), merged);
     }
 }

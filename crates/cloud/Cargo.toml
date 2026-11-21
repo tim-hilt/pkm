@@ -14,6 +14,8 @@ pkm-base = { path = "../base" }
 pkm-drawing = { path = "../drawing" }
 # The merge of Book state files.
 pkm-books = { path = "../books" }
+# The merge of Bookmark files and their state files.
+pkm-bookmarks = { path = "../bookmarks" }
 # The merge of Task files.
 pkm-tasks = { path = "../tasks" }
 # The merge of Note files.

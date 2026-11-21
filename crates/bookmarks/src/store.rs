@@ -8,6 +8,7 @@ use crate::address::normalise;
 use crate::extract::Details;
 use crate::images;
 use crate::state::{Anchor, Highlight, Markup, PageComment, Place, Rgb, State};
+use crate::sync::UPDATED;
 use pkm_base::clock::{iso8601, now_ms};
 use pkm_base::files::{DiskFiles, Files};
 use pkm_base::front_matter::{Document, Value};
@@ -18,7 +19,7 @@ use pkm_base::random::Entropy;
 use pkm_base::tag;
 use pkm_base::tag_store::TagStore;
 use pkm_search::{Needle, Snippet, start_of};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io;
 use std::ops::Range;
@@ -532,9 +533,117 @@ impl Bookmarks {
         let before = file.render();
         change(&mut file);
         if file.render() != before {
+            file.set_scalar(UPDATED, iso8601(now_ms()));
             self.files.write(&self.path(&id), &file.render())?;
         }
         Ok(self.bookmark_of(&file, &id))
+    }
+
+    /// Settles what Sync leaves: Bookmarks that share an Address are merged
+    /// (`merge_duplicates`), and the state files of Bookmarks that are
+    /// Deleted or have no Article, which another Device's Markup brought
+    /// back, are removed. Gives the ids of the Bookmarks it changed or removed.
+    pub fn settle(&self) -> io::Result<Vec<String>> {
+        let mut touched = self.merge_duplicates()?;
+        for listed in self.files.list(&self.root.join(STATE_FOLDER))? {
+            let Some(id) = listed.name.strip_suffix(".json") else {
+                continue;
+            };
+            if self.read(id).is_ok_and(|bookmark| bookmark.has_article) {
+                continue;
+            }
+            ignore_not_found(self.files.remove(&self.state_path(id)))?;
+            touched.push(id.to_owned());
+        }
+        Ok(touched)
+    }
+
+    /// Merges the Bookmarks that share an Address, which two Devices Saving it
+    /// before they Synced made, into the oldest Saved: Tags and Markup united,
+    /// the Article kept from whichever has one (the oldest's if both do, the
+    /// Highlights of the other found in it by their text). Gives the ids of
+    /// the Bookmarks it changed or removed. Every Device picks the same one.
+    fn merge_duplicates(&self) -> io::Result<Vec<String>> {
+        let mut groups: BTreeMap<String, Vec<(ItemId, Document)>> = BTreeMap::new();
+        for (id, file) in self.all_files()? {
+            if let Some(address) = file.scalar(ADDRESS).and_then(normalise) {
+                groups.entry(address).or_default().push((id, file));
+            }
+        }
+        let mut touched = Vec::new();
+        for mut group in groups.into_values().filter(|group| group.len() > 1) {
+            group.sort_by(|(a, file_a), (b, file_b)| {
+                let saved = |file: &Document| file.scalar(SAVED).unwrap_or_default().to_owned();
+                (saved(file_a), a.as_str()).cmp(&(saved(file_b), b.as_str()))
+            });
+            let mut group = group.into_iter();
+            let Some((id, mut oldest)) = group.next() else {
+                continue;
+            };
+            for (other_id, other) in group {
+                self.fold(&id, &mut oldest, &other_id, &other)?;
+                touched.push(other_id.to_string());
+            }
+            touched.push(id.to_string());
+        }
+        Ok(touched)
+    }
+
+    /// Folds the Bookmark `other` into `kept` (see `merge_duplicates`) and
+    /// removes it.
+    fn fold(
+        &self,
+        id: &ItemId,
+        kept: &mut Document,
+        other_id: &ItemId,
+        other: &Document,
+    ) -> io::Result<()> {
+        let mut state = self.read_state(id.as_str());
+        let mut theirs = self.read_state(other_id.as_str());
+        let before = state.clone();
+        let mut spare = self.images_of(&unread_bookmark_of(other, other_id));
+        let mut tags = tags_of(kept);
+        for tag in tags_of(other) {
+            if !tags.contains(&tag) {
+                tags.push(tag);
+            }
+        }
+        set_tags(kept, tags.clone());
+        if kept.body.is_empty() {
+            // Their Article, its images and the Markup anchored in it.
+            kept.body = other.body.clone();
+            spare.clear();
+        } else {
+            let length = utf16_length(&kept.body);
+            theirs.progress = None;
+            theirs.markup.highlights = (theirs.markup.highlights.into_iter())
+                .filter_map(|highlight| resolve(&kept.body, highlight))
+                .collect();
+            theirs
+                .markup
+                .page_comments
+                .retain(|c| c.place.offset <= length);
+        }
+        if kept.scalar(COVER).is_none()
+            && let Some(cover) = other.scalar(COVER)
+        {
+            kept.set_scalar(COVER, cover);
+        }
+        state = state.merged(&theirs);
+        kept.set_scalar(UPDATED, iso8601(now_ms()));
+        self.files.write(&self.path(id), &kept.render())?;
+        if state != before {
+            self.write_state(id.as_str(), &state)?;
+        }
+        self.tags.remember(tags)?;
+        let cover = other
+            .scalar(COVER)
+            .filter(|c| kept.scalar(COVER) != Some(c));
+        for name in cover.map(str::to_owned).into_iter().chain(spare) {
+            ignore_not_found(self.files.remove(&self.root.join(name)))?;
+        }
+        ignore_not_found(self.files.remove(&self.state_path(other_id.as_str())))?;
+        ignore_not_found(self.files.remove(&self.path(other_id)))
     }
 
     /// Moves every Bookmark of `other` here, with its Tags, Cover and images, keeping when it was
@@ -676,7 +785,7 @@ impl Bookmarks {
 
     /// The hidden state file of `id`.
     fn state_path(&self, id: &str) -> PathBuf {
-        self.root.join(STATE_FOLDER).join(id)
+        self.root.join(STATE_FOLDER).join(format!("{id}.json"))
     }
 
     /// The state of `id`; an unreadable one reads as none.
@@ -1630,7 +1739,11 @@ mod tests {
         let store = scratch.store();
         let b = tenth_part_article(&store);
         fs::create_dir_all(scratch.0.join(".state")).unwrap();
-        fs::write(scratch.0.join(".state").join(&b.id), "junk").unwrap();
+        fs::write(
+            scratch.0.join(".state").join(format!("{}.json", b.id)),
+            "junk",
+        )
+        .unwrap();
         assert_eq!(store.read(&b.id).unwrap().progress, None);
         assert_eq!(
             store
@@ -1647,7 +1760,7 @@ mod tests {
     fn dropping_the_article_and_deleting_take_the_state_file() {
         let scratch = Scratch::new();
         let store = scratch.store();
-        let state = |id: &str| scratch.0.join(".state").join(id);
+        let state = |id: &str| scratch.0.join(".state").join(format!("{id}.json"));
         let a = tenth_part_article(&store);
         store.save_progress(&a.id, 4).unwrap();
         assert!(state(&a.id).exists());
@@ -1801,14 +1914,26 @@ mod tests {
         let b = two_paragraphs(&store);
         highlight_at(&store, &b.id, 0, 5, "alpha");
         store.drop_article(&b.id).unwrap();
-        assert!(!scratch.0.join(".state").join(&b.id).exists());
+        assert!(
+            !scratch
+                .0
+                .join(".state")
+                .join(format!("{}.json", b.id))
+                .exists()
+        );
         store
             .add_article(&b.id, "alpha again", &HashMap::new())
             .unwrap();
         assert!(store.markup(&b.id).unwrap().highlights.is_empty());
         highlight_at(&store, &b.id, 0, 5, "alpha");
         store.delete(&b.id).unwrap();
-        assert!(!scratch.0.join(".state").join(&b.id).exists());
+        assert!(
+            !scratch
+                .0
+                .join(".state")
+                .join(format!("{}.json", b.id))
+                .exists()
+        );
     }
 
     fn saved_with_article(
@@ -1896,5 +2021,155 @@ mod tests {
         assert!(store.search_article(&b.id, " ").unwrap().is_empty());
         let plain = saved_with_article(&store, "https://a.test/y", "T", "");
         assert!(store.search_article(&plain.id, "tea").is_err());
+    }
+
+    /// Makes Bookmark `id` a Bookmark of `address` Saved at `saved`: what two
+    /// Devices Saving the same page before they Synced leave behind.
+    fn resaved(scratch: &Scratch, id: &str, address: &str, saved: &str) {
+        let path = scratch.0.join(format!("{id}.md"));
+        let mut file = Document::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+        file.set_scalar(ADDRESS, address);
+        file.set_scalar(SAVED, saved);
+        fs::write(path, file.render()).unwrap();
+    }
+
+    #[test]
+    fn the_same_address_saved_twice_merges_into_the_older_with_tags_united() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let older = plain(&store, "https://a.example/");
+        let newer = plain(&store, "https://b.example/");
+        store.add_tag(&older.id, "read").unwrap();
+        store.add_tag(&newer.id, "later").unwrap();
+        resaved(
+            &scratch,
+            &older.id,
+            "https://a.example/",
+            "2024-01-01T00:00:00Z",
+        );
+        resaved(
+            &scratch,
+            &newer.id,
+            "https://a.example/",
+            "2024-01-02T00:00:00Z",
+        );
+
+        let mut touched = store.settle().unwrap();
+        touched.sort();
+
+        assert_eq!(touched.len(), 2);
+        let all = store.list().unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].id, older.id);
+        assert_eq!(all[0].tags, ["read", "later"]);
+        assert_eq!(store.settle().unwrap(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn settling_removes_the_states_of_bookmarks_that_are_gone_or_have_no_article() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let read = saved_with_article(&store, "https://a.example/", "T", "alpha");
+        store.save_progress(&read.id, 1).unwrap();
+        let plain = plain(&store, "https://b.example/");
+        let state = |id: &str| scratch.0.join(".state").join(format!("{id}.json"));
+        for id in [plain.id.as_str(), "zzzzzzzzzzzz"] {
+            fs::write(state(id), "12 3456").unwrap();
+        }
+
+        let mut touched = store.settle().unwrap();
+        touched.sort();
+
+        assert_eq!(touched.len(), 2);
+        assert!(state(&read.id).exists());
+        assert!(!state(&plain.id).exists() && !state("zzzzzzzzzzzz").exists());
+    }
+
+    #[test]
+    fn a_merge_keeps_the_article_of_whichever_has_one_with_its_markup_and_images() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let older = plain(&store, "https://a.example/");
+        let images = downloaded(&[("https://i.test/a.png", PNG)]);
+        let article = "![](https://i.test/a.png)\n\nalpha beta";
+        let newer = store
+            .save(
+                "https://b.example/",
+                &details("T"),
+                "",
+                &[],
+                Some(article),
+                &images,
+            )
+            .unwrap()
+            .bookmark;
+        let reading = store.read_article(&newer.id).unwrap();
+        let start = reading.find("alpha").unwrap() as u64;
+        highlight_at(&store, &newer.id, start, start + 5, "alpha");
+        store.save_progress(&newer.id, 3).unwrap();
+        resaved(
+            &scratch,
+            &older.id,
+            "https://a.example/",
+            "2024-01-01T00:00:00Z",
+        );
+        resaved(
+            &scratch,
+            &newer.id,
+            "https://a.example/",
+            "2024-01-02T00:00:00Z",
+        );
+
+        store.settle().unwrap();
+
+        let merged = store.read(&older.id).unwrap();
+        assert!(merged.has_article);
+        assert_eq!(store.markup(&older.id).unwrap().highlights.len(), 1);
+        assert_eq!(merged.progress.unwrap().offset, 3);
+        assert_eq!(store.read_article(&older.id).unwrap(), reading);
+        let kept = scratch.files();
+        assert_eq!(
+            kept.iter().filter(|f| f.ends_with(".png")).count(),
+            1,
+            "{kept:?}"
+        );
+        assert_eq!(
+            kept.iter().filter(|f| f.ends_with(".md")).count(),
+            1,
+            "{kept:?}"
+        );
+    }
+
+    #[test]
+    fn a_merge_with_two_articles_keeps_the_olders_and_finds_the_others_highlights_by_text() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let older = saved_with_article(&store, "https://a.example/", "T", "alpha beta");
+        let newer = saved_with_article(&store, "https://b.example/", "T", "intro\n\nalpha beta");
+        let start = store
+            .read_article(&newer.id)
+            .unwrap()
+            .find("alpha")
+            .unwrap() as u64;
+        highlight_at(&store, &newer.id, start, start + 5, "alpha");
+        resaved(
+            &scratch,
+            &older.id,
+            "https://a.example/",
+            "2024-01-01T00:00:00Z",
+        );
+        resaved(
+            &scratch,
+            &newer.id,
+            "https://a.example/",
+            "2024-01-02T00:00:00Z",
+        );
+
+        store.settle().unwrap();
+
+        assert_eq!(store.read_article(&older.id).unwrap(), "alpha beta\n");
+        let markup = store.markup(&older.id).unwrap();
+        assert_eq!(markup.highlights[0].anchor, Anchor { start: 0, end: 5 });
+        assert_eq!(store.list().unwrap().len(), 1);
     }
 }

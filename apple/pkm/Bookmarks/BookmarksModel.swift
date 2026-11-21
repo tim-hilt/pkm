@@ -314,6 +314,15 @@ final class BookmarksModel {
 
     private static var now: UInt64 { UInt64(Date().timeIntervalSince1970 * 1000) }
 
+    /// Sync wrote or deleted Bookmarks here: lists them again, and closes what it Deleted or
+    /// Dropped the Article of.
+    func syncDidChange() {
+        covers = [:]
+        reload()
+        if let openID, !bookmarks.contains(where: { $0.id == openID && $0.hasArticle }) { self.openID = nil }
+        if let detailsID, !bookmarks.contains(where: { $0.id == detailsID }) { self.detailsID = nil }
+    }
+
     /// Deletes the Bookmark with its Cover, Article and images.
     func delete(id: String) {
         if openID == id { openID = nil }

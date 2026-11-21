@@ -37,7 +37,10 @@ mod fake_onedrive;
 
 #[cfg(feature = "native")]
 pub use gdrive::GoogleDriveStorage;
-pub use merge::{BookStates, Books, ColorsFile, Drawings, Filters, Merge, Notes, TagsFile, Tasks};
+pub use merge::{
+    BookStates, BookmarkStates, Bookmarks, Books, ColorsFile, Drawings, Filters, Merge, Notes,
+    TagsFile, Tasks,
+};
 #[cfg(feature = "native")]
 pub use onedrive::OneDriveStorage;
 pub use schedule::{Schedule, Status, Timing};

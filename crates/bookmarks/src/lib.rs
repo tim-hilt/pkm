@@ -12,6 +12,7 @@ mod html;
 mod images;
 mod state;
 mod store;
+pub mod sync;
 
 pub use address::{is_document, normalise};
 pub use article::{Article, read_article};

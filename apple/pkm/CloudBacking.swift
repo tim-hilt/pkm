@@ -92,7 +92,7 @@ private final class RotatedTokens: TokenObserver {
     }
 }
 
-/// How many of the Items (Drawings, Books, Tasks, Notes) a Sync step transfers are done.
+/// How many of the Items (Drawings, Books, Bookmarks, Tasks, Notes) a Sync step transfers are done.
 struct SyncProgress: Equatable {
     let done: Int
     let total: Int
@@ -103,6 +103,7 @@ struct SyncProgress: Equatable {
 private final class SyncEvents: SyncObserver, @unchecked Sendable {
     private let onChanged: @MainActor @Sendable ([String]) -> Void
     private let onBooksChanged: @MainActor @Sendable ([String]) -> Void
+    private let onBookmarksChanged: @MainActor @Sendable ([String]) -> Void
     private let onTasksChanged: @MainActor @Sendable ([String]) -> Void
     private let onNotesChanged: @MainActor @Sendable ([String]) -> Void
     private let onProgress: @MainActor @Sendable (SyncProgress?) -> Void
@@ -111,13 +112,15 @@ private final class SyncEvents: SyncObserver, @unchecked Sendable {
     init(
         onChanged: @escaping @MainActor @Sendable ([String]) -> Void,
         onBooksChanged: @escaping @MainActor @Sendable ([String]) -> Void,
+        onBookmarksChanged: @escaping @MainActor @Sendable ([String]) -> Void,
         onTasksChanged: @escaping @MainActor @Sendable ([String]) -> Void,
         onNotesChanged: @escaping @MainActor @Sendable ([String]) -> Void,
         onProgress: @escaping @MainActor @Sendable (SyncProgress?) -> Void,
         onStatus: @escaping @MainActor @Sendable (SyncStatus) -> Void
     ) {
-        (self.onChanged, self.onBooksChanged, self.onTasksChanged, self.onNotesChanged) =
-            (onChanged, onBooksChanged, onTasksChanged, onNotesChanged)
+        (self.onChanged, self.onBooksChanged, self.onBookmarksChanged) =
+            (onChanged, onBooksChanged, onBookmarksChanged)
+        (self.onTasksChanged, self.onNotesChanged) = (onTasksChanged, onNotesChanged)
         (self.onProgress, self.onStatus) = (onProgress, onStatus)
     }
 
@@ -127,6 +130,10 @@ private final class SyncEvents: SyncObserver, @unchecked Sendable {
 
     func booksChanged(names: [String]) {
         Task { @MainActor [onBooksChanged] in onBooksChanged(names) }
+    }
+
+    func bookmarksChanged(names: [String]) {
+        Task { @MainActor [onBookmarksChanged] in onBookmarksChanged(names) }
     }
 
     func tasksChanged(names: [String]) {
@@ -213,18 +220,21 @@ final class CloudBackingModel {
     private struct SyncTarget {
         let drawings: URL
         let books: URL
+        let bookmarks: URL
         let tasks: URL
         let notes: URL
         /// What was Synced, outside the Context folders; never Synced itself.
         let stateDirectory: URL
         let onChanged: @MainActor @Sendable ([String]) -> Void
         let onBooksChanged: @MainActor @Sendable ([String]) -> Void
+        let onBookmarksChanged: @MainActor @Sendable ([String]) -> Void
         let onTasksChanged: @MainActor @Sendable ([String]) -> Void
         let onNotesChanged: @MainActor @Sendable ([String]) -> Void
 
         var directories: SyncDirectories {
             SyncDirectories(
                 drawings: drawings.path(percentEncoded: false), books: books.path(percentEncoded: false),
+                bookmarks: bookmarks.path(percentEncoded: false),
                 tasks: tasks.path(percentEncoded: false), notes: notes.path(percentEncoded: false),
                 state: stateDirectory.path(percentEncoded: false))
         }
@@ -383,21 +393,22 @@ final class CloudBackingModel {
             save: { credentials.save(account) })
     }
 
-    /// Syncs the Drawings in `drawings`, the Books in `books`, the Tasks in
+    /// Syncs the Drawings in `drawings`, the Books in `books`, the Bookmarks in `bookmarks`, the Tasks in
     /// `tasks` and the Notes in `notes` while Connected, calling `onChanged`, `onBooksChanged`,
-    /// `onTasksChanged` and `onNotesChanged` (on the main actor) with the names of what Sync wrote or deleted here. `stateDirectory`
+    /// `onBookmarksChanged`, `onTasksChanged` and `onNotesChanged` (on the main actor) with the names of what Sync wrote or deleted here. `stateDirectory`
     /// holds what Sync remembers: not in the Context folders.
     func startSyncing(
-        drawings: URL, books: URL, tasks: URL, notes: URL, stateDirectory: URL,
+        drawings: URL, books: URL, bookmarks: URL, tasks: URL, notes: URL, stateDirectory: URL,
         onChanged: @escaping @MainActor @Sendable ([String]) -> Void,
         onBooksChanged: @escaping @MainActor @Sendable ([String]) -> Void,
+        onBookmarksChanged: @escaping @MainActor @Sendable ([String]) -> Void,
         onTasksChanged: @escaping @MainActor @Sendable ([String]) -> Void,
         onNotesChanged: @escaping @MainActor @Sendable ([String]) -> Void
     ) {
         target = SyncTarget(
-            drawings: drawings, books: books, tasks: tasks, notes: notes, stateDirectory: stateDirectory,
-            onChanged: onChanged, onBooksChanged: onBooksChanged, onTasksChanged: onTasksChanged,
-            onNotesChanged: onNotesChanged)
+            drawings: drawings, books: books, bookmarks: bookmarks, tasks: tasks, notes: notes,
+            stateDirectory: stateDirectory, onChanged: onChanged, onBooksChanged: onBooksChanged,
+            onBookmarksChanged: onBookmarksChanged, onTasksChanged: onTasksChanged, onNotesChanged: onNotesChanged)
         network = NetworkMonitor { [weak self] online in self?.networkChanged(online: online) }
         restartSync()
     }
@@ -451,6 +462,7 @@ final class CloudBackingModel {
         SyncEvents(
             onChanged: target.onChanged,
             onBooksChanged: target.onBooksChanged,
+            onBookmarksChanged: target.onBookmarksChanged,
             onTasksChanged: target.onTasksChanged,
             onNotesChanged: target.onNotesChanged,
             onProgress: { [weak self] in self?.progress = $0 },

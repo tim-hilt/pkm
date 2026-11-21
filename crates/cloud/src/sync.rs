@@ -204,7 +204,26 @@ pub fn sync_context_folders(
             break;
         }
     }
+    settle(folders, &mut outcomes);
     outcomes
+}
+
+/// Lets each Context settle its folder after all were Synced, once every
+/// folder ran without error and if Items arrived in it; what it changed is
+/// reported with the folder's, and uploaded by the next step.
+fn settle(folders: &[ContextFolder], outcomes: &mut [StepOutcome]) {
+    if outcomes.len() < folders.len() || outcomes.iter().any(|o| o.error.is_some()) {
+        return;
+    }
+    for (folder, outcome) in folders.iter().zip(outcomes) {
+        if outcome.changed.is_empty() {
+            continue;
+        }
+        match folder.merge.settle(folder.dir) {
+            Ok(names) => outcome.changed.extend(names),
+            Err(error) => outcome.error = Some(error),
+        }
+    }
 }
 
 /// `sync_context_folders` for the Drawings folder alone.
@@ -729,9 +748,9 @@ mod tests {
         use std::sync::{Arc, Mutex};
 
         use crate::{
-            Blob, BookStates, Books as BookFiles, ColorsFile, ContextFolder, DirStorage, Drawings,
-            Filters, Merge, Notes as NoteFiles, Progress, Storage, SyncState, TagsFile, Tasks,
-            sync_context_folders, sync_step,
+            Blob, BookStates, BookmarkStates, Bookmarks, Books as BookFiles, ColorsFile,
+            ContextFolder, DirStorage, Drawings, Filters, Merge, Notes as NoteFiles, Progress,
+            Storage, SyncState, TagsFile, Tasks, sync_context_folders, sync_step,
         };
         use pkm_base::highlight_colors::Preferences;
         use pkm_base::json;
@@ -897,6 +916,9 @@ mod tests {
             tasks: Scratch,
             /// The Notes Context: Note files.
             note_files: Scratch,
+            /// The Bookmarks Context: Bookmark files and images, with their
+            /// state hidden in `.state`.
+            bookmarks: Scratch,
         }
 
         impl Device {
@@ -904,7 +926,10 @@ mod tests {
                 let books = Scratch::new("books");
                 fs::create_dir_all(books.0.join(".state")).unwrap();
                 let tasks = Scratch::new("tasks");
+                let bookmarks = Scratch::new("bookmarks");
+                fs::create_dir_all(bookmarks.0.join(".state")).unwrap();
                 Device {
+                    bookmarks,
                     tasks,
                     note_files: Scratch::new("notes"),
                     drawings: Scratch::new("drawings"),
@@ -976,6 +1001,41 @@ mod tests {
                     .into_iter()
                     .filter(|name| !name.starts_with('.'))
                     .collect()
+            }
+
+            /// The Bookmarks on this Device.
+            fn bookmark_store(&self) -> pkm_bookmarks::Bookmarks {
+                pkm_bookmarks::Bookmarks::open(&self.bookmarks.0).unwrap()
+            }
+
+            /// One Sync step over the Bookmarks Context: the Bookmark files and images,
+            /// then the state files. Returns the names it changed here.
+            fn sync_bookmarks(&self, cloud: &Cloud) -> Vec<String> {
+                let files_state = SyncState::open(self.state.0.join("Bookmarks")).unwrap();
+                let states_state = SyncState::open(self.state.0.join("BookmarkStates")).unwrap();
+                let folders = [
+                    ContextFolder {
+                        dir: &self.bookmarks.0,
+                        state: &files_state,
+                        storage: &cloud.storage,
+                        merge: Arc::new(Bookmarks),
+                    },
+                    ContextFolder {
+                        dir: &self.bookmarks.0.join(".state"),
+                        state: &states_state,
+                        storage: &cloud.storage,
+                        merge: Arc::new(BookmarkStates),
+                    },
+                ];
+                let outcomes = sync_context_folders(&folders, &AtomicBool::new(false), &|_| {});
+                assert_eq!(outcomes.len(), 2);
+                let mut changed = Vec::new();
+                for outcome in outcomes {
+                    assert!(outcome.error.is_none(), "{:?}", outcome.error);
+                    changed.extend(outcome.changed);
+                }
+                changed.sort();
+                changed
             }
 
             fn write_task(&self, file: &str, bytes: &[u8]) {
@@ -3889,6 +3949,213 @@ mod tests {
                 assert!(listed[0].favorite);
                 assert_eq!(listed[1].query, "@home & !@wait");
             }
+        }
+
+        // ---- Bookmarks (ADR-0020, the Bookmarks merge hook) ----
+
+        /// Saves `address` with an Article of `article` and a Cover.
+        fn save_bookmark(device: &Device, address: &str, article: &str) -> pkm_bookmarks::Bookmark {
+            let page = pkm_bookmarks::Details {
+                title: "Page".into(),
+                cover: Some("https://i.test/c.png".into()),
+                ..Default::default()
+            };
+            let images = std::collections::HashMap::from([
+                ("https://i.test/c.png".to_owned(), PNG.to_vec()),
+                ("https://i.test/a.png".to_owned(), PNG.to_vec()),
+            ]);
+            let article = format!("![](https://i.test/a.png)\n\n{article}");
+            let saved =
+                device
+                    .bookmark_store()
+                    .save(address, &page, "", &[], Some(&article), &images);
+            saved.unwrap().bookmark
+        }
+
+        /// Runs the Bookmarks Sync on both Devices until nothing is left to settle.
+        fn sync_bookmarks_both(cloud: &Cloud, phone: &Device, tablet: &Device) {
+            for _ in 0..3 {
+                phone.sync_bookmarks(cloud);
+                tablet.sync_bookmarks(cloud);
+            }
+        }
+
+        #[test]
+        fn a_bookmark_with_its_images_and_cover_reaches_the_other_device() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            let saved = save_bookmark(&phone, "https://a.example/", "alpha");
+            phone.bookmark_store().save_progress(&saved.id, 2).unwrap();
+
+            sync_bookmarks_both(&cloud, &phone, &tablet);
+
+            let store = tablet.bookmark_store();
+            let read = store.read(&saved.id).unwrap();
+            assert_eq!(read.title, "Page");
+            assert_eq!(read.progress.unwrap().offset, 2);
+            assert_eq!(store.read_cover(&saved.id).unwrap(), PNG);
+            let article = store.read_article(&saved.id).unwrap();
+            let image = article.split(['(', ')']).nth(1).unwrap().to_owned();
+            assert_eq!(store.read_image(&saved.id, &image).unwrap(), PNG);
+            assert_eq!(
+                phone.bookmark_store().list().unwrap(),
+                store.list().unwrap()
+            );
+        }
+
+        #[test]
+        fn a_title_renamed_on_one_device_and_a_tag_added_on_another_are_both_kept() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            let saved = save_bookmark(&phone, "https://a.example/", "alpha");
+            sync_bookmarks_both(&cloud, &phone, &tablet);
+
+            phone.bookmark_store().rename(&saved.id, "Renamed").unwrap();
+            tablet.bookmark_store().add_tag(&saved.id, "later").unwrap();
+            sync_bookmarks_both(&cloud, &phone, &tablet);
+
+            for device in [&phone, &tablet] {
+                let read = device.bookmark_store().read(&saved.id).unwrap();
+                assert_eq!(
+                    (read.title.as_str(), read.tags),
+                    ("Renamed", vec!["later".to_owned()])
+                );
+            }
+        }
+
+        #[test]
+        fn highlights_made_on_both_devices_are_both_kept() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            let saved = save_bookmark(&phone, "https://a.example/", "alpha beta");
+            sync_bookmarks_both(&cloud, &phone, &tablet);
+            let article = phone.bookmark_store().read_article(&saved.id).unwrap();
+            let color = pkm_bookmarks::Rgb { r: 1, g: 2, b: 3 };
+            let highlight = |device: &Device, word: &str| {
+                let start = article.find(word).unwrap() as u64;
+                let anchor = pkm_bookmarks::Anchor {
+                    start,
+                    end: start + word.len() as u64,
+                };
+                let store = device.bookmark_store();
+                store
+                    .add_highlight(&saved.id, anchor, word, color, 1)
+                    .unwrap();
+            };
+            highlight(&phone, "alpha");
+            highlight(&tablet, "beta");
+
+            sync_bookmarks_both(&cloud, &phone, &tablet);
+
+            for device in [&phone, &tablet] {
+                let markup = device.bookmark_store().markup(&saved.id).unwrap();
+                assert_eq!(markup.highlights.len(), 2);
+            }
+        }
+
+        #[test]
+        fn drop_article_wins_over_markup_made_on_another_device() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            let saved = save_bookmark(&phone, "https://a.example/", "alpha");
+            sync_bookmarks_both(&cloud, &phone, &tablet);
+            let color = pkm_bookmarks::Rgb { r: 1, g: 2, b: 3 };
+            let anchor = pkm_bookmarks::Anchor { start: 0, end: 1 };
+            let article = tablet.bookmark_store().read_article(&saved.id).unwrap();
+            let quoted = &article[..1];
+
+            phone.bookmark_store().drop_article(&saved.id).unwrap();
+            let marked = tablet.bookmark_store();
+            marked
+                .add_highlight(&saved.id, anchor, quoted, color, 1)
+                .unwrap();
+            sync_bookmarks_both(&cloud, &phone, &tablet);
+
+            for device in [&phone, &tablet] {
+                let read = device.bookmark_store().read(&saved.id).unwrap();
+                assert!(!read.has_article);
+                assert!(read.progress.is_none());
+                assert!(device.bookmark_store().markup(&saved.id).is_err());
+            }
+            let files = |device: &Device| listing(&device.bookmarks.0.join(".state"));
+            assert!(files(&phone).is_empty() && files(&tablet).is_empty());
+            // The images of the Article went with it; the Cover stayed.
+            assert_eq!(cloud.files().len(), 2, "{:?}", cloud.files());
+        }
+
+        #[test]
+        fn a_delete_wins_over_an_edit_on_another_device() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            let saved = save_bookmark(&phone, "https://a.example/", "alpha");
+            sync_bookmarks_both(&cloud, &phone, &tablet);
+
+            phone.bookmark_store().delete(&saved.id).unwrap();
+            tablet.bookmark_store().rename(&saved.id, "Edited").unwrap();
+            tablet.bookmark_store().save_progress(&saved.id, 1).unwrap();
+            sync_bookmarks_both(&cloud, &phone, &tablet);
+
+            for device in [&phone, &tablet] {
+                assert!(device.bookmark_store().list().unwrap().is_empty());
+                assert!(
+                    listing(&device.bookmarks.0)
+                        .iter()
+                        .all(|f| f.starts_with('.'))
+                );
+            }
+            assert!(cloud.files().is_empty(), "{:?}", cloud.files());
+        }
+
+        #[test]
+        fn the_same_address_saved_on_both_devices_ends_up_as_the_older_bookmark() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            let older = save_bookmark(&phone, "https://a.example/?utm_source=x", "alpha");
+            phone.bookmark_store().add_tag(&older.id, "phone").unwrap();
+            // Saved a second later, as the other Device's clock has it.
+            std::thread::sleep(std::time::Duration::from_millis(1100));
+            let newer = tablet
+                .bookmark_store()
+                .save(
+                    "https://a.example/",
+                    &Default::default(),
+                    "",
+                    &["tablet".into()],
+                    None,
+                    &Default::default(),
+                )
+                .unwrap()
+                .bookmark;
+            assert_ne!(older.id, newer.id);
+
+            for _ in 0..4 {
+                phone.sync_bookmarks(&cloud);
+                tablet.sync_bookmarks(&cloud);
+            }
+
+            for device in [&phone, &tablet] {
+                let all = device.bookmark_store().list().unwrap();
+                assert_eq!(all.len(), 1, "{all:?}");
+                assert_eq!(all[0].id, older.id);
+                assert_eq!(all[0].tags, ["phone", "tablet"]);
+                assert!(all[0].has_article);
+            }
+            assert_eq!(
+                cloud.files().iter().filter(|f| f.ends_with(".md")).count(),
+                1,
+                "{:?}",
+                cloud.files()
+            );
+        }
+
+        #[test]
+        fn bookmark_files_that_are_no_bookmark_are_left_alone() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Device::new(), Device::new());
+            fs::write(phone.bookmarks.0.join("bbbbbbbbbbbb.md"), "not a bookmark").unwrap();
+            fs::write(phone.bookmarks.0.join(".state/bbbbbbbbbbbb.json"), "junk").unwrap();
+            sync_bookmarks_both(&cloud, &phone, &tablet);
+            assert!(cloud.files().is_empty());
         }
     }
 }
