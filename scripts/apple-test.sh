@@ -6,7 +6,7 @@ set -uo pipefail
 LOG=${LOG:-/tmp/pkm-test.log}
 
 cd "$(dirname "$0")/../apple" || exit 1
-xcodebuild -scheme "${SCHEME:-pkm}" test -collect-test-diagnostics never "$@" >"$LOG" 2>&1
+xcodebuild -allowProvisioningUpdates -scheme "${SCHEME:-pkm}" test -collect-test-diagnostics never "$@" >"$LOG" 2>&1
 status=$?
 
 awk -v zwsp="$(printf '\342\200\213')" '

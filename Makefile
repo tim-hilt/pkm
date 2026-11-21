@@ -1,6 +1,6 @@
 # Terminal-only build entry points; no Xcode GUI needed.
-SWIFT_SRC := apple/pkm apple/pkmTests apple/pkmUITests
-XCODEBUILD := cd apple && xcodebuild -quiet -scheme pkm
+SWIFT_SRC := apple/pkm apple/pkmShare apple/pkmTests apple/pkmUITests
+XCODEBUILD := cd apple && xcodebuild -quiet -allowProvisioningUpdates -scheme pkm
 XCTEST := scripts/apple-test.sh
 
 # Simulators matching the project's target devices.

@@ -31,6 +31,15 @@ enum Prepared: Equatable {
 final class BookmarksModel {
     private let store: BookmarkStore
     private let download: PageDownloader
+    private let parallelDownloads: Int
+
+    /// Bookmarks Saved in another store, which `prepare` and `addArticle` take into account: the
+    /// Share extension's store holds only what it Saved, and the app's Bookmarks are somewhere else.
+    var savedElsewhere: [Bookmark] = []
+
+    /// Where the Share extension hands over what it Saved and learns what is Saved; nil in tests
+    /// and wherever there is no extension.
+    @ObservationIgnored var handoff: ShareHandoff?
 
     /// Every Bookmark, newest Saved first.
     private(set) var bookmarks: [Bookmark] = []
@@ -79,9 +88,11 @@ final class BookmarksModel {
     /// The Covers shown, decoded once.
     @ObservationIgnored private var covers: [String: CGImage] = [:]
 
-    init(store: BookmarkStore, download: @escaping PageDownloader = Download.live) {
+    /// `parallelDownloads` bounds the images downloaded at once, and so the memory they take.
+    init(store: BookmarkStore, download: @escaping PageDownloader = Download.live, parallelDownloads: Int = 6) {
         self.store = store
         self.download = download
+        self.parallelDownloads = parallelDownloads
         reload()
     }
 
@@ -89,27 +100,35 @@ final class BookmarksModel {
     /// scheme), its page, Cover and the Article's images downloaded and read. An Address Saved
     /// already isn't downloaded. A download that fails, or none for a PDF or EPUB, leaves the Address
     /// alone to be Saved; an image that fails is left out. `progress` is called with the share of
-    /// downloads done, from the page on.
-    func prepare(_ text: String, progress: (Double) -> Void = { _ in }) async -> Prepared {
+    /// downloads done, from the page on. `html` is the page as the user sees it, from a browser's
+    /// Share sheet: the page isn't downloaded then, so that what is behind a login is kept, offline too.
+    func prepare(_ text: String, html: String? = nil, progress: (Double) -> Void = { _ in }) async -> Prepared {
         let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let address = normaliseAddress(address: typed.contains("://") ? typed : "https://" + typed),
             let url = URL(string: address)
         else { return .invalid }
-        if let existing = bookmarks.first(where: { $0.address == address }) { return .existing(existing) }
-        return .draft(await fetch(address, url: url, withCover: true, progress: progress))
+        if let existing = (bookmarks + savedElsewhere).first(where: { $0.address == address }) {
+            return .existing(existing)
+        }
+        return .draft(await fetch(address, url: url, html: html, withCover: true, progress: progress))
     }
 
-    /// The page at `address` (`url`), its Cover if `withCover` and the Article's images downloaded
-    /// and read, as `prepare` describes.
+    /// The page at `address` (`url`), or the given `html` of it, its Cover if `withCover` and the
+    /// Article's images downloaded and read, as `prepare` describes.
     private func fetch(
-        _ address: String, url: URL, withCover: Bool, progress: (Double) -> Void = { _ in }
+        _ address: String, url: URL, html given: String?, withCover: Bool, progress: (Double) -> Void = { _ in }
     ) async -> SaveDraft {
         var html = ""
         var failure: String?
         if !isDocumentAddress(address: address) {
             do {
-                guard let page = try await download(url).html else { throw PageDownloadError.notAPage }
-                html = page
+                if let given {
+                    guard given.utf8.count <= Download.limit else { throw PageDownloadError.tooLarge }
+                    html = given
+                } else {
+                    guard let page = try await download(url).html else { throw PageDownloadError.notAPage }
+                    html = page
+                }
             } catch {
                 failure = error.localizedDescription
             }
@@ -133,6 +152,7 @@ final class BookmarksModel {
     /// core keeps images (ADR-0029); nil for one that fails or is no picture.
     private func downloadImages(_ addresses: [String]) -> AsyncStream<(String, Data?)> {
         let download = download
+        let parallelDownloads = parallelDownloads
         return AsyncStream { continuation in
             let work = Task {
                 await withTaskGroup(of: (String, Data?).self) { group in
@@ -145,7 +165,7 @@ final class BookmarksModel {
                             return (address, StoredImage.bytes(of: data))
                         }
                     }
-                    for _ in 0..<Self.parallelDownloads { next() }
+                    for _ in 0..<parallelDownloads { next() }
                     for await done in group {
                         continuation.yield(done)
                         next()
@@ -156,8 +176,6 @@ final class BookmarksModel {
             continuation.onTermination = { _ in work.cancel() }
         }
     }
-
-    private static let parallelDownloads = 6
 
     /// Saves the page under `title` (blank keeps the page's) and `tags`, with its Article and images if
     /// `keepsArticle` (the Save sheet's toggle, which starts as `draft.article.readsLikeArticle`);
@@ -171,6 +189,16 @@ final class BookmarksModel {
         else { return nil }
         reload()
         return bookmarks.first { $0.id == saved.bookmark.id } ?? saved.bookmark
+    }
+
+    /// Takes in what the Share extension Saved, and tells it what is Saved and which Tags there are,
+    /// for it to find duplicates and suggest Tags: done whenever the app comes to the front or leaves it.
+    func exchangeWithShareExtension(tags: [String]) {
+        guard let handoff else { return }
+        if let inbox = try? handoff.openInbox(), let taken = try? store.takeFrom(other: inbox), taken > 0 {
+            reload()
+        }
+        handoff.publish(bookmarks, tags: tags)
     }
 
     /// Renames the Bookmark; a blank `title` changes nothing.
@@ -195,17 +223,24 @@ final class BookmarksModel {
         reload()
     }
 
-    /// Adds the Article of the page as it is now to a Bookmark without one. False if the page can't
-    /// be downloaded or has no text, and nothing changes.
-    func addArticle(to bookmark: Bookmark) async -> Bool {
+    /// Adds the Article of the page as it is now (or the given `html` of it, see `prepare`) to a
+    /// Bookmark without one. A Bookmark Saved elsewhere gets it as a Bookmark Saved here, which
+    /// `takeShared` hands over. False if the page can't be downloaded or has no text, and nothing changes.
+    func addArticle(to bookmark: Bookmark, html: String? = nil) async -> Bool {
         guard !bookmark.hasArticle, let url = URL(string: bookmark.address) else { return false }
-        let page = await fetch(bookmark.address, url: url, withCover: false)
-        guard page.failure == nil, !page.article.markdown.isEmpty,
-            (try? store.addArticle(id: bookmark.id, article: page.article.markdown, images: page.images)) != nil
-        else { return false }
+        let page = await fetch(bookmark.address, url: url, html: html, withCover: false)
+        guard page.failure == nil, !page.article.markdown.isEmpty else { return false }
+        if isKnown(bookmark) {
+            guard (try? store.addArticle(id: bookmark.id, article: page.article.markdown, images: page.images)) != nil
+            else { return false }
+        } else if save(page, title: bookmark.title, keepsArticle: true) == nil {
+            return false
+        }
         reload()
         return true
     }
+
+    private func isKnown(_ bookmark: Bookmark) -> Bool { bookmarks.contains { $0.id == bookmark.id } }
 
     /// Takes the Article, with its images, off the Bookmark, which closes its Reader.
     func dropArticle(id: String) {

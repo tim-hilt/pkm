@@ -537,6 +537,64 @@ impl Bookmarks {
         Ok(self.bookmark_of(&file, &id))
     }
 
+    /// Moves every Bookmark of `other` here, with its Tags, Cover and images, keeping when it was
+    /// Saved: how the Share extension hands over what it Saved. A Bookmark whose Address is Saved
+    /// here already only gives its Article, if this one has none (the other's Markup is none).
+    /// Gives how many were taken.
+    pub fn take_from(&self, other: &Bookmarks) -> io::Result<usize> {
+        let mut mine = self.list()?;
+        let mut entropy = Entropy::from_system();
+        let mut taken = 0;
+        for (id, mut file) in other.all_files()? {
+            let theirs = unread_bookmark_of(&file, &id);
+            let images = other.read_images(&theirs);
+            match mine.iter().find(|b| b.address == theirs.address) {
+                Some(known) if !known.has_article && theirs.has_article => {
+                    self.add_article(&known.id, &file.body, &images)?;
+                    taken += 1;
+                }
+                Some(_) => {}
+                None => {
+                    let new_id = loop {
+                        let new_id = ItemId::new(&mut entropy);
+                        if !self.files.exists(&self.path(&new_id)) {
+                            break new_id;
+                        }
+                    };
+                    let cover = match theirs.cover.as_ref().and_then(|c| images.get(c)) {
+                        Some(bytes) => self.keep_image(&mut entropy, bytes)?,
+                        None => None,
+                    };
+                    file.set_scalar("id", new_id.as_str());
+                    match cover {
+                        Some(name) => file.set_scalar(COVER, name),
+                        None => file.remove(COVER),
+                    }
+                    file.body = self.keep_article(&mut entropy, &file.body, &images)?;
+                    self.files.write(&self.path(&new_id), &file.render())?;
+                    self.tags.remember(tags_of(&file))?;
+                    mine.push(self.bookmark_of(&file, &new_id));
+                    taken += 1;
+                }
+            }
+            other.delete(&theirs.id)?;
+        }
+        Ok(taken)
+    }
+
+    /// The bytes of the Cover and of the images of the Article, by file name; those unreadable are left out.
+    fn read_images(&self, bookmark: &Bookmark) -> HashMap<String, Vec<u8>> {
+        (bookmark.cover.iter().cloned())
+            .chain(self.images_of(bookmark))
+            .filter_map(|name| {
+                Some((
+                    name.clone(),
+                    self.files.read_bytes(&self.root.join(&name)).ok()?,
+                ))
+            })
+            .collect()
+    }
+
     /// Deletes the Bookmark `id` with its Cover and images; one that is gone
     /// already is as wanted.
     pub fn delete(&self, id: &str) -> io::Result<()> {
@@ -811,6 +869,70 @@ mod tests {
             author: "Ann".into(),
             published: "2024-05-01".into(),
         }
+    }
+
+    #[test]
+    fn taking_from_another_folder_moves_its_bookmarks_with_tags_and_images() {
+        let (here, there) = (Scratch::new(), Scratch::new());
+        let theirs = there.store();
+        let article = "A\n\n![fig](https://i.test/fig.png)\n";
+        let saved = theirs
+            .save(
+                "https://x.test/new",
+                &details("New"),
+                "",
+                &["rust".to_owned()],
+                Some(article),
+                &downloaded(&[(COVER, PNG), ("https://i.test/fig.png", PNG)]),
+            )
+            .unwrap()
+            .bookmark;
+        let mine = here.store();
+        assert_eq!(mine.take_from(&theirs).unwrap(), 1);
+        assert!(theirs.list().unwrap().is_empty());
+        let taken = mine.list().unwrap().remove(0);
+        assert_eq!(
+            (taken.address.as_str(), taken.title.as_str()),
+            ("https://x.test/new", "New")
+        );
+        assert_eq!(
+            (taken.tags.clone(), taken.saved),
+            (vec!["rust".into()], saved.saved)
+        );
+        let name = taken.cover.unwrap();
+        assert_eq!(mine.read_cover(&taken.id).unwrap(), PNG);
+        assert!(here.files().contains(&name));
+        let text = mine.read_article(&taken.id).unwrap();
+        let image = text.split(['(', ')']).nth(1).unwrap();
+        assert_eq!(mine.read_image(&taken.id, image).unwrap(), PNG);
+        assert!(there.files().iter().all(|f| !is_image_file(f)));
+    }
+
+    #[test]
+    fn taking_an_address_saved_here_adds_only_a_missing_article() {
+        let (here, there) = (Scratch::new(), Scratch::new());
+        let (mine, theirs) = (here.store(), there.store());
+        let plain = |s: &Bookmarks, article: Option<&str>| {
+            s.save(
+                "https://x.test/a",
+                &details("A"),
+                "",
+                &[],
+                article,
+                &HashMap::new(),
+            )
+            .unwrap()
+            .bookmark
+        };
+        let kept = plain(&mine, None);
+        plain(&theirs, Some("Text\n"));
+        assert_eq!(mine.take_from(&theirs).unwrap(), 1);
+        assert_eq!(mine.list().unwrap().len(), 1);
+        assert_eq!(mine.read_article(&kept.id).unwrap(), "Text\n");
+        plain(&theirs, Some("Other\n"));
+        mine.take_from(&theirs).unwrap();
+        assert_eq!(mine.read_article(&kept.id).unwrap(), "Text\n");
+        assert!(theirs.list().unwrap().is_empty());
     }
 
     #[test]

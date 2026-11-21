@@ -19,6 +19,8 @@ targets:
     dependencies:
       - framework: Generated/pkmCoreFFI.xcframework
         embed: false
+      # The Share extension, embedded in the app.
+      - target: pkmShare
     configFiles:
       Debug: Config/Signing.xcconfig
       Release: Config/Signing.xcconfig
@@ -78,6 +80,8 @@ targets:
         ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
         # iCloud Drive is granted through a folder picker and kept as a bookmark.
         ENABLE_USER_SELECTED_FILES: readwrite
+        # The App Group, through which the Share extension hands over Bookmarks.
+        CODE_SIGN_ENTITLEMENTS: Config/App.entitlements
         "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": Config/Mac.entitlements
         ENABLE_HARDENED_RUNTIME: YES
         # Apple silicon only: smaller binary, no x86_64 slice.
@@ -88,6 +92,70 @@ targets:
           DEAD_CODE_STRIPPING: YES
     scheme:
       testTargets: [pkmTests]
+  # Saves the page of Safari's Share sheet (or the URL of another app) as a Bookmark. It
+  # shares the app's Bookmarks code and the core, and Saves into the App Group, from which the
+  # app takes the Bookmarks in; it must stay small, as an extension has little memory.
+  pkmShare:
+    type: app-extension
+    platform: auto
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - pkmShare
+      - Generated/pkmCore.swift
+      - pkm/Localizable.xcstrings
+      - pkm/Bookmarks/BookmarksModel.swift
+      - pkm/Bookmarks/PageDownloader.swift
+      - pkm/Bookmarks/SaveSheet.swift
+      - pkm/Bookmarks/SharedPage.swift
+      - pkm/Bookmarks/ShareHandoff.swift
+      - pkm/Tasks/MarkdownImages.swift
+    dependencies:
+      - framework: Generated/pkmCoreFFI.xcframework
+        embed: false
+    configFiles:
+      Debug: Config/Signing.xcconfig
+      Release: Config/Signing.xcconfig
+    info:
+      path: Config/ShareInfo.plist
+      properties:
+        CFBundleDisplayName: pkm
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            # Safari runs the script in the page and hands over its results; other apps share a URL.
+            NSExtensionJavaScriptPreprocessingFile: ShareExtension
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsWebPageWithMaxCount: 1
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.timhilt.pkm.share
+        PRODUCT_NAME: pkmShare
+        PRODUCT_MODULE_NAME: pkmShare
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: $(inherited)
+        MARKETING_VERSION: "${MARKETING_VERSION}"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "6.0"
+        SWIFT_EMIT_LOC_STRINGS: YES
+        LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+        STRING_CATALOG_GENERATE_SYMBOLS: NO
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_FILE: Config/ShareInfo.plist
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ENABLE_APP_SANDBOX: YES
+        ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
+        CODE_SIGN_ENTITLEMENTS: Config/App.entitlements
+        ENABLE_HARDENED_RUNTIME: YES
+        SKIP_INSTALL: YES
+        ARCHS: arm64
+      configs:
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: -Osize
+          DEAD_CODE_STRIPPING: YES
   # Run by `make test-ui` (iOS Simulator); not part of the unit-test scheme.
   pkmUITests:
     type: bundle.ui-testing

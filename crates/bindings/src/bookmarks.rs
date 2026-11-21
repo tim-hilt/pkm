@@ -7,6 +7,7 @@ use pkm_bookmarks::{
     PageComment, Place, Saved,
 };
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Why the Bookmarks couldn't be read or saved.
 #[derive(Debug, uniffi::Error)]
@@ -398,6 +399,12 @@ impl BookmarkStore {
     /// Takes the Article and its images off the Bookmark.
     pub fn drop_article(&self, id: String) -> Result<Bookmark, BookmarksError> {
         Ok(self.0.drop_article(&id)?)
+    }
+
+    /// Moves every Bookmark of `other` here, as the Share extension hands over what it Saved;
+    /// gives how many were taken.
+    pub fn take_from(&self, other: Arc<BookmarkStore>) -> Result<u64, BookmarksError> {
+        Ok(self.0.take_from(&other.0)? as u64)
     }
 
     /// Deletes the Bookmark with its Cover and images.

@@ -51,6 +51,10 @@ struct ContentView: View {
         }
         .onChange(of: cloud.progress, initial: true) { gallery.syncProgress = cloud.progress }
         .onChange(of: cloud.status, initial: true) { gallery.syncStatus = cloud.status }
+        // Takes in what the Share extension Saved, and tells it what is Saved.
+        .onChange(of: scenePhase, initial: true) {
+            bookmarks.exchangeWithShareExtension(tags: tasks.allTags.map(\.name))
+        }
         .onChange(of: scenePhase) {
             cloud.appBecame(inFront: scenePhase == .active)
             if scenePhase == .background { tasks.commit() }

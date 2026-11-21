@@ -14,7 +14,9 @@ extension BookmarksModel {
     static func forLaunch() -> BookmarksModel {
         let arguments = ProcessInfo.processInfo.arguments
         guard arguments.contains(where: { $0.hasPrefix("-UITesting") }) else {
-            return BookmarksModel(store: openOrTemporary(documentsFolder))
+            let model = BookmarksModel(store: openOrTemporary(documentsFolder))
+            model.handoff = .live
+            return model
         }
         let store = openOrTemporary(temporaryFolder())
         let opensArticle =
