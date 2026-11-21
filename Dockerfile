@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # The web app as a static site (issue 16): the core as wasm, the bundle, then
-# BusyBox httpd. The build stages run on the build platform; only the last
+# BusyBox httpd, with a CGI script that fetches pages. The build stages run on the build platform; only the last
 # stage is of the target platform (linux/arm64 for the Pi).
 
 # 1. The core as wasm in web/generated, built by the same script as `make web-wasm`.
@@ -41,10 +41,13 @@ COPY web/static static
 COPY --from=wasm /src/web/generated generated
 RUN bun run build
 
-# 3. The site on port 80.
-FROM lipanski/docker-static-website:latest
+# 3. The site on port 80, with the fetch script (ADR-0033): it needs a shell,
+# nc, ssl_client and nslookup, so the base is BusyBox, not a bare httpd.
+FROM busybox:musl
 EXPOSE 80
-COPY web/httpd.conf /home/static/httpd.conf
-COPY --from=web /src/web/dist /home/static
+WORKDIR /home/static
+COPY web/httpd.conf httpd.conf
+COPY --chmod=755 web/cgi-bin/fetch cgi-bin/fetch
+COPY --from=web /src/web/dist .
 # -c: without it httpd reads the file only as a fallback and ignores E404.
-CMD ["/busybox-httpd", "-f", "-v", "-p", "80", "-c", "httpd.conf"]
+CMD ["httpd", "-f", "-v", "-p", "80", "-h", "/home/static", "-c", "httpd.conf"]

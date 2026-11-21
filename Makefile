@@ -11,7 +11,7 @@ SIM ?= $(SIM_IPHONE)
 CORE_XCFRAMEWORK := apple/Generated/pkmCoreFFI.xcframework
 CORE_SOURCES := Cargo.toml Cargo.lock scripts/build-core-apple.sh $(shell find crates -type f)
 
-.PHONY: web-wasm web-install web-lint web-test web-test-browser web-record-references web-fmt web-dev core-apple apple-project build ipa test test-ios test-ui record-references lint fmt check release-notes sim run clean golden-fixtures bench visual-parity visual-parity-app screenshot
+.PHONY: web-wasm web-install web-lint web-test web-cgi-test web-test-browser web-record-references web-fmt web-dev core-apple apple-project build ipa test test-ios test-ui record-references lint fmt check release-notes sim run clean golden-fixtures bench visual-parity visual-parity-app screenshot
 
 # The web app (web/): the core as wasm in web/generated (rebuilt only when the
 # Rust sources change), Bun for packages and the dev server.
@@ -40,6 +40,11 @@ web-lint: web-install
 # Vitest on Node, against the real wasm.
 web-test: web-install web-wasm
 	cd web && bun run test
+
+# The fetch script against a local site, in the BusyBox image it runs in
+# (needs Docker).
+web-cgi-test:
+	docker run --rm -v '$(CURDIR)/web/cgi-bin:/cgi:ro' busybox:musl sh /cgi/fetch.test.sh
 
 # Renderer tests in Chromium with WebGPU (reference images, pixel probes); kept
 # out of `make check` as they need a GPU. Run `cd web && bunx playwright-core
@@ -130,7 +135,7 @@ fmt: web-fmt
 # The web app's formatting, lint, wasm build and Node tests, then fixes the
 # native formatting, lints and runs the Rust tests: cheapest failure first.
 # Run this before committing.
-check: web-lint web-test fmt lint
+check: web-lint web-test web-cgi-test fmt lint
 	cargo test --workspace --locked -q
 
 # Prints the next version and the changelog since the last tag (cliff.toml);

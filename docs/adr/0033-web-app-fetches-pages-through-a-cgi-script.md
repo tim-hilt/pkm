@@ -1,6 +1,6 @@
 # The web app fetches pages through a CGI script on its own server
 
-A browser can't fetch another site's page (CORS), so the web app couldn't Save a Bookmark from a pasted Address. The Docker image's BusyBox `httpd` runs a CGI script that downloads a page or image with BusyBox `wget` for the web app. Before downloading, it refuses anything but `http(s)`, private and LAN addresses (after every redirect), and anything that isn't HTML or an image. It also caps size and time. Pages Saved from a browser tab come through the bookmarklet instead, as the user sees them.
+A browser can't fetch another site's page (CORS), so the web app couldn't Save a Bookmark from a pasted Address. The Docker image's BusyBox `httpd` runs a CGI script that downloads a page or image for the web app, one raw request per hop with BusyBox `nc` and `ssl_client`: `wget` can't be stopped from following redirects. Before downloading, it refuses anything but `http(s)`, private and LAN addresses (after every redirect), and anything that isn't HTML or an image. It also caps size and time. Pages Saved from a browser tab come through the bookmarklet instead, as the user sees them.
 
 ## Considered Options
 
@@ -11,4 +11,5 @@ A browser can't fetch another site's page (CORS), so the web app couldn't Save a
 ## Consequences
 
 - The web app's server is no longer static files only.
+- The image's base is BusyBox (about 1.3 MB), as the script needs a shell and its applets.
 - Downloads are logged out: paywalled or login-only pages give no Article from a pasted Address.

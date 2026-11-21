@@ -7,6 +7,14 @@ A push to `main` that touches the web app builds `ghcr.io/tim-hilt/pkm`
 replaces the `pkm` container with the new image, removes the old one and
 reports to ntfy.
 
+## The fetch endpoint
+
+`GET /cgi-bin/fetch?url=<percent-encoded Address>` on the app's own origin
+(`web/cgi-bin/fetch`, run by BusyBox `httpd`, ADR-0033) downloads a page or
+image for the web app. It refuses other schemes than http(s), private and LAN
+hosts (every redirect hop checked), more than 10 MB or 20 s, and anything but
+HTML and images, with a status and a short reason. Test: `make web-cgi-test`.
+
 ## The Pi
 
 The services in `~/homelab/compose.yaml`:
