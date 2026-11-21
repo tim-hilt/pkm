@@ -1,6 +1,6 @@
 # Books
 
-The Context for PDFs and EPUBs to read and mark up. App-wide terms (Context, Item, Item ID, Delete, Appearance, Device, Cloud Backing, Sync) are in the [App glossary](../../GLOSSARY.md).
+The Context for PDFs and EPUBs to read and mark up. App-wide terms (Context, Item, Item ID, Delete, Appearance, Device, Cloud Backing, Sync, Reading Progress, and Markup with its Highlights, Comments and Highlight Colors) are in the [App glossary](../../GLOSSARY.md).
 
 ## Language
 
@@ -88,10 +88,6 @@ _Avoid_: Back, close
 A state of the Reader in which everything except the Book's pages is hidden.
 _Avoid_: Reading mode, focus mode, full screen
 
-**Reading Progress**:
-Where in a Book the user last left off. It moves back if the user goes back.
-_Avoid_: Bookmark, position, furthest page
-
 **Last Read**:
 When the Reader last showed a Book.
 _Avoid_: Last opened, recently opened
@@ -111,27 +107,3 @@ _Avoid_: Invert, night mode
 **Page Colors**:
 The paper and ink colors the user picks for Dark Pages.
 _Avoid_: Palette, page theme
-
-**Markup**:
-Everything the user adds on top of a Book: Highlights and Comments. Never part of the File.
-_Avoid_: Annotation
-
-**Highlight**:
-A passage of a Book's text marked in a Highlight Color. It may run across pages and may have a Comment.
-_Avoid_: Marker, annotation
-
-**Comment**:
-Text the user writes, belonging either to a Highlight or to a spot in the Book.
-_Avoid_: Note (that is a Context of its own), popup note, sticky note
-
-**Highlight Colors**:
-The colors a Highlight can have: six built-in ones, yellow first, plus the user's Custom Colors.
-_Avoid_: Palette, Page Colors
-
-**Custom Color**:
-A Highlight Color the user added. Unlike the built-in ones, it can be removed.
-_Avoid_: User color
-
-**Default Highlight Color**:
-The Highlight Color every new Highlight gets. Yellow unless the user picks another.
-_Avoid_: Last used color, current color

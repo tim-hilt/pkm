@@ -31,7 +31,7 @@ One written Markdown text in the Notes Context.
 _Avoid_: Page, document
 
 **Bookmark**:
-One saved web page in the Bookmarks Context.
+One saved web page in the Bookmarks Context, with or without its Article.
 _Avoid_: Link (that is a reference between items), favourite
 
 **Book**:
@@ -53,6 +53,36 @@ _Avoid_: Remove (that is one Item), clear
 **Link**:
 A reference from one item to another, possibly in another Context.
 _Avoid_: Bookmark, relation
+
+### Reading
+
+**Reading Progress**:
+Where in a Book or Article the user last left off. It moves back if the user goes back.
+_Avoid_: Bookmark, position, furthest page
+
+**Markup**:
+Everything the user adds on top of a Book or an Article: Highlights and Comments. Never part of what was read.
+_Avoid_: Annotation
+
+**Highlight**:
+A passage of a Book's or Article's text marked in a Highlight Color. It may run across pages or paragraphs and may have a Comment.
+_Avoid_: Marker, annotation
+
+**Comment**:
+Text the user writes, belonging either to a Highlight or to a spot in a Book or Article.
+_Avoid_: Note (that is a Context of its own), popup note, sticky note
+
+**Highlight Colors**:
+The colors a Highlight can have, the same in Books and Bookmarks: six built-in ones, yellow first, plus the user's Custom Colors.
+_Avoid_: Palette, Page Colors
+
+**Custom Color**:
+A Highlight Color the user added. Unlike the built-in ones, it can be removed.
+_Avoid_: User color
+
+**Default Highlight Color**:
+The Highlight Color every new Highlight gets. Yellow unless the user picks another.
+_Avoid_: Last used color, current color
 
 ### Look
 
