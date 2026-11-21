@@ -729,11 +729,13 @@ mod tests {
         use std::sync::{Arc, Mutex};
 
         use crate::{
-            Blob, BookStates, Books as BookFiles, ContextFolder, DirStorage, Drawings, Filters,
-            Merge, Notes as NoteFiles, Progress, Storage, SyncState, TagsFile, Tasks,
+            Blob, BookStates, Books as BookFiles, ColorsFile, ContextFolder, DirStorage, Drawings,
+            Filters, Merge, Notes as NoteFiles, Progress, Storage, SyncState, TagsFile, Tasks,
             sync_context_folders, sync_step,
         };
+        use pkm_base::highlight_colors::Preferences;
         use pkm_base::json;
+        use pkm_base::markup::Rgb;
         use pkm_books::library::Library;
 
         struct Scratch(PathBuf);
@@ -856,6 +858,30 @@ mod tests {
 
             fn take_calls(&self) -> Calls {
                 std::mem::take(&mut *self.storage.calls.lock().unwrap())
+            }
+        }
+
+        /// Puts the Highlight Colors preferences `bytes` into the Device `root`.
+        fn write_colors(root: &Scratch, bytes: &[u8]) {
+            let file = root.0.join(Preferences::FILE);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, bytes).unwrap();
+        }
+
+        /// One Sync step of the Highlight Colors file of the Device `root`,
+        /// which holds its Context folders and its state in `state`.
+        fn sync_colors(root: &Scratch, cloud: &Cloud) {
+            let dir = root.0.join(ColorsFile::FOLDER);
+            fs::create_dir_all(&dir).unwrap();
+            let state = SyncState::open(root.0.join("state").join("Colors")).unwrap();
+            let folders = [ContextFolder {
+                dir: &dir,
+                state: &state,
+                storage: &cloud.storage,
+                merge: Arc::new(ColorsFile),
+            }];
+            for outcome in sync_context_folders(&folders, &AtomicBool::new(false), &|_| {}) {
+                assert!(outcome.error.is_none(), "{:?}", outcome.error);
             }
         }
 
@@ -2746,28 +2772,47 @@ mod tests {
         #[test]
         fn custom_colors_are_united_and_a_removal_beats_a_concurrent_use() {
             let cloud = Cloud::new();
-            let (phone, tablet) = (Device::new(), Device::new());
-            phone.write_book("Book.pdf", b"%PDF-one");
-            tablet.write_book("Book.pdf", b"%PDF-one");
-            phone.write_book_state(
-        "preferences.json",
-        br#"{"custom_colors":{"0000000000001-a":32896,"0000000000002-b":9849600},"default_color":"Green","default_color_at":10,"removed_colors":{"0000000000001-a":9}}"#,
-    );
-            tablet.write_book_state(
-        "preferences.json",
-        br#"{"custom_colors":{"0000000000001-a":32896,"0000000000003-c":255},"default_color":"Blue","default_color_at":11}"#,
-    );
+            let (phone, tablet) = (Scratch::new("phone"), Scratch::new("tablet"));
+            write_colors(
+                &phone,
+                br#"{"custom_colors":{"0000000000001-a":32896,"0000000000002-b":9849600},"default_color":"Green","default_color_at":10,"removed_colors":{"0000000000001-a":9}}"#,
+            );
+            write_colors(
+                &tablet,
+                br#"{"custom_colors":{"0000000000001-a":32896,"0000000000003-c":255},"default_color":"Blue","default_color_at":11}"#,
+            );
 
-            phone.sync_books(&cloud);
-            tablet.sync_books(&cloud);
-            phone.sync_books(&cloud);
+            sync_colors(&phone, &cloud);
+            sync_colors(&tablet, &cloud);
+            sync_colors(&phone, &cloud);
 
-            let merged = json(&phone.read_book_state("preferences.json").unwrap());
+            let merged = json(&fs::read(phone.0.join(Preferences::FILE)).unwrap());
             let colors = merged.get("custom_colors").unwrap().as_object().unwrap();
             assert!(colors.get("0000000000001-a").is_none());
             assert!(colors.get("0000000000002-b").is_some());
             assert!(colors.get("0000000000003-c").is_some());
             assert_eq!(merged.get("default_color").unwrap().as_str(), Some("Blue"));
+        }
+
+        #[test]
+        fn a_custom_color_added_on_one_device_reaches_the_other_through_the_colors_file() {
+            let cloud = Cloud::new();
+            let (phone, tablet) = (Scratch::new("phone"), Scratch::new("tablet"));
+            let library = |device: &Scratch| Library::open(device.0.join("Books")).unwrap();
+            let teal = Rgb {
+                r: 0,
+                g: 128,
+                b: 128,
+            };
+            let color = library(&phone).add_custom_color(teal, 100).unwrap();
+
+            sync_colors(&phone, &cloud);
+            sync_colors(&tablet, &cloud);
+
+            assert_eq!(
+                library(&tablet).highlight_colors().colors.last(),
+                Some(&color)
+            );
         }
 
         #[test]

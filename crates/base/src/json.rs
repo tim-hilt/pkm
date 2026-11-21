@@ -194,6 +194,34 @@ impl Object {
     }
 }
 
+// --- Building ---------------------------------------------------------------
+
+/// An object with `members`, sorted by key: the layout of the app's state
+/// files, so that two Devices write the same bytes for the same content.
+pub fn object<K: Into<String>>(members: impl IntoIterator<Item = (K, Value)>) -> Value {
+    let mut members: Vec<(String, Value)> =
+        members.into_iter().map(|(k, v)| (k.into(), v)).collect();
+    members.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut object = Object::new();
+    for (key, value) in members {
+        object.insert(key, value);
+    }
+    Value::Object(object)
+}
+
+pub fn number(n: impl Into<u64>) -> Value {
+    Value::Number(n.into() as f64)
+}
+
+pub fn string(text: &str) -> Value {
+    Value::String(text.to_owned())
+}
+
+/// The JSON document in `bytes`; none if they aren't one.
+pub fn parse_bytes(bytes: &[u8]) -> Option<Value> {
+    parse(std::str::from_utf8(bytes).ok()?).ok()
+}
+
 // --- Errors ---------------------------------------------------------------
 
 /// Why a document was rejected, and where.

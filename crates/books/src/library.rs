@@ -16,13 +16,13 @@ use crate::book_cache::BookCache;
 pub use crate::details::format_of;
 use crate::details::{self, Details, Format, Size};
 use crate::epub::{self, Epub};
-use crate::files::{self, flush_ordered, unique_name, write_atomically};
+use crate::files::{self, flush_ordered, ignore_not_found, unique_name, write_atomically};
 use crate::listing::{Listing, Sort, SortKey, progress_changes_gallery};
 use crate::markup::{Anchor, Highlight, Markup, PageComment, Rgb};
-use crate::preferences::{HighlightColor, HighlightColors, Preferences};
 use crate::progress::{Place, ReadingProgress};
 use crate::state::{self, BookState};
 use crate::store::Folder;
+use pkm_base::highlight_colors::{HighlightColor, HighlightColors, Preferences};
 use pkm_base::item_id::ItemId;
 use pkm_base::sha256::Sha256;
 use std::collections::HashMap;
@@ -313,17 +313,20 @@ impl Library {
     pub fn open(root: impl Into<PathBuf>) -> io::Result<Self> {
         let folder = Folder::open(root)?;
         let books = index(folder.scan()?);
-        Ok(Library {
+        let library = Library {
             folder,
             books: Mutex::new(books),
             writing: Mutex::new(()),
             details: BookCache::new(),
-        })
+        };
+        library.migrate_legacy_preferences()?;
+        Ok(library)
     }
 
     /// Finds the Books in the folder again, so Files added, renamed or deleted
     /// outside the app, and states changed by Sync, are seen.
     fn refresh(&self) -> io::Result<()> {
+        self.migrate_legacy_preferences()?;
         self.rescan(&mut self.catalog())
     }
 
@@ -771,18 +774,39 @@ impl Library {
     }
 
     fn read_preferences(&self) -> Preferences {
-        Preferences::decode(fs::read(self.folder.preferences()).ok().as_deref())
+        Preferences::decode(fs::read(self.folder.colors()).ok().as_deref())
+    }
+
+    fn write_preferences(&self, preferences: &Preferences) -> io::Result<()> {
+        let path = self.folder.colors();
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir)?;
+        }
+        write_atomically(&self.folder.staging(), &path, &preferences.encode())
     }
 
     fn edit_preferences(&self, change: impl FnOnce(&mut Preferences)) -> io::Result<()> {
         let _writing = self.writing();
         let mut preferences = self.read_preferences();
         change(&mut preferences);
-        write_atomically(
-            &self.folder.staging(),
-            &self.folder.preferences(),
-            &preferences.encode(),
-        )
+        self.write_preferences(&preferences)
+    }
+
+    /// Carries the Preferences that older versions kept in the Books folder
+    /// (and Sync may still bring) over to the shared file, merged with what is
+    /// there, then deletes them (ADR-0034). Does nothing if there are none.
+    fn migrate_legacy_preferences(&self) -> io::Result<()> {
+        let legacy = self.folder.legacy_preferences();
+        if !legacy.exists() {
+            return Ok(());
+        }
+        let _writing = self.writing();
+        let Ok(old) = fs::read(&legacy) else {
+            return Ok(());
+        };
+        let merged = Preferences::decode(Some(&old)).merged(&self.read_preferences());
+        self.write_preferences(&merged)?;
+        ignore_not_found(fs::remove_file(legacy))
     }
 
     /// Makes `change` to the state of Book `id`, writing it if it changed.
@@ -3386,7 +3410,8 @@ mod tests {
     fn corrupt_preferences_read_as_yellow_and_are_replaced_by_the_next_choice() {
         let scratch = Scratch::new();
         let library = scratch.library();
-        fs::write(library.folder.preferences(), b"garbage").unwrap();
+        fs::create_dir_all(scratch.0.join("Colors")).unwrap();
+        fs::write(library.folder.colors(), b"garbage").unwrap();
         let corrupt = library.highlight_colors();
         assert_eq!(corrupt.default_color.id, "Yellow");
         assert_eq!(corrupt.colors.len(), 6);
@@ -3394,6 +3419,34 @@ mod tests {
         library.set_default_highlight_color("Red").unwrap();
 
         assert_eq!(library.highlight_colors().default_color.id, "Red");
+    }
+
+    #[test]
+    fn old_preferences_in_the_books_folder_move_to_the_shared_file() {
+        let scratch = Scratch::new();
+        let library = scratch.library();
+        let old = r#"{"custom_colors":{"0000000000001-x":32896},"default_color":"Green"}"#;
+        let legacy = scratch.0.join("library/.state/preferences.json");
+        fs::write(&legacy, old).unwrap();
+
+        let reopened = scratch.library();
+
+        assert!(!legacy.exists());
+        let colors = reopened.highlight_colors();
+        assert_eq!(colors.default_color.id, "Green");
+        assert_eq!(colors.colors[6].id, "0000000000001-x");
+        let shared = fs::read_to_string(scratch.0.join("Colors/colors.json")).unwrap();
+        assert!(shared.contains("0000000000001-x"));
+
+        // Sync may bring the old file after the move: the next listing takes it.
+        fs::write(
+            &legacy,
+            r#"{"custom_colors":{"0000000000002-y":255},"default_color":null}"#,
+        )
+        .unwrap();
+        library.books().unwrap();
+        assert!(!legacy.exists());
+        assert_eq!(library.highlight_colors().colors.len(), 8);
     }
 
     #[test]
@@ -3415,14 +3468,15 @@ mod tests {
     }
 
     #[test]
-    fn preferences_are_a_hidden_file_in_the_state_folder_and_no_book() {
+    fn preferences_are_a_file_beside_the_context_folders_and_no_book() {
         let scratch = Scratch::new();
         let library = scratch.library();
         let book = import_new(&library, &scratch.file("a.pdf", PDF));
 
         library.set_default_highlight_color("Blue").unwrap();
 
-        assert!(scratch.0.join("library/.state/preferences.json").is_file());
+        assert!(scratch.0.join("Colors/colors.json").is_file());
+        assert!(!scratch.0.join("library/.state/preferences.json").exists());
         assert_eq!(library.books().unwrap(), vec![book]);
         assert_eq!(
             fs::read_dir(scratch.0.join("library/.staging"))

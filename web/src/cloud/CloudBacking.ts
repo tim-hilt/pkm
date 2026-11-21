@@ -108,6 +108,8 @@ export class CloudBacking {
   private readonly notesState: SyncState;
   private readonly tags: FileFolder;
   private readonly tagsState: SyncState;
+  private readonly colors: FileFolder;
+  private readonly colorsState: SyncState;
   private readonly filters: FileFolder;
   private readonly filtersState: SyncState;
   private report: SyncReport = {};
@@ -124,6 +126,7 @@ export class CloudBacking {
   private readonly tasksIncoming = { known: false };
   private readonly notesIncoming = { known: false };
   private readonly tagsIncoming = { known: false };
+  private readonly colorsIncoming = { known: false };
   private readonly filtersIncoming = { known: false };
 
   private constructor(
@@ -144,6 +147,8 @@ export class CloudBacking {
     this.notesState = new SyncState(storage, "Notes");
     this.tags = new FileFolder(storage, "Tags");
     this.tagsState = new SyncState(storage, "Tags");
+    this.colors = new FileFolder(storage, "Colors");
+    this.colorsState = new SyncState(storage, "Colors");
     this.filters = new FileFolder(storage, "Filters");
     this.filtersState = new SyncState(storage, "Filters");
     tabs.listen((message) => void this.heard(message));
@@ -168,13 +173,14 @@ export class CloudBacking {
     return data && JSON.parse(new TextDecoder().decode(data));
   }
 
-  /** Throws `ConnectFailed` unless the server takes `credentials` and has (or now has) its `pkm/Drawings`, `pkm/Books`, `pkm/Tasks`, `pkm/Notes`, `pkm/Tags` and `pkm/Filters` folders. */
+  /** Throws `ConnectFailed` unless the server takes `credentials` and has (or now has) its `pkm/Drawings`, `pkm/Books`, `pkm/Tasks`, `pkm/Notes`, `pkm/Tags`, `pkm/Colors` and `pkm/Filters` folders. */
   private async check({ url, username, password }: Credentials): Promise<void> {
     let drawings;
     let books;
     let tasks;
     let notes;
     let tags;
+    let colors;
     let filters;
     try {
       drawings = this.core.webDav(url, username, password);
@@ -182,12 +188,13 @@ export class CloudBacking {
       tasks = this.core.webDavForTasks(url, username, password);
       notes = this.core.webDavForNotes(url, username, password);
       tags = this.core.webDavForTags(url, username, password);
+      colors = this.core.webDavForColors(url, username, password);
       filters = this.core.webDavForFilters(url, username, password);
     } catch {
       throw new ConnectFailed("notHttps");
     }
     try {
-      for (const protocol of [drawings, books, tasks, notes, tags, filters]) {
+      for (const protocol of [drawings, books, tasks, notes, tags, colors, filters]) {
         const result = await runExchange(protocol.connect(), this.send);
         if (result.error) throw new ConnectFailed(result.error as ConnectReason);
       }
@@ -197,6 +204,7 @@ export class CloudBacking {
       tasks.free();
       notes.free();
       tags.free();
+      colors.free();
       filters.free();
     }
   }
@@ -420,6 +428,11 @@ export class CloudBacking {
       credentials.username,
       credentials.password,
     );
+    const colorsProtocol = this.core.webDavForColors(
+      credentials.url,
+      credentials.username,
+      credentials.password,
+    );
     const filtersProtocol = this.core.webDavForFilters(
       credentials.url,
       credentials.username,
@@ -428,7 +441,7 @@ export class CloudBacking {
     const now = Date.now();
     // One step per folder, in order, all against the same server: Drawings,
     // the Book Files, then their state, which the core's Books merge merges,
-    // the Task files, the Note files, the Tags file and the Filters.
+    // the Task files, the Note files, the Tags file, the Highlight Colors file and the Filters.
     const plans = [
       {
         run: this.core.syncRun(now),
@@ -477,6 +490,14 @@ export class CloudBacking {
         state: this.tagsState,
         incoming: this.tagsIncoming,
         reports: "tasks" as const,
+      },
+      {
+        run: this.core.syncRunForColors(now),
+        protocol: colorsProtocol,
+        files: this.colors,
+        state: this.colorsState,
+        incoming: this.colorsIncoming,
+        reports: undefined,
       },
       {
         run: this.core.syncRunForFilters(now),
@@ -539,6 +560,7 @@ export class CloudBacking {
       tasksProtocol.free();
       notesProtocol.free();
       tagsProtocol.free();
+      colorsProtocol.free();
       filtersProtocol.free();
     }
     if (this.schedule !== schedule) return;

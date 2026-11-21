@@ -1,14 +1,17 @@
-//! Preferences: per-user choices that belong to the Library, not to a Book. Stored
+//! The Highlight Colors preferences, shared by Books and Bookmarks (ADR-0034):
+//! `Colors/colors.json` beside the Context folders, like the Tags. Stored
 //! as one JSON object: `default_color` references the Default Highlight Color, a
 //! built-in color by its name, a Custom Color by its ID, which is never a color
 //! name; `custom_colors` maps each Custom Color's ID to its color (sRGB as
 //! `0xRRGGBB`). An ID starts with the time it was added, so sorting IDs gives
 //! the order added.
 
-use crate::json::{self, number, object, string};
+use crate::item_id::ItemId;
+use crate::json::{self, Value, number, object, string};
 use crate::markup::Rgb;
-use pkm_base::json::Value;
+use crate::random::Entropy;
 use std::collections::BTreeMap;
+
 /// One of the Highlight Colors that always exist.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BuiltInColor {
@@ -64,7 +67,7 @@ impl From<BuiltInColor> for HighlightColor {
 
 /// The choices stored in the Preferences.
 #[derive(Debug, Default, PartialEq)]
-pub(crate) struct Preferences {
+pub struct Preferences {
     default_color: Option<String>,
     /// When `default_color` was last set; 0 if before this Device recorded it.
     default_color_at: u64,
@@ -76,9 +79,29 @@ pub(crate) struct Preferences {
 }
 
 impl Preferences {
+    /// Where the file is, from the folder that holds the Context folders.
+    pub const FILE: &'static str = "Colors/colors.json";
+
+    /// Whether `bytes` are a preferences file.
+    pub fn is_file(bytes: &[u8]) -> bool {
+        json::parse_bytes(bytes)
+            .is_some_and(|j| j.get("custom_colors").is_some() || j.get("default_color").is_some())
+    }
+
+    /// What the files `local` and `remote` merge to; none if either isn't a
+    /// preferences file. `base`, the file at the last Sync, isn't needed: the
+    /// merge records its removals.
+    pub fn merge_files(_base: Option<&[u8]>, local: &[u8], remote: &[u8]) -> Option<Vec<u8>> {
+        if !(Self::is_file(local) && Self::is_file(remote)) {
+            return None;
+        }
+        let merged = Self::decode(Some(local)).merged(&Self::decode(Some(remote)));
+        Some(merged.encode())
+    }
+
     /// The Preferences stored as `bytes`; the defaults if they are missing or unreadable.
-    pub(crate) fn decode(bytes: Option<&[u8]>) -> Self {
-        let json = bytes.and_then(json::parse).unwrap_or(Value::Null);
+    pub fn decode(bytes: Option<&[u8]>) -> Self {
+        let json = bytes.and_then(json::parse_bytes).unwrap_or(Value::Null);
         let mut custom: Vec<_> = json
             .get("custom_colors")
             .and_then(Value::as_object)
@@ -113,7 +136,7 @@ impl Preferences {
         prefs
     }
 
-    pub(crate) fn encode(&self) -> Vec<u8> {
+    pub fn encode(&self) -> Vec<u8> {
         let custom = object(
             self.custom
                 .iter()
@@ -140,7 +163,7 @@ impl Preferences {
     /// These Preferences and another Device's, as one: Custom Colors united,
     /// a removal kept, and the latest Default Highlight Color. Commutative and
     /// idempotent.
-    pub(crate) fn merged(&self, other: &Preferences) -> Preferences {
+    pub fn merged(&self, other: &Preferences) -> Preferences {
         let mut custom: BTreeMap<String, Rgb> = self.custom.iter().cloned().collect();
         for (id, rgb) in &other.custom {
             custom
@@ -174,7 +197,7 @@ impl Preferences {
     /// The Highlight Colors to choose from and the one new Highlights get. The
     /// default is yellow if none is stored, or it references a color that
     /// doesn't exist (any more).
-    pub(crate) fn highlight_colors(&self) -> HighlightColors {
+    pub fn highlight_colors(&self) -> HighlightColors {
         let custom = self.custom.iter().map(|(id, rgb)| HighlightColor {
             id: id.clone(),
             rgb: *rgb,
@@ -199,12 +222,12 @@ impl Preferences {
 
     /// Makes the color `id` the Default Highlight Color. It doesn't check that
     /// `id` is a color.
-    pub(crate) fn set_default_color(&mut self, id: &str) {
+    pub fn set_default_color(&mut self, id: &str) {
         self.set_default_color_at(id, 0);
     }
 
     /// Makes the color `id` the Default Highlight Color, set at `at`.
-    pub(crate) fn set_default_color_at(&mut self, id: &str, at: u64) {
+    pub fn set_default_color_at(&mut self, id: &str, at: u64) {
         self.default_color = Some(id.to_owned());
         self.default_color_at = at;
     }
@@ -212,10 +235,10 @@ impl Preferences {
     /// Adds a new Custom Color `rgb`, added at `now` in milliseconds since the
     /// Unix epoch, and returns it. It comes after every Custom Color already
     /// there, even if clocks disagree.
-    pub(crate) fn add_custom_color(&mut self, rgb: Rgb, now: u64) -> HighlightColor {
+    pub fn add_custom_color(&mut self, rgb: Rgb, now: u64) -> HighlightColor {
         let after = self.custom.last().and_then(|(id, _)| added_at(id));
         let time = after.map_or(now, |last| now.max(last + 1));
-        let id = format!("{time:013x}-{}", crate::state::new_id());
+        let id = format!("{time:013x}-{}", ItemId::new(&mut Entropy::from_system()));
         self.custom.push((id.clone(), rgb));
         HighlightColor {
             id,
@@ -225,7 +248,7 @@ impl Preferences {
     }
 
     /// Removes Custom Color `id`, removed at `at`.
-    pub(crate) fn remove_custom_color_at(&mut self, id: &str, at: u64) {
+    pub fn remove_custom_color_at(&mut self, id: &str, at: u64) {
         if self.custom.iter().any(|(custom, _)| custom == id) {
             self.custom.retain(|(custom, _)| custom != id);
             self.removed.insert(id.to_owned(), at);
@@ -282,6 +305,18 @@ mod tests {
 
     fn reloaded(prefs: &Preferences) -> Preferences {
         Preferences::decode(Some(&prefs.encode()))
+    }
+
+    #[test]
+    fn files_merge_and_bytes_that_are_no_preferences_are_left_alone() {
+        let left = br#"{"custom_colors":{"0000000000001-a":32896},"default_color":"Green"}"#;
+        let right = br#"{"custom_colors":{"0000000000002-b":9849600},"default_color":"Blue"}"#;
+        let merged = Preferences::merge_files(None, left, right).unwrap();
+        let merged = String::from_utf8(merged).unwrap();
+        assert!(merged.contains("0000000000001-a") && merged.contains("0000000000002-b"));
+        assert!(Preferences::is_file(left));
+        assert!(!Preferences::is_file(b"garbage") && !Preferences::is_file(b"{}"));
+        assert_eq!(Preferences::merge_files(None, left, b"garbage"), None);
     }
 
     #[test]

@@ -2,6 +2,7 @@
 //! helpers (Book Search, Table of Contents, Jump) and Markup. The logic lives in
 //! `pkm-books`.
 
+use pkm_base::highlight_colors::{HighlightColor, HighlightColors};
 use pkm_books::book_text::{self, Chunk, Found};
 use pkm_books::contents::{self, ContentsEntry, Entry, Position};
 use pkm_books::details::{Details, Format, Size};
@@ -13,7 +14,6 @@ use pkm_books::listing::{self, Sort, SortKey};
 use pkm_books::markup::{
     Anchor, EpubPosition, Highlight, Markup, PageComment, PageRects, Rect, Rgb,
 };
-use pkm_books::preferences::{HighlightColor, HighlightColors};
 use pkm_books::progress::{Place, ReadingProgress};
 use pkm_books::search::{Query, WordMatch};
 use std::path::Path;

@@ -9,12 +9,12 @@
 //! merge never brings back something the user removed.
 
 use crate::json::{self, number, object, string};
-use crate::markup::{Highlight, Markup, PageComment, Rgb};
+use crate::markup::{Markup, Rgb};
 use crate::progress::{self, ReadingProgress};
 use pkm_base::item_id::ItemId;
 use pkm_base::json::Value;
+use pkm_base::markup::MarkupChanges;
 use pkm_base::random::Entropy;
-use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BookState {
@@ -35,106 +35,39 @@ pub(crate) struct BookState {
     pub(crate) changes: Changes,
 }
 
-/// When each part of a Book's state last changed, and what was deleted.
+/// When the File and the Markup last changed, and what was deleted.
 /// Times are milliseconds since the Unix epoch; an absent time means "before
 /// this Device recorded times", which loses to any recorded one.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Changes {
     /// The File's name and SHA-256 changed together.
     file_at: u64,
-    highlight_colors: BTreeMap<String, u64>,
-    highlight_comments: BTreeMap<String, u64>,
-    /// Highlight Comments that were deleted, and when.
-    deleted_highlight_comments: BTreeMap<String, u64>,
-    page_comment_texts: BTreeMap<String, u64>,
-    /// Highlights that were removed, and when.
-    deleted_highlights: BTreeMap<String, u64>,
-    /// Page Comments that were removed, or emptied, and when.
-    deleted_page_comments: BTreeMap<String, u64>,
+    markup: MarkupChanges,
 }
 
 impl Changes {
     fn is_empty(&self) -> bool {
-        self.file_at == 0
-            && self.highlight_colors.is_empty()
-            && self.highlight_comments.is_empty()
-            && self.deleted_highlight_comments.is_empty()
-            && self.page_comment_texts.is_empty()
-            && self.deleted_highlights.is_empty()
-            && self.deleted_page_comments.is_empty()
+        self.file_at == 0 && self.markup.is_empty()
     }
 
     fn merged(&self, other: &Changes) -> Changes {
         Changes {
             file_at: self.file_at.max(other.file_at),
-            highlight_colors: latest_times(&self.highlight_colors, &other.highlight_colors),
-            highlight_comments: latest_times(&self.highlight_comments, &other.highlight_comments),
-            deleted_highlight_comments: latest_times(
-                &self.deleted_highlight_comments,
-                &other.deleted_highlight_comments,
-            ),
-            page_comment_texts: latest_times(&self.page_comment_texts, &other.page_comment_texts),
-            deleted_highlights: latest_times(&self.deleted_highlights, &other.deleted_highlights),
-            deleted_page_comments: latest_times(
-                &self.deleted_page_comments,
-                &other.deleted_page_comments,
-            ),
+            markup: self.markup.merged(&other.markup),
         }
     }
 
     fn to_json(&self) -> Value {
-        object([
-            ("file_at", number(self.file_at)),
-            ("highlight_colors", times_json(&self.highlight_colors)),
-            ("highlight_comments", times_json(&self.highlight_comments)),
-            (
-                "deleted_highlight_comments",
-                times_json(&self.deleted_highlight_comments),
-            ),
-            ("page_comment_texts", times_json(&self.page_comment_texts)),
-            ("deleted_highlights", times_json(&self.deleted_highlights)),
-            (
-                "deleted_page_comments",
-                times_json(&self.deleted_page_comments),
-            ),
-        ])
+        let file_at = ("file_at", number(self.file_at));
+        object(std::iter::once(file_at).chain(self.markup.members()))
     }
 
     fn from_json(json: &Value) -> Changes {
-        let times = |key: &str| read_times(json.get(key));
         Changes {
             file_at: json.get("file_at").and_then(Value::as_u64).unwrap_or(0),
-            highlight_colors: times("highlight_colors"),
-            highlight_comments: times("highlight_comments"),
-            deleted_highlight_comments: times("deleted_highlight_comments"),
-            page_comment_texts: times("page_comment_texts"),
-            deleted_highlights: times("deleted_highlights"),
-            deleted_page_comments: times("deleted_page_comments"),
+            markup: MarkupChanges::from_json(json),
         }
     }
-}
-
-fn latest_times(a: &BTreeMap<String, u64>, b: &BTreeMap<String, u64>) -> BTreeMap<String, u64> {
-    let mut latest = a.clone();
-    for (id, at) in b {
-        latest
-            .entry(id.clone())
-            .and_modify(|known| *known = (*known).max(*at))
-            .or_insert(*at);
-    }
-    latest
-}
-
-fn times_json(times: &BTreeMap<String, u64>) -> Value {
-    object(times.iter().map(|(id, at)| (id.as_str(), number(*at))))
-}
-
-fn read_times(json: Option<&Value>) -> BTreeMap<String, u64> {
-    json.and_then(Value::as_object)
-        .into_iter()
-        .flat_map(|times| times.iter())
-        .filter_map(|(id, at)| Some((id.to_owned(), at.as_u64()?)))
-        .collect()
 }
 
 impl BookState {
@@ -242,54 +175,37 @@ impl BookState {
     }
 
     pub(crate) fn set_highlight_color(&mut self, id: &str, color: Rgb, at: u64) {
-        self.markup.set_highlight_color(id, color);
-        if self.markup.highlights.iter().any(|h| h.id == id) {
-            self.changes.highlight_colors.insert(id.to_owned(), at);
-        }
+        self.markup
+            .set_highlight_color(&mut self.changes.markup, id, color, at);
     }
 
     pub(crate) fn set_highlight_comment(&mut self, id: &str, text: &str, at: u64) {
-        self.markup.set_highlight_comment(id, text);
-        if self.markup.highlights.iter().any(|h| h.id == id) {
-            self.changes.highlight_comments.insert(id.to_owned(), at);
-            if text.is_empty() {
-                self.changes
-                    .deleted_highlight_comments
-                    .insert(id.to_owned(), at);
-            } else {
-                self.changes.deleted_highlight_comments.remove(id);
-            }
-        }
+        self.markup
+            .set_highlight_comment(&mut self.changes.markup, id, text, at);
     }
 
     pub(crate) fn remove_highlight(&mut self, id: &str, at: u64) {
-        self.markup.remove_highlight(id);
-        self.changes.highlight_colors.remove(id);
-        self.changes.highlight_comments.remove(id);
-        self.changes.deleted_highlight_comments.remove(id);
-        self.changes.deleted_highlights.insert(id.to_owned(), at);
+        self.markup
+            .remove_highlight(&mut self.changes.markup, id, at);
     }
 
     pub(crate) fn set_page_comment_text(&mut self, id: &str, text: &str, at: u64) {
-        self.markup.set_page_comment_text(id, text);
-        if self.markup.page_comments.iter().any(|c| c.id == id) {
-            self.changes.page_comment_texts.insert(id.to_owned(), at);
-        } else {
-            self.changes.deleted_page_comments.insert(id.to_owned(), at);
-        }
+        self.markup
+            .set_page_comment_text(&mut self.changes.markup, id, text, at);
     }
 
     pub(crate) fn remove_page_comment(&mut self, id: &str, at: u64) {
-        self.markup.remove_page_comment(id);
-        self.changes.page_comment_texts.remove(id);
-        self.changes.deleted_page_comments.insert(id.to_owned(), at);
+        self.markup
+            .remove_page_comment(&mut self.changes.markup, id, at);
     }
 }
 
 /// The Markup, Reading Progress and change times of two states, as one.
 fn merge_content(a: &BookState, b: &BookState) -> Content {
     Content {
-        markup: merge_markup(a, b),
+        markup: a
+            .markup
+            .merged(&a.changes.markup, &b.markup, &b.changes.markup),
         progress: latest_progress(a.progress, b.progress),
         changes: a.changes.merged(&b.changes),
     }
@@ -298,134 +214,7 @@ fn merge_content(a: &BookState, b: &BookState) -> Content {
 struct Content {
     markup: Markup,
     progress: Option<ReadingProgress>,
-    pub(crate) changes: Changes,
-}
-
-/// The later of two values; a tie goes to the smaller value, so the result
-/// doesn't depend on the order the two states are merged in.
-fn later<T: Ord>(a: T, at_a: u64, b: T, at_b: u64) -> T {
-    match at_a.cmp(&at_b) {
-        std::cmp::Ordering::Greater => a,
-        std::cmp::Ordering::Less => b,
-        std::cmp::Ordering::Equal => a.min(b),
-    }
-}
-
-fn time_of(times: &BTreeMap<String, u64>, id: &str) -> u64 {
-    times.get(id).copied().unwrap_or(0)
-}
-
-/// A key that orders a Highlight's unchanging parts, for a deterministic tie.
-fn highlight_key(h: &Highlight) -> String {
-    format!("{:?}|{}|{}", h.anchor, h.quoted_text, h.created)
-}
-
-fn page_comment_key(c: &PageComment) -> String {
-    format!("{:?}|{}", c.place, c.created)
-}
-
-fn merge_markup(a: &BookState, b: &BookState) -> Markup {
-    let mut highlights: BTreeMap<&str, &Highlight> = BTreeMap::new();
-    for h in a.markup.highlights.iter().chain(&b.markup.highlights) {
-        highlights.insert(&h.id, h);
-    }
-    let merged_highlights = highlights
-        .into_iter()
-        .filter(|(id, _)| {
-            !a.changes.deleted_highlights.contains_key(*id)
-                && !b.changes.deleted_highlights.contains_key(*id)
-        })
-        .map(|(id, _)| {
-            let left = a.markup.highlights.iter().find(|h| h.id == id);
-            let right = b.markup.highlights.iter().find(|h| h.id == id);
-            match (left, right) {
-                (Some(left), Some(right)) => merge_highlight(left, a, right, b),
-                (Some(one), None) | (None, Some(one)) => one.clone(),
-                (None, None) => unreachable!("the id came from one of them"),
-            }
-        })
-        .collect::<Vec<_>>();
-
-    let mut comments: BTreeMap<&str, &PageComment> = BTreeMap::new();
-    for c in a.markup.page_comments.iter().chain(&b.markup.page_comments) {
-        comments.insert(&c.id, c);
-    }
-    let merged_comments = comments
-        .into_iter()
-        .filter(|(id, _)| {
-            !a.changes.deleted_page_comments.contains_key(*id)
-                && !b.changes.deleted_page_comments.contains_key(*id)
-        })
-        .map(|(id, _)| {
-            let left = a.markup.page_comments.iter().find(|c| c.id == id);
-            let right = b.markup.page_comments.iter().find(|c| c.id == id);
-            match (left, right) {
-                (Some(left), Some(right)) => merge_comment(left, a, right, b),
-                (Some(one), None) | (None, Some(one)) => one.clone(),
-                (None, None) => unreachable!("the id came from one of them"),
-            }
-        })
-        .collect::<Vec<_>>();
-
-    let mut markup = Markup {
-        highlights: merged_highlights,
-        page_comments: merged_comments,
-    };
-    markup
-        .highlights
-        .sort_by(|x, y| (x.created, &x.id).cmp(&(y.created, &y.id)));
-    markup
-        .page_comments
-        .sort_by(|x, y| (x.created, &x.id).cmp(&(y.created, &y.id)));
-    markup
-}
-
-fn merge_highlight(a: &Highlight, left: &BookState, b: &Highlight, right: &BookState) -> Highlight {
-    let mut merged = if highlight_key(a) <= highlight_key(b) {
-        a.clone()
-    } else {
-        b.clone()
-    };
-    let color = later(
-        a.color.packed(),
-        time_of(&left.changes.highlight_colors, &a.id),
-        b.color.packed(),
-        time_of(&right.changes.highlight_colors, &b.id),
-    );
-    merged.color = Rgb::unpacked(color).unwrap_or(merged.color);
-    let comment = |h: &Highlight, state: &BookState| {
-        let set = time_of(&state.changes.highlight_comments, &h.id);
-        let deleted = time_of(&state.changes.deleted_highlight_comments, &h.id);
-        if deleted > set {
-            (None, deleted)
-        } else {
-            (h.comment.clone(), set)
-        }
-    };
-    let (left_comment, left_at) = comment(a, left);
-    let (right_comment, right_at) = comment(b, right);
-    merged.comment = later(left_comment, left_at, right_comment, right_at);
-    merged
-}
-
-fn merge_comment(
-    a: &PageComment,
-    left: &BookState,
-    b: &PageComment,
-    right: &BookState,
-) -> PageComment {
-    let mut merged = if page_comment_key(a) <= page_comment_key(b) {
-        a.clone()
-    } else {
-        b.clone()
-    };
-    merged.text = later(
-        a.text.clone(),
-        time_of(&left.changes.page_comment_texts, &a.id),
-        b.text.clone(),
-        time_of(&right.changes.page_comment_texts, &b.id),
-    );
-    merged
+    changes: Changes,
 }
 
 /// The Reading Progress that was last saved; a tie goes to the one encoded
@@ -456,8 +245,9 @@ pub(crate) fn new_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markup::{Anchor, EpubPosition, Highlight, Rgb};
+    use crate::markup::{Anchor, EpubPosition, Highlight, PageComment, Rgb};
     use crate::progress::Place;
+    use pkm_base::markup::MarkupChanges;
 
     fn at(offset: u64) -> Anchor {
         Anchor::Epub {
@@ -622,7 +412,7 @@ mod tests {
             created: 1,
             text: "kept".into(),
         });
-        left.changes.page_comment_texts.insert("c".into(), 5);
+        left.set_page_comment_text("c", "kept", 5);
         let mut right = left.clone();
         right.set_page_comment_text("c", "", 6);
         assert!(left.merged(&right).markup.page_comments.is_empty());
@@ -641,6 +431,8 @@ mod tests {
             let mut left = state("abcdefghijkl", "a.pdf", "ff");
             let mut right = state("abcdefghijkl", "a.pdf", "ff");
             for side in [&mut left, &mut right] {
+                // What the side recorded: (kind of change, id, time).
+                let mut recorded: Vec<(&str, String, u64)> = Vec::new();
                 side.imported = next(100);
                 side.progress = (next(2) == 1).then(|| ReadingProgress {
                     place: Place::Epub {
@@ -666,16 +458,14 @@ mod tests {
                             comment: (next(2) == 1).then(|| format!("comment{i}")),
                         });
                         if next(2) == 1 {
-                            side.changes.highlight_colors.insert(id.clone(), next(100));
+                            recorded.push(("highlight_colors", id.clone(), next(100)));
                         }
                         if next(2) == 1 {
-                            side.changes
-                                .highlight_comments
-                                .insert(id.clone(), next(100));
+                            recorded.push(("highlight_comments", id.clone(), next(100)));
                         }
                     }
                     if next(3) == 0 {
-                        side.changes.deleted_highlights.insert(id, next(100));
+                        recorded.push(("deleted_highlights", id, next(100)));
                     }
                 }
                 for i in 0..4 {
@@ -690,14 +480,25 @@ mod tests {
                             created: next(20),
                             text: format!("text{i}"),
                         });
-                        side.changes
-                            .page_comment_texts
-                            .insert(id.clone(), next(100));
+                        recorded.push(("page_comment_texts", id.clone(), next(100)));
                     }
                     if next(3) == 0 {
-                        side.changes.deleted_page_comments.insert(id, next(100));
+                        recorded.push(("deleted_page_comments", id, next(100)));
                     }
                 }
+                let kinds = [
+                    "highlight_colors",
+                    "highlight_comments",
+                    "page_comment_texts",
+                    "deleted_highlights",
+                    "deleted_page_comments",
+                ];
+                let times = |kind: &str| {
+                    let of_kind = recorded.iter().filter(|(k, _, _)| *k == kind);
+                    object(of_kind.map(|(_, id, at)| (id.as_str(), number(*at))))
+                };
+                let json = object(kinds.map(|kind| (kind, times(kind))));
+                side.changes.markup = MarkupChanges::from_json(&json);
             }
             let (a, b) = (left.encode(), right.encode());
             let ab = crate::sync::merge(None, &a, &b).expect("two states merge");

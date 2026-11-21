@@ -2,6 +2,7 @@
 //! Items, and how two versions of one Item become one. The engine decides
 //! when to merge; the Context decides how.
 
+use pkm_base::highlight_colors::Preferences;
 use pkm_base::tags::Tags;
 use pkm_books::sync as books;
 use pkm_drawing::{are_same_drawing, is_drawing, merge_drawings};
@@ -172,8 +173,8 @@ impl Merge for Books {
     }
 }
 
-/// The Books' state files: `.state/<id>.json` and `.state/preferences.json` in
-/// the Books folder, merged by the Books merge hook (`pkm_books::sync`).
+/// The Books' state files: `.state/<id>.json` in the Books folder, merged by
+/// the Books merge hook (`pkm_books::sync`).
 pub struct BookStates;
 
 impl Merge for BookStates {
@@ -316,6 +317,39 @@ impl Merge for TagsFile {
     }
 }
 
+/// The Highlight Colors preferences: `Colors/colors.json` beside the Context
+/// folders, shared by Books and Bookmarks and merged per color (ADR-0034). One
+/// file, so any two of them are one Item; a file that isn't one is left where
+/// it is.
+pub struct ColorsFile;
+
+impl ColorsFile {
+    /// The folder on the Device and in the cloud (`pkm/Colors`).
+    pub const FOLDER: &str = "Colors";
+}
+
+impl Merge for ColorsFile {
+    fn extension(&self) -> &str {
+        ".json"
+    }
+
+    fn merge(&self, base: Option<&[u8]>, local: &[u8], remote: &[u8]) -> Option<Vec<u8>> {
+        Preferences::merge_files(base, local, remote)
+    }
+
+    fn is_item(&self, bytes: &[u8]) -> bool {
+        Preferences::is_file(bytes)
+    }
+
+    fn same_item(&self, a: &[u8], b: &[u8]) -> Option<bool> {
+        (Preferences::is_file(a) && Preferences::is_file(b)).then_some(true)
+    }
+
+    fn transfers_unparseable(&self) -> bool {
+        false
+    }
+}
+
 /// Filters: `Filters/<id>.md` beside the Tasks folder, merged three-way by
 /// field with `places` per Task ID (ADR-0024). A file that isn't a Filter is
 /// left where it is.
@@ -355,7 +389,15 @@ mod tests {
     #[test]
     fn only_notes_keep_their_items_in_directories() {
         assert!(Notes.has_directories());
-        let flat: [&dyn Merge; 6] = [&Drawings, &Books, &BookStates, &Tasks, &TagsFile, &Filters];
+        let flat: [&dyn Merge; 7] = [
+            &Drawings,
+            &Books,
+            &BookStates,
+            &Tasks,
+            &TagsFile,
+            &ColorsFile,
+            &Filters,
+        ];
         assert!(flat.iter().all(|merge| !merge.has_directories()));
     }
 

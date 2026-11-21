@@ -280,6 +280,8 @@ export interface Core {
   webDavForNotes(url: string, username: string, password: string): WebDavProtocol;
   /** The WebDAV protocol for the server's Tags folder; throws if the URL is not https. Free it when done. */
   webDavForTags(url: string, username: string, password: string): WebDavProtocol;
+  /** The WebDAV protocol for the server's Colors folder; throws if the URL is not https. Free it when done. */
+  webDavForColors(url: string, username: string, password: string): WebDavProtocol;
   /** The WebDAV protocol for the server's Filters folder; throws if the URL is not https. Free it when done. */
   webDavForFilters(url: string, username: string, password: string): WebDavProtocol;
   /** A Sync step over the Drawings, starting at `nowMs` (milliseconds since the epoch). Free it when done. */
@@ -294,6 +296,8 @@ export interface Core {
   syncRunForNotes(nowMs: number): SyncRun;
   /** A Sync step over the Tags file, merged per Tag. Free it when done. */
   syncRunForTags(nowMs: number): SyncRun;
+  /** A Sync step over the Highlight Colors file, merged per color. Free it when done. */
+  syncRunForColors(nowMs: number): SyncRun;
   /** A Sync step over the Filter files, merged field by field and their order per Task. Free it when done. */
   syncRunForFilters(nowMs: number): SyncRun;
   /** When Sync steps run, in front with a step due at `now` (milliseconds on any clock). Free it when done. */
@@ -330,6 +334,8 @@ export async function loadCore(
     webDavForNotes: (url, username, password) =>
       WebDavProtocol.newForNotes(url, username, password),
     webDavForTags: (url, username, password) => WebDavProtocol.newForTags(url, username, password),
+    webDavForColors: (url, username, password) =>
+      WebDavProtocol.newForColors(url, username, password),
     webDavForFilters: (url, username, password) =>
       WebDavProtocol.newForFilters(url, username, password),
     syncRun: (nowMs) => new SyncRun(nowMs),
@@ -338,6 +344,7 @@ export async function loadCore(
     syncRunForTasks: (nowMs) => SyncRun.newForTasks(nowMs),
     syncRunForNotes: (nowMs) => SyncRun.newForNotes(nowMs),
     syncRunForTags: (nowMs) => SyncRun.newForTags(nowMs),
+    syncRunForColors: (nowMs) => SyncRun.newForColors(nowMs),
     syncRunForFilters: (nowMs) => SyncRun.newForFilters(nowMs),
     syncSchedule: (now) => new SyncSchedule(now),
   };

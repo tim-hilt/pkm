@@ -4,7 +4,6 @@
 //! ```text
 //! <root>/<file name>            a Book's File, as the user knows it
 //! <root>/.state/<id>.json       its state (`state`)
-//! <root>/.state/preferences.json
 //! <root>/.details/<id>          its details, this Device only (ADR-0003)
 //! <root>/.staging/              Imports and writes in flight
 //! ```
@@ -14,6 +13,7 @@
 use crate::details::format_of;
 use crate::files::{ignore_not_found, millis, write_atomically};
 use crate::state::{BookState, new_id};
+use pkm_base::highlight_colors::Preferences;
 use pkm_base::sha256::Sha256;
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File};
@@ -24,7 +24,8 @@ use std::time::SystemTime;
 const STAGING: &str = ".staging";
 const STATE: &str = ".state";
 const DETAILS: &str = ".details";
-const PREFERENCES: &str = "preferences.json";
+/// Where older versions kept the Highlight Colors preferences, in `.state`.
+const LEGACY_PREFERENCES: &str = "preferences.json";
 
 /// The Books folder: its layout, and which state belongs to which File.
 #[derive(Debug)]
@@ -53,8 +54,16 @@ impl Folder {
         self.root.join(name)
     }
 
-    pub(crate) fn preferences(&self) -> PathBuf {
-        self.state_dir().join(PREFERENCES)
+    /// The Highlight Colors preferences, shared with the other Contexts:
+    /// beside the Books folder, as the Tags are.
+    pub(crate) fn colors(&self) -> PathBuf {
+        let beside = self.root.parent().unwrap_or(Path::new(""));
+        beside.join(Preferences::FILE)
+    }
+
+    /// Where older versions kept them; see `Library::migrate_legacy_preferences`.
+    pub(crate) fn legacy_preferences(&self) -> PathBuf {
+        self.state_dir().join(LEGACY_PREFERENCES)
     }
 
     /// Where the details of Book `id` are, or would be.
@@ -232,7 +241,7 @@ impl Folder {
         for entry in fs::read_dir(self.state_dir())? {
             let path = entry?.path();
             let is_state = path.extension().is_some_and(|e| e == "json")
-                && path.file_name().is_some_and(|n| n != PREFERENCES);
+                && path.file_name().is_some_and(|n| n != LEGACY_PREFERENCES);
             if !is_state {
                 continue;
             }
@@ -564,15 +573,15 @@ mod tests {
     }
 
     #[test]
-    fn an_unreadable_state_is_deleted_and_the_preferences_are_not_a_state() {
+    fn an_unreadable_state_is_deleted_and_a_leftover_preferences_file_is_not_a_state() {
         let scratch = Scratch::new();
         let folder = scratch.folder();
         fs::write(folder.state_file("aaaaaaaaaaaa"), "garbage").unwrap();
-        fs::write(folder.preferences(), "{}").unwrap();
+        fs::write(folder.legacy_preferences(), "{}").unwrap();
         scratch.put("a.pdf", A);
         assert_eq!(folder.scan().unwrap().len(), 1);
         assert!(!folder.state_file("aaaaaaaaaaaa").exists());
-        assert!(folder.preferences().exists());
+        assert!(folder.legacy_preferences().exists());
     }
 
     #[test]

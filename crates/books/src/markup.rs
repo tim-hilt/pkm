@@ -1,18 +1,16 @@
-//! Markup: Highlights and Comments on a Book, and how they are stored as JSON
-//! in the Book's state (`state`).
+//! Markup of a Book: the shared model (`pkm_base::markup`, ADR-0034) with
+//! this Context's anchors.
 //!
 //! The anchor of a PDF Highlight is a list of pages with their rectangles in PDF
 //! page space (points, origin at the page's bottom-left), engine-neutral
 //! (ADR-0001). That of an EPUB Highlight is a start and an end position in the
 //! text (ADR-0006). The quoted text is the fallback of both.
-//!
-//! A Comment on a Highlight is empty never: emptying it deletes it. A page
-//! Comment is its text: emptying it deletes the page Comment, and one without
-//! text, which only exists between adding it and typing, isn't listed.
 
-use crate::json::{number, object, string};
+use crate::json::{number, object};
 use crate::progress::Place;
 use pkm_base::json::Value;
+pub use pkm_base::markup::Rgb;
+use pkm_base::markup::{self, Located};
 
 /// A rectangle in PDF page space.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -53,228 +51,58 @@ pub enum Anchor {
     },
 }
 
-/// A color in sRGB, 8 bits per channel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Rgb {
-    pub r: u8,
-    pub g: u8,
-    pub b: u8,
-}
+/// A passage of a Book's text marked in a color. It may run across pages. For
+/// an EPUB `quoted_text` is the text from `start` to `end`, the spine items'
+/// texts joined by `\n`.
+pub type Highlight = markup::Highlight<Anchor>;
 
-impl Rgb {
-    pub(crate) fn packed(self) -> u64 {
-        u64::from(self.r) << 16 | u64::from(self.g) << 8 | u64::from(self.b)
-    }
-
-    pub(crate) fn unpacked(value: u64) -> Option<Self> {
-        let [_, _, _, _, _, r, g, b] = value.to_be_bytes();
-        (value <= 0xFF_FFFF).then_some(Self { r, g, b })
-    }
-}
-
-/// A passage of a Book's text marked in a color. It may run across pages.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Highlight {
-    /// Unique among all Highlights.
-    pub id: String,
-    pub anchor: Anchor,
-    /// The whole passage, however many pages it spans. For an EPUB it is the
-    /// text from `start` to `end`, the spine items' texts joined by `\n`.
-    pub quoted_text: String,
-    pub color: Rgb,
-    /// When it was added, in milliseconds since the Unix epoch.
-    pub created: u64,
-    /// What the user wrote about the passage. Never empty.
-    pub comment: Option<String>,
-}
-
-/// A Comment on a spot of a page, belonging to no passage.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PageComment {
-    /// Unique among all page Comments.
-    pub id: String,
-    /// The spot, in the terms of its Book's Format.
-    pub place: Place,
-    /// When it was added, in milliseconds since the Unix epoch.
-    pub created: u64,
-    /// What the user wrote. Never empty in the Markup.
-    pub text: String,
-}
+/// A Comment on a spot of a page, belonging to no passage; its `place` is in
+/// the terms of its Book's Format.
+pub type PageComment = markup::PageComment<Place>;
 
 /// Everything the user added on top of a Book.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Markup {
-    /// Oldest first.
-    pub highlights: Vec<Highlight>,
-    /// Oldest first.
-    pub page_comments: Vec<PageComment>,
-}
+pub type Markup = markup::Markup<Anchor, Place>;
 
-impl Markup {
-    /// The Markup as the Reader lists it: oldest first, without the page
-    /// Comments that have no text yet.
-    pub(crate) fn listed(&self) -> Markup {
-        let mut markup = Markup {
-            highlights: self.highlights.clone(),
-            page_comments: self
-                .page_comments
-                .iter()
-                .filter(|c| !c.text.is_empty())
-                .cloned()
-                .collect(),
-        };
-        markup
-            .highlights
-            .sort_by(|a, b| (a.created, &a.id).cmp(&(b.created, &b.id)));
-        markup
-            .page_comments
-            .sort_by(|a, b| (a.created, &a.id).cmp(&(b.created, &b.id)));
-        markup
-    }
-
-    /// Sets the color of Highlight `id`; nothing if there is none.
-    pub(crate) fn set_highlight_color(&mut self, id: &str, color: Rgb) {
-        if let Some(h) = self.highlights.iter_mut().find(|h| h.id == id) {
-            h.color = color;
+impl Located for Anchor {
+    fn to_json(&self) -> Value {
+        match self {
+            Anchor::Pdf(pages) => object([(
+                "pdf",
+                Value::Array(
+                    pages
+                        .iter()
+                        .map(|p| {
+                            let rects = p.rects.iter().flat_map(|r| [r.x, r.y, r.width, r.height]);
+                            object([
+                                ("page_index", number(p.page_index)),
+                                ("rects", Value::Array(rects.map(Value::Number).collect())),
+                            ])
+                        })
+                        .collect(),
+                ),
+            )]),
+            Anchor::Epub { start, end } => object([(
+                "epub",
+                object([
+                    ("start_spine", number(start.spine_index)),
+                    ("start_offset", number(start.offset)),
+                    ("end_spine", number(end.spine_index)),
+                    ("end_offset", number(end.offset)),
+                ]),
+            )]),
         }
     }
 
-    /// Sets the Comment of Highlight `id`; empty `text` deletes it.
-    pub(crate) fn set_highlight_comment(&mut self, id: &str, text: &str) {
-        if let Some(h) = self.highlights.iter_mut().find(|h| h.id == id) {
-            h.comment = (!text.is_empty()).then(|| text.to_owned());
-        }
-    }
-
-    pub(crate) fn remove_highlight(&mut self, id: &str) {
-        self.highlights.retain(|h| h.id != id);
-    }
-
-    /// Sets the text of page Comment `id`; empty `text` deletes it.
-    pub(crate) fn set_page_comment_text(&mut self, id: &str, text: &str) {
-        if text.is_empty() {
-            self.remove_page_comment(id);
-        } else if let Some(c) = self.page_comments.iter_mut().find(|c| c.id == id) {
-            c.text = text.to_owned();
-        }
-    }
-
-    pub(crate) fn remove_page_comment(&mut self, id: &str) {
-        self.page_comments.retain(|c| c.id != id);
-    }
-
-    /// The Markup as JSON, as `from_json` reads it.
-    pub(crate) fn to_json(&self) -> Value {
-        object([
-            (
-                "highlights",
-                Value::Array(self.highlights.iter().map(highlight_json).collect()),
-            ),
-            (
-                "page_comments",
-                Value::Array(self.page_comments.iter().map(page_comment_json).collect()),
-            ),
-        ])
-    }
-
-    /// The Markup in `json`; entries that are incomplete are skipped.
-    pub(crate) fn from_json(json: &Value) -> Markup {
-        let list = |key: &str| {
-            json.get(key)
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-        };
-        Markup {
-            highlights: list("highlights").filter_map(read_highlight).collect(),
-            page_comments: list("page_comments")
-                .filter_map(read_page_comment)
-                .collect(),
-        }
-    }
-}
-
-fn highlight_json(h: &Highlight) -> Value {
-    let anchor = match &h.anchor {
-        Anchor::Pdf(pages) => object([(
-            "pdf",
-            Value::Array(
+    fn from_json(anchor: &Value) -> Option<Self> {
+        if let Some(pages) = anchor.get("pdf") {
+            return Some(Anchor::Pdf(
                 pages
+                    .as_array()?
                     .iter()
-                    .map(|p| {
-                        let rects = p.rects.iter().flat_map(|r| [r.x, r.y, r.width, r.height]);
-                        object([
-                            ("page_index", number(p.page_index)),
-                            ("rects", Value::Array(rects.map(Value::Number).collect())),
-                        ])
-                    })
-                    .collect(),
-            ),
-        )]),
-        Anchor::Epub { start, end } => object([(
-            "epub",
-            object([
-                ("start_spine", number(start.spine_index)),
-                ("start_offset", number(start.offset)),
-                ("end_spine", number(end.spine_index)),
-                ("end_offset", number(end.offset)),
-            ]),
-        )]),
-    };
-    let mut members = vec![
-        ("id", string(&h.id)),
-        ("anchor", anchor),
-        ("quoted_text", string(&h.quoted_text)),
-        ("color", number(h.color.packed())),
-        ("created", number(h.created)),
-    ];
-    if let Some(comment) = &h.comment {
-        members.push(("comment", string(comment)));
-    }
-    object(members)
-}
-
-fn page_comment_json(c: &PageComment) -> Value {
-    let place = match c.place {
-        Place::Pdf { page_index, x, y } => object([(
-            "pdf",
-            object([
-                ("page_index", number(page_index)),
-                ("x", Value::Number(x)),
-                ("y", Value::Number(y)),
-            ]),
-        )]),
-        Place::Epub {
-            spine_index,
-            offset,
-        } => object([(
-            "epub",
-            object([("spine", number(spine_index)), ("offset", number(offset))]),
-        )]),
-    };
-    object([
-        ("id", string(&c.id)),
-        ("place", place),
-        ("created", number(c.created)),
-        ("text", string(&c.text)),
-    ])
-}
-
-fn u32_at(json: &Value, key: &str) -> Option<u32> {
-    u32::try_from(json.get(key)?.as_u64()?).ok()
-}
-
-fn read_highlight(json: &Value) -> Option<Highlight> {
-    let anchor = json.get("anchor")?;
-    let anchor = if let Some(pages) = anchor.get("pdf") {
-        Anchor::Pdf(
-            pages
-                .as_array()?
-                .iter()
-                .map(read_page_rects)
-                .collect::<Option<_>>()?,
-        )
-    } else {
+                    .map(read_page_rects)
+                    .collect::<Option<_>>()?,
+            ));
+        }
         let epub = anchor.get("epub")?;
         let position = |spine: &str, offset: &str| {
             Some(EpubPosition {
@@ -282,23 +110,52 @@ fn read_highlight(json: &Value) -> Option<Highlight> {
                 offset: epub.get(offset)?.as_u64()?,
             })
         };
-        Anchor::Epub {
+        Some(Anchor::Epub {
             start: position("start_spine", "start_offset")?,
             end: position("end_spine", "end_offset")?,
+        })
+    }
+}
+
+impl Located for Place {
+    fn to_json(&self) -> Value {
+        match *self {
+            Place::Pdf { page_index, x, y } => object([(
+                "pdf",
+                object([
+                    ("page_index", number(page_index)),
+                    ("x", Value::Number(x)),
+                    ("y", Value::Number(y)),
+                ]),
+            )]),
+            Place::Epub {
+                spine_index,
+                offset,
+            } => object([(
+                "epub",
+                object([("spine", number(spine_index)), ("offset", number(offset))]),
+            )]),
         }
-    };
-    Some(Highlight {
-        id: json.get("id")?.as_str()?.to_owned(),
-        anchor,
-        quoted_text: json.get("quoted_text")?.as_str()?.to_owned(),
-        color: Rgb::unpacked(json.get("color")?.as_u64()?)?,
-        created: json.get("created")?.as_u64()?,
-        comment: json
-            .get("comment")
-            .and_then(Value::as_str)
-            .filter(|c| !c.is_empty())
-            .map(str::to_owned),
-    })
+    }
+
+    fn from_json(place: &Value) -> Option<Self> {
+        if let Some(epub) = place.get("epub") {
+            return Some(Place::Epub {
+                spine_index: u32_at(epub, "spine")?,
+                offset: epub.get("offset")?.as_u64()?,
+            });
+        }
+        let pdf = place.get("pdf")?;
+        Some(Place::Pdf {
+            page_index: u32_at(pdf, "page_index")?,
+            x: pdf.get("x")?.as_f64()?,
+            y: pdf.get("y")?.as_f64()?,
+        })
+    }
+}
+
+fn u32_at(json: &Value, key: &str) -> Option<u32> {
+    u32::try_from(json.get(key)?.as_u64()?).ok()
 }
 
 fn read_page_rects(json: &Value) -> Option<PageRects> {
@@ -321,29 +178,6 @@ fn read_page_rects(json: &Value) -> Option<PageRects> {
                 height,
             })
             .collect(),
-    })
-}
-
-fn read_page_comment(json: &Value) -> Option<PageComment> {
-    let place = json.get("place")?;
-    let place = if let Some(epub) = place.get("epub") {
-        Place::Epub {
-            spine_index: u32_at(epub, "spine")?,
-            offset: epub.get("offset")?.as_u64()?,
-        }
-    } else {
-        let pdf = place.get("pdf")?;
-        Place::Pdf {
-            page_index: u32_at(pdf, "page_index")?,
-            x: pdf.get("x")?.as_f64()?,
-            y: pdf.get("y")?.as_f64()?,
-        }
-    };
-    Some(PageComment {
-        id: json.get("id")?.as_str()?.to_owned(),
-        place,
-        created: json.get("created")?.as_u64()?,
-        text: json.get("text")?.as_str()?.to_owned(),
     })
 }
 
@@ -467,93 +301,6 @@ mod tests {
         assert_eq!(markup.highlights[0].id, "ok");
         assert!(markup.page_comments.is_empty());
         assert_eq!(read("7"), Markup::default());
-    }
-
-    #[test]
-    fn the_listed_markup_is_oldest_first_and_without_unwritten_page_comments() {
-        let markup = Markup {
-            highlights: vec![pdf_highlight("late", 9), pdf_highlight("early", 1)],
-            page_comments: vec![
-                page_comment("b", 5, "x"),
-                page_comment("blank", 2, ""),
-                page_comment("a", 5, "y"),
-            ],
-        };
-        let listed = markup.listed();
-        let ids = |h: &Markup| {
-            (
-                h.highlights
-                    .iter()
-                    .map(|h| h.id.clone())
-                    .collect::<Vec<_>>(),
-                h.page_comments
-                    .iter()
-                    .map(|c| c.id.clone())
-                    .collect::<Vec<_>>(),
-            )
-        };
-        assert_eq!(
-            ids(&listed),
-            (
-                vec!["early".into(), "late".into()],
-                vec!["a".into(), "b".into()]
-            )
-        );
-    }
-
-    #[test]
-    fn a_color_change_replaces_the_color_and_nothing_else() {
-        let mut markup = Markup {
-            highlights: vec![pdf_highlight("a", 1), pdf_highlight("b", 2)],
-            page_comments: vec![],
-        };
-        let red = Rgb { r: 255, g: 0, b: 0 };
-        markup.set_highlight_color("a", red);
-        markup.set_highlight_color("unknown", red);
-        assert_eq!(markup.highlights[0].color, red);
-        assert_eq!(markup.highlights[1], pdf_highlight("b", 2));
-    }
-
-    #[test]
-    fn a_comment_is_set_replaced_and_deleted_by_emptying_it() {
-        let mut markup = Markup {
-            highlights: vec![pdf_highlight("a", 1)],
-            page_comments: vec![],
-        };
-        markup.set_highlight_comment("a", "first");
-        markup.set_highlight_comment("a", "second");
-        assert_eq!(markup.highlights[0].comment.as_deref(), Some("second"));
-        markup.set_highlight_comment("unknown", "x");
-        markup.set_highlight_comment("a", "");
-        assert_eq!(markup.highlights[0].comment, None);
-    }
-
-    #[test]
-    fn removing_a_highlight_takes_its_comment_along_and_leaves_the_others() {
-        let mut markup = Markup {
-            highlights: vec![pdf_highlight("a", 1), pdf_highlight("b", 2)],
-            page_comments: vec![],
-        };
-        markup.set_highlight_comment("a", "note");
-        markup.remove_highlight("a");
-        markup.remove_highlight("unknown");
-        assert_eq!(markup.highlights, vec![pdf_highlight("b", 2)]);
-    }
-
-    #[test]
-    fn a_page_comment_text_is_replaced_and_emptying_it_deletes_the_page_comment() {
-        let mut markup = Markup {
-            highlights: vec![],
-            page_comments: vec![page_comment("a", 1, ""), page_comment("b", 2, "keep")],
-        };
-        markup.set_page_comment_text("a", "typed");
-        markup.set_page_comment_text("unknown", "x");
-        assert_eq!(markup.page_comments[0].text, "typed");
-        markup.set_page_comment_text("a", "");
-        assert_eq!(markup.page_comments, vec![page_comment("b", 2, "keep")]);
-        markup.remove_page_comment("b");
-        markup.remove_page_comment("unknown");
-        assert!(markup.page_comments.is_empty());
     }
 
     /// What `to_json` wrote before `pkm-base` replaced serde_json: keys sorted,

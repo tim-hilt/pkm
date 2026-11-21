@@ -130,3 +130,26 @@ describe("the Books folder", () => {
     expect(text(await tablet.storage.read("Books/.state/aaaaaaaaaaaa.json"))).toBe("{");
   });
 });
+
+describe("the Colors folder", () => {
+  const colors = (id: string, rgb: number) =>
+    bytes(JSON.stringify({ custom_colors: { [id]: rgb }, default_color: null }));
+
+  it("merges the Highlight Colors of both Devices through their own file", async () => {
+    const browser = await device();
+    const tablet = await device();
+    await browser.storage.write("Colors/colors.json", colors("0000000000001-a", 32896));
+    await tablet.storage.write("Colors/colors.json", colors("0000000000002-b", 9849600));
+
+    await settle();
+    await sync(tablet);
+    await sync(browser);
+    await settle();
+
+    for (const device of [browser, tablet]) {
+      const merged = JSON.parse(text(await device.storage.read("Colors/colors.json")));
+      expect(Object.keys(merged.custom_colors)).toEqual(["0000000000001-a", "0000000000002-b"]);
+    }
+    expect([...server.contents("pkm/Colors").keys()]).toEqual(["colors.json"]);
+  });
+});
