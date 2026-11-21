@@ -24,4 +24,5 @@ pkm-drawing = { path = "../drawing" }
 pkm-books = { path = "../books" }
 pkm-tasks = { path = "../tasks" }
 pkm-notes = { path = "../notes" }
+pkm-bookmarks = { path = "../bookmarks" }
 pkm-cloud = { path = "../cloud" }

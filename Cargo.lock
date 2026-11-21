@@ -535,12 +535,20 @@ name = "pkm-bindings"
 version = "0.1.0"
 dependencies = [
  "pkm-base",
+ "pkm-bookmarks",
  "pkm-books",
  "pkm-cloud",
  "pkm-drawing",
  "pkm-notes",
  "pkm-tasks",
  "uniffi",
+]
+
+[[package]]
+name = "pkm-bookmarks"
+version = "0.1.0"
+dependencies = [
+ "pkm-base",
 ]
 
 [[package]]

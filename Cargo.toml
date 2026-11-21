@@ -1,7 +1,7 @@
 # Rust core (ADR-0001) and its UniFFI bindings (ADR-0007).
 [workspace]
 resolver = "3"
-members = ["crates/base", "crates/drawing", "crates/books", "crates/tasks", "crates/notes", "crates/cloud", "crates/bindings", "crates/web"]
+members = ["crates/base", "crates/drawing", "crates/books", "crates/tasks", "crates/notes", "crates/bookmarks", "crates/cloud", "crates/bindings", "crates/web"]
 
 [workspace.package]
 version = "0.1.0"

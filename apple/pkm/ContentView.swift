@@ -117,6 +117,7 @@ extension ContentView {
         case .context(.tasks): TasksView()
         case .context(.books): BooksView()
         case .context(.notes): NotesView()
+        case .context(.bookmarks): BookmarksView()
         case .context(let context): ComingSoonView(context: context)
         }
     }
@@ -163,6 +164,8 @@ extension AppNavigation {
             navigation.selected = .tasks
         } else if arguments.contains("-UITestingOpenNotes") || arguments.contains("-UITestingOpenNote") {
             navigation.selected = .notes
+        } else if arguments.contains("-UITestingOpenBookmarks") {
+            navigation.selected = .bookmarks
         } else if arguments.contains("-UITestingOpenBooks") || arguments.contains("-UITestingOpenReader") {
             navigation.selected = .books
         }

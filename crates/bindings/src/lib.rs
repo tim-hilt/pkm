@@ -1,6 +1,7 @@
 //! UniFFI surface of the core (ADR-0007). Foreign clients see exactly what is
 //! exported here; the logic itself lives in `pkm-drawing` and `pkm-cloud`.
 
+mod bookmarks;
 mod books;
 mod markdown;
 mod notes;
