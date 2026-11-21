@@ -1,7 +1,7 @@
-//! Search's matching (GLOSSARY.md): a query found in a text ignoring case and
-//! accents, anywhere in a word, in the text as typed (Markdown markers
-//! included). Positions are UTF-16 units, which is what Swift and JavaScript
-//! count in.
+//! Search's matching (Notes and Bookmarks GLOSSARY.md): a query found in a
+//! text ignoring case and accents, anywhere in a word, in the text as typed
+//! (Markdown markers included). Positions are UTF-16 units, which is what
+//! Swift and JavaScript count in.
 
 use std::ops::Range;
 use unicode_normalization::UnicodeNormalization;
@@ -12,7 +12,7 @@ const BEFORE: usize = 40;
 const AFTER: usize = 80;
 
 /// A query ready to look for: folded once, for every text.
-pub(crate) struct Needle(Vec<char>);
+pub struct Needle(Vec<char>);
 
 /// The text around a match, on one line, for telling results apart.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,32 +25,56 @@ pub struct Snippet {
 impl Needle {
     /// The query without the white space around it; `None` if nothing is left,
     /// which matches nothing.
-    pub(crate) fn new(query: &str) -> Option<Self> {
+    pub fn new(query: &str) -> Option<Self> {
         let folded = fold(query.trim());
         (!folded.is_empty()).then_some(Self(folded))
     }
 
     /// The snippet around the first match in `text`, if there is one.
-    pub(crate) fn find(&self, text: &str) -> Option<Snippet> {
+    pub fn find(&self, text: &str) -> Option<Snippet> {
         let chars: Vec<char> = text.chars().collect();
+        let range = self.char_matches(&chars).next()?;
+        Some(snippet(&chars, range))
+    }
+
+    /// Every match in `text`, in order and apart, as ranges of UTF-16 units
+    /// of `text` as written.
+    pub fn find_all(&self, text: &str) -> Vec<Range<usize>> {
+        let chars: Vec<char> = text.chars().collect();
+        let mut starts = Vec::with_capacity(chars.len() + 1); // UTF-16 offset of each char
+        let mut units = 0;
+        for c in &chars {
+            starts.push(units);
+            units += c.len_utf16();
+        }
+        starts.push(units);
+        (self.char_matches(&chars))
+            .map(|r| starts[r.start]..starts[r.end])
+            .collect()
+    }
+
+    /// The matches in `chars` as ranges of chars, in order and apart. A match
+    /// covers every char whose folding it touches, so "ss" in "Straße" is the "ß".
+    fn char_matches<'a>(&'a self, chars: &'a [char]) -> impl Iterator<Item = Range<usize>> + 'a {
         let mut folded = Vec::new();
-        let mut source = Vec::new(); // `source[i]`: the char of `text` that `folded[i]` comes from
+        let mut source = Vec::new(); // `source[i]`: the char of `chars` that `folded[i]` comes from
         for (i, c) in chars.iter().enumerate() {
             for f in fold_char(*c) {
                 folded.push(f);
                 source.push(i);
             }
         }
-        let at = folded.windows(self.0.len()).position(|w| w == self.0)?;
-        Some(snippet(
-            &chars,
-            source[at]..source[at + self.0.len() - 1] + 1,
-        ))
+        let mut from = 0;
+        std::iter::from_fn(move || {
+            let at = from + (folded[from..].windows(self.0.len())).position(|w| w == self.0)?;
+            from = at + self.0.len();
+            Some(source[at]..source[from - 1] + 1)
+        })
     }
 }
 
 /// The snippet at the start of `text`, for a result whose match is elsewhere.
-pub(crate) fn start_of(text: &str) -> Snippet {
+pub fn start_of(text: &str) -> Snippet {
     snippet(&text.chars().collect::<Vec<_>>(), 0..0)
 }
 
@@ -136,6 +160,17 @@ mod tests {
         assert_eq!(marked(&found("graph", "a paragraph").unwrap()), "graph");
         assert_eq!(marked(&found("word", "a **word** b").unwrap()), "word");
         assert_eq!(marked(&found("**word", "a **word** b").unwrap()), "**word");
+    }
+
+    #[test]
+    fn every_match_is_a_range_in_utf16_units_of_the_text_as_written() {
+        let all = |query: &str, text: &str| Needle::new(query).unwrap().find_all(text);
+        assert_eq!(all("tea", "😀 Tea, tea; TEA"), [3..6, 8..11, 13..16]);
+        assert_eq!(all("aa", "aaaaa"), [0..2, 2..4]);
+        assert_eq!(all("cafe", "Café **café**"), [0..4, 7..11]);
+        assert_eq!(all("ss", "Straße").len(), 1);
+        assert_eq!(all("ss", "Straße")[0], 4..5);
+        assert!(all("x", "none").is_empty());
     }
 
     #[test]

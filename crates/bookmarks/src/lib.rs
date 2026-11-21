@@ -17,5 +17,6 @@ pub use address::{is_document, normalise};
 pub use article::{Article, read_article};
 pub use extract::{Details, extract};
 pub use pkm_base::files::{DiskFiles, Files, MemoryFiles};
+pub use pkm_search::Snippet;
 pub use state::{Anchor, Highlight, Markup, PageComment, Place, Rgb};
-pub use store::{ArticleProgress, Bookmark, Bookmarks, Saved};
+pub use store::{ArticleProgress, Bookmark, Bookmarks, Found, Saved};

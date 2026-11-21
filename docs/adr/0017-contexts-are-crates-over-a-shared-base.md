@@ -13,4 +13,4 @@ Each Context's logic is its own crate (`pkm-drawing`, `pkm-books`). What they an
 ## Consequences
 
 - `pkm-cloud` no longer depends on the `base64` crate; the wasm build shrank by 184 bytes.
-- `pkm-notes` also depends on `unicode-normalization` to fold accents in Search; `pkm-books` links it already, so the app doesn't grow.
+- Search's matching is the crate `pkm-search`, shared by `pkm-notes` and `pkm-bookmarks`. It depends on `unicode-normalization` to fold accents; `pkm-books` links it already, so the app doesn't grow.

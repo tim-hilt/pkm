@@ -1,0 +1,10 @@
+# Search's matching, shared by the Contexts that have it: Notes and Bookmarks.
+[package]
+name = "pkm-search"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Folds case and accents.
+unicode-normalization = "0.1"

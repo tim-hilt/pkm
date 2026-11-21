@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: DEVICE=mac|ipad|iphone|web [SCREEN=canvas|settings|books|reader|tasks|task|filters|filter|grouped|notes|note|bookmarks|article|bookmark] [OUT=path] scripts/screenshot.sh
+# Usage: DEVICE=mac|ipad|iphone|web [SCREEN=canvas|settings|books|reader|tasks|task|filters|filter|grouped|notes|note|bookmarks|article|bookmark|bookmark-search|article-find] [OUT=path] scripts/screenshot.sh
 # Builds the app, launches it with the sample Drawing already open
 # (-UITestingOpenSampleDrawing), or with Settings open (SCREEN=settings,
 # -UITestingOpenSettings), or with the Books Gallery over sample Books
@@ -40,7 +40,9 @@ note) LAUNCH_ARG=-UITestingOpenNote WINDOW_NAME= ;;
 bookmarks) LAUNCH_ARG=-UITestingOpenBookmarks WINDOW_NAME= ;;
 bookmark) LAUNCH_ARG=-UITestingOpenBookmarkDetails WINDOW_NAME= ;;
 article) LAUNCH_ARG=-UITestingOpenArticle WINDOW_NAME= ;;
-*) echo "SCREEN must be canvas, settings, books, reader, tasks, task, filters, filter, grouped, notes, note, bookmarks, article or bookmark" >&2; exit 2 ;;
+bookmark-search) LAUNCH_ARG=-UITestingSearchBookmarks WINDOW_NAME= ;;
+article-find) LAUNCH_ARG=-UITestingFindInArticle WINDOW_NAME= ;;
+*) echo "SCREEN must be canvas, settings, books, reader, tasks, task, filters, filter, grouped, notes, note, bookmarks, article, bookmark, bookmark-search or article-find" >&2; exit 2 ;;
 esac
 OUT=${OUT:-/tmp/wt-$DEVICE.png}
 DERIVED=build

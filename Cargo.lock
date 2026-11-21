@@ -549,6 +549,7 @@ name = "pkm-bookmarks"
 version = "0.1.0"
 dependencies = [
  "pkm-base",
+ "pkm-search",
 ]
 
 [[package]]
@@ -588,6 +589,13 @@ name = "pkm-notes"
 version = "0.1.0"
 dependencies = [
  "pkm-base",
+ "pkm-search",
+]
+
+[[package]]
+name = "pkm-search"
+version = "0.1.0"
+dependencies = [
  "unicode-normalization",
 ]
 

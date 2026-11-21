@@ -262,4 +262,24 @@ import Testing
         #expect(model.markup(of: id).highlights.isEmpty && model.markup(of: id).pageComments.isEmpty)
         #expect(model.highlight(NSRange(location: 2, length: 0), of: markdown, in: id, color: yellow) == nil)
     }
+
+    @Test func searchListsMatchesWithASnippetAndArticleSearchGivesRangesInTheArticle() async throws {
+        let model = try await saved(["https://example.com/long"], pages: ["https://example.com/long": Self.shortPage])
+        _ = await model.addArticle(to: model.bookmarks[0])
+        let id = model.bookmarks[0].id
+        let markdown = try #require(model.article(of: model.bookmarks[0]))
+
+        model.searchText = "WELCOME"
+        #expect(model.results.map(\.bookmark.id) == [id])
+        let found = try #require(model.results.first)
+        let units = Array(found.snippet.utf16)[Int(found.matchedStart)..<Int(found.matchedEnd)]
+        #expect(String(decoding: units, as: UTF16.self).lowercased() == "welcome")
+        model.searchText = ""
+        #expect(model.results.isEmpty)
+
+        let ranges = model.searchArticle("welcome", in: id)
+        #expect(!ranges.isEmpty)
+        #expect(ranges.allSatisfy { (markdown as NSString).substring(with: $0).lowercased() == "welcome" })
+        #expect(model.searchArticle("  ", in: id).isEmpty)
+    }
 }

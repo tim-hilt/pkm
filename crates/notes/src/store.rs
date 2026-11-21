@@ -4,13 +4,13 @@
 mod images;
 
 use crate::folder::{Counts, Folder, FolderError, check_name, is_visible_name};
-use crate::search::{Needle, Snippet, start_of};
 use pkm_base::clock::{iso8601, now_ms};
 use pkm_base::files::{DiskFiles, Files};
 use pkm_base::front_matter::Document;
 use pkm_base::item_id::ItemId;
 use pkm_base::markdown::{image_targets, row_preview};
 use pkm_base::random::Entropy;
+use pkm_search::{Needle, Snippet, start_of};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};

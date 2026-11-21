@@ -171,9 +171,10 @@ extension AppNavigation {
             navigation.selected = .tasks
         } else if arguments.contains("-UITestingOpenNotes") || arguments.contains("-UITestingOpenNote") {
             navigation.selected = .notes
-        } else if ["-UITestingOpenBookmarks", "-UITestingOpenArticle", "-UITestingOpenBookmarkDetails"].contains(
-            where: arguments.contains)
-        {
+        } else if [
+            "-UITestingOpenBookmarks", "-UITestingOpenArticle", "-UITestingOpenBookmarkDetails",
+            "-UITestingSearchBookmarks", "-UITestingFindInArticle",
+        ].contains(where: arguments.contains) {
             navigation.selected = .bookmarks
         } else if arguments.contains("-UITestingOpenBooks") || arguments.contains("-UITestingOpenReader") {
             navigation.selected = .books

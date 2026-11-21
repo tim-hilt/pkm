@@ -4,6 +4,7 @@ import SwiftUI
 /// mark if it has an Article, narrowed to one Tag from the menu. Tapping one opens its Article in the
 /// Reader, or else its page in the system's browser; swipe right or the context menu Edit it (its
 /// Details), swipe left or the context menu Delete it, after asking. "+" opens the Save sheet.
+/// Searching lists the matches instead, each with a snippet of where the words were found.
 struct BookmarksView: View {
     @Environment(BookmarksModel.self) private var model
     @Environment(\.openURL) private var openURL
@@ -14,11 +15,12 @@ struct BookmarksView: View {
 
     var body: some View {
         @Bindable var model = model
-        List(model.shown, id: \.id) { bookmark in
+        List(rows, id: \.bookmark.id) { row in
+            let bookmark = row.bookmark
             Button {
                 open(bookmark)
             } label: {
-                BookmarkRow(bookmark: bookmark)
+                BookmarkRow(bookmark: bookmark, found: row.found)
             }
             .buttonStyle(.plain)
             .swipeActions(edge: .leading) {
@@ -33,14 +35,24 @@ struct BookmarksView: View {
             }
         }
         .navigationTitle("Bookmarks")
+        .searchable(text: $model.searchText)
+        #if os(iOS)
+            .searchToolbarBehavior(.minimize)
+        #endif
         .overlay {
-            if model.bookmarks.isEmpty {
+            if isSearching {
+                if model.results.isEmpty { ContentUnavailableView.search(text: model.searchText) }
+            } else if model.bookmarks.isEmpty {
                 ContentUnavailableView(
                     "No Bookmarks", systemImage: "bookmark",
                     description: Text("Tap + and enter the address of a page to Save it."))
             }
         }
         .toolbar {
+            #if os(iOS)
+                // At the top, so that the bottom stays free for the "+", as in Notes and Books.
+                DefaultToolbarItem(kind: .search, placement: .topBarTrailing)
+            #endif
             if !model.tagsInUse.isEmpty {
                 ToolbarItem {
                     Menu("Tag", systemImage: "line.3.horizontal.decrease") {
@@ -67,6 +79,21 @@ struct BookmarksView: View {
         .accessibilityIdentifier("bookmarks-list")
     }
 
+    private var isSearching: Bool { !model.searchText.isEmpty }
+
+    /// The list's rows: the Bookmarks that match, or else those the Tag filter leaves.
+    private var rows: [Row] {
+        isSearching
+            ? model.results.map { Row(bookmark: $0.bookmark, found: $0) }
+            : model.shown.map { Row(bookmark: $0, found: nil) }
+    }
+
+    private struct Row {
+        let bookmark: Bookmark
+        /// What Search found; nil when not searching.
+        let found: BookmarkFound?
+    }
+
     private func showExisting() {
         model.detailsID = existing
         existing = nil
@@ -85,6 +112,8 @@ struct BookmarksView: View {
 private struct BookmarkRow: View {
     @Environment(BookmarksModel.self) private var model
     let bookmark: Bookmark
+    /// What Search found in it, to show a snippet of; nil when not searching.
+    let found: BookmarkFound?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -110,6 +139,13 @@ private struct BookmarkRow: View {
                     Text(bookmark.site).lineLimit(1)
                 }
                 .font(.caption).foregroundStyle(.secondary)
+                if let found, !found.snippet.isEmpty {
+                    Text(
+                        AttributedString(
+                            snippet: found.snippet, matchedStart: found.matchedStart, matchedEnd: found.matchedEnd)
+                    )
+                    .lineLimit(2).font(.subheadline).foregroundStyle(.secondary)
+                }
                 if !bookmark.tags.isEmpty {
                     HStack(spacing: 4) { ForEach(bookmark.tags, id: \.self) { TagPill(tag: $0) } }
                         .font(.caption2).lineLimit(1)

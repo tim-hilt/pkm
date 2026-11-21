@@ -442,17 +442,9 @@ private struct ResultRow: View {
         }
     }
 
-    /// The snippet as typed, with the match in bold; the range counts UTF-16 units.
     private var snippet: AttributedString {
-        var text = AttributedString(result.snippet)
-        let units = result.snippet.utf16
-        if let from = units.index(units.startIndex, offsetBy: Int(result.matchedStart), limitedBy: units.endIndex),
-            let to = units.index(units.startIndex, offsetBy: Int(result.matchedEnd), limitedBy: units.endIndex),
-            let range = Range(NSRange(from..<to, in: result.snippet), in: text)
-        {
-            text[range].font = .subheadline.bold()
-        }
-        return text
+        AttributedString(
+            snippet: result.snippet, matchedStart: result.matchedStart, matchedEnd: result.matchedEnd)
     }
 }
 

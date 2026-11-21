@@ -17,9 +17,11 @@ use pkm_base::markup::MarkupChanges;
 use pkm_base::random::Entropy;
 use pkm_base::tag;
 use pkm_base::tag_store::TagStore;
+use pkm_search::{Needle, Snippet, start_of};
 use std::collections::HashMap;
 use std::fs;
 use std::io;
+use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -75,6 +77,16 @@ pub struct Saved {
     pub bookmark: Bookmark,
     /// The Address was Saved before, so this is that Bookmark, unchanged.
     pub existing: bool,
+}
+
+/// A Bookmark that Search found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Found {
+    pub bookmark: Bookmark,
+    /// Around the first match in the Article, else in the Site or Address;
+    /// the start of the Article (the Excerpt without one), with no match
+    /// marked, where only the Title matched.
+    pub snippet: Snippet,
 }
 
 /// The Bookmarks in one folder (`Bookmarks` in the app's storage).
@@ -183,17 +195,56 @@ impl Bookmarks {
 
     /// Every Bookmark, newest Saved first. Files that are no Bookmark are skipped.
     pub fn list(&self) -> io::Result<Vec<Bookmark>> {
-        let mut all = Vec::new();
-        for listed in self.files.list(&self.root)? {
-            let Some(id) = (listed.name.strip_suffix(".md")).and_then(ItemId::parse) else {
-                continue;
-            };
-            if let Some(file) = self.read_file(&id) {
-                all.push(self.bookmark_of(&file, &id));
-            }
-        }
+        let mut all: Vec<_> = (self.all_files()?.iter())
+            .map(|(id, file)| self.bookmark_of(file, id))
+            .collect();
         all.sort_by(|a, b| b.saved.cmp(&a.saved).then_with(|| a.id.cmp(&b.id)));
         Ok(all)
+    }
+
+    /// The Bookmarks whose Title, Site, Address or Article has `query`,
+    /// ignoring case and accents, anywhere in a word and in the text as
+    /// written. Those matching in the Title come first, then the others, each
+    /// newest Saved first. A blank query finds nothing. Reads every Bookmark
+    /// on each call.
+    pub fn search(&self, query: &str) -> io::Result<Vec<Found>> {
+        let Some(needle) = Needle::new(query) else {
+            return Ok(Vec::new());
+        };
+        let mut hits = Vec::new();
+        for (id, file) in self.all_files()? {
+            let bookmark = self.bookmark_of(&file, &id);
+            let title_matched = needle.find(&bookmark.title).is_some();
+            let snippet = (needle.find(&file.body))
+                .or_else(|| needle.find(&bookmark.site))
+                .or_else(|| needle.find(&bookmark.address));
+            if snippet.is_none() && !title_matched {
+                continue;
+            }
+            let snippet = snippet.unwrap_or_else(|| {
+                start_of(if bookmark.has_article {
+                    &file.body
+                } else {
+                    &bookmark.excerpt
+                })
+            });
+            hits.push((title_matched, Found { bookmark, snippet }));
+        }
+        hits.sort_by(|(a_title, a), (b_title, b)| {
+            (b_title.cmp(a_title))
+                .then_with(|| b.bookmark.saved.cmp(&a.bookmark.saved))
+                .then_with(|| a.bookmark.id.cmp(&b.bookmark.id))
+        });
+        Ok(hits.into_iter().map(|(_, found)| found).collect())
+    }
+
+    /// Article Search: where `query` is in the Article of the Bookmark `id`,
+    /// matched as Search does. Each range is UTF-16 offsets into the stored
+    /// Markdown (`read_article`), in order; none for a blank query.
+    /// `NotFound` if there is no such Bookmark or it has no Article.
+    pub fn search_article(&self, id: &str, query: &str) -> io::Result<Vec<Range<usize>>> {
+        let article = self.read_article(id)?;
+        Ok(Needle::new(query).map_or_else(Vec::new, |needle| needle.find_all(&article)))
     }
 
     /// The Bookmark `id`; `NotFound` if there is none.
@@ -590,6 +641,20 @@ impl Bookmarks {
                 .map(|(offset, last_read)| progress_of(offset, last_read, &file.body));
         }
         bookmark
+    }
+
+    /// Every file that is a Bookmark, in no order.
+    fn all_files(&self) -> io::Result<Vec<(ItemId, Document)>> {
+        let mut all = Vec::new();
+        for listed in self.files.list(&self.root)? {
+            let Some(id) = (listed.name.strip_suffix(".md")).and_then(ItemId::parse) else {
+                continue;
+            };
+            if let Some(file) = self.read_file(&id) {
+                all.push((id, file));
+            }
+        }
+        Ok(all)
     }
 
     /// The file of `id`, none if it is none, which includes a file whose
@@ -1316,7 +1381,7 @@ mod tests {
         let text = store.read_article(&b.id).unwrap();
         assert!(
             text.starts_with("Text\n")
-                && !text.contains("2.png")
+                && !text.contains("![j]") // a random file name may end in "2.png"
                 && !text.contains("https://i.test/1")
         );
         let again = store
@@ -1622,5 +1687,92 @@ mod tests {
         highlight_at(&store, &b.id, 0, 5, "alpha");
         store.delete(&b.id).unwrap();
         assert!(!scratch.0.join(".state").join(&b.id).exists());
+    }
+
+    fn saved_with_article(
+        store: &Bookmarks,
+        address: &str,
+        title: &str,
+        article: &str,
+    ) -> Bookmark {
+        let mut page = details(title);
+        page.cover = None;
+        let saved = store.save(address, &page, "", &[], Some(article), &HashMap::new());
+        saved.unwrap().bookmark
+    }
+
+    #[test]
+    fn search_ignores_case_and_accents_and_finds_substrings_in_every_field() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let by_title = saved_with_article(&store, "https://a.test/x", "Un Café", "");
+        let by_article = saved_with_article(&store, "https://b.test/x", "B", "some **paragraph**");
+        let by_address = saved_with_article(&store, "https://rust-lang.test/x", "C", "");
+        let found = |query: &str| -> Vec<String> {
+            let found = store.search(query).unwrap();
+            found.into_iter().map(|f| f.bookmark.id).collect()
+        };
+        assert_eq!(found("CAFE"), vec![by_title.id.clone()]);
+        assert_eq!(found("graph"), vec![by_article.id.clone()]);
+        assert_eq!(found("**para"), vec![by_article.id]);
+        assert_eq!(found("rust-LANG"), vec![by_address.id]);
+        assert_eq!(found("site").len(), 3, "the Site of all");
+        assert!(found("  ").is_empty());
+        assert!(found("absent").is_empty());
+    }
+
+    #[test]
+    fn search_lists_title_matches_first_then_newest_saved() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let mut ids = Vec::new();
+        for (n, (title, article)) in [("x", "tea"), ("Tea", ""), ("x", "tea"), ("y", "")]
+            .into_iter()
+            .enumerate()
+        {
+            let address = format!("https://t.test/{n}");
+            let id = saved_with_article(&store, &address, title, article).id;
+            let path = scratch.0.join(format!("{id}.md"));
+            let text = fs::read_to_string(&path).unwrap();
+            let saved = text.lines().find(|l| l.starts_with("saved: ")).unwrap();
+            let later = format!("saved: 2020-01-0{}T00:00:00Z", n + 1);
+            fs::write(&path, text.replace(saved, &later)).unwrap();
+            ids.push(id);
+        }
+        let found = store.search("tea").unwrap();
+        let order: Vec<_> = found.iter().map(|f| f.bookmark.id.clone()).collect();
+        assert_eq!(order, [&ids[1], &ids[2], &ids[0]].map(Clone::clone));
+        let snippet = &found[0].snippet;
+        assert_eq!(
+            (snippet.text.as_str(), snippet.matched.clone()),
+            ("About", 0..0)
+        );
+        assert_eq!(found[1].snippet.text, "tea");
+    }
+
+    #[test]
+    fn a_search_snippet_marks_the_match_in_utf16_units_after_an_emoji() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        saved_with_article(&store, "https://a.test/x", "T", "😀 tea\n");
+        assert_eq!(store.search("tea").unwrap()[0].snippet.matched, 3..6);
+    }
+
+    #[test]
+    fn article_search_gives_ranges_in_the_offsets_of_the_stored_article() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let b = saved_with_article(&store, "https://a.test/x", "T", "😀 **Tea** and tea\n");
+        let article = store.read_article(&b.id).unwrap();
+        let units: Vec<u16> = article.encode_utf16().collect();
+        let ranges = store.search_article(&b.id, "TEA").unwrap();
+        assert_eq!(ranges, [5..8, 15..18]);
+        assert_eq!(
+            String::from_utf16(&units[ranges[0].clone()]).unwrap(),
+            "Tea"
+        );
+        assert!(store.search_article(&b.id, " ").unwrap().is_empty());
+        let plain = saved_with_article(&store, "https://a.test/y", "T", "");
+        assert!(store.search_article(&plain.id, "tea").is_err());
     }
 }

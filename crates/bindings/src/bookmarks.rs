@@ -3,8 +3,8 @@
 
 use pkm_base::markup::Rgb;
 use pkm_bookmarks::{
-    Anchor, Article, ArticleProgress, Bookmark, Bookmarks, Details, Highlight, Markup, PageComment,
-    Place, Saved,
+    Anchor, Article, ArticleProgress, Bookmark, Bookmarks, Details, Found, Highlight, Markup,
+    PageComment, Place, Saved,
 };
 use std::collections::HashMap;
 
@@ -141,6 +141,35 @@ impl From<Markup> for ArticleMarkup {
     }
 }
 
+/// A Bookmark that Search found, see `pkm_bookmarks::Found`.
+#[derive(uniffi::Record)]
+pub struct BookmarkFound {
+    pub bookmark: Bookmark,
+    /// Around the match, as written.
+    pub snippet: String,
+    /// The match in `snippet`, in UTF-16 units: `matched_start` up to `matched_end`.
+    pub matched_start: u32,
+    pub matched_end: u32,
+}
+
+impl From<Found> for BookmarkFound {
+    fn from(found: Found) -> Self {
+        Self {
+            bookmark: found.bookmark,
+            snippet: found.snippet.text,
+            matched_start: found.snippet.matched.start as u32,
+            matched_end: found.snippet.matched.end as u32,
+        }
+    }
+}
+
+/// A match of Article Search: UTF-16 offsets `start` up to `end` into the Article's Markdown.
+#[derive(uniffi::Record)]
+pub struct ArticleMatch {
+    pub start: u64,
+    pub end: u64,
+}
+
 /// The Details of the page at `address` whose HTML is `html`; pass an empty
 /// `html` where the download failed, for the Details of the Address alone.
 #[uniffi::export]
@@ -211,6 +240,29 @@ impl BookmarkStore {
     /// Every Bookmark carrying the Tag, newest Saved first.
     pub fn bookmarks_tagged(&self, tag: String) -> Result<Vec<Bookmark>, BookmarksError> {
         Ok(self.0.list_tagged(&tag)?)
+    }
+
+    /// The Bookmarks with `query` in their Title, Site, Address or Article, Title matches first,
+    /// each newest Saved first.
+    pub fn search(&self, query: String) -> Result<Vec<BookmarkFound>, BookmarksError> {
+        Ok(self.0.search(&query)?.into_iter().map(Into::into).collect())
+    }
+
+    /// Where `query` is in the Bookmark's Article, in order; fails for a Bookmark without one.
+    pub fn search_article(
+        &self,
+        id: String,
+        query: String,
+    ) -> Result<Vec<ArticleMatch>, BookmarksError> {
+        Ok(self
+            .0
+            .search_article(&id, &query)?
+            .into_iter()
+            .map(|r| ArticleMatch {
+                start: r.start as u64,
+                end: r.end as u64,
+            })
+            .collect())
     }
 
     pub fn read(&self, id: String) -> Result<Bookmark, BookmarksError> {

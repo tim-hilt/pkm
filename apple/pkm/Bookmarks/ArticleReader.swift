@@ -5,7 +5,8 @@ import SwiftUI
 /// reopens where the user left off (Reading Progress, saved whenever the Reader rests) and has
 /// Immersive Mode: a tap hides everything but the Article, on macOS full screen does. Selecting text
 /// offers Highlight, in the Default Highlight Color, and Comment, on the spot; a tap on either opens
-/// the Books' popover to recolor, comment on or remove it.
+/// the Books' popover to recolor, comment on or remove it. Find (the magnifier, ⌘F on the Mac) is
+/// Article Search: a bar at the bottom marks every match in the Article and Jumps between them.
 struct ArticleReader: View {
     @Environment(BookmarksModel.self) private var model
     @Environment(LibraryModel.self) private var library
@@ -19,6 +20,11 @@ struct ArticleReader: View {
     @State private var markdown: String?
     @State private var markup = ArticleMarkup(highlights: [], pageComments: [])
     @State private var editing: MarkupEdit?
+    @State private var isFinding = false
+    @State private var query = ""
+    @State private var matches: [NSRange] = []
+    /// The index in `matches` of the match the Reader last Jumped to.
+    @State private var current = 0
 
     private var bookmark: Bookmark? { model.bookmarks.first { $0.id == id } }
 
@@ -28,7 +34,7 @@ struct ArticleReader: View {
                 ArticleText(
                     markdown: markdown, layout: spot.layout,
                     images: ImageSource(add: { _ in nil }, read: { model.image($0, of: id) }),
-                    markup: markup,
+                    markup: markup, found: isFinding ? FoundText(ranges: matches, current: current) : FoundText(),
                     actions: MarkupActions(highlight: highlight, comment: comment, tap: tapped)
                 )
                 .frame(maxWidth: 680)
@@ -51,7 +57,19 @@ struct ArticleReader: View {
             markdown = bookmark.flatMap(model.article(of:))
             markup = model.markup(of: id)
             spot.reopen(at: bookmark?.progress.map { Int($0.offset) })
+            if let launched = model.launchFind {
+                model.launchFind = nil
+                query = launched
+                isFinding = true
+            }
         }
+        .safeAreaInset(edge: .bottom) {
+            if isFinding {
+                FindBar(query: $query, count: matches.count, current: current, jump: jump) { isFinding = false }
+            }
+        }
+        .onChange(of: query) { find() }
+        .onChange(of: isFinding) { if !isFinding { query = "" } }
         .onDisappear { saveProgress() }
         .onChange(of: scenePhase) { if scenePhase == .background { saveProgress() } }
         .navigationTitle(bookmark?.title ?? "")
@@ -59,6 +77,9 @@ struct ArticleReader: View {
             if let url = bookmark.flatMap({ URL(string: $0.address) }) {
                 Button("Open Page", systemImage: "safari") { openURL(url) }
             }
+            Button("Find in Article", systemImage: "magnifyingglass") { isFinding.toggle() }
+                .keyboardShortcut("f")
+                .accessibilityIdentifier("article-find")
             Button("Details", systemImage: "info.circle") { model.detailsID = id }
                 .accessibilityIdentifier("bookmark-details")
         }
@@ -81,6 +102,25 @@ struct ArticleReader: View {
         #endif
         .bookmarkDetailsSheet(isInFront: true)
         .accessibilityIdentifier("article-reader")
+    }
+
+    /// Searches the Article for `query` and Jumps to the first match.
+    private func find() {
+        matches = model.searchArticle(query, in: id)
+        current = 0
+        scroll(toMatch: 0)
+    }
+
+    /// Jumps to the next match, the previous one for -1, going around at either end.
+    private func jump(_ step: Int) {
+        guard !matches.isEmpty else { return }
+        current = (current + step + matches.count) % matches.count
+        scroll(toMatch: current)
+    }
+
+    private func scroll(toMatch index: Int) {
+        guard matches.indices.contains(index) else { return }
+        position.scrollTo(y: spot.y(ofOffset: matches[index].location))
     }
 
     private func saveProgress() {
@@ -172,6 +212,50 @@ private struct MarkupEdit: Identifiable {
     }
 }
 
+/// The Article Search matches to mark in the text, and which of them is the current one.
+struct FoundText: Equatable {
+    var ranges: [NSRange] = []
+    var current: Int?
+    init() {}
+    init(ranges: [NSRange], current: Int?) {
+        self.ranges = ranges
+        self.current = current
+    }
+}
+
+/// Article Search's bar: the query, "3 of 12", Jumps to the previous and next match, and Done.
+private struct FindBar: View {
+    @Binding var query: String
+    let count: Int
+    let current: Int
+    /// Jumps by a step: 1 to the next match, -1 to the previous one.
+    let jump: (Int) -> Void
+    let done: () -> Void
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            TextField("Find in Article", text: $query)
+                .textFieldStyle(.roundedBorder)
+                .focused($isFocused)
+                .autocorrectionDisabled()
+                .onSubmit { jump(1) }
+                .accessibilityIdentifier("article-find-field")
+            if !query.isEmpty {
+                Text(count == 0 ? "No matches" : "\(current + 1) of \(count)")
+                    .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+            }
+            Button("Previous Match", systemImage: "chevron.up") { jump(-1) }.disabled(count == 0)
+            Button("Next Match", systemImage: "chevron.down") { jump(1) }.disabled(count == 0)
+            Button("Done", action: done)
+        }
+        .labelStyle(.iconOnly)
+        .padding(.horizontal).padding(.vertical, 8)
+        .background(.bar)
+        .onAppear { isFocused = true }
+    }
+}
+
 /// What the text view reports: a selection to Highlight, a spot to Comment on, a tap.
 struct MarkupActions {
     let highlight: (NSRange) -> Void
@@ -220,7 +304,12 @@ private final class ReadingSpot {
     func restoreY() -> CGFloat? {
         guard let offset = pending, layout.isLaidOut else { return nil }
         pending = nil
-        return layout.y(ofOffset: offset) + Self.margin - sample.insetTop
+        return y(ofOffset: offset)
+    }
+
+    /// The scroll offset that shows the line holding the UTF-16 `offset` at the top, a little below the bars.
+    func y(ofOffset offset: Int) -> CGFloat {
+        max(0, layout.y(ofOffset: offset) + Self.margin - sample.insetTop - 40)
     }
 
     /// The offset at the top of the view if it moved since it was last saved; nil while a restore
@@ -284,6 +373,24 @@ final class ArticleLayout {
         return found
     }
 
+    /// Marks the UTF-16 `ranges` (in order) as Article Search matches, the one at `current` stronger,
+    /// in place of any marked before. Drawn over the text, not part of it.
+    func mark(_ ranges: [NSRange], current: Int?) {
+        guard let manager else { return }
+        manager.removeRenderingAttribute(.backgroundColor, for: manager.documentRange)
+        var at = manager.documentRange.location
+        var offset = 0
+        for (index, range) in ranges.enumerated() {
+            guard let start = manager.location(at, offsetBy: range.location - offset),
+                let end = manager.location(start, offsetBy: range.length),
+                let text = NSTextRange(location: start, end: end)
+            else { continue }
+            let color = PlatformColor.systemYellow.withAlphaComponent(index == current ? 0.9 : 0.4)
+            manager.addRenderingAttribute(.backgroundColor, value: color, for: text)
+            (at, offset) = (end, range.upperBound)
+        }
+    }
+
     /// Where in the text the line holding the UTF-16 `offset` starts.
     func y(ofOffset offset: Int) -> CGFloat {
         guard let manager else { return 0 }
@@ -305,6 +412,7 @@ final class ArticleLayout {
     let layout: ArticleLayout
     let images: ImageSource
     let markup: ArticleMarkup
+    let found: FoundText
     let actions: MarkupActions
 
     /// What the text view's delegate and the drawn images need to outlive an update.
@@ -314,6 +422,8 @@ final class ArticleLayout {
         var actions: MarkupActions
         /// The Markup that is drawn.
         var painted: ArticleMarkup?
+        /// The Article Search matches that are marked.
+        var marked = FoundText()
         init(_ images: ImageSource, _ actions: MarkupActions) {
             attachments = ImageAttachments(images)
             self.actions = actions
@@ -325,10 +435,16 @@ final class ArticleLayout {
     /// Styles the text, then draws the Markup over it, unless both are as they were.
     func update(_ storage: NSTextStorage, textChanged: Bool, _ coordinator: Coordinator) {
         coordinator.actions = actions
-        guard textChanged || coordinator.painted != markup else { return }
-        MarkdownStyler.style(storage, caret: nil, images: coordinator.attachments)
-        paint(storage)
-        coordinator.painted = markup
+        if textChanged || coordinator.painted != markup {
+            MarkdownStyler.style(storage, caret: nil, images: coordinator.attachments)
+            paint(storage)
+            coordinator.painted = markup
+            coordinator.marked = FoundText(ranges: [], current: nil)  // styling may have dropped the marks
+        }
+        if coordinator.marked != found {
+            layout.mark(found.ranges, current: found.current)
+            coordinator.marked = found
+        }
     }
 
     private func paint(_ storage: NSTextStorage) {

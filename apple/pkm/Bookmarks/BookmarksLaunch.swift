@@ -8,7 +8,8 @@ extension BookmarksModel {
     /// The Bookmarks for this launch: the Bookmarks folder. For UI tests and screenshots (`-UITesting…`)
     /// it is temporary, with sample Bookmarks when launched with `-UITestingOpenBookmarks`, and the
     /// first one's Article open in the Reader with `-UITestingOpenArticle`, or its Details with
-    /// `-UITestingOpenBookmarkDetails`.
+    /// `-UITestingOpenBookmarkDetails`. `-UITestingSearchBookmarks` searches the list for "example",
+    /// `-UITestingFindInArticle` searches the open Article for "the".
     @MainActor
     static func forLaunch() -> BookmarksModel {
         let arguments = ProcessInfo.processInfo.arguments
@@ -16,9 +17,12 @@ extension BookmarksModel {
             return BookmarksModel(store: openOrTemporary(documentsFolder))
         }
         let store = openOrTemporary(temporaryFolder())
-        let opensArticle = arguments.contains("-UITestingOpenArticle")
+        let opensArticle =
+            arguments.contains("-UITestingOpenArticle") || arguments.contains("-UITestingFindInArticle")
         let opensDetails = arguments.contains("-UITestingOpenBookmarkDetails")
-        if opensArticle || opensDetails || arguments.contains("-UITestingOpenBookmarks") {
+        if opensArticle || opensDetails || arguments.contains("-UITestingOpenBookmarks")
+            || arguments.contains("-UITestingSearchBookmarks")
+        {
             let samples = [
                 ("https://example.com/rust", "Rust in Action", "Example Blog"),
                 ("https://example.org/design", "A Philosophy of Software Design", "example.org"),
@@ -40,6 +44,8 @@ extension BookmarksModel {
         let model = BookmarksModel(store: store)
         if opensArticle, let sample = model.bookmarks.first(where: { $0.hasArticle }) { markUp(sample, in: model) }
         if opensArticle { model.openID = model.bookmarks.first { $0.hasArticle }?.id }
+        if arguments.contains("-UITestingSearchBookmarks") { model.searchText = "example" }
+        if arguments.contains("-UITestingFindInArticle") { model.launchFind = "the" }
         if opensDetails { model.detailsID = model.bookmarks.first { $0.hasArticle }?.id }
         return model
     }

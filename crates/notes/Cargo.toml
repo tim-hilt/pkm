@@ -8,5 +8,5 @@ publish.workspace = true
 [dependencies]
 # Front matter, Item IDs, Markdown, the clock and the file seam.
 pkm-base = { path = "../base" }
-# Folds case and accents for Search.
-unicode-normalization = "0.1"
+# Search's matching.
+pkm-search = { path = "../search" }

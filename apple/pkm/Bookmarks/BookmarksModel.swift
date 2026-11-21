@@ -43,11 +43,22 @@ final class BookmarksModel {
     /// The Bookmarks the list shows: those carrying `tagFilter`, or all.
     private(set) var shown: [Bookmark] = []
 
+    /// What Search looks for; empty when not searching.
+    var searchText = "" {
+        didSet { if searchText != oldValue { reloadResults() } }
+    }
+
+    /// The Bookmarks that match `searchText`, Title matches first; empty when not searching.
+    private(set) var results: [BookmarkFound] = []
+
     /// The Tags some Bookmark carries, alphabetically: what the list can be narrowed to.
     var tagsInUse: [String] { Set(bookmarks.flatMap(\.tags)).sorted() }
 
     /// The Bookmark whose Article the Reader shows, if any.
     var openID: String?
+
+    /// Article Search's query to open the Reader with, for UI tests and screenshots.
+    @ObservationIgnored var launchFind: String?
 
     /// The Bookmark whose Details are shown, if any.
     var detailsID: String?
@@ -203,6 +214,13 @@ final class BookmarksModel {
         reload()
     }
 
+    /// Where `query` is in the Bookmark's Article (Article Search), as UTF-16 ranges of the Markdown
+    /// that `article(of:)` gives, in order; none for a blank query or a Bookmark without an Article.
+    func searchArticle(_ query: String, in id: String) -> [NSRange] {
+        let found = (try? store.searchArticle(id: id, query: query)) ?? []
+        return found.map { NSRange(location: Int($0.start), length: Int($0.end - $0.start)) }
+    }
+
     /// The Markdown of the Bookmark's Article; nil if it has none.
     func article(of bookmark: Bookmark) -> String? {
         bookmark.hasArticle ? try? store.readArticle(id: bookmark.id) : nil
@@ -289,6 +307,11 @@ final class BookmarksModel {
     private func reload() {
         bookmarks = (try? store.bookmarks()) ?? []
         shown = tagFilter.flatMap { try? store.bookmarksTagged(tag: $0) } ?? bookmarks
+        reloadResults()
+    }
+
+    private func reloadResults() {
+        results = searchText.isEmpty ? [] : (try? store.search(query: searchText)) ?? []
     }
 }
 

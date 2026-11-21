@@ -6,11 +6,10 @@
 //! `pkm-bindings`.
 
 mod folder;
-mod search;
 mod store;
 pub mod sync;
 
 pub use folder::{Counts, Folder, FolderError};
 pub use pkm_base::files::{DiskFiles, Files, MemoryFiles};
-pub use search::Snippet;
+pub use pkm_search::Snippet;
 pub use store::{Found, Note, Notes, Row};
