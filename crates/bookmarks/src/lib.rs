@@ -16,4 +16,4 @@ pub use address::{is_document, normalise};
 pub use article::{Article, read_article};
 pub use extract::{Details, extract};
 pub use pkm_base::files::{DiskFiles, Files, MemoryFiles};
-pub use store::{Bookmark, Bookmarks, Saved};
+pub use store::{ArticleProgress, Bookmark, Bookmarks, Saved};

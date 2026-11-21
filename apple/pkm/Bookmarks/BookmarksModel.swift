@@ -213,6 +213,12 @@ final class BookmarksModel {
         try? store.readImage(id: id, name: name)
     }
 
+    /// Keeps `offset` (UTF-16, into the Article's Markdown) as where the Bookmark was left.
+    func saveProgress(id: String, offset: Int) {
+        _ = try? store.saveProgress(id: id, offset: UInt64(max(0, offset)))
+        reload()
+    }
+
     /// Deletes the Bookmark with its Cover, Article and images.
     func delete(id: String) {
         if openID == id { openID = nil }

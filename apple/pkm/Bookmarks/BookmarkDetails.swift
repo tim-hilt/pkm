@@ -96,6 +96,7 @@ struct BookmarkDetails: View {
             row("Author", bookmark.author)
             row("Published", bookmark.published)
             row("Saved", Self.saved(bookmark.saved))
+            if let progress = bookmark.progress { row("Reading Progress", "\(Int(progress.percent)) %") }
             row("Excerpt", bookmark.excerpt)
         }
     }

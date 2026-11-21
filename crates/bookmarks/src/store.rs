@@ -30,6 +30,8 @@ const AUTHOR: &str = "author";
 const PUBLISHED: &str = "published";
 const SAVED: &str = "saved";
 const TAGS: &str = "tags";
+/// Beside the Bookmarks, hidden: one state file per Bookmark.
+const STATE_FOLDER: &str = ".state";
 
 /// A Bookmark and its details. Empty where there is none, except `cover`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +52,19 @@ pub struct Bookmark {
     pub has_article: bool,
     /// Valid Tags, in the order they were added.
     pub tags: Vec<String>,
+    /// Where the Article was left; none if it was never read, or there is no Article.
+    pub progress: Option<ArticleProgress>,
+}
+
+/// Where in a Bookmark's Article the user left off, and when (Bookmarks ADR-0002).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArticleProgress {
+    /// UTF-16 offset into the Article's stored Markdown (`read_article`), never past its end.
+    pub offset: u64,
+    /// Last Read: when the Reader last rested, in milliseconds since the Unix epoch.
+    pub last_read: u64,
+    /// How much of the Article lies before `offset`, 0 to 100, rounded down.
+    pub percent: u8,
 }
 
 /// What Saving gave.
@@ -159,7 +174,7 @@ impl Bookmarks {
         self.files.write(&self.path(&id), &file.render())?;
         self.tags.remember(kept_tags)?;
         Ok(Saved {
-            bookmark: bookmark_of(&file, &id),
+            bookmark: self.bookmark_of(&file, &id),
             existing: false,
         })
     }
@@ -172,7 +187,7 @@ impl Bookmarks {
                 continue;
             };
             if let Some(file) = self.read_file(&id) {
-                all.push(bookmark_of(&file, &id));
+                all.push(self.bookmark_of(&file, &id));
             }
         }
         all.sort_by(|a, b| b.saved.cmp(&a.saved).then_with(|| a.id.cmp(&b.id)));
@@ -183,7 +198,7 @@ impl Bookmarks {
     pub fn read(&self, id: &str) -> io::Result<Bookmark> {
         let id = ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?;
         let file = self.read_file(&id).ok_or(io::ErrorKind::NotFound)?;
-        Ok(bookmark_of(&file, &id))
+        Ok(self.bookmark_of(&file, &id))
     }
 
     /// The bytes of the Cover of the Bookmark `id`; `NotFound` if there is
@@ -271,6 +286,22 @@ impl Bookmarks {
         Ok(())
     }
 
+    /// Keeps `offset` (UTF-16, into `read_article`'s text; clamped to its end) as
+    /// where the Bookmark `id` was left, and now as its Last Read. It replaces
+    /// the previous one whichever way it points, so scrolling back and leaving
+    /// moves Reading Progress back, as in Books (Books ADR-0004). `NotFound`
+    /// if there is no such Bookmark or it has no Article.
+    pub fn save_progress(&self, id: &str, offset: u64) -> io::Result<Bookmark> {
+        let bookmark = self.read(id)?;
+        if !bookmark.has_article {
+            return Err(io::ErrorKind::NotFound.into());
+        }
+        let length = utf16_length(&self.read_article(id)?);
+        let line = format!("{} {}", offset.min(length), now_ms() as u64);
+        self.files.write(&self.state_path(&bookmark.id), &line)?;
+        self.read(id)
+    }
+
     /// Gives the Bookmark `id` the `article` (see `save`, which also says what
     /// becomes of `images`), if it has none: an Article is never replaced, so
     /// that Markup stays where it was put. A blank `article` adds nothing.
@@ -295,6 +326,7 @@ impl Bookmarks {
     pub fn drop_article(&self, id: &str) -> io::Result<Bookmark> {
         let images = self.images_of(&self.read(id)?);
         let bookmark = self.modify(id, |file| file.body.clear())?;
+        ignore_not_found(self.files.remove(&self.state_path(&bookmark.id)))?;
         // After the file, so that an interruption leaves unused images, not a broken Article.
         for name in images {
             ignore_not_found(self.files.remove(&self.root.join(name)))?;
@@ -312,7 +344,7 @@ impl Bookmarks {
         if file.render() != before {
             self.files.write(&self.path(&id), &file.render())?;
         }
-        Ok(bookmark_of(&file, &id))
+        Ok(self.bookmark_of(&file, &id))
     }
 
     /// Deletes the Bookmark `id` with its Cover and images; one that is gone
@@ -325,6 +357,7 @@ impl Bookmarks {
         for name in bookmark.cover.iter().chain(&images) {
             ignore_not_found(self.files.remove(&self.root.join(name)))?;
         }
+        ignore_not_found(self.files.remove(&self.state_path(&bookmark.id)))?;
         ignore_not_found(
             self.files
                 .remove(&self.root.join(format!("{}.md", bookmark.id))),
@@ -393,6 +426,25 @@ impl Bookmarks {
         self.root.join(format!("{id}.md"))
     }
 
+    /// The hidden state file of `id`, holding `<offset> <last_read>`.
+    fn state_path(&self, id: &str) -> PathBuf {
+        self.root.join(STATE_FOLDER).join(id)
+    }
+
+    /// The Bookmark of `file`, with the Reading Progress its state file keeps; an
+    /// unreadable state reads as never read.
+    fn bookmark_of(&self, file: &Document, id: &ItemId) -> Bookmark {
+        let mut bookmark = unread_bookmark_of(file, id);
+        if bookmark.has_article {
+            bookmark.progress = self
+                .files
+                .read(&self.state_path(id.as_str()))
+                .ok()
+                .and_then(|line| decode_progress(&line, &file.body));
+        }
+        bookmark
+    }
+
     /// The file of `id`, none if it is none, which includes a file whose
     /// front matter names another `id` or no Address.
     fn read_file(&self, id: &ItemId) -> Option<Document> {
@@ -429,7 +481,7 @@ fn ignore_not_found(result: io::Result<()>) -> io::Result<()> {
     }
 }
 
-fn bookmark_of(file: &Document, id: &ItemId) -> Bookmark {
+fn unread_bookmark_of(file: &Document, id: &ItemId) -> Bookmark {
     let text = |key| file.scalar(key).unwrap_or_default().to_owned();
     Bookmark {
         id: id.as_str().to_owned(),
@@ -446,7 +498,26 @@ fn bookmark_of(file: &Document, id: &ItemId) -> Bookmark {
         saved: text(SAVED),
         has_article: !file.body.trim().is_empty(),
         tags: tags_of(file),
+        progress: None,
     }
+}
+
+/// UTF-16 code units in `text`: the unit of offsets into an Article (Books ADR-0006).
+fn utf16_length(text: &str) -> u64 {
+    text.encode_utf16().count() as u64
+}
+
+/// The Reading Progress in a state `line` for an Article `body`; none if it isn't one.
+fn decode_progress(line: &str, body: &str) -> Option<ArticleProgress> {
+    let (offset, last_read) = line.split_once(' ')?;
+    let offset: u64 = offset.parse().ok()?;
+    let length = utf16_length(body);
+    let offset = offset.min(length);
+    Some(ArticleProgress {
+        offset,
+        last_read: last_read.parse().ok()?,
+        percent: (offset * 100).checked_div(length).unwrap_or(0) as u8,
+    })
 }
 
 #[cfg(test)]
@@ -1124,5 +1195,116 @@ mod tests {
             io::ErrorKind::NotFound
         );
         assert!(!store.drop_article(&b.id).unwrap().has_article);
+    }
+
+    /// A Bookmark whose Article is 10 UTF-16 units long: nine and a line break.
+    fn tenth_part_article(store: &Bookmarks) -> Bookmark {
+        saved_with_images(store, "123456789", &[])
+    }
+
+    #[test]
+    fn reading_progress_and_last_read_round_trip_as_a_percentage_of_the_article() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let b = tenth_part_article(&store);
+        assert_eq!(b.progress, None, "never read");
+        let before = now_ms() as u64;
+        let saved = store.save_progress(&b.id, 5).unwrap().progress.unwrap();
+        assert_eq!((saved.offset, saved.percent), (5, 50));
+        assert!(saved.last_read >= before);
+        let reopened = scratch.store();
+        assert_eq!(reopened.read(&b.id).unwrap().progress, Some(saved));
+        assert_eq!(reopened.list().unwrap()[0].progress, Some(saved));
+    }
+
+    #[test]
+    fn progress_counts_utf16_units_and_moves_back_when_saved_earlier() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        // The emoji is two UTF-16 units: 4 + 2 + 3 + the line break.
+        let b = saved_with_images(&store, "abcd😀efg", &[]);
+        assert_eq!(
+            store
+                .save_progress(&b.id, 9)
+                .unwrap()
+                .progress
+                .unwrap()
+                .percent,
+            90
+        );
+        let back = store.save_progress(&b.id, 3).unwrap().progress.unwrap();
+        assert_eq!((back.offset, back.percent), (3, 30));
+    }
+
+    #[test]
+    fn progress_past_the_end_stops_at_the_end() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let b = tenth_part_article(&store);
+        let p = store.save_progress(&b.id, 999).unwrap().progress.unwrap();
+        assert_eq!((p.offset, p.percent), (10, 100));
+    }
+
+    #[test]
+    fn a_bookmark_never_read_has_no_state_file_and_one_without_article_cannot_be_read() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let b = tenth_part_article(&store);
+        assert!(!scratch.0.join(".state").exists());
+        let plain = plain(&store, "https://x.test/plain");
+        assert_eq!(
+            store.save_progress(&plain.id, 1).unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+        assert_eq!(
+            store.save_progress("nonsense", 1).unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+        assert_eq!(store.read(&b.id).unwrap().progress, None);
+    }
+
+    #[test]
+    fn an_unreadable_state_reads_as_never_read_and_the_next_save_replaces_it() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let b = tenth_part_article(&store);
+        fs::create_dir_all(scratch.0.join(".state")).unwrap();
+        fs::write(scratch.0.join(".state").join(&b.id), "junk").unwrap();
+        assert_eq!(store.read(&b.id).unwrap().progress, None);
+        assert_eq!(
+            store
+                .save_progress(&b.id, 2)
+                .unwrap()
+                .progress
+                .unwrap()
+                .offset,
+            2
+        );
+    }
+
+    #[test]
+    fn dropping_the_article_and_deleting_take_the_state_file() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let state = |id: &str| scratch.0.join(".state").join(id);
+        let a = tenth_part_article(&store);
+        store.save_progress(&a.id, 4).unwrap();
+        assert!(state(&a.id).exists());
+        assert_eq!(store.drop_article(&a.id).unwrap().progress, None);
+        assert!(!state(&a.id).exists());
+        let b = store
+            .save(
+                "https://x.test/b",
+                &details("B"),
+                "",
+                &[],
+                Some("text"),
+                &HashMap::new(),
+            )
+            .unwrap()
+            .bookmark;
+        store.save_progress(&b.id, 1).unwrap();
+        store.delete(&b.id).unwrap();
+        assert!(!state(&b.id).exists());
     }
 }

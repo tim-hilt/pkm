@@ -104,6 +104,9 @@ private struct BookmarkRow: View {
                     if bookmark.hasArticle {
                         Image(systemName: "doc.text").accessibilityLabel("Article")
                     }
+                    if let progress = bookmark.progress {
+                        Text("\(Int(progress.percent)) %").monospacedDigit()
+                    }
                     Text(bookmark.site).lineLimit(1)
                 }
                 .font(.caption).foregroundStyle(.secondary)

@@ -1,7 +1,7 @@
 //! The Bookmarks surface of the UniFFI library (ADR-0007): the Bookmarks store
 //! and the extraction of a page's details. The logic lives in `pkm-bookmarks`.
 
-use pkm_bookmarks::{Article, Bookmark, Bookmarks, Details, Saved};
+use pkm_bookmarks::{Article, ArticleProgress, Bookmark, Bookmarks, Details, Saved};
 use std::collections::HashMap;
 
 /// Why the Bookmarks couldn't be read or saved.
@@ -38,6 +38,15 @@ pub struct Bookmark {
     pub saved: String,
     pub has_article: bool,
     pub tags: Vec<String>,
+    pub progress: Option<ArticleProgress>,
+}
+
+/// Where an Article was left, see `pkm_bookmarks::ArticleProgress`.
+#[uniffi::remote(Record)]
+pub struct ArticleProgress {
+    pub offset: u64,
+    pub last_read: u64,
+    pub percent: u8,
 }
 
 /// The text of a page, see `pkm_bookmarks::Article`.
@@ -175,6 +184,12 @@ impl BookmarkStore {
     /// Takes a Tag off every Bookmark, for Delete a Tag.
     pub fn remove_tag_everywhere(&self, tag: String) -> Result<(), BookmarksError> {
         Ok(self.0.remove_tag_everywhere(&tag)?)
+    }
+
+    /// Keeps `offset` (UTF-16, into the Article's Markdown) as where the Bookmark was left, and now as
+    /// its Last Read; fails for a Bookmark without an Article.
+    pub fn save_progress(&self, id: String, offset: u64) -> Result<Bookmark, BookmarksError> {
+        Ok(self.0.save_progress(&id, offset)?)
     }
 
     /// Gives a Bookmark without an Article the `article`, with its `images` as in `save`.
