@@ -1,6 +1,9 @@
+/** The Contexts whose files live in stores that have to read them again after a change. */
+export type StoredContext = "tasks" | "notes" | "bookmarks";
+
 /** What a tab tells the others (ADR-0016). */
 export type TabMessage =
-  | { kind: "changed"; names: string[]; tasks: boolean; notes: boolean }
+  | { kind: "changed"; names: string[]; contexts: StoredContext[] }
   | { kind: "connected" }
   | { kind: "disconnected" };
 

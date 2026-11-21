@@ -5,7 +5,7 @@ import type { FileStorage } from "../storage/FileStorage";
 import { FileFolder } from "./FileFolder";
 import { type StepResult, type SyncStatus, runSyncStep } from "./SyncRunner";
 import { SyncState } from "./SyncState";
-import { type TabMessage, type Tabs, browserTabs } from "./Tabs";
+import { type StoredContext, type TabMessage, type Tabs, browserTabs } from "./Tabs";
 import { type Fetch, runExchange } from "./WebDavSender";
 
 /** Why connecting failed. */
@@ -95,13 +95,20 @@ export class CloudBacking {
   private current: Credentials | undefined;
   private readonly listeners = new Set<(connection: Connection | undefined) => void>();
   private readonly syncedListeners = new Set<(names: string[]) => void>();
-  private readonly tasksListeners = new Set<() => void>();
-  private readonly notesListeners = new Set<() => void>();
+  private readonly storedListeners: Record<StoredContext, Set<() => void>> = {
+    tasks: new Set(),
+    notes: new Set(),
+    bookmarks: new Set(),
+  };
   private readonly state: SyncState;
   private readonly books: FileFolder;
   private readonly bookStates: FileFolder;
   private readonly booksState: SyncState;
   private readonly bookStateStates: SyncState;
+  private readonly bookmarks: FileFolder;
+  private readonly bookmarkStates: FileFolder;
+  private readonly bookmarksState: SyncState;
+  private readonly bookmarkStateStates: SyncState;
   private readonly tasks: FileFolder;
   private readonly tasksState: SyncState;
   private readonly notes: FileFolder;
@@ -123,6 +130,7 @@ export class CloudBacking {
   private step: Promise<void> | undefined;
   private readonly incoming = { known: false };
   private readonly booksIncoming = { known: false };
+  private readonly bookmarksIncoming = { known: false };
   private readonly tasksIncoming = { known: false };
   private readonly notesIncoming = { known: false };
   private readonly tagsIncoming = { known: false };
@@ -141,6 +149,10 @@ export class CloudBacking {
     this.bookStates = new FileFolder(storage, "Books/.state");
     this.booksState = new SyncState(storage, "Books");
     this.bookStateStates = new SyncState(storage, "BooksState");
+    this.bookmarks = new FileFolder(storage, "Bookmarks");
+    this.bookmarkStates = new FileFolder(storage, "Bookmarks/.state");
+    this.bookmarksState = new SyncState(storage, "Bookmarks");
+    this.bookmarkStateStates = new SyncState(storage, "BookmarksState");
     this.tasks = new FileFolder(storage, "Tasks");
     this.tasksState = new SyncState(storage, "Tasks");
     this.notes = new FileFolder(storage, "Notes", true);
@@ -173,10 +185,11 @@ export class CloudBacking {
     return data && JSON.parse(new TextDecoder().decode(data));
   }
 
-  /** Throws `ConnectFailed` unless the server takes `credentials` and has (or now has) its `pkm/Drawings`, `pkm/Books`, `pkm/Tasks`, `pkm/Notes`, `pkm/Tags`, `pkm/Colors` and `pkm/Filters` folders. */
+  /** Throws `ConnectFailed` unless the server takes `credentials` and has (or now has) its `pkm/Drawings`, `pkm/Books`, `pkm/Bookmarks`, `pkm/Tasks`, `pkm/Notes`, `pkm/Tags`, `pkm/Colors` and `pkm/Filters` folders. */
   private async check({ url, username, password }: Credentials): Promise<void> {
     let drawings;
     let books;
+    let bookmarks;
     let tasks;
     let notes;
     let tags;
@@ -185,6 +198,7 @@ export class CloudBacking {
     try {
       drawings = this.core.webDav(url, username, password);
       books = this.core.webDavForBooks(url, username, password);
+      bookmarks = this.core.webDavForBookmarks(url, username, password);
       tasks = this.core.webDavForTasks(url, username, password);
       notes = this.core.webDavForNotes(url, username, password);
       tags = this.core.webDavForTags(url, username, password);
@@ -194,13 +208,14 @@ export class CloudBacking {
       throw new ConnectFailed("notHttps");
     }
     try {
-      for (const protocol of [drawings, books, tasks, notes, tags, colors, filters]) {
+      for (const protocol of [drawings, books, bookmarks, tasks, notes, tags, colors, filters]) {
         const result = await runExchange(protocol.connect(), this.send);
         if (result.error) throw new ConnectFailed(result.error as ConnectReason);
       }
     } finally {
       drawings.free();
       books.free();
+      bookmarks.free();
       tasks.free();
       notes.free();
       tags.free();
@@ -284,6 +299,7 @@ export class CloudBacking {
     await this.tabs.exclusive(() => this.storage.remove("Cloud"));
     this.incoming.known = false;
     this.booksIncoming.known = false;
+    this.bookmarksIncoming.known = false;
     this.tasksIncoming.known = false;
     this.notesIncoming.known = false;
     this.setReport({});
@@ -322,32 +338,48 @@ export class CloudBacking {
 
   /** Calls `listener` whenever a step or another tab changed Task files here. Returns a function that stops it. */
   onTasksChanged(listener: () => void): () => void {
-    this.tasksListeners.add(listener);
-    return () => this.tasksListeners.delete(listener);
+    return this.listen("tasks", listener);
   }
 
   /** This tab saved Task files: Sync follows, and the other tabs, whose stores don't hold them yet, read them again. */
   tasksSaved(): void {
-    this.localChange();
-    this.tabs.post({ kind: "changed", names: [], tasks: true, notes: false });
+    this.filesSaved("tasks");
   }
 
   /** Calls `listener` whenever a step or another tab changed Note files here. Returns a function that stops it. */
   onNotesChanged(listener: () => void): () => void {
-    this.notesListeners.add(listener);
-    return () => this.notesListeners.delete(listener);
+    return this.listen("notes", listener);
   }
 
   /** This tab saved Note files: Sync follows, and the other tabs, whose stores don't hold them yet, read them again. */
   notesSaved(): void {
+    this.filesSaved("notes");
+  }
+
+  /** Calls `listener` whenever a step or another tab changed Bookmark files here. Returns a function that stops it. */
+  onBookmarksChanged(listener: () => void): () => void {
+    return this.listen("bookmarks", listener);
+  }
+
+  /** This tab saved Bookmark files: Sync follows, and the other tabs, whose stores don't hold them yet, read them again. */
+  bookmarksSaved(): void {
+    this.filesSaved("bookmarks");
+  }
+
+  private listen(context: StoredContext, listener: () => void): () => void {
+    this.storedListeners[context].add(listener);
+    return () => this.storedListeners[context].delete(listener);
+  }
+
+  private filesSaved(context: StoredContext): void {
     this.localChange();
-    this.tabs.post({ kind: "changed", names: [], tasks: false, notes: true });
+    this.tabs.post({ kind: "changed", names: [], contexts: [context] });
   }
 
   /** Follows what another tab did: the storage already holds the new connection (or none). */
   private async heard(message: TabMessage): Promise<void> {
     if (message.kind === "changed") {
-      this.tell(message.names, message.tasks, message.notes);
+      this.tell(message.names, message.contexts);
       return;
     }
     const saved = message.kind === "connected" ? await this.saved() : undefined;
@@ -355,6 +387,7 @@ export class CloudBacking {
     this.current = saved;
     this.incoming.known = false;
     this.booksIncoming.known = false;
+    this.bookmarksIncoming.known = false;
     this.tasksIncoming.known = false;
     this.notesIncoming.known = false;
     this.setReport({});
@@ -413,6 +446,11 @@ export class CloudBacking {
       credentials.username,
       credentials.password,
     );
+    const bookmarksProtocol = this.core.webDavForBookmarks(
+      credentials.url,
+      credentials.username,
+      credentials.password,
+    );
     const tasksProtocol = this.core.webDavForTasks(
       credentials.url,
       credentials.username,
@@ -441,7 +479,7 @@ export class CloudBacking {
     const now = Date.now();
     // One step per folder, in order, all against the same server: Drawings,
     // the Book Files, then their state, which the core's Books merge merges,
-    // the Task files, the Note files, the Tags file, the Highlight Colors file and the Filters.
+    // the Bookmark files and their state, the Task files, the Note files, the Tags file, the Highlight Colors file and the Filters.
     const plans = [
       {
         run: this.core.syncRun(now),
@@ -466,6 +504,22 @@ export class CloudBacking {
         state: this.bookStateStates,
         incoming: this.booksIncoming,
         reports: undefined,
+      },
+      {
+        run: this.core.syncRunForBookmarks(now),
+        protocol: bookmarksProtocol,
+        files: this.bookmarks,
+        state: this.bookmarksState,
+        incoming: this.bookmarksIncoming,
+        reports: "bookmarks" as const,
+      },
+      {
+        run: this.core.syncRunForBookmarkStates(now),
+        protocol: bookmarksProtocol,
+        files: this.bookmarkStates,
+        state: this.bookmarkStateStates,
+        incoming: this.bookmarksIncoming,
+        reports: "bookmarks" as const,
       },
       {
         run: this.core.syncRunForTasks(now),
@@ -510,8 +564,7 @@ export class CloudBacking {
     ];
     const results: StepResult[] = [];
     const changed: string[] = [];
-    let tasksChanged = false;
-    let notesChanged = false;
+    const contexts = new Set<StoredContext>();
     let finished = 0;
     let planned = 0;
     try {
@@ -536,8 +589,7 @@ export class CloudBacking {
         if (!result) return;
         results.push(result);
         if (reports === "drawings") changed.push(...result.changed);
-        if (reports === "tasks" && result.changed.length > 0) tasksChanged = true;
-        if (reports === "notes" && result.changed.length > 0) notesChanged = true;
+        if (reports && reports !== "drawings" && result.changed.length > 0) contexts.add(reports);
         if (latest.seen) {
           finished += latest.done;
           planned += latest.total;
@@ -557,6 +609,7 @@ export class CloudBacking {
       for (const { run } of plans) run.free();
       drawingsProtocol.free();
       booksProtocol.free();
+      bookmarksProtocol.free();
       tasksProtocol.free();
       notesProtocol.free();
       tagsProtocol.free();
@@ -579,17 +632,17 @@ export class CloudBacking {
       progress: undefined,
       lastSync: wentThrough ? Date.now() : this.report.lastSync,
     });
-    if (changed.length > 0 || tasksChanged || notesChanged) {
-      this.tell(changed, tasksChanged, notesChanged);
-      this.tabs.post({ kind: "changed", names: changed, tasks: tasksChanged, notes: notesChanged });
+    if (changed.length > 0 || contexts.size > 0) {
+      this.tell(changed, [...contexts]);
+      this.tabs.post({ kind: "changed", names: changed, contexts: [...contexts] });
     }
   }
 
   /** Tells the listeners what a step, here or in another tab, changed. */
-  private tell(names: string[], tasks: boolean, notes: boolean): void {
+  private tell(names: string[], contexts: StoredContext[]): void {
     if (names.length > 0) for (const listener of this.syncedListeners) listener(names);
-    if (tasks) for (const listener of this.tasksListeners) listener();
-    if (notes) for (const listener of this.notesListeners) listener();
+    for (const context of contexts)
+      for (const listener of this.storedListeners[context]) listener();
   }
 
   private setReport(report: SyncReport): void {

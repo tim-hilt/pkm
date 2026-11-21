@@ -93,6 +93,8 @@ export async function startApp(
   shell.pane("notes").append(new NotesView(notes).element);
   const bookmarkFiles = await BookmarkFiles.open(storage);
   const bookmarks = new BookmarksModel(bookmarkFiles, new PageDownloader(), () => tasks.allTags);
+  bookmarkFiles.onSaved = () => cloud.bookmarksSaved();
+  cloud.onBookmarksChanged(() => void bookmarks.syncDidChange());
   // The Tags file is shared: Tags a Bookmark added are known to the Tasks, and a Tag Deleted there leaves the Bookmarks.
   bookmarkFiles.onTagsSaved = () => void tasks.syncDidChange();
   tasks.onTagDeleted = (tag) => bookmarks.removeTagEverywhere(tag);

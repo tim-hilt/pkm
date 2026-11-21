@@ -24,27 +24,40 @@ export class BookmarkFiles {
   /** Called after the Tags file was written, for the Tasks to read it again. */
   onTagsSaved: () => void = () => {};
 
+  /** Called after files were written or removed, for Sync to follow. */
+  onSaved: () => void = () => {};
+
   private constructor(
-    readonly store: BookmarkStore,
+    private current: BookmarkStore,
     private readonly storage: FileStorage,
   ) {}
 
   static async open(storage: FileStorage): Promise<BookmarkFiles> {
-    const folder = BookmarkStore.folder();
-    const paths: string[] = [];
-    const texts: string[] = [];
-    const take = async (from: string, wanted: (name: string) => boolean) => {
-      for (const { name } of await storage.files(from)) {
-        const bytes = wanted(name) ? await storage.read(`${from}/${name}`) : undefined;
-        if (!bytes) continue;
-        paths.push(`${from}/${name}`);
-        texts.push(decode(bytes));
+    return new BookmarkFiles(await load(storage), storage);
+  }
+
+  /** The store; a new one after `reload`. */
+  get store(): BookmarkStore {
+    return this.current;
+  }
+
+  /**
+   * Starts over from what the files hold now, after Sync wrote or deleted some. What the store
+   * changed is saved first; the old store is freed.
+   */
+  async reload(): Promise<void> {
+    for (;;) {
+      const saved = this.saveAll();
+      await saved;
+      const reloaded = await load(this.storage);
+      // What the store changed while the files were read may be missing from them.
+      if (this.saveAll() === saved) {
+        this.current.free();
+        this.current = reloaded;
+        return;
       }
-    };
-    await take(folder, (name) => name.endsWith(".md"));
-    await take(`${folder}/.state`, (name) => name.endsWith(".json"));
-    await take("Tags", (name) => name === "tags.json");
-    return new BookmarkFiles(new BookmarkStore(paths, texts), storage);
+      reloaded.free();
+    }
   }
 
   /** Settles when what was changed is saved. */
@@ -88,8 +101,34 @@ export class BookmarkFiles {
         else await this.storage.write(path, bytes);
       }
       if (changes.some(({ path }) => path === TAGS)) this.onTagsSaved();
+      this.onSaved();
     });
     this.writing = written.catch(() => {});
     return written;
   }
+
+  /** Saves what changed; the writes then in progress, the same as before if there was nothing to save. */
+  private saveAll(): Promise<void> {
+    void this.save().catch(() => {});
+    return this.writing;
+  }
+}
+
+/** A store of what `Bookmarks/` and the Tags file hold now. */
+async function load(storage: FileStorage): Promise<BookmarkStore> {
+  const folder = BookmarkStore.folder();
+  const paths: string[] = [];
+  const texts: string[] = [];
+  const take = async (from: string, wanted: (name: string) => boolean) => {
+    for (const { name } of await storage.files(from)) {
+      const bytes = wanted(name) ? await storage.read(`${from}/${name}`) : undefined;
+      if (!bytes) continue;
+      paths.push(`${from}/${name}`);
+      texts.push(decode(bytes));
+    }
+  };
+  await take(folder, (name) => name.endsWith(".md"));
+  await take(`${folder}/.state`, (name) => name.endsWith(".json"));
+  await take("Tags", (name) => name === "tags.json");
+  return new BookmarkStore(paths, texts);
 }

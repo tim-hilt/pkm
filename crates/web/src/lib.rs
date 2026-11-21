@@ -1335,6 +1335,19 @@ impl WebDavProtocol {
             .map_err(|_| JsError::new("notHttps"))
     }
 
+    /// The requests for the folder of Bookmarks (their images and state files
+    /// too). Throws `notHttps` for a URL that is not https.
+    #[wasm_bindgen(js_name = newForBookmarks)]
+    pub fn new_for_bookmarks(
+        url: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<WebDavProtocol, JsError> {
+        WebDav::new(url, username, password, Bookmarks::FOLDER)
+            .map(Self)
+            .map_err(|_| JsError::new("notHttps"))
+    }
+
     /// The requests for the folder of the Tags file. Throws `notHttps` for a URL
     /// that is not https.
     #[wasm_bindgen(js_name = newForTags)]
@@ -1424,8 +1437,9 @@ impl WebDavProtocol {
 use pkm_cloud::step::{LocalFile, Marks, Synced};
 use pkm_cloud::storage::Tree;
 use pkm_cloud::{
-    Blob, BookStates, Books, ColorsFile, Drawings, Filters, Next, Notes as NoteFiles, Request,
-    Response, Schedule, Status, StepOutcome, SyncStep, TagsFile, Tasks, Timing,
+    Blob, BookStates, BookmarkStates, Bookmarks, Books, ColorsFile, Drawings, Filters, Next,
+    Notes as NoteFiles, Request, Response, Schedule, Status, StepOutcome, SyncStep, TagsFile,
+    Tasks, Timing,
 };
 use std::time::Duration;
 
@@ -1631,6 +1645,19 @@ impl SyncRun {
     #[wasm_bindgen(js_name = newForNotes)]
     pub fn new_for_notes(now_ms: f64) -> SyncRun {
         SyncRun::with_merge(now_ms, Arc::new(NoteFiles))
+    }
+
+    /// A step over the Bookmark files and their images, merged per field
+    /// (Bookmarks ADR-0002).
+    #[wasm_bindgen(js_name = newForBookmarks)]
+    pub fn new_for_bookmarks(now_ms: f64) -> SyncRun {
+        SyncRun::with_merge(now_ms, Arc::new(Bookmarks))
+    }
+
+    /// A step over the Bookmarks' state files, merged per Highlight and Comment.
+    #[wasm_bindgen(js_name = newForBookmarkStates)]
+    pub fn new_for_bookmark_states(now_ms: f64) -> SyncRun {
+        SyncRun::with_merge(now_ms, Arc::new(BookmarkStates))
     }
 
     /// A step over the Tags file, merged per Tag (ADR-0023).

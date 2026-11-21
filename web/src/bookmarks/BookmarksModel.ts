@@ -455,6 +455,18 @@ export class BookmarksModel {
     this.onChange();
   }
 
+  /**
+   * Sync or another tab wrote or deleted Bookmark files: reads them again. A Bookmark they
+   * Deleted leaves the Reader and the Details.
+   */
+  async syncDidChange(): Promise<void> {
+    await this.files.reload();
+    this.reload();
+    if (this.openId !== undefined && !this.bookmark(this.openId)) this.openId = undefined;
+    if (this.detailsId !== undefined && !this.bookmark(this.detailsId)) this.detailsId = undefined;
+    this.onChange();
+  }
+
   /** Saves what changed, lists again, then tells the view. */
   private changed(): void {
     this.reload();

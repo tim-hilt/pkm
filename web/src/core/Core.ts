@@ -296,6 +296,8 @@ export interface Core {
   webDav(url: string, username: string, password: string): WebDavProtocol;
   /** The WebDAV protocol for the server's Books folder; throws if the URL is not https. Free it when done. */
   webDavForBooks(url: string, username: string, password: string): WebDavProtocol;
+  /** The WebDAV protocol for the server's Bookmarks folder; throws if the URL is not https. Free it when done. */
+  webDavForBookmarks(url: string, username: string, password: string): WebDavProtocol;
   /** The WebDAV protocol for the server's Tasks folder; throws if the URL is not https. Free it when done. */
   webDavForTasks(url: string, username: string, password: string): WebDavProtocol;
   /** The WebDAV protocol for the server's Notes folder; throws if the URL is not https. Free it when done. */
@@ -312,6 +314,10 @@ export interface Core {
   syncRunForBooks(nowMs: number): SyncRun;
   /** A Sync step over the Books' state files, merged by the Books merge hook. Free it when done. */
   syncRunForBookStates(nowMs: number): SyncRun;
+  /** A Sync step over the Bookmark files and their images, merged per field. Free it when done. */
+  syncRunForBookmarks(nowMs: number): SyncRun;
+  /** A Sync step over the Bookmarks' state files, merged per Highlight and Comment. Free it when done. */
+  syncRunForBookmarkStates(nowMs: number): SyncRun;
   /** A Sync step over the Task files, merged field by field. Free it when done. */
   syncRunForTasks(nowMs: number): SyncRun;
   /** A Sync step over the Note files, merged field by field, the Body by line. Free it when done. */
@@ -353,6 +359,8 @@ export async function loadCore(
       WebDavProtocol.newForBooks(url, username, password),
     webDavForTasks: (url, username, password) =>
       WebDavProtocol.newForTasks(url, username, password),
+    webDavForBookmarks: (url, username, password) =>
+      WebDavProtocol.newForBookmarks(url, username, password),
     webDavForNotes: (url, username, password) =>
       WebDavProtocol.newForNotes(url, username, password),
     webDavForTags: (url, username, password) => WebDavProtocol.newForTags(url, username, password),
@@ -364,6 +372,8 @@ export async function loadCore(
     syncRunForBooks: (nowMs) => SyncRun.newForBooks(nowMs),
     syncRunForBookStates: (nowMs) => SyncRun.newForBookStates(nowMs),
     syncRunForTasks: (nowMs) => SyncRun.newForTasks(nowMs),
+    syncRunForBookmarks: (nowMs) => SyncRun.newForBookmarks(nowMs),
+    syncRunForBookmarkStates: (nowMs) => SyncRun.newForBookmarkStates(nowMs),
     syncRunForNotes: (nowMs) => SyncRun.newForNotes(nowMs),
     syncRunForTags: (nowMs) => SyncRun.newForTags(nowMs),
     syncRunForColors: (nowMs) => SyncRun.newForColors(nowMs),
