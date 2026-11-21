@@ -93,8 +93,11 @@ export class BookmarkDetails {
         ...row("Address", bookmark.address),
         ...row("Author", bookmark.author),
         ...row("Published", bookmark.published),
-        ...row("Saved", saved(bookmark.saved)),
+        ...row("Saved", dateTime(bookmark.saved)),
         ...(bookmark.percent === undefined ? [] : row("Reading Progress", `${bookmark.percent} %`)),
+        ...(bookmark.lastRead === undefined
+          ? []
+          : row("Last Read", dateTime(new Date(bookmark.lastRead).toISOString()))),
         ...row("Excerpt", bookmark.excerpt),
       ]),
       this.actions(bookmark),
@@ -152,8 +155,8 @@ export class BookmarkDetails {
   }
 }
 
-/** The Saved time (UTC ISO 8601) as the user's date and time; the text itself if it isn't one. */
-function saved(text: string): string {
+/** A time (UTC ISO 8601) as the user's date and time; the text itself if it isn't one. */
+function dateTime(text: string): string {
   const date = new Date(text);
   return Number.isNaN(date.getTime())
     ? text

@@ -16,6 +16,8 @@ export interface BookmarkPlaces {
   openDetails(id: string): void;
   /** Leaves the Details, back to the list's address. */
   closeDetails(): void;
+  /** The Reader is in Immersive Mode, or no longer: the window shows only the Article, or its usual frame. */
+  immersive(on: boolean): void;
 }
 
 /**
@@ -163,6 +165,7 @@ export class BookmarksView {
     const id = model.openId;
     this.element.classList.toggle("has-open", id !== undefined);
     if (id === this.reading?.id) return;
+    this.reading?.reader.dispose();
     this.reading?.reader.element.remove();
     this.reading = undefined;
     const bookmark = model.bookmark(id);
@@ -171,6 +174,7 @@ export class BookmarksView {
       back: () => model.closeReader(),
       details: () => this.places.openDetails(bookmark.id),
       openPage: () => openPage(bookmark.address),
+      immersive: (on) => this.places.immersive(on),
     });
     this.reading = { id: bookmark.id, reader };
     this.element.append(reader.element);

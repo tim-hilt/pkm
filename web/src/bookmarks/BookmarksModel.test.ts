@@ -213,6 +213,99 @@ describe("the list", () => {
   });
 });
 
+describe("reading an Article", () => {
+  let id: string;
+  beforeEach(async () => {
+    id = (await model.save(await draftOf("https://example.com/post"), "", [], true)).id;
+  });
+
+  it("keeps Reading Progress and Last Read, which survive a restart", async () => {
+    expect(model.bookmark(id)).toMatchObject({ percent: undefined, offset: undefined });
+    model.saveProgress(id, 500);
+    await model.saving;
+    const row = model.bookmark(id)!;
+    expect([row.offset, row.percent! > 0, Date.now() - row.lastRead! < 5000]).toEqual([
+      500,
+      true,
+      true,
+    ]);
+    const reopened = new BookmarksModel(
+      await BookmarkFiles.open(storage),
+      new PageDownloader(served.send),
+      () => [],
+    );
+    expect(reopened.bookmark(id)!.offset).toBe(500);
+    // Moving back is saved as it is.
+    model.saveProgress(id, 100);
+    expect(model.bookmark(id)!.offset).toBe(100);
+  });
+
+  it("adds, recolors, comments on and removes a Highlight, across restarts", async () => {
+    const article = model.article(id)!;
+    const start = article.indexOf("Some words");
+    const quoted = article.slice(start, start + 20);
+    const added = model.addHighlight(id, start, start + 20, quoted, 0xffeb3c)!;
+    model.setHighlightColor(id, added.id, 0x7ed957);
+    model.setHighlightComment(id, added.id, "Nice");
+    await model.saving;
+    const reopened = new BookmarksModel(
+      await BookmarkFiles.open(storage),
+      new PageDownloader(served.send),
+      () => [],
+    );
+    const [kept] = reopened.markup(id).highlights;
+    expect([kept!.start, kept!.end, kept!.rgb, kept!.comment, kept!.quotedText]).toEqual([
+      start,
+      start + 20,
+      0x7ed957,
+      "Nice",
+      quoted,
+    ]);
+    reopened.removeHighlight(id, added.id);
+    expect(reopened.markup(id).highlights).toEqual([]);
+  });
+
+  it("refuses a Highlight of nothing", () => {
+    expect(model.addHighlight(id, 5, 5, "", 0xffeb3c)).toBeUndefined();
+    expect(model.markup(id).highlights).toEqual([]);
+  });
+
+  it("keeps a Comment on a spot only with text", () => {
+    const spot = model.addComment(id, 12);
+    expect(model.markup(id).comments).toEqual([]);
+    model.setCommentText(id, spot.id, "Check this");
+    expect(model.markup(id).comments.map((c) => [c.offset, c.text])).toEqual([[12, "Check this"]]);
+    model.removeComment(id, spot.id);
+    expect(model.markup(id).comments).toEqual([]);
+  });
+
+  it("finds Article Search matches in offsets of the Article", () => {
+    const article = model.article(id)!;
+    const found = model.searchArticle(id, "WORDS worth");
+    expect(found.length).toBe(40);
+    expect(article.slice(found[0]!.start, found[0]!.end).toLowerCase()).toBe("words worth");
+    expect(model.searchArticle(id, "")).toEqual([]);
+  });
+
+  it("offers the built-in colors, and the Custom Colors and default Books chose", async () => {
+    expect((await model.highlightColors()).defaultId).toBe("Yellow");
+    await storage.write(
+      "Colors/colors.json",
+      new TextEncoder().encode(
+        '{"default_color":"0000000000001-a","custom_colors":{"0000000000001-a":32896}}',
+      ),
+    );
+    const colors = await model.highlightColors();
+    expect([colors.defaultId, colors.colors.length]).toEqual(["0000000000001-a", 7]);
+  });
+
+  it("takes Markup and Reading Progress with a Dropped Article", () => {
+    model.saveProgress(id, 100);
+    model.dropArticle(id);
+    expect(model.bookmark(id)!.percent).toBeUndefined();
+  });
+});
+
 describe("after a restart", () => {
   it("lists what was Saved", async () => {
     const saved = await model.save(await draftOf("https://example.com/post"), "", ["a"], true);

@@ -159,5 +159,32 @@ async function seedBookmarks(page, reading) {
     await page.waitForSelector(".bookmarks dialog", { state: "detached" });
     await page.waitForTimeout(1100); // Saved is to the second, and newest comes first.
   }
-  if (reading) await page.click(".bookmark-open:has-text('On foxes')");
+  if (!reading) return;
+  await page.click(".bookmark-open:has-text('On foxes')");
+  await page.waitForSelector(".bookmark-article");
+  // Marks the Article up through the UI: a Highlight, a Comment on a spot, and a Find.
+  const select = (text) =>
+    page.evaluate((text) => {
+      const article = document.querySelector(".bookmark-article");
+      const walker = document.createTreeWalker(article, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        const at = n.data.indexOf(text);
+        if (at < 0) continue;
+        const range = document.createRange();
+        range.setStart(n, at);
+        range.setEnd(n, at + text.length);
+        getSelection().removeAllRanges();
+        getSelection().addRange(range);
+        return;
+      }
+    }, text);
+  await select("tired of running");
+  await page.click(".reader-selection button:has-text('Highlight')");
+  await page.waitForTimeout(300); // The Highlight clears the selection once it is made.
+  await select("sat down");
+  await page.click(".reader-selection button:has-text('Comment')");
+  await page.fill(".reader-popover textarea", "Fox diaries?");
+  await page.mouse.click(5, 5);
+  await page.click(".bookmarks-reader button:has-text('Find')");
+  await page.keyboard.type("fox");
 }

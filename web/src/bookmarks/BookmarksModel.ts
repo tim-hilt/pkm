@@ -2,6 +2,7 @@ import {
   type Details,
   Images,
   extractDetails,
+  highlightPalette,
   isDocumentAddress,
   normaliseAddress,
   readArticle,
@@ -29,6 +30,40 @@ export interface BookmarkRow {
   tags: string[];
   /** How much of the Article was read, 0 to 100; `undefined` if never. */
   percent: number | undefined;
+  /** Where it was left: a UTF-16 offset into the Article's Markdown; `undefined` if never read. */
+  offset: number | undefined;
+  /** Last Read, in milliseconds since the Unix epoch; `undefined` if never read. */
+  lastRead: number | undefined;
+}
+
+/** A passage of an Article marked in a color; offsets are UTF-16, into the Article's Markdown. */
+export interface Highlight {
+  id: string;
+  start: number;
+  end: number;
+  quotedText: string;
+  /** `0xRRGGBB`. */
+  rgb: number;
+  comment: string | undefined;
+}
+
+/** A Comment on a spot of an Article, at a UTF-16 offset into its Markdown. */
+export interface SpotComment {
+  id: string;
+  offset: number;
+  text: string;
+}
+
+/** What the user marked up on an Article, oldest first. */
+export interface ArticleMarkup {
+  highlights: Highlight[];
+  comments: SpotComment[];
+}
+
+/** The Highlight Colors, shared with Books: those to choose from, `defaultId` being the Default one. */
+export interface HighlightColors {
+  colors: { id: string; rgb: number }[];
+  defaultId: string;
 }
 
 /** A Bookmark that Search found, with where in its snippet. */
@@ -279,6 +314,107 @@ export class BookmarksModel {
     return true;
   }
 
+  /** Keeps `offset` as where the Article was left, and now as its Last Read. The Reader is open over the list, so nothing is redrawn; the list is when it is shown again. */
+  saveProgress(id: string, offset: number): void {
+    try {
+      this.store.saveProgress(id, offset).free();
+    } catch {
+      // The Bookmark or its Article is gone, as the Reader closes: nothing is left to keep.
+      return;
+    }
+    this.reload();
+    this.persist();
+  }
+
+  /** The Markup of the Bookmark's Article. */
+  markup(id: string): ArticleMarkup {
+    return {
+      highlights: this.store.highlights(id).map((h) => {
+        const highlight = {
+          id: h.id,
+          start: h.start,
+          end: h.end,
+          quotedText: h.quotedText,
+          rgb: h.rgb,
+          comment: h.comment,
+        };
+        h.free();
+        return highlight;
+      }),
+      comments: this.store.pageComments(id).map(plainComment),
+    };
+  }
+
+  /** Highlights `start` up to `end` of the Article, which reads `quotedText` there; `undefined` for an empty or out-of-range passage. */
+  addHighlight(
+    id: string,
+    start: number,
+    end: number,
+    quotedText: string,
+    rgb: number,
+  ): Highlight | undefined {
+    try {
+      const added = this.store.addHighlight(id, start, end, quotedText, rgb, Date.now());
+      const highlight = { id: added.id, start, end, quotedText, rgb, comment: undefined };
+      added.free();
+      this.persist();
+      return highlight;
+    } catch {
+      return undefined;
+    }
+  }
+
+  setHighlightColor(id: string, highlight: string, rgb: number): void {
+    this.store.setHighlightColor(id, highlight, rgb);
+    this.persist();
+  }
+
+  /** An empty `comment` deletes the Comment. */
+  setHighlightComment(id: string, highlight: string, comment: string): void {
+    this.store.setHighlightComment(id, highlight, comment);
+    this.persist();
+  }
+
+  removeHighlight(id: string, highlight: string): void {
+    this.store.removeHighlight(id, highlight);
+    this.persist();
+  }
+
+  /** Puts a Comment on the spot at `offset`; it is kept once it has text (`setCommentText`). */
+  addComment(id: string, offset: number): SpotComment {
+    return plainComment(this.store.addPageComment(id, offset, Date.now()));
+  }
+
+  /** An empty `text` deletes the Comment. */
+  setCommentText(id: string, comment: string, text: string): void {
+    this.store.setPageCommentText(id, comment, text);
+    this.persist();
+  }
+
+  removeComment(id: string, comment: string): void {
+    this.store.removePageComment(id, comment);
+    this.persist();
+  }
+
+  /** Where `query` is in the Article, in order, as UTF-16 offsets into its Markdown. */
+  searchArticle(id: string, query: string): { start: number; end: number }[] {
+    if (query === "") return [];
+    return this.store.searchArticle(id, query).map((match) => {
+      const found = { start: match.start, end: match.end };
+      match.free();
+      return found;
+    });
+  }
+
+  /** The Highlight Colors to choose from, as Books keep them. */
+  async highlightColors(): Promise<HighlightColors> {
+    const palette = highlightPalette(await this.files.readColors());
+    const colors = palette.colors.map(({ id, rgb }) => ({ id, rgb }));
+    const defaultId = palette.defaultId;
+    palette.free();
+    return { colors, defaultId };
+  }
+
   /** Takes the Article, with its images, off the Bookmark, which closes its Reader. */
   dropArticle(id: string): void {
     if (this.openId === id) this.openId = undefined;
@@ -320,11 +456,16 @@ export class BookmarksModel {
   /** Saves what changed, lists again, then tells the view. */
   private changed(): void {
     this.reload();
+    this.persist();
+    this.onChange();
+  }
+
+  /** Saves what changed in the store, and says why if that fails. */
+  private persist(): void {
     this.files.save().then(
       () => this.setFailure(undefined),
       (error: unknown) => this.setFailure(error instanceof Error ? error.message : String(error)),
     );
-    this.onChange();
   }
 
   private setFailure(failure: string | undefined): void {
@@ -367,6 +508,8 @@ function plain(bookmark: {
   hasArticle: boolean;
   tags: string[];
   percent?: number;
+  offset?: number;
+  lastRead?: number;
   free(): void;
 }): BookmarkRow {
   const row = {
@@ -382,9 +525,23 @@ function plain(bookmark: {
     hasArticle: bookmark.hasArticle,
     tags: bookmark.tags,
     percent: bookmark.percent,
+    offset: bookmark.offset,
+    lastRead: bookmark.lastRead,
   };
   bookmark.free();
   return row;
+}
+
+/** A plain copy of a Comment of the core, which is freed. */
+function plainComment(comment: {
+  id: string;
+  offset: number;
+  text: string;
+  free(): void;
+}): SpotComment {
+  const copy = { id: comment.id, offset: comment.offset, text: comment.text };
+  comment.free();
+  return copy;
 }
 
 /** Calls `use` with the downloaded images as the core takes them, which are freed after. */

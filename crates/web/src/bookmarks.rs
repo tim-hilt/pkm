@@ -4,7 +4,8 @@
 //! The store works on files in memory as the Notes' does, but the client does
 //! not hand in the images: it reads them from its storage when shown.
 
-use pkm_bookmarks::{Bookmarks, MemoryFiles};
+use pkm_base::highlight_colors::{HighlightColor, Preferences};
+use pkm_bookmarks::{Anchor, Bookmarks, Highlight, MemoryFiles, PageComment, Place, Rgb};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -12,6 +13,10 @@ use wasm_bindgen::prelude::*;
 
 fn error(e: impl std::fmt::Display) -> JsError {
     JsError::new(&e.to_string())
+}
+
+fn color(packed: u32) -> Result<Rgb, JsError> {
+    Rgb::unpacked(packed.into()).ok_or_else(|| JsError::new("not a color"))
 }
 
 /// A Bookmark and its details, see `pkm_bookmarks::Bookmark`.
@@ -35,6 +40,11 @@ pub struct Bookmark {
     pub tags: Vec<String>,
     /// How much of the Article was read, `0..=100`; none if it never was.
     pub percent: Option<u8>,
+    /// Where it was left: a UTF-16 offset into the Article's Markdown; none if it never was read.
+    pub offset: Option<u32>,
+    /// Last Read, in milliseconds since the Unix epoch; none if never read.
+    #[wasm_bindgen(js_name = lastRead)]
+    pub last_read: Option<f64>,
 }
 
 impl From<pkm_bookmarks::Bookmark> for Bookmark {
@@ -52,6 +62,8 @@ impl From<pkm_bookmarks::Bookmark> for Bookmark {
             has_article: b.has_article,
             tags: b.tags,
             percent: b.progress.map(|p| p.percent),
+            offset: b.progress.map(|p| p.offset as u32),
+            last_read: b.progress.map(|p| p.last_read as f64),
         }
     }
 }
@@ -122,6 +134,92 @@ pub struct BookmarkFound {
     pub matched_start: u32,
     #[wasm_bindgen(js_name = matchedEnd)]
     pub matched_end: u32,
+}
+
+/// A passage of an Article marked in a color; its offsets are UTF-16, into the Article's Markdown.
+#[wasm_bindgen(getter_with_clone)]
+#[derive(Clone)]
+pub struct ArticleHighlight {
+    pub id: String,
+    pub start: u32,
+    pub end: u32,
+    #[wasm_bindgen(js_name = quotedText)]
+    pub quoted_text: String,
+    /// `0xRRGGBB`.
+    pub rgb: u32,
+    pub comment: Option<String>,
+}
+
+impl From<Highlight> for ArticleHighlight {
+    fn from(h: Highlight) -> Self {
+        Self {
+            id: h.id,
+            start: h.anchor.start as u32,
+            end: h.anchor.end as u32,
+            quoted_text: h.quoted_text,
+            rgb: h.color.packed() as u32,
+            comment: h.comment,
+        }
+    }
+}
+
+/// A Comment on a spot of an Article, `offset` being UTF-16, into its Markdown.
+#[wasm_bindgen(getter_with_clone)]
+#[derive(Clone)]
+pub struct ArticleComment {
+    pub id: String,
+    pub offset: u32,
+    pub text: String,
+}
+
+impl From<PageComment> for ArticleComment {
+    fn from(c: PageComment) -> Self {
+        Self {
+            id: c.id,
+            offset: c.place.offset as u32,
+            text: c.text,
+        }
+    }
+}
+
+/// A match of Article Search: UTF-16 offsets `start` up to `end` into the Article's Markdown.
+#[wasm_bindgen]
+pub struct ArticleMatch {
+    pub start: u32,
+    pub end: u32,
+}
+
+/// One of the Highlight Colors to choose from.
+#[wasm_bindgen(getter_with_clone)]
+#[derive(Clone)]
+pub struct PaletteColor {
+    /// A built-in color's name, or a Custom Color's ID.
+    pub id: String,
+    /// `0xRRGGBB`.
+    pub rgb: u32,
+}
+
+/// The Highlight Colors to choose from and the one new Highlights get.
+#[wasm_bindgen(getter_with_clone)]
+pub struct Palette {
+    pub colors: Vec<PaletteColor>,
+    /// The `id` of the Default Highlight Color, one of `colors`.
+    #[wasm_bindgen(js_name = defaultId)]
+    pub default_id: String,
+}
+
+/// The Highlight Colors that the Highlight Colors file `bytes` holds (shared with Books, ADR-0034); the built-in ones where there is none.
+#[wasm_bindgen(js_name = highlightPalette)]
+pub fn highlight_palette(bytes: Option<Vec<u8>>) -> Palette {
+    let chosen = Preferences::decode(bytes.as_deref()).highlight_colors();
+    let color = |c: HighlightColor| PaletteColor {
+        id: c.id,
+        rgb: c.rgb.packed() as u32,
+    };
+    Palette {
+        default_id: chosen.default_color.id,
+        colors: chosen.colors.into_iter().map(color).collect(),
+    }
 }
 
 /// Downloaded images by their address, for `save` and `addArticle`.
@@ -281,6 +379,121 @@ impl BookmarkStore {
         self.bookmarks.read_article(id).map_err(error)
     }
 
+    /// Where `query` is in the Bookmark's Article, in order, see `pkm_bookmarks::Bookmarks::search_article`.
+    #[wasm_bindgen(js_name = searchArticle)]
+    pub fn search_article(&self, id: &str, query: &str) -> Result<Vec<ArticleMatch>, JsError> {
+        let found = self.bookmarks.search_article(id, query).map_err(error)?;
+        Ok(found
+            .into_iter()
+            .map(|r| ArticleMatch {
+                start: r.start as u32,
+                end: r.end as u32,
+            })
+            .collect())
+    }
+
+    /// Keeps `offset` (UTF-16, into the Article's Markdown) as where the Bookmark was left, and now as its Last Read.
+    #[wasm_bindgen(js_name = saveProgress)]
+    pub fn save_progress(&self, id: &str, offset: u32) -> Result<Bookmark, JsError> {
+        (self.bookmarks.save_progress(id, offset.into()))
+            .map(Into::into)
+            .map_err(error)
+    }
+
+    /// The Highlights of the Bookmark's Article, oldest first.
+    pub fn highlights(&self, id: &str) -> Result<Vec<ArticleHighlight>, JsError> {
+        let markup = self.bookmarks.markup(id).map_err(error)?;
+        Ok(markup.highlights.into_iter().map(Into::into).collect())
+    }
+
+    /// The Comments on spots of the Bookmark's Article, oldest first.
+    #[wasm_bindgen(js_name = pageComments)]
+    pub fn page_comments(&self, id: &str) -> Result<Vec<ArticleComment>, JsError> {
+        let markup = self.bookmarks.markup(id).map_err(error)?;
+        Ok(markup.page_comments.into_iter().map(Into::into).collect())
+    }
+
+    /// Adds a Highlight, see `pkm_bookmarks::Bookmarks::add_highlight`; `created` in milliseconds since the Unix epoch.
+    #[wasm_bindgen(js_name = addHighlight)]
+    pub fn add_highlight(
+        &self,
+        id: &str,
+        start: u32,
+        end: u32,
+        quoted_text: &str,
+        rgb: u32,
+        created: f64,
+    ) -> Result<ArticleHighlight, JsError> {
+        let anchor = Anchor {
+            start: start.into(),
+            end: end.into(),
+        };
+        let color = color(rgb)?;
+        (self.bookmarks)
+            .add_highlight(id, anchor, quoted_text, color, created as u64)
+            .map(Into::into)
+            .map_err(error)
+    }
+
+    #[wasm_bindgen(js_name = setHighlightColor)]
+    pub fn set_highlight_color(&self, id: &str, highlight: &str, rgb: u32) -> Result<(), JsError> {
+        let color = color(rgb)?;
+        (self.bookmarks.set_highlight_color(id, highlight, color)).map_err(error)
+    }
+
+    /// Empty `comment` deletes the Comment.
+    #[wasm_bindgen(js_name = setHighlightComment)]
+    pub fn set_highlight_comment(
+        &self,
+        id: &str,
+        highlight: &str,
+        comment: &str,
+    ) -> Result<(), JsError> {
+        (self.bookmarks.set_highlight_comment(id, highlight, comment)).map_err(error)
+    }
+
+    #[wasm_bindgen(js_name = removeHighlight)]
+    pub fn remove_highlight(&self, id: &str, highlight: &str) -> Result<(), JsError> {
+        self.bookmarks
+            .remove_highlight(id, highlight)
+            .map_err(error)
+    }
+
+    /// Adds a Comment at UTF-16 `offset`, still without text: it isn't in the Markup until `setPageCommentText` gives it some.
+    #[wasm_bindgen(js_name = addPageComment)]
+    pub fn add_page_comment(
+        &self,
+        id: &str,
+        offset: u32,
+        created: f64,
+    ) -> Result<ArticleComment, JsError> {
+        let place = Place {
+            offset: offset.into(),
+        };
+        (self.bookmarks)
+            .add_page_comment(id, place, created as u64)
+            .map(Into::into)
+            .map_err(error)
+    }
+
+    /// Empty `text` deletes the Comment.
+    #[wasm_bindgen(js_name = setPageCommentText)]
+    pub fn set_page_comment_text(
+        &self,
+        id: &str,
+        comment: &str,
+        text: &str,
+    ) -> Result<(), JsError> {
+        (self.bookmarks.set_page_comment_text(id, comment, text)).map_err(error)
+    }
+
+    #[wasm_bindgen(js_name = removePageComment)]
+    pub fn remove_page_comment(&self, id: &str, comment: &str) -> Result<(), JsError> {
+        self.bookmarks
+            .remove_page_comment(id, comment)
+            .map_err(error)
+    }
+
     /// Renames the Bookmark; a blank `title` changes nothing.
     pub fn rename(&self, id: &str, title: &str) -> Result<Bookmark, JsError> {
         (self.bookmarks.rename(id, title))
@@ -334,5 +547,28 @@ impl BookmarkStore {
     /// Deletes the Bookmark with its Cover, images and state.
     pub fn delete(&self, id: &str) -> Result<(), JsError> {
         self.bookmarks.delete(id).map_err(error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_palette_is_the_built_in_colors_with_yellow_the_default_where_there_is_no_file() {
+        let palette = highlight_palette(None);
+        let names: Vec<_> = palette.colors.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(names, ["Yellow", "Green", "Blue", "Pink", "Purple", "Red"]);
+        assert_eq!(palette.default_id, "Yellow");
+        assert_eq!(palette.colors[0].rgb, 0xFFEB3C);
+    }
+
+    #[test]
+    fn the_palette_offers_a_custom_color_and_default_of_the_file() {
+        let file =
+            br#"{"default_color":"0000000000001-a","custom_colors":{"0000000000001-a":32896}}"#;
+        let palette = highlight_palette(Some(file.to_vec()));
+        assert_eq!(palette.default_id, "0000000000001-a");
+        assert_eq!(palette.colors.last().map(|c| c.rgb), Some(32896));
     }
 }

@@ -99,6 +99,7 @@ export async function startApp(
     new BookmarksView(bookmarks, {
       openDetails: (id) => navigation.openItem(id),
       closeDetails: () => navigation.closeItem(),
+      immersive: (on) => shell.setFocused(on),
     }).element,
   );
   const pane = shell.pane("drawings");

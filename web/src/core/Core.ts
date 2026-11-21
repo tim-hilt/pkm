@@ -29,6 +29,7 @@ import init, {
   ZOrder,
   darkModeColor,
   extractDetails,
+  highlightPalette,
   imageTargets,
   insertImage,
   isDocumentAddress,
@@ -66,7 +67,13 @@ import {
   readGeometry,
 } from "../drawings/rendering/GeometryBuffers";
 
-export type { Details } from "../../generated/pkm_web.js";
+export type {
+  ArticleComment,
+  ArticleHighlight,
+  ArticleMatch,
+  Details,
+  Palette,
+} from "../../generated/pkm_web.js";
 
 export {
   Alignment,
@@ -97,6 +104,7 @@ export {
   ZOrder,
   darkModeColor,
   extractDetails,
+  highlightPalette,
   imageTargets,
   insertImage,
   isDocumentAddress,

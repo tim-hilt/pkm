@@ -7,6 +7,8 @@ const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 const imageName = /^[a-z0-9]+\.(png|jpg|gif|webp)$/;
 
 const TAGS = "Tags/tags.json";
+/** The Highlight Colors, shared with Books (ADR-0034). */
+const COLORS = "Colors/colors.json";
 
 /**
  * The Bookmarks, kept in the Origin Private File System: `Bookmarks/<id>.md`, their state files
@@ -56,6 +58,11 @@ export class BookmarkFiles {
     const path = `${BookmarkStore.folder()}/${name}`;
     // Written but perhaps not saved yet.
     return this.store.fileBytes(path) ?? this.storage.read(path);
+  }
+
+  /** The Highlight Colors file as Sync or Books left it; `undefined` if there is none. */
+  readColors(): Promise<Uint8Array | undefined> {
+    return this.storage.read(COLORS);
   }
 
   /** Gives the store the Tags file as the Tasks left it, so that a new Tag doesn't undo theirs. */
