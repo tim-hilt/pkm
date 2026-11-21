@@ -15,7 +15,8 @@
             let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
             let defaults = try #require(UserDefaults(suiteName: root.lastPathComponent))
             let library = LibraryModel(
-                core: try Library.open(root: root.path), coversFolder: root.appending(path: "covers"),
+                core: try Library.open(root: root.appending(path: "Books").path),
+                coversFolder: root.appending(path: "covers"),
                 defaults: defaults)
             guard case .imported(let book) = await library.import(try writePDF(named: "a.pdf", pageCount: 2))
             else { throw ImportFailure() }
@@ -36,7 +37,8 @@
             let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
             let defaults = try #require(UserDefaults(suiteName: root.lastPathComponent))
             let library = LibraryModel(
-                core: try Library.open(root: root.path), coversFolder: root.appending(path: "covers"),
+                core: try Library.open(root: root.appending(path: "Books").path),
+                coversFolder: root.appending(path: "covers"),
                 defaults: defaults)
             guard
                 case .imported(let epub) = await library.import(
@@ -81,7 +83,8 @@
             let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
             let defaults = try #require(UserDefaults(suiteName: root.lastPathComponent))
             let library = LibraryModel(
-                core: try Library.open(root: root.path), coversFolder: root.appending(path: "covers"),
+                core: try Library.open(root: root.appending(path: "Books").path),
+                coversFolder: root.appending(path: "covers"),
                 defaults: defaults)
             guard case .imported(let first) = await library.import(try writePDF(named: "a.pdf", pageCount: 2))
             else { throw ImportFailure() }

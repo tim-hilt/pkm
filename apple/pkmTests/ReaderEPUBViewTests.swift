@@ -1384,7 +1384,7 @@ func makeLibrary() throws -> LibraryModel {
     let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
     let defaults = try #require(UserDefaults(suiteName: root.lastPathComponent))
     return LibraryModel(
-        core: try Library.open(root: root.path), coversFolder: root.appending(path: "covers"),
+        core: try Library.open(root: root.appending(path: "Books").path), coversFolder: root.appending(path: "covers"),
         defaults: defaults)
 }
 

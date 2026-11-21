@@ -8,7 +8,8 @@ import Testing
         let root = FileManager.default.temporaryDirectory.appending(
             path: UUID().uuidString, directoryHint: .isDirectory)
         return LibraryModel(
-            core: try Library.open(root: root.path), coversFolder: root.appending(path: "covers"),
+            core: try Library.open(root: root.appending(path: "Books").path),
+            coversFolder: root.appending(path: "covers"),
             defaults: .isolated())
     }
 

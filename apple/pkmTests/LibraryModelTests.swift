@@ -5,13 +5,16 @@ import UniformTypeIdentifiers
 @testable import pkm
 
 @MainActor @Suite struct LibraryModelTests {
-    let root = FileManager.default.temporaryDirectory
+    /// One folder per test: the Library's `root` is `Books` in it, as the shared
+    /// Highlight Colors file lies beside the Books folder.
+    let home = FileManager.default.temporaryDirectory
         .appending(path: UUID().uuidString, directoryHint: .isDirectory)
-    var coversFolder: URL { root.deletingLastPathComponent().appending(path: "\(root.lastPathComponent)-covers") }
+    var root: URL { home.appending(path: "Books", directoryHint: .isDirectory) }
+    var coversFolder: URL { home.appending(path: "covers") }
 
     /// This device's user defaults, as far as the Library is concerned: one
     /// suite per test, so tests don't see each other's sort choice.
-    var defaults: UserDefaults { UserDefaults(suiteName: root.lastPathComponent)! }
+    var defaults: UserDefaults { UserDefaults(suiteName: home.lastPathComponent)! }
 
     /// Opens the Library at `root`, keeping its Covers in `coversFolder` and its
     /// sort choice in `defaults`.
