@@ -234,4 +234,32 @@ import Testing
         model.openLinked(id: "missing")
         #expect(model.detailsID == nil && model.openID == nil)
     }
+
+    @Test func markupIsPutOnAnArticleRecoloredCommentedAndRemoved() async throws {
+        let model = try await saved(["https://example.com/long"], pages: ["https://example.com/long": Self.shortPage])
+        let id = model.bookmarks[0].id
+        _ = await model.addArticle(to: model.bookmarks[0])
+        let markdown = try #require(model.article(of: model.bookmarks[0]))
+        let word = (markdown as NSString).range(of: "Welcome")
+        let yellow = Rgb(r: 255, g: 235, b: 60)
+        let green = Rgb(r: 126, g: 217, b: 87)
+
+        let highlight = try #require(model.highlight(word, of: markdown, in: id, color: yellow))
+        model.setColor(green, ofHighlight: highlight.id, in: id)
+        model.setComment("why", ofHighlight: highlight.id, in: id)
+        let spot = try #require(model.commentSpot(at: word.upperBound, in: id))
+        model.setText("hm", ofComment: spot.id, in: id)
+
+        let markup = model.markup(of: id)
+        #expect(markup.highlights.map(\.quotedText) == ["Welcome"] && markup.highlights[0].color == green)
+        #expect(markup.highlights[0].comment == "why" && markup.pageComments.map(\.text) == ["hm"])
+        #expect(markup.target(at: word.location, length: markdown.utf16.count) == .highlight(highlight.id))
+        #expect(markup.target(at: word.upperBound, length: markdown.utf16.count) == .comment(spot.id))
+        #expect(markup.target(at: word.upperBound + 1, length: markdown.utf16.count) == nil)
+
+        model.removeHighlight(highlight.id, in: id)
+        model.removeComment(spot.id, in: id)
+        #expect(model.markup(of: id).highlights.isEmpty && model.markup(of: id).pageComments.isEmpty)
+        #expect(model.highlight(NSRange(location: 2, length: 0), of: markdown, in: id, color: yellow) == nil)
+    }
 }

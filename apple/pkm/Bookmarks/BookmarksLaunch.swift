@@ -38,9 +38,35 @@ extension BookmarksModel {
             }
         }
         let model = BookmarksModel(store: store)
+        if opensArticle, let sample = model.bookmarks.first(where: { $0.hasArticle }) { markUp(sample, in: model) }
         if opensArticle { model.openID = model.bookmarks.first { $0.hasArticle }?.id }
         if opensDetails { model.detailsID = model.bookmarks.first { $0.hasArticle }?.id }
         return model
+    }
+
+    /// Samples of Markup on the first Article: a Highlight over two paragraphs, a Highlight with a
+    /// Comment in a Custom-looking color, and a Comment on a spot.
+    private static func markUp(_ bookmark: Bookmark, in model: BookmarksModel) {
+        guard let markdown = model.article(of: bookmark) else { return }
+        let text = markdown as NSString
+        let id = bookmark.id
+        let yellow = Rgb(r: 255, g: 235, b: 60)
+        let start = text.range(of: "compiler")
+        let end = text.range(of: "Some patience")
+        if start.location != NSNotFound, end.location != NSNotFound {
+            let passage = NSRange(location: start.location, length: end.upperBound - start.location)
+            _ = model.highlight(passage, of: markdown, in: id, color: yellow)
+        }
+        let quote = text.range(of: "Make it work")
+        if quote.location != NSNotFound,
+            let found = model.highlight(quote, of: markdown, in: id, color: Rgb(r: 102, g: 178, b: 255))
+        {
+            model.setComment("Worth remembering", ofHighlight: found.id, in: id)
+        }
+        let spot = text.range(of: "Every chapter")
+        if spot.location != NSNotFound, let added = model.commentSpot(at: spot.location, in: id) {
+            model.setText("Check the answers", ofComment: added.id, in: id)
+        }
     }
 
     private static let sampleImageAddress = "https://example.com/figure.png"

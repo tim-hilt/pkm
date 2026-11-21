@@ -7,11 +7,13 @@
 use crate::address::normalise;
 use crate::extract::Details;
 use crate::images;
+use crate::state::{Anchor, Highlight, Markup, PageComment, Place, Rgb, State};
 use pkm_base::clock::{iso8601, now_ms};
 use pkm_base::files::{DiskFiles, Files};
 use pkm_base::front_matter::{Document, Value};
 use pkm_base::images::{extension, is_image_file};
 use pkm_base::item_id::ItemId;
+use pkm_base::markup::MarkupChanges;
 use pkm_base::random::Entropy;
 use pkm_base::tag;
 use pkm_base::tag_store::TagStore;
@@ -297,9 +299,146 @@ impl Bookmarks {
             return Err(io::ErrorKind::NotFound.into());
         }
         let length = utf16_length(&self.read_article(id)?);
-        let line = format!("{} {}", offset.min(length), now_ms() as u64);
-        self.files.write(&self.state_path(&bookmark.id), &line)?;
+        let mut state = self.read_state(&bookmark.id);
+        state.progress = Some((offset.min(length), now_ms() as u64));
+        self.write_state(&bookmark.id, &state)?;
         self.read(id)
+    }
+
+    /// The Markup of the Bookmark `id`, oldest first: empty if it has none.
+    /// A Highlight whose offsets no longer hold its quoted text is found by
+    /// that text, and left out if it isn't there. `NotFound` if there is no
+    /// such Bookmark or it has no Article.
+    pub fn markup(&self, id: &str) -> io::Result<Markup> {
+        let article = self.read_article(id)?;
+        let mut markup = self.read_state(id).markup.listed();
+        markup.highlights = markup
+            .highlights
+            .into_iter()
+            .filter_map(|h| resolve(&article, h))
+            .collect();
+        let length = utf16_length(&article);
+        for comment in &mut markup.page_comments {
+            comment.place.offset = comment.place.offset.min(length);
+        }
+        Ok(markup)
+    }
+
+    /// Adds a Highlight of the passage `quoted_text` at `anchor` in `color`,
+    /// `created` in milliseconds since the Unix epoch, to the Bookmark `id`, and
+    /// returns it. `InvalidInput` for an `anchor` that is empty or past the
+    /// Article's end; `NotFound` if there is no such Bookmark or it has no Article.
+    pub fn add_highlight(
+        &self,
+        id: &str,
+        anchor: Anchor,
+        quoted_text: &str,
+        color: Rgb,
+        created: u64,
+    ) -> io::Result<Highlight> {
+        let highlight = Highlight {
+            id: new_id(),
+            anchor,
+            quoted_text: quoted_text.to_owned(),
+            color,
+            created,
+            comment: None,
+        };
+        self.edit_markup(id, |markup, _, length| {
+            if anchor.start >= anchor.end || anchor.end > length {
+                return Err(io::ErrorKind::InvalidInput.into());
+            }
+            markup.highlights.push(highlight.clone());
+            Ok(highlight)
+        })
+    }
+
+    /// Sets the color of Highlight `highlight` of the Bookmark `id`; nothing if it isn't there.
+    pub fn set_highlight_color(&self, id: &str, highlight: &str, color: Rgb) -> io::Result<()> {
+        self.edit_markup(id, |m, changes, _| {
+            m.set_highlight_color(changes, highlight, color, now_ms() as u64);
+            Ok(())
+        })
+    }
+
+    /// Sets the Comment of Highlight `highlight` of the Bookmark `id`; empty
+    /// `comment` deletes it. Nothing if the Highlight isn't there.
+    pub fn set_highlight_comment(
+        &self,
+        id: &str,
+        highlight: &str,
+        comment: &str,
+    ) -> io::Result<()> {
+        self.edit_markup(id, |m, changes, _| {
+            m.set_highlight_comment(changes, highlight, comment, now_ms() as u64);
+            Ok(())
+        })
+    }
+
+    /// Removes Highlight `highlight`, with its Comment, from the Bookmark `id`.
+    pub fn remove_highlight(&self, id: &str, highlight: &str) -> io::Result<()> {
+        self.edit_markup(id, |m, changes, _| {
+            m.remove_highlight(changes, highlight, now_ms() as u64);
+            Ok(())
+        })
+    }
+
+    /// Adds a Comment on the spot `place` of the Bookmark `id`, `created` in
+    /// milliseconds since the Unix epoch, and returns it, still without text:
+    /// it isn't in the Markup until `set_page_comment_text` gives it some. A
+    /// `place` past the Article's end is its end.
+    pub fn add_page_comment(
+        &self,
+        id: &str,
+        place: Place,
+        created: u64,
+    ) -> io::Result<PageComment> {
+        self.edit_markup(id, |markup, _, length| {
+            let comment = PageComment {
+                id: new_id(),
+                place: Place {
+                    offset: place.offset.min(length),
+                },
+                created,
+                text: String::new(),
+            };
+            markup.page_comments.push(comment.clone());
+            Ok(comment)
+        })
+    }
+
+    /// Sets the text of page Comment `comment` of the Bookmark `id`; empty
+    /// `text` deletes it. Nothing if it isn't there.
+    pub fn set_page_comment_text(&self, id: &str, comment: &str, text: &str) -> io::Result<()> {
+        self.edit_markup(id, |m, changes, _| {
+            m.set_page_comment_text(changes, comment, text, now_ms() as u64);
+            Ok(())
+        })
+    }
+
+    /// Removes page Comment `comment` from the Bookmark `id`.
+    pub fn remove_page_comment(&self, id: &str, comment: &str) -> io::Result<()> {
+        self.edit_markup(id, |m, changes, _| {
+            m.remove_page_comment(changes, comment, now_ms() as u64);
+            Ok(())
+        })
+    }
+
+    /// Applies `change` to the Markup of the Bookmark `id`, given the Article's
+    /// length in UTF-16 units, and saves the state if that changed it.
+    fn edit_markup<T>(
+        &self,
+        id: &str,
+        change: impl FnOnce(&mut Markup, &mut MarkupChanges, u64) -> io::Result<T>,
+    ) -> io::Result<T> {
+        let length = utf16_length(&self.read_article(id)?);
+        let mut state = self.read_state(id);
+        let before = state.clone();
+        let done = change(&mut state.markup, &mut state.changes, length)?;
+        if state != before {
+            self.write_state(id, &state)?;
+        }
+        Ok(done)
     }
 
     /// Gives the Bookmark `id` the `article` (see `save`, which also says what
@@ -426,21 +565,29 @@ impl Bookmarks {
         self.root.join(format!("{id}.md"))
     }
 
-    /// The hidden state file of `id`, holding `<offset> <last_read>`.
+    /// The hidden state file of `id`.
     fn state_path(&self, id: &str) -> PathBuf {
         self.root.join(STATE_FOLDER).join(id)
     }
 
-    /// The Bookmark of `file`, with the Reading Progress its state file keeps; an
-    /// unreadable state reads as never read.
+    /// The state of `id`; an unreadable one reads as none.
+    fn read_state(&self, id: &str) -> State {
+        let text = self.files.read(&self.state_path(id)).unwrap_or_default();
+        State::decode(&text)
+    }
+
+    fn write_state(&self, id: &str, state: &State) -> io::Result<()> {
+        self.files.write(&self.state_path(id), &state.encode())
+    }
+
+    /// The Bookmark of `file`, with the Reading Progress its state file keeps.
     fn bookmark_of(&self, file: &Document, id: &ItemId) -> Bookmark {
         let mut bookmark = unread_bookmark_of(file, id);
         if bookmark.has_article {
             bookmark.progress = self
-                .files
-                .read(&self.state_path(id.as_str()))
-                .ok()
-                .and_then(|line| decode_progress(&line, &file.body));
+                .read_state(id.as_str())
+                .progress
+                .map(|(offset, last_read)| progress_of(offset, last_read, &file.body));
         }
         bookmark
     }
@@ -507,17 +654,44 @@ fn utf16_length(text: &str) -> u64 {
     text.encode_utf16().count() as u64
 }
 
-/// The Reading Progress in a state `line` for an Article `body`; none if it isn't one.
-fn decode_progress(line: &str, body: &str) -> Option<ArticleProgress> {
-    let (offset, last_read) = line.split_once(' ')?;
-    let offset: u64 = offset.parse().ok()?;
+/// The Reading Progress at `offset` in an Article `body`, never past its end.
+fn progress_of(offset: u64, last_read: u64, body: &str) -> ArticleProgress {
     let length = utf16_length(body);
     let offset = offset.min(length);
-    Some(ArticleProgress {
+    ArticleProgress {
         offset,
-        last_read: last_read.parse().ok()?,
+        last_read,
         percent: (offset * 100).checked_div(length).unwrap_or(0) as u8,
-    })
+    }
+}
+
+/// `highlight` where its quoted text is: as it is if its offsets hold the
+/// text, else at the first place the text is in `article`; none if it isn't.
+fn resolve(article: &str, mut highlight: Highlight) -> Option<Highlight> {
+    let Anchor { start, end } = highlight.anchor;
+    let units: Vec<u16> = article.encode_utf16().collect();
+    let held = units.get(start as usize..end as usize);
+    if held.is_some_and(|held| {
+        held.iter()
+            .copied()
+            .eq(highlight.quoted_text.encode_utf16())
+    }) {
+        return Some(highlight);
+    }
+    let found = article
+        .find(&highlight.quoted_text)
+        .filter(|_| !highlight.quoted_text.is_empty())?;
+    let start = utf16_length(&article[..found]);
+    highlight.anchor = Anchor {
+        start,
+        end: start + utf16_length(&highlight.quoted_text),
+    };
+    Some(highlight)
+}
+
+/// A new Item ID, for a Highlight or a page Comment.
+fn new_id() -> String {
+    ItemId::new(&mut Entropy::from_system()).to_string()
 }
 
 #[cfg(test)]
@@ -1306,5 +1480,147 @@ mod tests {
         store.save_progress(&b.id, 1).unwrap();
         store.delete(&b.id).unwrap();
         assert!(!state(&b.id).exists());
+    }
+
+    const YELLOW: Rgb = Rgb {
+        r: 255,
+        g: 235,
+        b: 60,
+    };
+    const GREEN: Rgb = Rgb {
+        r: 126,
+        g: 217,
+        b: 87,
+    };
+
+    /// A Bookmark whose Article is "alpha beta\ngamma delta\n" (23 UTF-16 units).
+    fn two_paragraphs(store: &Bookmarks) -> Bookmark {
+        saved_with_images(store, "alpha beta\n\ngamma delta", &[])
+    }
+
+    fn highlight_at(store: &Bookmarks, id: &str, start: u64, end: u64, quoted: &str) -> Highlight {
+        let anchor = Anchor { start, end };
+        store.add_highlight(id, anchor, quoted, YELLOW, 1).unwrap()
+    }
+
+    #[test]
+    fn highlights_can_span_paragraphs_and_be_recolored_and_deleted() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let b = two_paragraphs(&store);
+        let article = store.read_article(&b.id).unwrap();
+        let passage = &article[6..18];
+        let h = highlight_at(&store, &b.id, 6, 18, passage);
+        assert!(passage.contains("\n\n"));
+        store.set_highlight_color(&b.id, &h.id, GREEN).unwrap();
+        let listed = scratch.store().markup(&b.id).unwrap();
+        assert_eq!(listed.highlights.len(), 1);
+        assert_eq!(
+            (listed.highlights[0].anchor, listed.highlights[0].color),
+            (Anchor { start: 6, end: 18 }, GREEN)
+        );
+        store.remove_highlight(&b.id, &h.id).unwrap();
+        assert!(scratch.store().markup(&b.id).unwrap().highlights.is_empty());
+    }
+
+    #[test]
+    fn comments_on_highlights_and_spots_are_written_and_deleted() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let b = two_paragraphs(&store);
+        let h = highlight_at(&store, &b.id, 0, 5, "alpha");
+        store.set_highlight_comment(&b.id, &h.id, "why").unwrap();
+        let spot = store
+            .add_page_comment(&b.id, Place { offset: 12 }, 2)
+            .unwrap();
+        assert!(
+            store.markup(&b.id).unwrap().page_comments.is_empty(),
+            "without text it isn't listed"
+        );
+        store.set_page_comment_text(&b.id, &spot.id, "hm").unwrap();
+        let markup = scratch.store().markup(&b.id).unwrap();
+        assert_eq!(markup.highlights[0].comment.as_deref(), Some("why"));
+        assert_eq!(
+            (
+                markup.page_comments[0].place,
+                &markup.page_comments[0].text[..]
+            ),
+            (Place { offset: 12 }, "hm")
+        );
+        store.set_highlight_comment(&b.id, &h.id, "").unwrap();
+        store.set_page_comment_text(&b.id, &spot.id, "").unwrap();
+        let markup = scratch.store().markup(&b.id).unwrap();
+        assert_eq!(markup.highlights[0].comment, None);
+        assert!(markup.page_comments.is_empty());
+    }
+
+    #[test]
+    fn markup_keeps_reading_progress_and_the_other_way_round() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let b = two_paragraphs(&store);
+        highlight_at(&store, &b.id, 0, 5, "alpha");
+        store.save_progress(&b.id, 7).unwrap();
+        highlight_at(&store, &b.id, 6, 10, "beta");
+        assert_eq!(store.read(&b.id).unwrap().progress.unwrap().offset, 7);
+        assert_eq!(store.markup(&b.id).unwrap().highlights.len(), 2);
+    }
+
+    #[test]
+    fn a_highlight_that_moved_is_found_by_its_text_and_one_that_is_gone_is_left_out() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let b = two_paragraphs(&store);
+        highlight_at(&store, &b.id, 0, 4, "beta");
+        highlight_at(&store, &b.id, 0, 4, "omega");
+        let listed = store.markup(&b.id).unwrap();
+        assert_eq!(listed.highlights.len(), 1);
+        assert_eq!(listed.highlights[0].anchor, Anchor { start: 6, end: 10 });
+    }
+
+    #[test]
+    fn markup_must_lie_inside_the_article_of_a_bookmark_that_has_one() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let b = two_paragraphs(&store);
+        let anchor = |start, end| Anchor { start, end };
+        for bad in [anchor(3, 3), anchor(5, 2), anchor(0, 999)] {
+            let err = store.add_highlight(&b.id, bad, "x", YELLOW, 1).unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        }
+        let plain = store
+            .save(
+                "https://x.test/p",
+                &details("P"),
+                "",
+                &[],
+                None,
+                &HashMap::new(),
+            )
+            .unwrap()
+            .bookmark;
+        let err = store.add_highlight(&plain.id, anchor(0, 1), "x", YELLOW, 1);
+        assert_eq!(err.unwrap_err().kind(), io::ErrorKind::NotFound);
+        assert_eq!(
+            store.markup(&plain.id).unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+    }
+
+    #[test]
+    fn dropping_the_article_and_deleting_clear_the_markup() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let b = two_paragraphs(&store);
+        highlight_at(&store, &b.id, 0, 5, "alpha");
+        store.drop_article(&b.id).unwrap();
+        assert!(!scratch.0.join(".state").join(&b.id).exists());
+        store
+            .add_article(&b.id, "alpha again", &HashMap::new())
+            .unwrap();
+        assert!(store.markup(&b.id).unwrap().highlights.is_empty());
+        highlight_at(&store, &b.id, 0, 5, "alpha");
+        store.delete(&b.id).unwrap();
+        assert!(!scratch.0.join(".state").join(&b.id).exists());
     }
 }

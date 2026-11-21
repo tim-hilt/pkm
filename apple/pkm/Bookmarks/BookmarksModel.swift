@@ -219,6 +219,48 @@ final class BookmarksModel {
         reload()
     }
 
+    /// The Markup of the Bookmark's Article; empty if it has none.
+    func markup(of id: String) -> ArticleMarkup {
+        (try? store.markup(id: id)) ?? ArticleMarkup(highlights: [], pageComments: [])
+    }
+
+    /// Highlights the UTF-16 `range` of the Article's Markdown, which is `markdown`, in `color`;
+    /// nil if the core refuses it, as for an empty range.
+    func highlight(_ range: NSRange, of markdown: String, in id: String, color: Rgb) -> ArticleHighlight? {
+        try? store.addHighlight(
+            id: id, start: UInt64(range.location), end: UInt64(range.upperBound),
+            quotedText: (markdown as NSString).substring(with: range), color: color, created: Self.now)
+    }
+
+    func setColor(_ color: Rgb, ofHighlight highlight: String, in id: String) {
+        try? store.setHighlightColor(id: id, highlight: highlight, color: color)
+    }
+
+    /// Empty `comment` deletes the Comment.
+    func setComment(_ comment: String, ofHighlight highlight: String, in id: String) {
+        try? store.setHighlightComment(id: id, highlight: highlight, comment: comment)
+    }
+
+    func removeHighlight(_ highlight: String, in id: String) {
+        try? store.removeHighlight(id: id, highlight: highlight)
+    }
+
+    /// A Comment on the spot at UTF-16 `offset`, without text until `setText` gives it some.
+    func commentSpot(at offset: Int, in id: String) -> ArticleComment? {
+        try? store.addPageComment(id: id, offset: UInt64(max(0, offset)), created: Self.now)
+    }
+
+    /// Empty `text` deletes the Comment.
+    func setText(_ text: String, ofComment comment: String, in id: String) {
+        try? store.setPageCommentText(id: id, comment: comment, text: text)
+    }
+
+    func removeComment(_ comment: String, in id: String) {
+        try? store.removePageComment(id: id, comment: comment)
+    }
+
+    private static var now: UInt64 { UInt64(Date().timeIntervalSince1970 * 1000) }
+
     /// Deletes the Bookmark with its Cover, Article and images.
     func delete(id: String) {
         if openID == id { openID = nil }
