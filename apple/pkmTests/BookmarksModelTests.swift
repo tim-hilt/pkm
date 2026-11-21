@@ -37,7 +37,7 @@ import Testing
         #expect(draft.details.title == "Hello" && draft.details.site == "The Site")
         #expect(draft.cover != nil && draft.failure == nil)
 
-        let saved = try #require(model.save(draft, title: "Renamed"))
+        let saved = try #require(model.save(draft, title: "Renamed", keepsArticle: false))
         #expect(model.bookmarks.map(\.id) == [saved.id])
         #expect(model.bookmarks.first?.title == "Renamed")
         #expect(model.cover(of: saved) != nil)
@@ -51,7 +51,7 @@ import Testing
         }
         #expect(draft.failure != nil)
         #expect(draft.details.title == "https://offline.test/x")
-        let saved = try #require(model.save(draft, title: ""))
+        let saved = try #require(model.save(draft, title: "", keepsArticle: false))
         #expect(saved.title == "https://offline.test/x" && saved.cover == nil)
     }
 
@@ -67,7 +67,7 @@ import Testing
     @Test func anAddressSavedAlreadyGivesItsBookmarkWithoutDownloading() async throws {
         let model = try model(serving(["https://example.com/a": Self.page]))
         guard case .draft(let draft) = await model.prepare("https://example.com/a") else { return }
-        let saved = try #require(model.save(draft, title: ""))
+        let saved = try #require(model.save(draft, title: "", keepsArticle: false))
         let again = await model.prepare("https://EXAMPLE.com/a?utm_campaign=y")
         #expect(again == .existing(saved))
     }
@@ -82,11 +82,60 @@ import Testing
         let model = try model(serving([:]))
         for name in ["a", "b"] {
             guard case .draft(let draft) = await model.prepare("https://example.com/\(name)") else { return }
-            model.save(draft, title: name)
+            model.save(draft, title: name, keepsArticle: false)
             try await Task.sleep(for: .milliseconds(1100))  // `saved` counts seconds
         }
         #expect(model.bookmarks.map(\.title) == ["b", "a"])
         model.delete(id: model.bookmarks[0].id)
         #expect(model.bookmarks.map(\.title) == ["a"])
+    }
+
+    private static let longPage = Download(
+        data: Data(
+            ("<title>Long</title><article><p>"
+                + String(repeating: "Plenty of prose, indeed, and a <a href=\"/x\">link</a>. ", count: 20)
+                + "</p></article>").utf8),
+        mimeType: "text/html", textEncoding: "utf-8")
+
+    private static let shortPage = Download(
+        data: Data("<title>Home</title><p>Welcome, friends, come in.</p>".utf8),
+        mimeType: "text/html", textEncoding: "utf-8")
+
+    @Test func aPageThatReadsLikeAnArticleIsSavedWithItsTextAndRead() async throws {
+        let model = try model(serving(["https://example.com/long": Self.longPage]))
+        guard case .draft(let draft) = await model.prepare("https://example.com/long") else {
+            Issue.record("expected a draft")
+            return
+        }
+        #expect(draft.article.readsLikeArticle)
+        let saved = try #require(model.save(draft, title: "", keepsArticle: draft.article.readsLikeArticle))
+        #expect(saved.hasArticle)
+        let text = try #require(model.article(of: saved))
+        #expect(text.contains("[link](https://example.com/x)"))
+    }
+
+    @Test func theUsersToggleOverridesTheDecision() async throws {
+        let model = try model(
+            serving([
+                "https://example.com/long": Self.longPage, "https://example.com/a": Self.shortPage,
+            ]))
+        guard case .draft(let long) = await model.prepare("https://example.com/long"),
+            case .draft(let short) = await model.prepare("https://example.com/a")
+        else { return }
+        #expect(!short.article.readsLikeArticle)
+        let without = try #require(model.save(long, title: "", keepsArticle: false))
+        let with = try #require(model.save(short, title: "", keepsArticle: true))
+        #expect(!without.hasArticle && model.article(of: without) == nil)
+        #expect(with.hasArticle)
+    }
+
+    @Test func deletingTheBookmarkClosesItsReader() async throws {
+        let model = try model(serving(["https://example.com/long": Self.longPage]))
+        guard case .draft(let draft) = await model.prepare("https://example.com/long") else { return }
+        let saved = try #require(model.save(draft, title: "", keepsArticle: true))
+        model.openID = saved.id
+        #expect(model.pushedPath == [saved.id])
+        model.delete(id: saved.id)
+        #expect(model.pushedPath.isEmpty)
     }
 }

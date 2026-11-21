@@ -9,6 +9,8 @@ struct SaveDraft: Equatable {
     let address: String
     let details: Details
     let cover: Data?
+    /// The page's text, empty where there is none, and whether it reads like an Article.
+    let article: Article
     /// Why the page couldn't be read, if it couldn't; the Bookmark is then Saved with its Address only.
     let failure: String?
 }
@@ -30,6 +32,15 @@ final class BookmarksModel {
 
     /// Every Bookmark, newest Saved first.
     private(set) var bookmarks: [Bookmark] = []
+
+    /// The Bookmark whose Article the Reader shows, if any.
+    var openID: String?
+
+    /// What is pushed over the list: the Reader of `openID`.
+    var pushedPath: [String] {
+        get { openID.map { [$0] } ?? [] }
+        set { openID = newValue.last }
+    }
 
     /// The Covers shown, decoded once.
     @ObservationIgnored private var covers: [String: CGImage] = [:]
@@ -62,23 +73,32 @@ final class BookmarksModel {
         let details = extractDetails(html: html, address: address)
         var cover: Data?
         if let address = details.cover, let url = URL(string: address) { cover = try? await download(url).data }
-        return .draft(SaveDraft(address: address, details: details, cover: cover, failure: failure))
+        let article = readArticle(html: html, address: address)
+        return .draft(SaveDraft(address: address, details: details, cover: cover, article: article, failure: failure))
     }
 
-    /// Saves the page under `title` (blank keeps the page's); the Bookmark, or the one Saved before
-    /// under the same Address.
+    /// Saves the page under `title` (blank keeps the page's), with its Article if `keepsArticle`
+    /// (the Save sheet's toggle, which starts as `draft.article.readsLikeArticle`); the Bookmark,
+    /// or the one Saved before under the same Address.
     @discardableResult
-    func save(_ draft: SaveDraft, title: String) -> Bookmark? {
+    func save(_ draft: SaveDraft, title: String, keepsArticle: Bool) -> Bookmark? {
         guard
             let saved = try? store.save(
-                address: draft.address, details: draft.details, title: title, cover: draft.cover)
+                address: draft.address, details: draft.details, title: title, cover: draft.cover,
+                article: keepsArticle ? draft.article.markdown : nil)
         else { return nil }
         reload()
         return saved.bookmark
     }
 
-    /// Deletes the Bookmark with its Cover.
+    /// The Markdown of the Bookmark's Article; nil if it has none.
+    func article(of bookmark: Bookmark) -> String? {
+        bookmark.hasArticle ? try? store.readArticle(id: bookmark.id) : nil
+    }
+
+    /// Deletes the Bookmark with its Cover and Article.
     func delete(id: String) {
+        if openID == id { openID = nil }
         try? store.delete(id: id)
         covers[id] = nil
         reload()

@@ -170,7 +170,7 @@ clean:
 	rm -rf apple/pkm.xcodeproj apple/build apple/Generated target web/generated web/dist
 
 # Screenshot of the Canvas with the sample Drawing open, for looking at layout:
-# make screenshot DEVICE=mac|ipad|iphone|web [SCREEN=canvas|settings|books|reader|tasks|task|filters|filter|grouped|notes|note|bookmarks] [OUT=/tmp/wt-<device>.png]
+# make screenshot DEVICE=mac|ipad|iphone|web [SCREEN=canvas|settings|books|reader|tasks|task|filters|filter|grouped|notes|note|bookmarks|article] [OUT=/tmp/wt-<device>.png]
 DEVICE ?= iphone
 screenshot: $(if $(filter web,$(DEVICE)),web-install web-wasm,apple-project)
 	DEVICE=$(DEVICE) SCREEN='$(SCREEN)' OUT='$(OUT)' scripts/screenshot.sh

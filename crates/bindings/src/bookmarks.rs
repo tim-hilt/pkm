@@ -1,7 +1,7 @@
 //! The Bookmarks surface of the UniFFI library (ADR-0007): the Bookmarks store
 //! and the extraction of a page's details. The logic lives in `pkm-bookmarks`.
 
-use pkm_bookmarks::{Bookmark, Bookmarks, Details, Saved};
+use pkm_bookmarks::{Article, Bookmark, Bookmarks, Details, Saved};
 
 /// Why the Bookmarks couldn't be read or saved.
 #[derive(Debug, uniffi::Error)]
@@ -35,6 +35,14 @@ pub struct Bookmark {
     pub author: String,
     pub published: String,
     pub saved: String,
+    pub has_article: bool,
+}
+
+/// The text of a page, see `pkm_bookmarks::Article`.
+#[uniffi::remote(Record)]
+pub struct Article {
+    pub markdown: String,
+    pub reads_like_article: bool,
 }
 
 /// What a page says about itself, see `pkm_bookmarks::Details`.
@@ -60,6 +68,12 @@ pub struct Saved {
 #[uniffi::export]
 pub fn extract_details(html: String, address: String) -> Details {
     pkm_bookmarks::extract(&html, &address)
+}
+
+/// The Article of the page at `address` whose HTML is `html`; empty where the page has no text.
+#[uniffi::export]
+pub fn read_article(html: String, address: String) -> Article {
+    pkm_bookmarks::read_article(&html, &address)
 }
 
 /// The Address `address` stands for, without tracking parameters and `#` part;
@@ -88,15 +102,23 @@ impl BookmarkStore {
     }
 
     /// Saves the page at `address` unless it is Saved already, which gives that Bookmark.
-    /// A blank `title` leaves it to the page's; `cover` is the Cover's bytes, if downloaded.
+    /// A blank `title` leaves it to the page's; `cover` is the Cover's bytes, if downloaded;
+    /// `article` is the Article's Markdown if it is to have one.
     pub fn save(
         &self,
         address: String,
         details: Details,
         title: String,
         cover: Option<Vec<u8>>,
+        article: Option<String>,
     ) -> Result<Saved, BookmarksError> {
-        Ok(self.0.save(&address, &details, &title, cover.as_deref())?)
+        Ok(self.0.save(
+            &address,
+            &details,
+            &title,
+            cover.as_deref(),
+            article.as_deref(),
+        )?)
     }
 
     /// Every Bookmark, newest Saved first.
@@ -111,6 +133,11 @@ impl BookmarkStore {
     /// The bytes of the Bookmark's Cover.
     pub fn read_cover(&self, id: String) -> Result<Vec<u8>, BookmarksError> {
         Ok(self.0.read_cover(&id)?)
+    }
+
+    /// The Markdown of the Bookmark's Article.
+    pub fn read_article(&self, id: String) -> Result<String, BookmarksError> {
+        Ok(self.0.read_article(&id)?)
     }
 
     /// Deletes the Bookmark with its Cover.
@@ -131,7 +158,17 @@ mod tests {
             BookmarkStore::open(dir.join("Bookmarks").to_string_lossy().into_owned()).unwrap();
         let address = "https://example.com/a?utm_source=x".to_owned();
         let details = extract_details("<title>Hi</title>".into(), address.clone());
-        let saved = store.save(address, details, String::new(), None).unwrap();
+        let page = "<p>Some text, long enough to be kept.</p>";
+        let article = read_article(page.into(), address.clone());
+        let saved = store
+            .save(
+                address,
+                details,
+                String::new(),
+                None,
+                Some(article.markdown),
+            )
+            .unwrap();
         let rows = store.bookmarks().unwrap();
         assert_eq!(
             (
@@ -140,6 +177,10 @@ mod tests {
                 saved.existing
             ),
             ("Hi", "https://example.com/a", false)
+        );
+        assert_eq!(
+            store.read_article(rows[0].id.clone()).unwrap(),
+            "Some text, long enough to be kept.\n"
         );
         std::fs::remove_dir_all(dir).unwrap();
     }

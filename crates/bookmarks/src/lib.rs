@@ -6,10 +6,13 @@
 //! through `pkm-bindings`.
 
 mod address;
+mod article;
 mod extract;
+mod html;
 mod store;
 
 pub use address::{is_document, normalise};
+pub use article::{Article, read_article};
 pub use extract::{Details, extract};
 pub use pkm_base::files::{DiskFiles, Files, MemoryFiles};
 pub use store::{Bookmark, Bookmarks, Saved};

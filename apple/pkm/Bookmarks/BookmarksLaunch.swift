@@ -5,7 +5,8 @@ extension BookmarksModel {
     static let documentsFolder = URL.documentsDirectory.appending(path: "Bookmarks", directoryHint: .isDirectory)
 
     /// The Bookmarks for this launch: the Bookmarks folder. For UI tests and screenshots (`-UITesting…`)
-    /// it is temporary, with sample Bookmarks when launched with `-UITestingOpenBookmarks`.
+    /// it is temporary, with sample Bookmarks when launched with `-UITestingOpenBookmarks`, and the
+    /// first one's Article open in the Reader with `-UITestingOpenArticle`.
     @MainActor
     static func forLaunch() -> BookmarksModel {
         let arguments = ProcessInfo.processInfo.arguments
@@ -13,7 +14,8 @@ extension BookmarksModel {
             return BookmarksModel(store: openOrTemporary(documentsFolder))
         }
         let store = openOrTemporary(temporaryFolder())
-        if arguments.contains("-UITestingOpenBookmarks") {
+        let opensArticle = arguments.contains("-UITestingOpenArticle")
+        if opensArticle || arguments.contains("-UITestingOpenBookmarks") {
             let samples = [
                 ("https://example.com/rust", "Rust in Action", "Example Blog"),
                 ("https://example.org/design", "A Philosophy of Software Design", "example.org"),
@@ -25,11 +27,35 @@ extension BookmarksModel {
             ]
             for (address, title, site) in samples.reversed() {
                 let details = Details(title: title, site: site, cover: nil, excerpt: "", author: "", published: "")
-                _ = try? store.save(address: address, details: details, title: "", cover: nil)
+                let article = address.hasSuffix("/rust") ? readArticle(html: sampleArticle, address: address) : nil
+                _ = try? store.save(
+                    address: address, details: details, title: "", cover: nil, article: article?.markdown)
             }
         }
-        return BookmarksModel(store: store)
+        let model = BookmarksModel(store: store)
+        if opensArticle { model.openID = model.bookmarks.first { $0.hasArticle }?.id }
+        return model
     }
+
+    /// A page to read: headings, Inline formatting, links, lists, a quote, code and a table.
+    private static let sampleArticle = """
+        <body><nav><a href="/">Home</a> <a href="/blog">Blog</a></nav><article>
+        <h1>Rust in Action</h1>
+        <p>Learning <em>systems programming</em> is easier with a <strong>safe</strong> language, as the
+        <a href="/book">book</a> shows: the compiler checks what you would otherwise debug for days, and
+        <code>cargo</code> does the rest.</p>
+        <h2>What you need</h2>
+        <ul><li>A recent toolchain<ul><li>via rustup</li></ul></li><li>An editor</li><li>Some patience</li></ul>
+        <blockquote><p>Make it work, make it right, make it fast.</p></blockquote>
+        <h4>A first program</h4>
+        <pre><code>fn main() {
+            println!("Hello");
+        }</code></pre>
+        <table><tr><th>Type</th><th>Size</th></tr><tr><td>u8</td><td>1 byte</td></tr></table>
+        <p>Every chapter ends with exercises, and the answers are in the back, so that nobody has to guess whether the
+        code that compiles is also the code that was meant, which is a rare comfort in this line of work.</p>
+        </article><footer>Copyright</footer></body>
+        """
 
     private static func temporaryFolder() -> URL {
         FileManager.default.temporaryDirectory.appending(

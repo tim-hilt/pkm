@@ -4,6 +4,7 @@
 //! Tolerates broken markup: what can't be read is left out.
 
 use crate::address::{domain, resolve};
+use crate::html::{attributes, clean, find_ignoring_case};
 use pkm_base::json::{self, Value};
 
 /// What a page says about itself. Empty where it says nothing, and for the
@@ -179,123 +180,6 @@ impl Page {
     }
 }
 
-/// The attributes at the start of `text`, which follows a tag's name, as
-/// (lower-cased name, decoded value), and how many bytes the tag's rest takes,
-/// its `>` included.
-fn attributes(text: &str) -> (Vec<(String, String)>, usize) {
-    let bytes = text.as_bytes();
-    let mut found = Vec::new();
-    let mut i = 0;
-    let skip_space = |mut i: usize| {
-        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-            i += 1;
-        }
-        i
-    };
-    while i < bytes.len() {
-        i = skip_space(i);
-        match bytes.get(i) {
-            None => break,
-            Some(b'>') => return (found, i + 1),
-            Some(b'/') => {
-                i += 1;
-                continue;
-            }
-            _ => {}
-        }
-        let name_start = i;
-        // A name starting with `=` is broken markup; take it whole to move on.
-        i += 1;
-        while i < bytes.len()
-            && !matches!(bytes[i], b'=' | b'>' | b'/')
-            && !bytes[i].is_ascii_whitespace()
-        {
-            i += 1;
-        }
-        let name = text[name_start..i].to_ascii_lowercase();
-        i = skip_space(i);
-        let mut value = "";
-        if bytes.get(i) == Some(&b'=') {
-            i = skip_space(i + 1);
-            match bytes.get(i) {
-                Some(&quote @ (b'"' | b'\'')) => {
-                    let end = text[i + 1..]
-                        .find(quote as char)
-                        .map_or(text.len(), |e| i + 1 + e);
-                    value = &text[i + 1..end];
-                    i = (end + 1).min(text.len());
-                }
-                _ => {
-                    let start = i;
-                    while i < bytes.len() && !bytes[i].is_ascii_whitespace() && bytes[i] != b'>' {
-                        i += 1;
-                    }
-                    value = &text[start..i];
-                }
-            }
-        }
-        found.push((name, decode(value)));
-    }
-    (found, text.len())
-}
-
-/// The position of `needle` (lower case) in `haystack`, ignoring ASCII case.
-fn find_ignoring_case(haystack: &str, needle: &str) -> Option<usize> {
-    haystack
-        .as_bytes()
-        .windows(needle.len())
-        .position(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
-}
-
-/// `text` with its character references decoded and white space collapsed.
-fn clean(text: &str) -> String {
-    decode(text)
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// `text` with the character references that pages use decoded; any other left as is.
-fn decode(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(amp) = rest.find('&') {
-        out += &rest[..amp];
-        rest = &rest[amp..];
-        let decoded = rest.find(';').filter(|&end| end <= 10).and_then(|end| {
-            let name = &rest[1..end];
-            let character = match name {
-                "amp" => '&',
-                "lt" => '<',
-                "gt" => '>',
-                "quot" => '"',
-                "apos" => '\'',
-                "nbsp" => '\u{a0}',
-                _ => {
-                    let number = name.strip_prefix('#')?;
-                    let code = match number.strip_prefix(['x', 'X']) {
-                        Some(hex) => u32::from_str_radix(hex, 16),
-                        None => number.parse(),
-                    };
-                    char::from_u32(code.ok()?)?
-                }
-            };
-            Some((character, end + 1))
-        });
-        match decoded {
-            Some((character, used)) => {
-                out.push(character);
-                rest = &rest[used..];
-            }
-            None => {
-                out.push('&');
-                rest = &rest[1..];
-            }
-        }
-    }
-    out + rest
-}
-
 /// A JSON-LD member as text: a string, the `name` or `url` of an object, or
 /// those of an array's items joined by commas.
 fn ld_text(node: &Value, key: &str) -> Option<String> {
@@ -433,14 +317,6 @@ mod tests {
         assert_eq!(
             (details.title.as_str(), details.site.as_str()),
             (ADDRESS, "Site")
-        );
-    }
-
-    #[test]
-    fn character_references_are_decoded() {
-        assert_eq!(
-            decode("a&amp;b &lt;&#65;&#x42;&gt; &nbsp;&bogus; &"),
-            "a&b <AB> \u{a0}&bogus; &"
         );
     }
 

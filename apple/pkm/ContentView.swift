@@ -10,6 +10,7 @@ struct ContentView: View {
     @Environment(CloudBackingModel.self) private var cloud
     @Environment(TasksModel.self) private var tasks
     @Environment(NotesModel.self) private var notes
+    @Environment(BookmarksModel.self) private var bookmarks
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.scenePhase) private var scenePhase
     /// An iPhone opens into the detail; its sidebar is one step back.
@@ -105,6 +106,8 @@ extension ContentView {
             return Binding(get: { tasks.openFilterPath }, set: { tasks.openFilterPath = $0 })
         case .context(.notes) where NotesLayout.pushes(sizeClass):
             return Binding(get: { notes.pushedPath }, set: { notes.pushedPath = $0 })
+        case .context(.bookmarks):
+            return Binding(get: { bookmarks.pushedPath }, set: { bookmarks.pushedPath = $0 })
         default:
             return .constant([])
         }
@@ -150,7 +153,8 @@ extension AppNavigation {
     /// The navigation for this launch. The `-UITesting…` launch arguments
     /// (temporary stores, `make screenshot`) start on Drawings (Books for
     /// `-UITestingOpenBooks` and `-UITestingOpenReader`, Tasks for `-UITestingOpenTasks`
-    /// and `-UITestingOpenTaskSheet`, Notes for `-UITestingOpenNotes` and `-UITestingOpenNote`) and leave the Device's last AppContext alone.
+    /// and `-UITestingOpenTaskSheet`, Notes for `-UITestingOpenNotes` and `-UITestingOpenNote`, Bookmarks for `-UITestingOpenBookmarks`
+    /// and `-UITestingOpenArticle`) and leave the Device's last AppContext alone.
     @MainActor
     static func forLaunch() -> AppNavigation {
         guard ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("-UITesting") }) else {
@@ -164,7 +168,7 @@ extension AppNavigation {
             navigation.selected = .tasks
         } else if arguments.contains("-UITestingOpenNotes") || arguments.contains("-UITestingOpenNote") {
             navigation.selected = .notes
-        } else if arguments.contains("-UITestingOpenBookmarks") {
+        } else if arguments.contains("-UITestingOpenBookmarks") || arguments.contains("-UITestingOpenArticle") {
             navigation.selected = .bookmarks
         } else if arguments.contains("-UITestingOpenBooks") || arguments.contains("-UITestingOpenReader") {
             navigation.selected = .books

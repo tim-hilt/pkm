@@ -1,7 +1,7 @@
 //! The Bookmarks store: `<id>.md` files with the front matter `id`,
 //! `address`, `title`, `site`, `cover`, `excerpt`, `author`, `published` and
 //! `saved`, beside their Cover `<id>.<ext>` (Bookmarks ADR-0002). The body is
-//! the Article's place, empty until there are Articles.
+//! the Article, if the Bookmark has one.
 
 use crate::address::normalise;
 use crate::extract::Details;
@@ -40,6 +40,8 @@ pub struct Bookmark {
     pub published: String,
     /// When it was Saved, as UTC ISO 8601.
     pub saved: String,
+    /// Whether the Bookmark has an Article.
+    pub has_article: bool,
 }
 
 /// What Saving gave.
@@ -80,14 +82,16 @@ impl Bookmarks {
     /// its Address is Saved already, which gives that Bookmark. `title` is the
     /// user's, which a blank one leaves to the page's. `cover` holds the bytes
     /// of the Cover; they are left out if they are no PNG, JPEG, GIF or
-    /// WebP, so that a broken image never costs the Bookmark. `InvalidInput`
-    /// for an `address` that is none (see `normalise`).
+    /// WebP, so that a broken image never costs the Bookmark. `article` is the
+    /// Article's Markdown (see `read_article`) if the Bookmark is to have one;
+    /// blank is none. `InvalidInput` for an `address` that is none (see `normalise`).
     pub fn save(
         &self,
         address: &str,
         details: &Details,
         title: &str,
         cover: Option<&[u8]>,
+        article: Option<&str>,
     ) -> io::Result<Saved> {
         let address = normalise(address).ok_or(io::ErrorKind::InvalidInput)?;
         if let Some(bookmark) = self.list()?.into_iter().find(|b| b.address == address) {
@@ -132,6 +136,9 @@ impl Bookmarks {
             }
         }
         file.set_scalar(SAVED, iso8601(now_ms()));
+        if let Some(article) = article.map(str::trim).filter(|a| !a.is_empty()) {
+            file.body = format!("{article}\n");
+        }
         self.files.write(&self.path(&id), &file.render())?;
         Ok(Saved {
             bookmark: bookmark_of(&file, &id),
@@ -166,6 +173,16 @@ impl Bookmarks {
     pub fn read_cover(&self, id: &str) -> io::Result<Vec<u8>> {
         let name = self.read(id)?.cover.ok_or(io::ErrorKind::NotFound)?;
         self.files.read_bytes(&self.root.join(name))
+    }
+
+    /// The Article of the Bookmark `id`; `NotFound` if there is no such
+    /// Bookmark or it has no Article.
+    pub fn read_article(&self, id: &str) -> io::Result<String> {
+        let id = ItemId::parse(id).ok_or(io::ErrorKind::NotFound)?;
+        let file = self.read_file(&id).ok_or(io::ErrorKind::NotFound)?;
+        Some(file.body)
+            .filter(|b| !b.trim().is_empty())
+            .ok_or(io::ErrorKind::NotFound.into())
     }
 
     /// Deletes the Bookmark `id` with its Cover; one that is gone already is as wanted.
@@ -217,12 +234,14 @@ fn bookmark_of(file: &Document, id: &ItemId) -> Bookmark {
         author: text(AUTHOR),
         published: text(PUBLISHED),
         saved: text(SAVED),
+        has_article: !file.body.trim().is_empty(),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::article::read_article;
 
     const PNG: &[u8] = b"\x89PNG\r\n\x1a\n rest";
 
@@ -280,6 +299,7 @@ mod tests {
                 &details("Page"),
                 "",
                 None,
+                None,
             )
             .unwrap();
         assert!(!saved.existing);
@@ -304,7 +324,7 @@ mod tests {
         let store = scratch.store();
         let title = |address: &str, details: &Details, typed: &str| {
             store
-                .save(address, details, typed, None)
+                .save(address, details, typed, None, None)
                 .unwrap()
                 .bookmark
                 .title
@@ -325,13 +345,20 @@ mod tests {
         let scratch = Scratch::new();
         let store = scratch.store();
         let first = store
-            .save("https://example.com/a", &details("One"), "", Some(PNG))
+            .save(
+                "https://example.com/a",
+                &details("One"),
+                "",
+                Some(PNG),
+                None,
+            )
             .unwrap();
         let again = store
             .save(
                 "HTTPS://example.com/a?utm_medium=mail#x",
                 &details("Two"),
                 "",
+                None,
                 None,
             )
             .unwrap();
@@ -345,7 +372,7 @@ mod tests {
         let scratch = Scratch::new();
         let error = scratch
             .store()
-            .save("ftp://x.test/a", &details("X"), "", None)
+            .save("ftp://x.test/a", &details("X"), "", None, None)
             .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
         assert!(scratch.files().is_empty());
@@ -380,7 +407,7 @@ mod tests {
         let scratch = Scratch::new();
         let store = scratch.store();
         let b = store
-            .save("https://a.test/", &details("A"), "", Some(PNG))
+            .save("https://a.test/", &details("A"), "", Some(PNG), None)
             .unwrap()
             .bookmark;
         let cover = b.cover.clone().unwrap();
@@ -394,7 +421,7 @@ mod tests {
         let scratch = Scratch::new();
         let store = scratch.store();
         let b = store
-            .save("https://a.test/", &details("A"), "", Some(b"<html>"))
+            .save("https://a.test/", &details("A"), "", Some(b"<html>"), None)
             .unwrap()
             .bookmark;
         assert_eq!(b.cover, None);
@@ -410,11 +437,11 @@ mod tests {
         let scratch = Scratch::new();
         let store = scratch.store();
         let keep = store
-            .save("https://a.test/keep", &details("Keep"), "", Some(PNG))
+            .save("https://a.test/keep", &details("Keep"), "", Some(PNG), None)
             .unwrap()
             .bookmark;
         let gone = store
-            .save("https://a.test/gone", &details("Gone"), "", Some(PNG))
+            .save("https://a.test/gone", &details("Gone"), "", Some(PNG), None)
             .unwrap()
             .bookmark;
         store.delete(&gone.id).unwrap();
@@ -425,5 +452,87 @@ mod tests {
         );
         assert_eq!(scratch.files().len(), 2);
         assert_eq!(store.list().unwrap(), [keep]);
+    }
+
+    #[test]
+    fn an_article_is_the_body_of_the_file_and_marks_its_bookmark() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let with = store
+            .save(
+                "https://a.test/1",
+                &details("One"),
+                "",
+                None,
+                Some("# Head\n\nText\n\n"),
+            )
+            .unwrap()
+            .bookmark;
+        let without = store
+            .save("https://a.test/2", &details("Two"), "", None, None)
+            .unwrap()
+            .bookmark;
+        assert!(with.has_article && !without.has_article);
+        assert_eq!(store.read_article(&with.id).unwrap(), "# Head\n\nText\n");
+        assert_eq!(
+            store.read_article(&without.id).unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+        let text = fs::read_to_string(scratch.0.join(format!("{}.md", with.id))).unwrap();
+        assert!(text.ends_with("Z\n---\n# Head\n\nText\n"));
+        let listed = store.list().unwrap();
+        assert_eq!(listed.iter().filter(|b| b.has_article).count(), 1);
+    }
+
+    #[test]
+    fn the_user_can_override_what_the_page_reads_like() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let long = format!(
+            "<article><p>{}</p></article>",
+            "Plenty of prose, indeed. ".repeat(30)
+        );
+        let short = "<p>Home, sweet home, welcome, friends.</p>";
+        let save = |address: &str, html: &str, keep: Option<bool>| {
+            let article = read_article(html, address);
+            let keep = keep.unwrap_or(article.reads_like_article);
+            store
+                .save(
+                    address,
+                    &details("T"),
+                    "",
+                    None,
+                    keep.then_some(article.markdown.as_str()),
+                )
+                .unwrap()
+                .bookmark
+                .has_article
+        };
+        assert!(save("https://a.test/long", &long, None));
+        assert!(!save("https://a.test/long-off", &long, Some(false)));
+        assert!(!save("https://a.test/short", short, None));
+        assert!(save("https://a.test/short-on", short, Some(true)));
+    }
+
+    #[test]
+    fn a_blank_article_is_none() {
+        let scratch = Scratch::new();
+        let saved = scratch
+            .store()
+            .save("https://a.test/1", &details("One"), "", None, Some(" \n"))
+            .unwrap();
+        assert!(!saved.bookmark.has_article);
+    }
+
+    #[test]
+    fn deleting_takes_the_article_with_the_file() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let b = store
+            .save("https://a.test/1", &details("One"), "", None, Some("Text"))
+            .unwrap()
+            .bookmark;
+        store.delete(&b.id).unwrap();
+        assert!(scratch.files().is_empty());
     }
 }
