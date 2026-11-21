@@ -1,5 +1,7 @@
 # Notes are Markdown files named by Item ID, in directories that are their Folders
 
+> Superseded in part: Folders by ADR-0035; Notes are `Notes/<id>.md`.
+
 Builds on ADR-0019, ADR-0021 and ADR-0029.
 
 Each Note is `Notes/<Folder path>/<id>.md`: front matter (`id`, `title`, `updated`) read and written by `pkm-base` as for Tasks, and the Body as the file's body. A Folder is a real directory, so the tree reads the same in Finder, Files and Obsidian and can be edited there; renaming a Folder renames its directory. The file is named by Item ID, so changing the Title never renames it. Images sit beside their Note as `<random-id>.<ext>` (ADR-0029) and move with it unless another Note still shows them. Directories starting with `.` and files that are neither `.md` nor Images are ignored.

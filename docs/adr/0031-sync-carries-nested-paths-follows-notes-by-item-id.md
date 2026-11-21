@@ -1,5 +1,7 @@
 # Sync carries nested paths and follows Notes by Item ID across them
 
+> Superseded by ADR-0035: storage is flat again.
+
 Supersedes the "one flat folder" storage of ADR-0020 (which stays otherwise). Needed by ADR-0030.
 
 A storage lists, reads, writes and deletes files by a path relative to its Context folder, `/` separated, and keeps empty directories; every Cloud Provider walks subdirectories itself (WebDAV at Depth 1 per directory). Contexts without directories see no change. For Notes, Sync pairs files by the Item ID in their front matter, not by path: a Note Moved on one Device and edited on another ends up Moved and edited, and two different Moves of one Note take the newer. A Folder renamed differently on two Devices thus ends up with the newer name, and a directory emptied by such Moves is removed. Images follow their Note by their unique file name and transfer unmerged.

@@ -4,14 +4,14 @@
 
 - [App](./GLOSSARY.md): the Contexts, their items, Links between them, Settings and Cloud Backing
 - [Tasks](./crates/tasks/GLOSSARY.md): Tasks with Priorities and Tags, seen through Filters, with Subtasks, possibly Blocked by others
-- [Notes](./crates/notes/GLOSSARY.md): Notes with a Title and a Body, in Folders, found by Search
+- [Notes](./crates/notes/GLOSSARY.md): Notes with a Title, a Body and Tags, found by Search
 - [Drawings](./crates/drawing/GLOSSARY.md): Excalidraw-compatible Drawings, edited on the Canvas
 - [Bookmarks](./crates/bookmarks/GLOSSARY.md): saved web pages, some with an Article to read and mark up
 - [Books](./crates/books/GLOSSARY.md): PDFs and EPUBs to read and mark up, with Highlights and Comments
 
 ## Relationships
 
-- **App → Notes**: Delete and Cloud Backing are the app's; Cloud Backing Syncs Folders as directories, merging each Note's Body by line.
+- **App → Notes**: Delete, Tags and Cloud Backing are the app's; Cloud Backing merges each Note's Body by line.
 
 - **App → Drawings**: Cloud Backing Syncs the Drawings with the Drawings Context's own merge.
 - **App → Bookmarks**: Delete, Tags, Reading Progress, Markup and Cloud Backing are the app's.

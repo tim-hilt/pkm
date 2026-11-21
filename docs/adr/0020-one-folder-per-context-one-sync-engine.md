@@ -1,6 +1,6 @@
 # One visible folder per Context, one Sync engine with a merge hook each
 
-> Superseded in part: flat storage by ADR-0031.
+> Superseded in part: flat storage by ADR-0031, itself superseded by ADR-0035.
 
 Supersedes the folder layout of ADR-0003 (Drawings in Documents) and ADR-0011 (Drawings in the cloud's `pkm` folder). Builds on ADR-0016 and ADR-0017.
 
