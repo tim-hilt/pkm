@@ -8,6 +8,7 @@ struct TitleField: View {
     /// Takes the keyboard focus when it appears.
     var autofocus = false
     @FocusState private var isFocused: Bool
+    @Namespace private var field
     @State private var selection: TextSelection?
 
     var body: some View {
@@ -21,7 +22,7 @@ struct TitleField: View {
                     Text(AttributedString(title: text)).font(Self.font).allowsHitTesting(false)
                 }
             }
-            .focusedSceneValue(\.formatText, isFocused ? { format($0) } : nil)
+            .focusedSceneValue(\.formatText, isFocused ? TextFormatter(field: field) { format($0) } : nil)
             .onAppear { isFocused = autofocus }
             .accessibilityIdentifier("note-title")
     }

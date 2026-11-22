@@ -107,6 +107,18 @@ import XCTest
         XCTAssertTrue(field.exists, "the field stays for the next Subtask")
     }
 
+    /// On iPadOS 26 the focused Title once updated the menu bar without end, and the app hung.
+    func testATaskIsAddedFromTheNewTaskSheet() {
+        app.buttons["add-task"].tap()
+        XCTAssertTrue(app.navigationBars["New Task"].waitForExistence(timeout: 5))
+        // The field takes the focus as it appears; see `testASubtaskIsAddedFromTheSubtasksSection`.
+        XCTAssertTrue(app.keys["C"].waitForExistence(timeout: 5))
+        for key in ["C", "a", "l", "l"] { app.keys[key].tap() }
+        app.navigationBars["New Task"].buttons["Add"].tap()
+        app.navigationBars["New Task"].buttons["Cancel"].tap()
+        XCTAssertTrue(app.staticTexts["Call"].waitForExistence(timeout: 5))
+    }
+
     func testAPriorityIsSetFromARowsContextMenu() {
         app.staticTexts["Book the dentist"].press(forDuration: 1)
         XCTAssertTrue(app.buttons["Reject"].waitForExistence(timeout: 5))

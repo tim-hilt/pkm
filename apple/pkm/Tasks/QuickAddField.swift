@@ -222,9 +222,9 @@ struct QuickAddField: View {
     }
 
     /// What formats the selection (see `FormatCommands`) while the field has the focus.
-    private var formatting: ((Inline) -> Void)? {
-        guard isFocused else { return nil }
-        return { format($0) }
+    private var formatting: TextFormatter? {
+        // Quick Add is replaced after each Add: a formatter of the old one would edit that.
+        isFocused ? TextFormatter(field: ObjectIdentifier(quickAdd)) { format($0) } : nil
     }
 
     /// Toggles Inline formatting on the selection, which stays selected.

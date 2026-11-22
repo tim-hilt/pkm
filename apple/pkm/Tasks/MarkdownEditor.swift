@@ -14,7 +14,7 @@ struct MarkdownEditor: View {
     /// The editor lost focus.
     var onBlur: () -> Void = {}
     /// Formats the selection; set while the editor has the focus.
-    @State private var formatting: ((Inline) -> Void)?
+    @State private var formatting: TextFormatter?
 
     var body: some View {
         MarkdownTextRepresentable(text: $text, formatting: $formatting, images: images, onBlur: onBlur)
@@ -289,7 +289,7 @@ private let copyImageTitle = String(localized: "Copy Image to Clipboard")
 
     private struct MarkdownTextRepresentable: UIViewRepresentable {
         @Binding var text: String
-        @Binding var formatting: ((Inline) -> Void)?
+        @Binding var formatting: TextFormatter?
         let images: ImageSource?
         let onBlur: () -> Void
 
@@ -561,7 +561,7 @@ private let copyImageTitle = String(localized: "Copy Image to Clipboard")
 
     private struct MarkdownTextRepresentable: NSViewRepresentable {
         @Binding var text: String
-        @Binding var formatting: ((Inline) -> Void)?
+        @Binding var formatting: TextFormatter?
         let images: ImageSource?
         let onBlur: () -> Void
 
@@ -667,6 +667,8 @@ private let copyImageTitle = String(localized: "Copy Image to Clipboard")
 #endif
 
 /// What formats the selection of `view`, for `FormatCommands`.
-private func formatter(for view: MarkdownTextView) -> (Inline) -> Void {
-    { [weak view] kind in MainActor.assumeIsolated { _ = view?.apply(.toggle(kind)) } }
+private func formatter(for view: MarkdownTextView) -> TextFormatter {
+    TextFormatter(field: ObjectIdentifier(view)) { [weak view] kind in
+        MainActor.assumeIsolated { _ = view?.apply(.toggle(kind)) }
+    }
 }
