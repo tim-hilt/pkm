@@ -5,4 +5,7 @@
 //   DEVELOPMENT_TEAM = <team ID>
 //   CODE_SIGN_IDENTITY[sdk=macosx*] = Apple Development
 CODE_SIGN_IDENTITY[sdk=macosx*] = -
+// The app's bundle ID; its Share extension appends `.share`. Override this, never
+// PRODUCT_BUNDLE_IDENTIFIER, which would give the extension the app's ID.
+APP_BUNDLE_ID = com.timhilt.pkm
 #include? "Local.xcconfig"

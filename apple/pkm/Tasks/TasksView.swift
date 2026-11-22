@@ -329,7 +329,7 @@ private struct TaskQuickActions: ViewModifier {
                 TagPicker(selected: (model.task(id: task.id) ?? task).tags.map(\.name)) { tag in
                     isPickingTags = false
                     // A row that leaves the Filter or changes Group does so animated.
-                    withAnimation { model.toggleTag(task, tag) }
+                    withAnimation { _ = model.toggleTag(task, tag) }
                 }
             }
     }

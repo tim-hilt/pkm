@@ -29,7 +29,7 @@ cd apple
 if [[ "$target" == mac ]]; then
   xcodebuild build -quiet -project $app.xcodeproj -scheme $app -configuration "$config" \
     -destination 'platform=macOS' -derivedDataPath "$build" -allowProvisioningUpdates \
-    PRODUCT_BUNDLE_IDENTIFIER="$bundle_id"
+    APP_BUNDLE_ID="$bundle_id"
   rm -rf /Applications/$app.app "/Applications/$product"
   cp -R "$build/Build/Products/$config/$product" /Applications/
   open "/Applications/$product"
@@ -44,7 +44,7 @@ else
     echo "Building for $id (log: $log)" >&2
     if xcodebuild build -quiet -project $app.xcodeproj -scheme $app -configuration "$config" \
       -destination "platform=iOS,name=$target" -derivedDataPath "$build" -allowProvisioningUpdates \
-      PRODUCT_BUNDLE_IDENTIFIER="$id" 2>&1 | tee "$log"; then
+      APP_BUNDLE_ID="$id" 2>&1 | tee "$log"; then
       installed_id=$id
       break
     fi

@@ -49,7 +49,8 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.timhilt.pkm
+        # APP_BUNDLE_ID (Config/Signing.xcconfig) also names the Share extension.
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID)
         # The bundle, executable and macOS menu bar show this name; the Swift
         # module keeps its space-free one.
         PRODUCT_NAME: pkm
@@ -132,7 +133,7 @@ targets:
               NSExtensionActivationSupportsWebURLWithMaxCount: 1
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.timhilt.pkm.share
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID).share
         PRODUCT_NAME: pkmShare
         PRODUCT_MODULE_NAME: pkmShare
         CODE_SIGN_STYLE: Automatic
