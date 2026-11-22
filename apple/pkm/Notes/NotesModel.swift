@@ -28,6 +28,8 @@ final class NotesModel {
         set {
             chosenTag = newValue
             listed = nil
+            // A cached `notes` doesn't read `chosenTag`: views asking for it must hear of the change.
+            changes += 1
         }
     }
 
@@ -107,10 +109,7 @@ final class NotesModel {
     /// Saves the Title and Body as typed.
     func save(id: String, title: String, body: String) {
         guard (try? store.edit(id: id, title: title, body: body)) != nil else { return }
-        listed = nil
-        used = nil
-        changes += 1
-        reloadResults()
+        filesChanged()
     }
 
     /// Gives the Note exactly `tags`: those it lacks are added in order, the others removed. Tags
@@ -193,7 +192,7 @@ final class NotesModel {
         filesChanged()
     }
 
-    /// Notes were added or Deleted: the list reads them again.
+    /// Note files were written or Deleted: the list and the Tags in use are read again.
     private func filesChanged() {
         listed = nil
         used = nil

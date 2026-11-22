@@ -6,8 +6,9 @@
 //! property) takes the side that changed it since the base, or the newer
 //! `updated` when both did. The Body merges by line, the newer side winning
 //! the lines both changed. Tags merge as a set: additions on either side are
-//! kept, a Remove on either side stands. Without a base the newer side wins whole. Bytes
-//! that are no Note are no Item: `merge` and `same_item` say none.
+//! kept, a Remove on either side stands. Without a base the newer side wins
+//! whole, but for the Tags of both sides united. Bytes that are no Note are no
+//! Item: `merge` and `same_item` say none.
 //!
 //! Image files (`store::images`) are Items too, but are transferred and never
 //! merged: an Image's file never changes after it is added.

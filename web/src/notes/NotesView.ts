@@ -72,10 +72,11 @@ export class NotesView {
     this.menu.hide();
     this.element.classList.toggle("has-open", model.openId !== undefined);
     const searching = model.searchText.trim() !== "";
+    const colors = new Map(model.knownTags().map((tag) => [tag.name, tag.color]));
     this.list.replaceChildren(
       ...(searching
         ? model.results.map((hit) => this.result(hit))
-        : model.notes.map((row) => this.row(row))),
+        : model.notes.map((row) => this.row(row, colors))),
     );
     this.empty.hidden = searching || model.notes.length > 0;
     this.noResults.hidden = !searching || model.results.length > 0;
@@ -99,9 +100,19 @@ export class NotesView {
     this.tags.value = model.tagFilter ?? "";
   }
 
-  private row(row: ListedNote): HTMLElement {
+  /** A Note of the list, its Tags as pills; `colors` are the Tag Colors by Tag. */
+  private row(row: ListedNote, colors: Map<string, string | undefined>): HTMLElement {
     const open = button("task-open note-open", "", () => this.model.open(row.id));
-    open.append(...this.rowText(row), ...this.pills(row.tags));
+    open.append(...this.rowText(row));
+    if (row.tags.length > 0) {
+      open.append(
+        make(
+          "span",
+          "task-tags",
+          row.tags.map((tag) => tagLabel(tag, colors.get(tag))),
+        ),
+      );
+    }
     const item = make("li", "task-row note-row", [open]);
     if (row.id === this.model.openId) open.setAttribute("aria-current", "true");
     this.menu.attach(item, () => [
@@ -129,19 +140,6 @@ export class NotesView {
     );
     if (hit.id === this.model.openId) open.setAttribute("aria-current", "true");
     return make("li", "task-row note-row", [open]);
-  }
-
-  /** The Tags as pills in their Tag Colors; none for a Note without Tags. */
-  private pills(tags: string[]): HTMLElement[] {
-    if (tags.length === 0) return [];
-    const colors = new Map(this.model.knownTags().map((tag) => [tag.name, tag.color]));
-    return [
-      make(
-        "span",
-        "task-tags",
-        tags.map((tag) => tagLabel(tag, colors.get(tag))),
-      ),
-    ];
   }
 
   /** The Tags row of the editor: the Note's Tags and the button that picks them. */

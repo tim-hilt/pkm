@@ -59,6 +59,28 @@ import Testing
         #expect(model.note(id: try #require(model.openID))?.tags == [])
     }
 
+    @Test func narrowingTellsAViewThatShowedTheListAlready() throws {
+        let model = try openModel()
+        model.add()
+        let id = try #require(model.openID)
+        model.setTags(["work"], of: id)
+        model.openID = nil
+        _ = model.notes
+        let invalidated = Flag()
+        withObservationTracking {
+            _ = model.notes
+        } onChange: {
+            invalidated.isSet = true
+        }
+        model.tagFilter = "work"
+        #expect(invalidated.isSet)
+    }
+
+    /// Set from the observation's change handler, which may run on any thread.
+    private final class Flag: @unchecked Sendable {
+        var isSet = false
+    }
+
     @Test func theNarrowingDropsBackToAllNotesOnceNoNoteCarriesItsTag() throws {
         let model = try openModel()
         model.add()
