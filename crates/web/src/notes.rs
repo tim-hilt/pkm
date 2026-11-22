@@ -15,6 +15,8 @@ pub struct Note {
     pub id: String,
     pub title: String,
     pub body: String,
+    /// Valid Tags, in the order they were added.
+    pub tags: Vec<String>,
 }
 
 impl From<pkm_notes::Note> for Note {
@@ -23,6 +25,7 @@ impl From<pkm_notes::Note> for Note {
             id: note.id,
             title: note.title,
             body: note.body,
+            tags: note.tags,
         }
     }
 }
@@ -36,6 +39,7 @@ pub struct ListedNote {
     pub preview: String,
     /// UTC ISO 8601.
     pub updated: String,
+    pub tags: Vec<String>,
 }
 
 impl From<pkm_notes::Row> for ListedNote {
@@ -45,6 +49,7 @@ impl From<pkm_notes::Row> for ListedNote {
             title: row.title,
             preview: row.preview,
             updated: row.updated,
+            tags: row.tags,
         }
     }
 }
@@ -108,6 +113,13 @@ impl NoteStore {
         Self { files, notes }
     }
 
+    /// Puts a text file there as it was saved, e.g. the Tags file that Tasks
+    /// changed (`Tags/tags.json`); not a change.
+    #[wasm_bindgen(js_name = loadFile)]
+    pub fn load_file(&self, path: &str, text: String) {
+        self.files.load(Path::new(path), text);
+    }
+
     /// Puts an Image saved beside the Notes in memory, for `readImage`;
     /// `path` is a storage path. Not counted as a change.
     #[wasm_bindgen(js_name = loadImage)]
@@ -149,6 +161,26 @@ impl NoteStore {
 
     pub fn delete(&self, id: &str) -> Result<(), JsError> {
         self.notes.delete(id).map_err(error)
+    }
+
+    /// Puts a Tag on the Note, unless it has it; a new Tag joins the Tags file.
+    #[wasm_bindgen(js_name = addTag)]
+    pub fn add_tag(&self, id: &str, tag: &str) -> Result<Note, JsError> {
+        self.notes.add_tag(id, tag).map(Into::into).map_err(error)
+    }
+
+    /// Takes a Tag off the Note; it stays known.
+    #[wasm_bindgen(js_name = removeTag)]
+    pub fn remove_tag(&self, id: &str, tag: &str) -> Result<Note, JsError> {
+        (self.notes.remove_tag(id, tag))
+            .map(Into::into)
+            .map_err(error)
+    }
+
+    /// Takes a Tag off every Note, for Delete a Tag.
+    #[wasm_bindgen(js_name = removeTagEverywhere)]
+    pub fn remove_tag_everywhere(&self, tag: &str) -> Result<(), JsError> {
+        self.notes.remove_tag_everywhere(tag).map_err(error)
     }
 
     /// Keeps a PNG, JPEG, GIF or WebP beside the Note `id`; its reference.

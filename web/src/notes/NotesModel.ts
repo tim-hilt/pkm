@@ -1,4 +1,5 @@
 import { imageTargets } from "../core/Core";
+import type { Tag } from "../tasks/TasksModel";
 import type { NoteFiles } from "./NoteFiles";
 
 /** A Note as a row of the list shows it: a plain copy, as the core's objects must be freed. */
@@ -7,6 +8,7 @@ export interface ListedNote {
   title: string;
   /** The Body's line to show when the Title is empty. */
   preview: string;
+  tags: string[];
 }
 
 /** A Note that Search found; a plain copy of the core's result. */
@@ -21,10 +23,11 @@ export interface SearchHit {
   titleMatched: boolean;
 }
 
-/** A Note's Title and Body as typed. */
+/** A Note's Title and Body as typed, with its Tags in the order they were added. */
 export interface NoteText {
   title: string;
   body: string;
+  tags: string[];
 }
 
 /**
@@ -52,7 +55,11 @@ export class NotesModel {
   /** Called after the rows, the open Note or the failure changed. */
   onChange: () => void = () => {};
 
-  constructor(private readonly files: NoteFiles) {
+  constructor(
+    private readonly files: NoteFiles,
+    /** The known Tags with their Tag Colors. */
+    readonly knownTags: () => Tag[] = () => [],
+  ) {
     this.reload();
   }
 
@@ -125,7 +132,7 @@ export class NotesModel {
   note(id: string): NoteText | undefined {
     try {
       const note = this.store.read(id);
-      const text = { title: note.title, body: note.body };
+      const text = { title: note.title, body: note.body, tags: note.tags };
       note.free();
       return text;
     } catch {
@@ -140,6 +147,29 @@ export class NotesModel {
     } catch {
       return;
     }
+    this.changed();
+  }
+
+  /** Gives the Note exactly `tags`: those it lacks are added in order, the others removed. Tags unknown become known. */
+  async setTags(id: string, tags: string[]): Promise<void> {
+    const current = this.note(id)?.tags ?? [];
+    await this.files.refreshTags();
+    try {
+      for (const tag of current.filter((tag) => !tags.includes(tag))) {
+        this.store.removeTag(id, tag).free();
+      }
+      for (const tag of tags.filter((tag) => !current.includes(tag))) {
+        this.store.addTag(id, tag).free();
+      }
+    } catch {
+      // The Note is gone, or a Tag is invalid: what was changed is kept.
+    }
+    this.changed();
+  }
+
+  /** Takes `tag` off every Note, as part of Delete a Tag. */
+  removeTagEverywhere(tag: string): void {
+    this.store.removeTagEverywhere(tag);
     this.changed();
   }
 
@@ -198,7 +228,7 @@ export class NotesModel {
   private reload(): void {
     const { store } = this;
     this.notes = store.notes().map((note) => {
-      const row = { id: note.id, title: note.title, preview: note.preview };
+      const row = { id: note.id, title: note.title, preview: note.preview, tags: note.tags };
       note.free();
       return row;
     });

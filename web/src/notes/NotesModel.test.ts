@@ -62,6 +62,53 @@ describe("the Notes list", () => {
   });
 });
 
+describe("Tags", () => {
+  it("are set in order, listed, kept and known to the app, and Remove leaves them known", async () => {
+    model.add();
+    const id = model.openId!;
+    await model.setTags(id, ["work", "home"]);
+    expect(model.note(id)?.tags).toEqual(["work", "home"]);
+    await model.setTags(id, ["home", "play"]);
+    expect(model.note(id)?.tags).toEqual(["home", "play"]);
+    expect(model.notes[0]?.tags).toEqual(["home", "play"]);
+    await model.saving;
+    const reopened = new NotesModel(await NoteFiles.open(storage));
+    expect(reopened.notes[0]?.tags).toEqual(["home", "play"]);
+    const known = new TextDecoder().decode((await storage.read("Tags/tags.json"))!);
+    expect(known).toContain("work");
+    await model.setTags(id, []);
+    expect(model.notes[0]?.tags).toEqual([]);
+  });
+
+  it("Delete a Tag takes it off every Note", async () => {
+    model.add();
+    const first = model.openId!;
+    model.save(first, "First", "");
+    await model.setTags(first, ["work", "home"]);
+    model.add();
+    const second = model.openId!;
+    model.save(second, "Second", "");
+    await model.setTags(second, ["work"]);
+    model.removeTagEverywhere("work");
+    expect(model.note(first)?.tags).toEqual(["home"]);
+    expect(model.note(second)?.tags).toEqual([]);
+  });
+
+  it("keep a Tag the Tasks added to the shared file", async () => {
+    model.add();
+    const id = model.openId!;
+    await storage.write(
+      "Tags/tags.json",
+      new TextEncoder().encode('{"tags":{"mine":{"updated":"2020-01-01T00:00:00Z"}}}'),
+    );
+    await model.setTags(id, ["new"]);
+    await model.saving;
+    const known = new TextDecoder().decode((await storage.read("Tags/tags.json"))!);
+    expect(known).toContain("mine");
+    expect(known).toContain("new");
+  });
+});
+
 describe("Copy Note", () => {
   it("is the Title, then the Body after a blank line", () => {
     model.add();

@@ -3,6 +3,8 @@ import { DescriptionImages } from "../tasks/DescriptionImages";
 import { DescriptionField } from "../tasks/DescriptionField";
 import { RowMenu } from "../tasks/RowMenu";
 import { confirmButton, modal } from "../tasks/TaskDialogs";
+import { tagLabel } from "../tasks/TagLabel";
+import { tagsRow } from "../tasks/TagsRow";
 import { titleNodes } from "../tasks/TitleText";
 import { type ListedNote, type NotesModel, type SearchHit } from "./NotesModel";
 import { TitleField } from "./TitleField";
@@ -34,7 +36,9 @@ export class NotesView {
   /** The Images of the Note the editor shows. */
   private images: DescriptionImages | undefined;
   /** The editor's fields, and the model's `syncs` when they last took the Note as saved. */
-  private fields: { title: TitleField; body: DescriptionField; syncs: number } | undefined;
+  private fields:
+    | { title: TitleField; body: DescriptionField; tags: HTMLElement; syncs: number }
+    | undefined;
 
   constructor(private readonly model: NotesModel) {
     this.failure.setAttribute("role", "alert");
@@ -82,7 +86,7 @@ export class NotesView {
 
   private row(row: ListedNote): HTMLElement {
     const open = button("task-open note-open", "", () => this.model.open(row.id));
-    open.append(...this.rowText(row));
+    open.append(...this.rowText(row), ...this.pills(row.tags));
     const item = make("li", "task-row note-row", [open]);
     if (row.id === this.model.openId) open.setAttribute("aria-current", "true");
     this.menu.attach(item, () => [
@@ -112,6 +116,24 @@ export class NotesView {
     return make("li", "task-row note-row", [open]);
   }
 
+  /** The Tags as pills in their Tag Colors; none for a Note without Tags. */
+  private pills(tags: string[]): HTMLElement[] {
+    if (tags.length === 0) return [];
+    const colors = new Map(this.model.knownTags().map((tag) => [tag.name, tag.color]));
+    return [
+      make(
+        "span",
+        "task-tags",
+        tags.map((tag) => tagLabel(tag, colors.get(tag))),
+      ),
+    ];
+  }
+
+  /** The Tags row of the editor: the Note's Tags and the button that picks them. */
+  private tagsRow(id: string, tags: string[]): HTMLElement {
+    return tagsRow(this.model, tags, (picked) => void this.model.setTags(id, picked));
+  }
+
   /** The Title formatted, or the Body's first line, or "New Note". */
   private rowText({ title, preview }: ListedNote): HTMLElement[] {
     const line = (text: string, className: string) => make("span", className, titleNodes(text));
@@ -133,9 +155,12 @@ export class NotesView {
     const id = this.model.openId;
     if (id === this.shown) {
       const { fields } = this;
-      if (id === undefined || !fields || fields.syncs === this.model.syncs) return;
-      fields.syncs = this.model.syncs;
+      if (id === undefined || !fields) return;
       const note = this.model.note(id);
+      // Rebuilt on any change, as Tag Colors may have changed too.
+      if (note) fields.tags.replaceChildren(this.tagsRow(id, note.tags));
+      if (fields.syncs === this.model.syncs) return;
+      fields.syncs = this.model.syncs;
       if (note && note.title !== fields.title.value) fields.title.value = note.title;
       if (note && note.body !== fields.body.value) fields.body.value = note.body;
       return;
@@ -171,8 +196,12 @@ export class NotesView {
       button("tasks-back", "Notes", () => this.model.open(undefined)),
       make("div", "notes-bar-end", [button("tasks-back", "Delete", () => this.ask(id)), more]),
     ]);
-    this.detail.replaceChildren(bar, make("div", "notes-editor", [title.element, body.element]));
-    this.fields = { title, body, syncs: this.model.syncs };
+    const tags = make("div", "notes-tags", [this.tagsRow(id, note.tags)]);
+    this.detail.replaceChildren(
+      bar,
+      make("div", "notes-editor", [title.element, tags, body.element]),
+    );
+    this.fields = { title, body, tags, syncs: this.model.syncs };
     if (this.model.newId === id) title.focus();
   }
 

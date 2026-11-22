@@ -1,32 +1,8 @@
 import { button, make } from "../Dom";
 import { confirmButton, field, modal, textInput } from "../tasks/TaskDialogs";
-import { pickTagsDialog } from "../tasks/TagPicker";
-import { tagLabel } from "../tasks/TagLabel";
+import { tagsRow } from "../tasks/TagsRow";
 import { type HandedPage, bookmarklet } from "./Bookmarklet";
 import type { BookmarkRow, BookmarksModel, Draft } from "./BookmarksModel";
-
-/** The Tags of a Bookmark as labels, with the button that picks them. */
-export function tagsRow(
-  model: Pick<BookmarksModel, "knownTags">,
-  tags: string[],
-  change: (tags: string[]) => void,
-): HTMLElement {
-  const colors = new Map(model.knownTags().map((tag) => [tag.name, tag.color]));
-  const pick = button("tasks-back", "Tags", () =>
-    pickTagsDialog(
-      document.body,
-      {
-        get allTags() {
-          return model.knownTags();
-        },
-      },
-      tags,
-      { kind: "many", done: change },
-    ),
-  );
-  pick.ariaLabel = "Pick Tags";
-  return make("div", "bookmark-tags", [...tags.map((tag) => tagLabel(tag, colors.get(tag))), pick]);
-}
 
 /**
  * The Save dialog: the Address to paste, then the page downloaded through the server, with its

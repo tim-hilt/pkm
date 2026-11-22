@@ -87,8 +87,9 @@ export async function startApp(
     if (!tasks.editing) navigation.showList(tasks.list);
   };
   const noteFiles = await NoteFiles.open(storage);
-  const notes = new NotesModel(noteFiles);
+  const notes = new NotesModel(noteFiles, () => tasks.allTags);
   noteFiles.onSaved = () => cloud.notesSaved();
+  noteFiles.onTagsSaved = () => void tasks.syncDidChange();
   cloud.onNotesChanged(() => void notes.syncDidChange());
   shell.pane("notes").append(new NotesView(notes).element);
   const bookmarkFiles = await BookmarkFiles.open(storage);
@@ -97,7 +98,10 @@ export async function startApp(
   cloud.onBookmarksChanged(() => void bookmarks.syncDidChange());
   // The Tags file is shared: Tags a Bookmark added are known to the Tasks, and a Tag Deleted there leaves the Bookmarks.
   bookmarkFiles.onTagsSaved = () => void tasks.syncDidChange();
-  tasks.onTagDeleted = (tag) => bookmarks.removeTagEverywhere(tag);
+  tasks.onTagDeleted = (tag) => {
+    notes.removeTagEverywhere(tag);
+    bookmarks.removeTagEverywhere(tag);
+  };
   const bookmarksView = new BookmarksView(bookmarks, {
     openDetails: (id) => navigation.openItem(id),
     closeDetails: () => navigation.closeItem(),

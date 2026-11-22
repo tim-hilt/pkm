@@ -1,7 +1,7 @@
 import { button, make } from "../Dom";
 import { confirmButton, field, modal, textInput } from "../tasks/TaskDialogs";
 import type { BookmarkRow, BookmarksModel } from "./BookmarksModel";
-import { tagsRow } from "./SaveDialog";
+import { tagsRow } from "../tasks/TagsRow";
 
 /** What the Details can do besides change the Bookmark: show other places. */
 export interface DetailsPlaces {
