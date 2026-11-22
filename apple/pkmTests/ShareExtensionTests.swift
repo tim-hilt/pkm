@@ -81,6 +81,18 @@ import Testing
             published.bookmarks.contains(.init(address: "https://example.com/new", title: "Shared", hasArticle: true)))
     }
 
+    @Test func theBuiltGroupIsUsedWhereTheSignatureGrantsIt() {
+        let group = ShareHandoff.group(listed: ["group.com.timhilt.pkm.TEAM"]) { _ in true }
+        #expect(group == ShareHandoff.group)
+    }
+
+    @Test func aSideloadedBuildUsesTheGroupRenamedForItsTeam() {
+        let renamed = "group.com.timhilt.pkm.TEAM"
+        let listed = ["group.com.other", "group.com.timhilt.pkmother", renamed]
+        #expect(ShareHandoff.group(listed: listed) { $0 != ShareHandoff.group } == renamed)
+        #expect(ShareHandoff.group(listed: listed) { _ in false } == nil)
+    }
+
     @Test func publishedStartsEmptyBeforeTheAppHasPublished() {
         #expect(ShareHandoff(folder: root).published() == .init())
     }

@@ -11,7 +11,18 @@ struct ShareHandoff {
 
     /// The App Group's folder; nil where the app isn't signed with the group.
     static var live: ShareHandoff? {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group).map(ShareHandoff.init)
+        let files = FileManager.default
+        // The extension lives in the app's `PlugIns`; the app lists the groups for both.
+        let app = Bundle(url: Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent())
+        let listed = [Bundle.main, app].flatMap { $0?.object(forInfoDictionaryKey: "ALTAppGroups") as? [String] ?? [] }
+        return group(listed: listed) { files.containerURL(forSecurityApplicationGroupIdentifier: $0) != nil }
+            .flatMap(files.containerURL(forSecurityApplicationGroupIdentifier:)).map(ShareHandoff.init)
+    }
+
+    /// The App Group this build may use: the built one, else the one a sideloading tool (AltStore,
+    /// SideStore) renamed it to for its team, `<group>.<team>`, which it lists in `ALTAppGroups`.
+    static func group(listed: [String], isGranted: (String) -> Bool) -> String? {
+        ([group] + listed.filter { $0.hasPrefix(group + ".") }).first(where: isGranted)
     }
 
     /// What the app published about one Saved Bookmark: enough to recognise it and offer Add Article.

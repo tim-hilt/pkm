@@ -79,7 +79,9 @@ build: apple-project
 
 # Builds an unsigned pkm.ipa for sideloading on an iPhone or iPad
 # (TARGETED_DEVICE_FAMILY is 1,2). SideStore, AltStore and similar tools
-# re-sign it on the device, so no provisioning profile is embedded.
+# re-sign it on the device, so no provisioning profile is embedded. They grant
+# what the binaries' entitlements ask for, so app and Share extension are signed
+# ad hoc with theirs (the App Group), inside out.
 IPA_PRODUCT := 'apple/build/Build/Products/Release-iphoneos/pkm.app'
 ipa: apple-project
 	$(XCODEBUILD) build -configuration Release -destination 'generic/platform=iOS' \
@@ -87,6 +89,8 @@ ipa: apple-project
 	rm -rf apple/build/Payload apple/build/pkm.ipa
 	mkdir -p apple/build/Payload
 	cp -R $(IPA_PRODUCT) apple/build/Payload/
+	for bundle in apple/build/Payload/pkm.app/PlugIns/pkmShare.appex apple/build/Payload/pkm.app; do \
+		codesign -f -s - --entitlements apple/Config/App.entitlements $$bundle || exit 1; done
 	cd apple/build && zip -qry pkm.ipa Payload
 	@echo "apple/build/pkm.ipa"
 
