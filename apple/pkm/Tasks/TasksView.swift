@@ -41,6 +41,12 @@ struct TasksView: View {
         #endif
         .navigationDestination(for: String.self) { id in
             TaskListView(emptyText: "No Open Tasks match.")
+                #if os(iOS)
+                    // Room to scroll the last row clear of the "+", as the bar gives it below.
+                    .safeAreaInset(edge: .bottom) {
+                        Color.clear.frame(height: AddButtonMetrics.size + 2 * AddButtonMetrics.margin)
+                    }
+                #endif
                 .addButton("New Task", identifier: "add-task") { isAdding = true }
                 .taskSheets(isAdding: $isAdding, isInFront: true)
                 .navigationTitle(model.filters.first { $0.id == id }?.title ?? "")
