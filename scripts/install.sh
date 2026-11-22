@@ -50,6 +50,10 @@ else
     fi
     # Only Apple's App ID quota is worth retrying under another ID; anything
     # else is a real build failure.
+    if grep -q 'No Accounts' "$log"; then
+      echo "error: Xcode is not signed in; add your Apple ID in Xcode > Settings > Accounts and retry" >&2
+      exit 1
+    fi
     grep -q 'maximum App ID limit' "$log" || exit 1
     echo "Apple refuses new App IDs this week; trying an ID that is already registered." >&2
   done
