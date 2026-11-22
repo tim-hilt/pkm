@@ -13,6 +13,7 @@ pub mod line_merge;
 pub mod markdown;
 pub mod markup;
 pub mod random;
+pub mod set_merge;
 pub mod sha256;
 pub mod tag;
 pub mod tag_store;

@@ -17,6 +17,7 @@ pub mod filters;
 use crate::store::is_task;
 use pkm_base::front_matter::{Document, Value};
 use pkm_base::images::{is_image, is_image_file};
+use pkm_base::set_merge;
 use std::cmp::Ordering;
 
 const UPDATED: &str = "updated";
@@ -159,7 +160,7 @@ impl Sides<'_> {
         }
         if kind.sets.contains(&key) {
             // An empty set is no property at all, as the store writes it.
-            let set = self.merged_set(items(self.winner), items(self.loser));
+            let set = set_merge::merge(self.base.map(items), items(self.winner), items(self.loser));
             return (!set.is_empty()).then_some(Value::List(set));
         }
         pick(self.base.as_ref(), &self.winner, &self.loser).cloned()
@@ -191,21 +192,6 @@ impl Sides<'_> {
                 merged.map(|v| format!("{key} {v}"))
             })
             .collect()
-    }
-
-    fn merged_set(&self, winner: &[String], loser: &[String]) -> Vec<String> {
-        let base = self.base.map(items);
-        // Kept: on both sides, or added on one (everything, without a base).
-        let kept = |item: &String, other: &[String]| {
-            other.contains(item) || base.is_none_or(|b| !b.contains(item))
-        };
-        let mut items: Vec<String> = winner.iter().filter(|i| kept(i, loser)).cloned().collect();
-        for item in loser {
-            if kept(item, winner) && !items.contains(item) {
-                items.push(item.clone());
-            }
-        }
-        items
     }
 }
 

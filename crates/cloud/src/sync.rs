@@ -3228,6 +3228,97 @@ mod tests {
             }
         }
 
+        /// A Device with a Notes store, its Tags beside it as on a real Device.
+        struct NotingDevice {
+            root: Scratch,
+        }
+
+        impl NotingDevice {
+            fn new() -> Self {
+                Self {
+                    root: Scratch::new("noting"),
+                }
+            }
+
+            /// The store, opened fresh as at a launch.
+            fn store(&self) -> pkm_notes::Notes {
+                pkm_notes::Notes::open(self.root.0.join("Notes")).unwrap()
+            }
+
+            /// One Sync step of the Tags and of the Note files, each with its cloud.
+            fn sync(&self, tags: &Cloud, notes: &Cloud) {
+                fs::create_dir_all(self.root.0.join("state")).unwrap();
+                let state = |name| SyncState::open(self.root.0.join("state").join(name)).unwrap();
+                let (tags_state, notes_state) = (state("Tags"), state("Notes"));
+                let (tags_dir, notes_dir) = (self.root.0.join("Tags"), self.root.0.join("Notes"));
+                fs::create_dir_all(&tags_dir).unwrap();
+                fs::create_dir_all(&notes_dir).unwrap();
+                let folders = [
+                    ContextFolder {
+                        dir: &tags_dir,
+                        state: &tags_state,
+                        storage: &tags.storage,
+                        merge: Arc::new(TagsFile),
+                    },
+                    ContextFolder {
+                        dir: &notes_dir,
+                        state: &notes_state,
+                        storage: &notes.storage,
+                        merge: Arc::new(NoteFiles),
+                    },
+                ];
+                for outcome in sync_context_folders(&folders, &AtomicBool::new(false), &|_| {}) {
+                    assert!(outcome.error.is_none(), "{:?}", outcome.error);
+                }
+            }
+
+            /// The Tags of the Note `id`, sorted.
+            fn note_tags(&self, id: &str) -> Vec<String> {
+                let mut tags = self.store().read(id).unwrap().tags;
+                tags.sort();
+                tags
+            }
+
+            /// The names in the Tags file, as Manage Tags lists them.
+            fn known_tags(&self) -> Vec<String> {
+                let files = Arc::new(pkm_base::files::DiskFiles);
+                let tags = pkm_base::tag_store::TagStore::beside(files, &self.root.0.join("Notes"));
+                tags.read().names().map(str::to_owned).collect()
+            }
+        }
+
+        #[test]
+        fn tags_changed_on_both_devices_are_united_and_reach_the_tags_file() {
+            let (tags, notes) = (Cloud::new(), Cloud::new());
+            let (phone, tablet) = (NotingDevice::new(), NotingDevice::new());
+            let store = phone.store();
+            let note = store.create(&["home".to_owned()]).unwrap();
+            store
+                .edit(&note.id, "Plan", "![](cccccccccccc.png)\n")
+                .unwrap();
+            fs::write(
+                phone.root.0.join("Notes").join("cccccccccccc.png"),
+                b"\x89PNG\r\n\x1a\n a",
+            )
+            .unwrap();
+            phone.sync(&tags, &notes);
+            tablet.sync(&tags, &notes);
+            assert_eq!(tablet.note_tags(&note.id), ["home"]);
+            assert!(tablet.root.0.join("Notes/cccccccccccc.png").exists());
+
+            store.add_tag(&note.id, "shop").unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(1100));
+            tablet.store().add_tag(&note.id, "food").unwrap();
+            phone.sync(&tags, &notes);
+            tablet.sync(&tags, &notes);
+            phone.sync(&tags, &notes);
+
+            for device in [&phone, &tablet] {
+                assert_eq!(device.note_tags(&note.id), ["food", "home", "shop"]);
+                assert_eq!(device.known_tags(), ["food", "home", "shop"]);
+            }
+        }
+
         /// A Device with a Tasks store, its Tags beside it as on a real Device.
         struct TaggingDevice {
             root: Scratch,

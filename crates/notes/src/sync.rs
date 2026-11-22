@@ -5,18 +5,21 @@
 //! Three-way against the file at the last Sync. The Title (like any other
 //! property) takes the side that changed it since the base, or the newer
 //! `updated` when both did. The Body merges by line, the newer side winning
-//! the lines both changed. Without a base the newer side wins whole. Bytes
+//! the lines both changed. Tags merge as a set: additions on either side are
+//! kept, a Remove on either side stands. Without a base the newer side wins whole. Bytes
 //! that are no Note are no Item: `merge` and `same_item` say none.
 //!
 //! Image files (`store::images`) are Items too, but are transferred and never
 //! merged: an Image's file never changes after it is added.
 
-use pkm_base::front_matter::Document;
+use pkm_base::front_matter::{Document, Value};
 use pkm_base::images::{is_image, is_image_file};
 use pkm_base::line_merge::{self, Side};
+use pkm_base::set_merge;
 use std::cmp::Ordering;
 
 const UPDATED: &str = "updated";
+const TAGS: &str = "tags";
 
 /// What `local` and `remote` merge to, given the Note's bytes at the last Sync
 /// (none if there was none); none if either isn't a Note or they differ in id.
@@ -43,15 +46,25 @@ pub fn merge(base: Option<&[u8]>, local: &[u8], remote: &[u8]) -> Option<Vec<u8>
     let mut merged = winner.clone();
     let keys: Vec<&str> = winner.keys().chain(loser.keys()).collect();
     for key in keys.into_iter().filter(|key| *key != UPDATED) {
-        let base = base.as_ref().map(|b| b.get(key));
-        // The winner's, unless only the loser changed it since the base.
-        let value = if base == Some(winner.get(key)) {
-            loser.get(key)
+        let value = if key == TAGS {
+            // A set: additions are kept, a Remove on either side stands.
+            let list = |file: &Document| file.list(key).unwrap_or_default().to_vec();
+            let base = base.as_ref().map(list);
+            let tags = set_merge::merge(base.as_deref(), &list(winner), &list(loser));
+            // An empty set is no property at all, as the store writes it.
+            (!tags.is_empty()).then_some(Value::List(tags))
         } else {
-            winner.get(key)
+            let base = base.as_ref().map(|b| b.get(key));
+            // The winner's, unless only the loser changed it since the base.
+            let value = if base == Some(winner.get(key)) {
+                loser.get(key)
+            } else {
+                winner.get(key)
+            };
+            value.cloned()
         };
         match value {
-            Some(value) => merged.set(key, value.clone()),
+            Some(value) => merged.set(key, value),
             None => merged.remove(key),
         }
     }
@@ -106,6 +119,23 @@ mod tests {
             .into_bytes()
     }
 
+    fn tagged(tags: &[&str], body: &str, updated: &str) -> Vec<u8> {
+        let tags: String = tags.iter().map(|t| format!("  - {t}\n")).collect();
+        let tags = if tags.is_empty() {
+            tags
+        } else {
+            format!("tags:\n{tags}")
+        };
+        format!("---\nid: aaaaaaaaaaaa\ntitle: Plan\n{tags}updated: {updated}\n---\n{body}")
+            .into_bytes()
+    }
+
+    fn tags_of(file: &Document) -> Vec<String> {
+        let mut tags = file.list("tags").unwrap_or_default().to_vec();
+        tags.sort();
+        tags
+    }
+
     fn merged(base: Option<&[u8]>, local: &[u8], remote: &[u8]) -> Document {
         let bytes = merge(base, local, remote).unwrap();
         // Whichever Device merges, the result is the same.
@@ -150,6 +180,49 @@ mod tests {
             merged(Some(&base), &older, &newer).scalar("title"),
             Some("Agenda")
         );
+    }
+
+    #[test]
+    fn tags_added_on_both_sides_are_united() {
+        let base = tagged(&["home"], "", T0);
+        let local = tagged(&["home", "shop"], "", T1);
+        let remote = tagged(&["home", "food"], "", T2);
+        let file = merged(Some(&base), &local, &remote);
+        assert_eq!(tags_of(&file), ["food", "home", "shop"]);
+    }
+
+    #[test]
+    fn a_tag_removed_on_one_side_stays_removed_next_to_an_add_on_the_other() {
+        let base = tagged(&["home", "shop"], "", T0);
+        let removed = tagged(&["home"], "", T1);
+        let added = tagged(&["home", "shop", "food"], "", T2);
+        assert_eq!(
+            tags_of(&merged(Some(&base), &removed, &added)),
+            ["food", "home"]
+        );
+        let last = tagged(&[], "", T2);
+        let base = tagged(&["home"], "", T0);
+        assert_eq!(
+            merged(Some(&base), &last, &tagged(&["home"], "", T1)).get("tags"),
+            None
+        );
+    }
+
+    #[test]
+    fn tags_changed_on_one_side_and_the_body_on_the_other_are_both_kept() {
+        let base = tagged(&[], "one\n", T0);
+        let tagged_note = tagged(&["home"], "one\n", T1);
+        let edited = tagged(&[], "two\n", T2);
+        let file = merged(Some(&base), &tagged_note, &edited);
+        assert_eq!(tags_of(&file), ["home"]);
+        assert_eq!(file.body, "two\n");
+    }
+
+    #[test]
+    fn without_a_base_the_tags_of_both_sides_are_united() {
+        let local = tagged(&["a"], "", T1);
+        let remote = tagged(&["b"], "", T2);
+        assert_eq!(tags_of(&merged(None, &local, &remote)), ["a", "b"]);
     }
 
     #[test]
