@@ -93,6 +93,18 @@ import Testing
         #expect(ShareHandoff.group(listed: listed) { _ in false } == nil)
     }
 
+    @Test func theProfileListsTheGroupsTheSignatureGrants() {
+        let plist = """
+            <?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Entitlements</key><dict>
+            <key>com.apple.security.application-groups</key><array><string>group.com.timhilt.pkm.TEAM</string></array>
+            </dict></dict></plist>
+            """
+        // The plist sits inside a signed envelope of binary data.
+        let profile = Data([0x30, 0x80, 0xFF]) + Data(plist.utf8) + Data([0x00, 0xA0, 0xFF])
+        #expect(ShareHandoff.groups(inProfile: profile) == ["group.com.timhilt.pkm.TEAM"])
+        #expect(ShareHandoff.groups(inProfile: Data([0xFF])).isEmpty)
+    }
+
     @Test func publishedStartsEmptyBeforeTheAppHasPublished() {
         #expect(ShareHandoff(folder: root).published() == .init())
     }

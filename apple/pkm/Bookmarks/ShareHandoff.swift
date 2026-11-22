@@ -12,17 +12,33 @@ struct ShareHandoff {
     /// The App Group's folder; nil where the app isn't signed with the group.
     static var live: ShareHandoff? {
         let files = FileManager.default
-        // The extension lives in the app's `PlugIns`; the app lists the groups for both.
-        let app = Bundle(url: Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent())
-        let listed = [Bundle.main, app].flatMap { $0?.object(forInfoDictionaryKey: "ALTAppGroups") as? [String] ?? [] }
+        // The extension lives in the app's `PlugIns`, and may be signed with the app's profile.
+        let bundles = [
+            Bundle.main.bundleURL, Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent(),
+        ]
+        let listed = bundles.flatMap { bundle in
+            (try? Data(contentsOf: bundle.appending(path: "embedded.mobileprovision"))).map(groups(inProfile:)) ?? []
+        }
         return group(listed: listed) { files.containerURL(forSecurityApplicationGroupIdentifier: $0) != nil }
             .flatMap(files.containerURL(forSecurityApplicationGroupIdentifier:)).map(ShareHandoff.init)
     }
 
     /// The App Group this build may use: the built one, else the one a sideloading tool (AltStore,
-    /// SideStore) renamed it to for its team, `<group>.<team>`, which it lists in `ALTAppGroups`.
+    /// SideStore) renamed it to for its team, `<group>.<team>`, which its profile lists.
     static func group(listed: [String], isGranted: (String) -> Bool) -> String? {
         ([group] + listed.filter { $0.hasPrefix(group + ".") }).first(where: isGranted)
+    }
+
+    /// The App Groups a provisioning profile grants. Its plist sits inside a signed envelope, which
+    /// iOS has no public API to open, so it is cut out between `<?xml` and `</plist>`.
+    static func groups(inProfile profile: Data) -> [String] {
+        guard let start = profile.firstRange(of: Data("<?xml".utf8)),
+            let end = profile.firstRange(of: Data("</plist>".utf8), in: start.lowerBound..<profile.endIndex),
+            let plist = try? PropertyListSerialization.propertyList(
+                from: profile[start.lowerBound..<end.upperBound], format: nil) as? [String: Any],
+            let entitlements = plist["Entitlements"] as? [String: Any]
+        else { return [] }
+        return entitlements["com.apple.security.application-groups"] as? [String] ?? []
     }
 
     /// What the app published about one Saved Bookmark: enough to recognise it and offer Add Article.
