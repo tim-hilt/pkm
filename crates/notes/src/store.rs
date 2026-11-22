@@ -155,6 +155,15 @@ impl Notes {
         Ok(note_of(&file, &id))
     }
 
+    /// Takes `tag` off every Note, for the app's Delete a Tag, which also
+    /// forgets the Tag itself. Repeating it after an interruption finishes the job.
+    pub fn remove_tag_everywhere(&self, tag: &str) -> io::Result<()> {
+        for row in self.list_tagged(tag)? {
+            self.remove_tag(&row.id, tag)?;
+        }
+        Ok(())
+    }
+
     /// Takes `tag` off the Note `id`; one it doesn't have is as wanted. The
     /// Tag stays known. `NotFound` if there is no such Note.
     pub fn remove_tag(&self, id: &str, tag: &str) -> io::Result<Note> {
@@ -428,6 +437,18 @@ mod tests {
         assert_eq!(notes.remove_tag(&id, "work").unwrap().tags, ["home"]);
         notes.remove_tag(&id, "home").unwrap();
         assert!(!scratch.text(&id).contains("tags"));
+    }
+
+    #[test]
+    fn deleting_a_tag_removes_it_from_every_note_but_leaves_the_others() {
+        let scratch = Scratch::new();
+        let notes = scratch.store();
+        let a = notes.create(&tags(&["x", "y"])).unwrap().id;
+        let b = notes.create(&tags(&["x"])).unwrap().id;
+        notes.remove_tag_everywhere("x").unwrap();
+        assert_eq!(notes.read(&a).unwrap().tags, ["y"]);
+        assert!(notes.read(&b).unwrap().tags.is_empty());
+        assert!(notes.list_tagged("x").unwrap().is_empty());
     }
 
     #[test]

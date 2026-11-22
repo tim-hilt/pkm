@@ -122,6 +122,12 @@ final class NotesModel {
         filesChanged()
     }
 
+    /// Takes `tag` off every Note, as part of Delete a Tag.
+    func removeTagEverywhere(_ tag: String) {
+        try? store.removeTagEverywhere(tag: tag)
+        filesChanged()
+    }
+
     /// The Note as text to copy: its Title, then its Body after a blank line; either may be missing.
     func copyText(id: String) -> String {
         guard let note = note(id: id) else { return "" }

@@ -6,6 +6,7 @@ import SwiftUI
 struct ManageTagsView: View {
     @Environment(TasksModel.self) private var tasks
     @Environment(BookmarksModel.self) private var bookmarks
+    @Environment(NotesModel.self) private var notes
     @State private var deletion = TagDeletion()
     @State private var editing: String?
 
@@ -44,6 +45,7 @@ struct ManageTagsView: View {
             Button("Delete", role: .destructive) {
                 if let tag = deletion.pending {
                     bookmarks.removeTagEverywhere(tag)
+                    notes.removeTagEverywhere(tag)
                     tasks.deleteTag(tag)  // last: it forgets the Tag
                 }
                 deletion.cancel()

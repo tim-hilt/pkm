@@ -115,6 +115,11 @@ impl NoteStore {
         Ok(self.0.add_tag(&id, &tag)?)
     }
 
+    /// Takes the Tag off every Note, for Delete a Tag.
+    pub fn remove_tag_everywhere(&self, tag: String) -> Result<(), NotesError> {
+        Ok(self.0.remove_tag_everywhere(&tag)?)
+    }
+
     /// Takes the Tag off the Note; it stays known.
     pub fn remove_tag(&self, id: String, tag: String) -> Result<Note, NotesError> {
         Ok(self.0.remove_tag(&id, &tag)?)

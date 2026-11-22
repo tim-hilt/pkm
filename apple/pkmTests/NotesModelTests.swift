@@ -87,6 +87,16 @@ import Testing
         #expect(model.notes.map(\.id) == [tagged])
     }
 
+    @Test func aDeletedTagIsGoneFromNotes() throws {
+        let model = try openModel()
+        model.add()
+        let id = try #require(model.openID)
+        model.setTags(["work", "home"], of: id)
+        model.removeTagEverywhere("work")
+        #expect(model.note(id: id)?.tags == ["home"])
+        #expect(model.notes.first?.tags == ["home"] && model.tagsInUse == ["home"])
+    }
+
     @Test func aNotesTagsAreSetInOrderListedAndKnownToTheApp() throws {
         let model = try openModel()
         model.add()
