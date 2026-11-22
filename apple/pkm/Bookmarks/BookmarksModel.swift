@@ -149,10 +149,11 @@ final class BookmarksModel {
     }
 
     /// Downloads the images at `addresses`, a few at a time, as they finish, each stored as the
-    /// core keeps images (ADR-0029); nil for one that fails or is no picture.
+    /// core keeps images (ADR-0029), an SVG as PNG; nil for one that fails or is no picture.
     private func downloadImages(_ addresses: [String]) -> AsyncStream<(String, Data?)> {
         let download = download
         let parallelDownloads = parallelDownloads
+        let svgs = SVGRenderer()
         return AsyncStream { continuation in
             let work = Task {
                 await withTaskGroup(of: (String, Data?).self) { group in
@@ -162,7 +163,8 @@ final class BookmarksModel {
                         group.addTask {
                             guard let url = URL(string: address), let data = try? await download(url).data
                             else { return (address, nil) }
-                            return (address, StoredImage.bytes(of: data))
+                            if let stored = StoredImage.bytes(of: data) { return (address, stored) }
+                            return (address, await svgs.png(of: data))
                         }
                     }
                     for _ in 0..<parallelDownloads { next() }

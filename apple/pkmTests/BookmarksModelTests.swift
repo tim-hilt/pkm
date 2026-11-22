@@ -167,6 +167,22 @@ import Testing
         #expect(model.image(String(names[0]), of: saved.id) == draft.images["https://example.com/ok.png"])
     }
 
+    @Test func anSVGOfAnArticleIsKeptAsPNG() async throws {
+        let page = Download(
+            data: Data(
+                ("<title>Plot</title><article><p>" + String(repeating: "Plenty of prose, indeed. ", count: 30)
+                    + "</p><img src=\"/plot.svg#inv\" alt=\"Plot\"></article>").utf8),
+            mimeType: "text/html", textEncoding: "utf-8")
+        let svg = Download(data: SVGRendererTests.redTopHalf, mimeType: "image/svg+xml", textEncoding: nil)
+        let model = try model(serving(["https://example.com/plot": page, "https://example.com/plot.svg#inv": svg]))
+        guard case .draft(let draft) = await model.prepare("https://example.com/plot") else {
+            Issue.record("expected a draft")
+            return
+        }
+        let stored = try #require(draft.images["https://example.com/plot.svg#inv"])
+        #expect(stored.starts(with: [0x89, 0x50, 0x4E, 0x47]))
+    }
+
     /// A model with the Bookmarks of `addresses` Saved, newest last, without Article.
     private func saved(_ addresses: [String], pages: [String: Download] = [:]) async throws -> BookmarksModel {
         let model = try model(serving(pages))

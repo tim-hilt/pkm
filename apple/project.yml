@@ -109,6 +109,7 @@ targets:
       - pkm/Bookmarks/SaveSheet.swift
       - pkm/Bookmarks/SharedPage.swift
       - pkm/Bookmarks/ShareHandoff.swift
+      - pkm/Bookmarks/SVGRenderer.swift
       - pkm/Tasks/MarkdownImages.swift
     dependencies:
       - framework: Generated/pkmCoreFFI.xcframework

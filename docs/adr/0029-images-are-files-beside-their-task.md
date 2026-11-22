@@ -2,7 +2,7 @@
 
 Builds on ADR-0021 and ADR-0026.
 
-A pasted Image is kept as `Tasks/<random-id>.<ext>` and referenced from the Description as `![](<random-id>.<ext>)`, which Obsidian also reads. Sync transfers Images unmerged, like Book Files (ADR-0020). PNG, JPEG, GIF and WebP are kept byte for byte. Anything else (such as TIFF or HEIC) is stored as PNG. Images are never downscaled.
+A pasted Image is kept as `Tasks/<random-id>.<ext>` and referenced from the Description as `![](<random-id>.<ext>)`, which Obsidian also reads. Sync transfers Images unmerged, like Book Files (ADR-0020). PNG, JPEG, GIF and WebP are kept byte for byte. Anything else (such as TIFF, HEIC or SVG) is stored as PNG. Images are never downscaled.
 
 ## Considered Options
 
