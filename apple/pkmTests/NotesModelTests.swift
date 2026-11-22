@@ -37,6 +37,56 @@ import Testing
         #expect(model.note(id: id)?.body == "- first line\n")
     }
 
+    @Test func theListNarrowsToAnExactTagAndANewNoteStartsWithIt() throws {
+        let model = try openModel()
+        model.add()
+        let first = try #require(model.openID)
+        model.save(id: first, title: "One", body: "")
+        model.setTags(["work"], of: first)
+        model.add()
+        let second = try #require(model.openID)
+        model.save(id: second, title: "Two", body: "")
+        model.setTags(["work/meetings"], of: second)
+        model.openID = nil
+        #expect(model.tagsInUse == ["work", "work/meetings"])
+        model.tagFilter = "work"
+        #expect(model.notes.map(\.id) == [first])
+        model.add()
+        let created = try #require(model.openID)
+        #expect(model.note(id: created)?.tags == ["work"])
+        model.tagFilter = nil
+        model.add()
+        #expect(model.note(id: try #require(model.openID))?.tags == [])
+    }
+
+    @Test func theNarrowingDropsBackToAllNotesOnceNoNoteCarriesItsTag() throws {
+        let model = try openModel()
+        model.add()
+        let id = try #require(model.openID)
+        model.setTags(["work"], of: id)
+        model.tagFilter = "work"
+        model.setTags([], of: id)
+        #expect(model.tagFilter == nil)
+        #expect(model.notes.map(\.id) == [id])
+    }
+
+    @Test func searchCoversAllNotesWhateverTheNarrowing() throws {
+        let model = try openModel()
+        model.add()
+        let tagged = try #require(model.openID)
+        model.save(id: tagged, title: "Tagged", body: "")
+        model.setTags(["work"], of: tagged)
+        model.add()
+        let other = try #require(model.openID)
+        model.save(id: other, title: "Groceries", body: "")
+        model.openID = nil
+        model.tagFilter = "work"
+        model.searchText = "grocer"
+        #expect(model.results.map(\.id) == [other])
+        model.searchText = ""
+        #expect(model.notes.map(\.id) == [tagged])
+    }
+
     @Test func aNotesTagsAreSetInOrderListedAndKnownToTheApp() throws {
         let model = try openModel()
         model.add()

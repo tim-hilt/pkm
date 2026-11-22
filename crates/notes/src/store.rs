@@ -13,6 +13,7 @@ use pkm_base::random::Entropy;
 use pkm_base::tag;
 use pkm_base::tag_store::TagStore;
 use pkm_search::{Needle, Snippet, start_of};
+use std::collections::BTreeSet;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -210,6 +211,21 @@ impl Notes {
             .collect();
         rows.sort_by(|a, b| b.updated.cmp(&a.updated).then_with(|| a.id.cmp(&b.id)));
         Ok(rows)
+    }
+
+    /// Every Note carrying exactly `tag` (not `tag/sub`), newest `updated` first.
+    pub fn list_tagged(&self, tag: &str) -> io::Result<Vec<Row>> {
+        let mut rows = self.list()?;
+        rows.retain(|row| row.tags.iter().any(|t| t == tag));
+        Ok(rows)
+    }
+
+    /// The Tags some Note carries, alphabetically: what the list can be narrowed to.
+    pub fn tags_in_use(&self) -> io::Result<Vec<String>> {
+        let tags: BTreeSet<_> = (self.list()?.into_iter())
+            .flat_map(|row| row.tags)
+            .collect();
+        Ok(tags.into_iter().collect())
     }
 
     /// The Notes whose Title or Body has `query`, ignoring case
@@ -514,6 +530,36 @@ mod tests {
         assert_eq!(notes.list().unwrap()[0].updated, "2020-01-01T00:00:00Z");
         notes.edit(id, "new", "x\n").unwrap();
         assert!(notes.list().unwrap()[0].updated.as_str() > "2020-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn the_list_narrows_to_an_exact_tag_newest_first_and_tags_in_use_are_sorted() {
+        let scratch = Scratch::new();
+        let notes = scratch.store();
+        let tagged = |names: &[&str], updated: &str| {
+            let id = notes.create(&tags(names)).unwrap().id;
+            let text = scratch.text(&id);
+            let now = text.lines().find(|l| l.starts_with("updated: ")).unwrap();
+            scratch.write(
+                &format!("{id}.md"),
+                &text.replace(now, &format!("updated: {updated}")),
+            );
+            id
+        };
+        let old = tagged(&["work"], "2020-01-01T00:00:00Z");
+        let other = tagged(&["work/meetings", "home"], "2021-01-01T00:00:00Z");
+        let new = tagged(&["work", "home"], "2022-01-01T00:00:00Z");
+        let listed = |tag| -> Vec<String> {
+            let rows = notes.list_tagged(tag).unwrap();
+            rows.into_iter().map(|r| r.id).collect()
+        };
+        assert_eq!(listed("work"), [new.clone(), old]);
+        assert_eq!(listed("work/meetings"), [other]);
+        assert!(listed("wor").is_empty());
+        assert_eq!(
+            notes.tags_in_use().unwrap(),
+            ["home", "work", "work/meetings"]
+        );
     }
 
     #[test]

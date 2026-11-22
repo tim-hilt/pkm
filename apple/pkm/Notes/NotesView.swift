@@ -77,11 +77,24 @@ private struct NotesBrowser: View {
         .searchable(text: Bindable(model).searchText)
         #if os(iOS)
             .searchToolbarBehavior(.minimize)
-            .toolbar {
+        #endif
+        .toolbar {
+            #if os(iOS)
                 // At the top, so that the bottom stays free for the "+", as in Books.
                 DefaultToolbarItem(kind: .search, placement: .topBarTrailing)
+            #endif
+            if !model.tagsInUse.isEmpty {
+                ToolbarItem {
+                    Menu("Tag", systemImage: "line.3.horizontal.decrease") {
+                        Picker("Tag", selection: Bindable(model).tagFilter) {
+                            Text("All Notes").tag(String?.none)
+                            ForEach(model.tagsInUse, id: \.self) { Text($0).tag(Optional($0)) }
+                        }
+                    }
+                    .accessibilityIdentifier("note-tag-filter")
+                }
             }
-        #endif
+        }
         .overlay {
             if isSearching {
                 if model.results.isEmpty { ContentUnavailableView.search(text: model.searchText) }

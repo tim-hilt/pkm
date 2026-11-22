@@ -149,6 +149,21 @@ impl NoteStore {
         Ok(self.0.list()?.into_iter().map(Into::into).collect())
     }
 
+    /// The Notes carrying exactly the Tag, newest `updated` first.
+    pub fn notes_tagged(&self, tag: String) -> Result<Vec<ListedNote>, NotesError> {
+        Ok(self
+            .0
+            .list_tagged(&tag)?
+            .into_iter()
+            .map(Into::into)
+            .collect())
+    }
+
+    /// The Tags some Note carries, alphabetically.
+    pub fn tags_in_use(&self) -> Result<Vec<String>, NotesError> {
+        Ok(self.0.tags_in_use()?)
+    }
+
     /// The Notes with `query` in the Title or Body, Title matches first, each newest first.
     pub fn search(&self, query: String) -> Result<Vec<SearchResult>, NotesError> {
         Ok(self.0.search(&query)?.into_iter().map(Into::into).collect())
@@ -175,6 +190,10 @@ mod tests {
         );
         assert_eq!(rows[0].tags, ["work", "home"]);
         assert_eq!(store.read(note.id.clone()).unwrap().tags, ["work", "home"]);
+        let work = store.notes_tagged("work".into()).unwrap();
+        assert_eq!(work.len(), 1);
+        assert!(store.notes_tagged("play".into()).unwrap().is_empty());
+        assert_eq!(store.tags_in_use().unwrap(), ["home", "work"]);
         let found = store.search("TITLE".into()).unwrap();
         assert_eq!(
             (found[0].id.as_str(), found[0].title_matched),

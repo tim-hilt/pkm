@@ -14,8 +14,31 @@ final class NotesModel {
     @ObservationIgnored private let defaults: UserDefaults?
     private static let noteKey = "notesLastNote"
 
-    /// The Notes read since the files last changed; read again on demand.
+    /// The Notes and the Tags in use, read since the files last changed; read again on demand.
     @ObservationIgnored private var listed: [ListedNote]?
+    @ObservationIgnored private var used: [String]?
+
+    /// The Tag the user narrowed the list to, even if no Note carries it any more.
+    private var chosenTag: String?
+
+    /// The Tag the list is narrowed to; nil for "All Notes", which it drops back to once no Note
+    /// carries its Tag.
+    var tagFilter: String? {
+        get { chosenTag.flatMap { tagsInUse.contains($0) ? $0 : nil } }
+        set {
+            chosenTag = newValue
+            listed = nil
+        }
+    }
+
+    /// The Tags some Note carries, alphabetically: what the list can be narrowed to.
+    var tagsInUse: [String] {
+        _ = changes
+        if let used { return used }
+        let tags = (try? store.tagsInUse()) ?? []
+        used = tags
+        return tags
+    }
 
     /// Grows when the files change, so that views asking for `notes` read them again.
     private var changes = 0
@@ -73,7 +96,7 @@ final class NotesModel {
 
     /// Adds an empty Note and opens it, for its Title to be typed.
     func add() {
-        guard let note = try? store.create(tags: []) else { return }
+        guard let note = try? store.create(tags: tagFilter.map { [$0] } ?? []) else { return }
         newID = note.id
         openID = note.id
     }
@@ -85,6 +108,7 @@ final class NotesModel {
     func save(id: String, title: String, body: String) {
         guard (try? store.edit(id: id, title: title, body: body)) != nil else { return }
         listed = nil
+        used = nil
         changes += 1
         reloadResults()
     }
@@ -146,11 +170,11 @@ final class NotesModel {
         ImageSource(add: { [self] in addImage($0, to: id) }, read: { [self] in image($0, of: id) })
     }
 
-    /// Every Note, newest changed first.
+    /// The Notes, newest changed first: those carrying `tagFilter`, or all.
     var notes: [ListedNote] {
         _ = changes
         if let listed { return listed }
-        let notes = (try? store.notes()) ?? []
+        let notes = (try? tagFilter.map { try store.notesTagged(tag: $0) } ?? store.notes()) ?? []
         listed = notes
         return notes
     }
@@ -166,6 +190,7 @@ final class NotesModel {
     /// Notes were added or Deleted: the list reads them again.
     private func filesChanged() {
         listed = nil
+        used = nil
         changes += 1
         reloadResults()
     }
