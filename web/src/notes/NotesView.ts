@@ -28,6 +28,7 @@ export class NotesView {
   ]);
   private readonly noResults = make("div", "tasks-empty");
   private readonly search = make("input", "notes-search");
+  private readonly tags = make("select", "notes-tags-menu");
   private readonly detail = make("div", "notes-detail");
   private readonly failure = make("p", "tasks-failure");
   private readonly menu: RowMenu;
@@ -48,12 +49,14 @@ export class NotesView {
     this.search.placeholder = "Search";
     this.search.ariaLabel = "Search Notes";
     this.search.addEventListener("input", () => model.search(this.search.value));
+    this.tags.ariaLabel = "Tag";
+    this.tags.addEventListener("change", () => (model.tagFilter = this.tags.value || undefined));
     const create = button("tasks-new", "", () => model.add());
     create.innerHTML = plusGlyph;
     create.title = create.ariaLabel = "New Note";
     const scroll = make("div", "tasks-scroll", [this.list, this.empty, this.noResults]);
     const side = make("div", "notes-side", [
-      make("div", "notes-bar", [this.search]),
+      make("div", "notes-bar", [this.search, this.tags]),
       scroll,
       this.failure,
     ]);
@@ -79,9 +82,21 @@ export class NotesView {
     this.noResults.replaceChildren(
       make("strong", "", [`No Results for “${model.searchText.trim()}”`]),
     );
+    this.showTags();
     this.failure.hidden = model.failure === undefined;
     this.failure.textContent = model.failure ?? "";
     this.showEditor();
+  }
+
+  /** The Tag menu: "All Notes" and the Tags in use; hidden while there are none. */
+  private showTags(): void {
+    const { model } = this;
+    this.tags.hidden = model.tagsInUse.length === 0;
+    this.tags.replaceChildren(
+      new Option("All Notes", ""),
+      ...model.tagsInUse.map((tag) => new Option(tag, tag)),
+    );
+    this.tags.value = model.tagFilter ?? "";
   }
 
   private row(row: ListedNote): HTMLElement {

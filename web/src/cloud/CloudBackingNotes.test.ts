@@ -57,7 +57,7 @@ async function device(tabs?: MemoryTabGroup): Promise<Device> {
 /** Writes a Note on the Device, as the app does, and saves it. */
 async function createNote(device: Device, title: string, body: string): Promise<string> {
   const files = await NoteFiles.open(device.storage);
-  const note = files.store.create();
+  const note = files.store.create([]);
   const { id } = note;
   note.free();
   files.store.edit(id, title, body).free();

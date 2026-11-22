@@ -36,8 +36,10 @@ export interface NoteText {
  * every Notes rule lives in the core. A port of the Swift `NotesModel`.
  */
 export class NotesModel {
-  /** Every Note, newest changed first. */
+  /** The Notes the list shows, newest changed first: those carrying `tagFilter`, or all. */
   notes: ListedNote[] = [];
+  /** The Tags some Note carries, alphabetically: what the list can be narrowed to. */
+  tagsInUse: string[] = [];
   /** What Search looks for; empty when not searching. */
   searchText = "";
   /** The Notes that match `searchText`, Title matches first; empty when not searching. */
@@ -54,6 +56,8 @@ export class NotesModel {
   private releasable: string[] = [];
   /** Called after the rows, the open Note or the failure changed. */
   onChange: () => void = () => {};
+  /** The Tag the user narrowed the list to, even if no Note carries it any more. */
+  private chosenTag: string | undefined;
 
   constructor(
     private readonly files: NoteFiles,
@@ -67,14 +71,27 @@ export class NotesModel {
     return this.files.store;
   }
 
+  /** The Tag the list is narrowed to; `undefined` for "All Notes", which it drops back to once no Note carries its Tag. */
+  get tagFilter(): string | undefined {
+    return this.chosenTag !== undefined && this.tagsInUse.includes(this.chosenTag)
+      ? this.chosenTag
+      : undefined;
+  }
+
+  set tagFilter(tag: string | undefined) {
+    this.chosenTag = tag;
+    this.changed();
+  }
+
   /** Settles when what was changed is saved. */
   get saving(): Promise<void> {
     return this.files.save().catch(() => {});
   }
 
-  /** Adds an empty Note and opens it, for its Title to be typed. */
+  /** Adds an empty Note, carrying the Tag the list is narrowed to, and opens it, for its Title to be typed. */
   add(): void {
-    const note = this.store.create();
+    const tag = this.tagFilter;
+    const note = this.store.create(tag === undefined ? [] : [tag]);
     const id = note.id;
     note.free();
     this.newId = id;
@@ -227,7 +244,10 @@ export class NotesModel {
 
   private reload(): void {
     const { store } = this;
-    this.notes = store.notes().map((note) => {
+    this.tagsInUse = store.tagsInUse();
+    const tag = this.tagFilter;
+    const rows = tag === undefined ? store.notes() : store.notesTagged(tag);
+    this.notes = rows.map((note) => {
       const row = { id: note.id, title: note.title, preview: note.preview, tags: note.tags };
       note.free();
       return row;

@@ -143,9 +143,9 @@ impl NoteStore {
         self.files.read_bytes(Path::new(path)).ok()
     }
 
-    /// Saves a new, empty Note.
-    pub fn create(&self) -> Result<Note, JsError> {
-        self.notes.create(&[]).map(Into::into).map_err(error)
+    /// Saves a new, empty Note carrying the Tags (the valid ones, once each).
+    pub fn create(&self, tags: Vec<String>) -> Result<Note, JsError> {
+        self.notes.create(&tags).map(Into::into).map_err(error)
     }
 
     pub fn read(&self, id: &str) -> Result<Note, JsError> {
@@ -212,6 +212,19 @@ impl NoteStore {
     pub fn notes(&self) -> Result<Vec<ListedNote>, JsError> {
         let rows = self.notes.list().map_err(error)?;
         Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    /// Every Note carrying exactly the Tag, newest `updated` first.
+    #[wasm_bindgen(js_name = notesTagged)]
+    pub fn notes_tagged(&self, tag: &str) -> Result<Vec<ListedNote>, JsError> {
+        let rows = self.notes.list_tagged(tag).map_err(error)?;
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    /// The Tags some Note carries, alphabetically.
+    #[wasm_bindgen(js_name = tagsInUse)]
+    pub fn tags_in_use(&self) -> Result<Vec<String>, JsError> {
+        self.notes.tags_in_use().map_err(error)
     }
 
     /// The Notes with `query` in the Title or Body, Title matches first, each newest first.

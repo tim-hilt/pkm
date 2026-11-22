@@ -38,4 +38,23 @@ describe("NotesView", () => {
     await userEvent.keyboard("more");
     expect(model.note(id)?.body).toContain("theirs");
   });
+
+  it("narrows the list with the Tag menu, which is hidden while no Note has a Tag", async () => {
+    const model = new NotesModel(await NoteFiles.open(new MemoryStorage()));
+    const view = new NotesView(model);
+    document.body.append(view.element);
+    views.push(view);
+    const menu = view.element.querySelector<HTMLSelectElement>('select[aria-label="Tag"]')!;
+    expect(menu.hidden).toBe(true);
+    model.add();
+    model.save(model.openId!, "Tagged", "");
+    await model.setTags(model.openId!, ["work"]);
+    model.add();
+    model.save(model.openId!, "Plain", "");
+    model.open(undefined);
+    expect(menu.hidden).toBe(false);
+    expect([...menu.options].map((option) => option.text)).toEqual(["All Notes", "work"]);
+    await userEvent.selectOptions(menu, "work");
+    expect(view.element.querySelectorAll(".note-row")).toHaveLength(1);
+  });
 });

@@ -240,3 +240,40 @@ describe("Search", () => {
     expect(model.results).toEqual([]);
   });
 });
+
+describe("Narrowing to a Tag", () => {
+  async function note(title: string, tags: string[]): Promise<string> {
+    model.add();
+    const id = model.openId!;
+    model.save(id, title, "");
+    await model.setTags(id, tags);
+    return id;
+  }
+
+  it("lists the Tags in use, narrows the list and drops back to All Notes once the Tag is gone", async () => {
+    expect(model.tagsInUse).toEqual([]);
+    const work = await note("A", ["work"]);
+    await note("B", ["home"]);
+    expect(model.tagsInUse).toEqual(["home", "work"]);
+    model.tagFilter = "work";
+    expect(model.notes.map((row) => row.id)).toEqual([work]);
+    await model.setTags(work, []);
+    expect(model.tagFilter).toBeUndefined();
+    expect(model.notes).toHaveLength(2);
+  });
+
+  it("starts a Note created while narrowed with that Tag", async () => {
+    await note("A", ["work"]);
+    model.tagFilter = "work";
+    model.add();
+    expect(model.note(model.openId!)?.tags).toEqual(["work"]);
+  });
+
+  it("is ignored by Search, which covers all Notes", async () => {
+    await note("Alpha", ["work"]);
+    await note("Alphabet", ["home"]);
+    model.tagFilter = "work";
+    model.search("alpha");
+    expect(model.results).toHaveLength(2);
+  });
+});
