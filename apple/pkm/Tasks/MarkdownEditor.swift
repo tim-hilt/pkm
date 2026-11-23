@@ -138,6 +138,9 @@ private let copyImageTitle = String(localized: "Copy Image to Clipboard")
         private weak var textView: UITextView?
         private weak var scrollView: UIScrollView?
         private var recognizer: UILongPressGestureRecognizer?
+        /// UIKit's own recognizer of the drag, which took the touch over: on iPad it cancels ours
+        /// once the handle moves.
+        private weak var followed: UIGestureRecognizer?
         private var link: CADisplayLink?
         /// The selection end being dragged.
         private var handle: SelectionHandle?
@@ -176,18 +179,31 @@ private let copyImageTitle = String(localized: "Copy Image to Clipboard")
                 end: textView.caretRect(for: range.end))
         }
 
-        @objc private func touched(_ press: UILongPressGestureRecognizer) {
+        /// Follows the text view's recognizer still dragging the handle, if any.
+        private func followTextViewDrag() -> Bool {
+            guard handle != nil,
+                let other = textView?.gestureRecognizers?.first(where: { [.began, .changed].contains($0.state) })
+            else { return false }
+            other.addTarget(self, action: #selector(touched))
+            followed = other
+            return true
+        }
+
+        @objc private func touched(_ press: UIGestureRecognizer) {
             finger = press.location(in: nil)
             switch press.state {
-            case .began:
+            case .began where press === recognizer:
                 scrolled = false
                 handle = grabbedHandle(at: finger)
                 guard let handle, let range = textView?.selectedRange else { return }
                 anchor = handle == .start ? NSMaxRange(range) : range.location
                 link = CADisplayLink(target: self, selector: #selector(tick))
                 link?.add(to: .main, forMode: .common)
-            case .changed: break
+            case .began, .changed: break
+            case .cancelled where press === recognizer && followTextViewDrag(): break
             default:
+                followed?.removeTarget(self, action: #selector(touched))
+                followed = nil
                 link?.invalidate()
                 link = nil
                 guard handle != nil, scrolled, let scrollView else { return }

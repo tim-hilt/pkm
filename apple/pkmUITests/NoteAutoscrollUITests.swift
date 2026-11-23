@@ -5,6 +5,7 @@ import XCTest
 @MainActor final class NoteAutoscrollUITests: XCTestCase {
     private var app: XCUIApplication!
     private var title: XCUIElement { app.textFields["note-title"] }
+    private var body: XCUIElement { app.descendants(matching: .any)["note-body"] }
 
     /// A Note longer than the screen, its Body being edited.
     private func openLongNote() {
@@ -12,42 +13,48 @@ import XCTest
         app = XCUIApplication()
         app.launchArguments = ["-UITestingOpenNote"]
         app.launch()
-        let body = app.descendants(matching: .any)["note-body"]
         XCTAssertTrue(body.waitForExistence(timeout: 10))
         body.tap()
-        body.typeText(String(repeating: "word\n", count: 50))
+        let lines = Int(app.windows.firstMatch.frame.height / 20)
+        body.typeText(String(repeating: "word\n", count: lines))
     }
 
-    /// Selects the word at mid-screen and drags the handle at `handle` to `y`, holding it there.
-    /// Returns where the Title was once the word was selected.
-    @discardableResult private func select(thenDrag handle: CGVector, to y: CGFloat) -> CGFloat {
+    /// Selects a word halfway down to the keyboard and drags its start or end handle to `y`, holding
+    /// it there. The Body's text starts at its left edge.
+    private func select(thenDrag handle: SelectionHandle, to y: CGFloat) {
         let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
-        origin.withOffset(CGVector(dx: 30, dy: 300)).doubleTap()
+        let left = body.frame.minX
+        let line = app.keyboards.firstMatch.frame.minY / 2
+        origin.withOffset(CGVector(dx: left + 8, dy: line)).doubleTap()
         sleep(1)
-        let before = title.frame.minY
-        origin.withOffset(handle).press(
-            forDuration: 0.3, thenDragTo: origin.withOffset(CGVector(dx: handle.dx, dy: y)), withVelocity: .slow,
+        // UIKit draws the start handle's knob above the word, the end handle's below.
+        let grab = handle == .start ? CGVector(dx: left, dy: line - 8) : CGVector(dx: left + 30, dy: line + 14)
+        origin.withOffset(grab).press(
+            forDuration: 0.3, thenDragTo: origin.withOffset(CGVector(dx: grab.dx, dy: y)), withVelocity: .slow,
             thenHoldForDuration: 3)
-        return before
     }
+
+    private enum SelectionHandle { case start, end }
 
     func testHoldingTheStartHandleAtTheTopScrollsUp() {
         openLongNote()
         XCTAssertFalse(title.isHittable, "typing scrolled the Title away")
 
-        select(thenDrag: CGVector(dx: 17, dy: 292), to: 110)
+        select(thenDrag: .start, to: 20)
 
-        XCTAssertTrue(title.isHittable, "scrolled up to the Title")
+        // Not `isHittable`: the edit menu may cover the Title.
+        XCTAssertTrue(title.exists && title.frame.minY >= 0, "scrolled up to the Title")
     }
 
     func testHoldingTheEndHandleAtTheKeyboardScrollsDown() {
         openLongNote()
-        app.swipeDown(velocity: .fast)
-        app.swipeDown(velocity: .fast)
+        for _ in 0..<5 where !title.isHittable { body.swipeDown(velocity: .fast) }
         XCTAssertTrue(title.isHittable)
+        let before = title.frame.minY
 
-        let before = select(thenDrag: CGVector(dx: 46, dy: 312), to: app.keyboards.firstMatch.frame.minY - 5)
+        select(thenDrag: .end, to: app.keyboards.firstMatch.frame.minY - 5)
 
-        XCTAssertLessThan(title.frame.minY, before - 400, "scrolled down well past the screen")
+        // Far off screen, the Title may leave the accessibility tree.
+        XCTAssertTrue(!title.exists || title.frame.minY < before - 400, "scrolled down well past the screen")
     }
 }
