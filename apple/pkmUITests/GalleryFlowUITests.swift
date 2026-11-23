@@ -163,11 +163,6 @@ import XCTest
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
     }
 
-    func testAPlaceholderSaysComingSoon() throws {
-        openSidebarRow("Notes")
-        XCTAssertTrue(app.staticTexts["Coming soon"].waitForExistence(timeout: 10))
-    }
-
     /// The Gallery and menu buttons are the system's navigation bar buttons.
     func testTheCanvasHasNativeBackAndMenuButtonsInTheNavigationBar() {
         openDrawings()

@@ -529,17 +529,6 @@
         }
       }
     },
-    "Coming soon": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Coming soon"
-          }
-        }
-      }
-    },
     "Copied": {
       "extractionState": "manual",
       "localizations": {

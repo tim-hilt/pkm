@@ -102,7 +102,8 @@ import XCTest
         // The field takes the focus as it appears, but its accessibility representation hides
         // that from `typeText`, so the keyboard is tapped.
         for key in ["C", "a", "l", "l"] { app.keys[key].tap() }
-        app.buttons["Return"].tap()
+        // The Return key is "Return" on an iPhone and "Go" on an iPad.
+        app.keyboards.buttons.matching(NSPredicate(format: "identifier IN {'Return', 'Go'}")).firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Call"].waitForExistence(timeout: 5))
         XCTAssertTrue(field.exists, "the field stays for the next Subtask")
     }
@@ -185,14 +186,11 @@ import XCTest
         for _ in 0..<4 where !row.isHittable { app.collectionViews.firstMatch.swipeUp() }
         row.tap()
         XCTAssertTrue(app.navigationBars["Tags"].waitForExistence(timeout: 5))
-        // The keyboard opens only when search is tapped; a tap while the sheet still rises is lost.
-        for _ in 0..<3 where !app.keys["h"].exists {
-            app.searchFields["Search or create"].tap()
-            _ = app.keys["h"].waitForExistence(timeout: 2)
-        }
-        XCTAssertTrue(app.keys["h"].exists)
-        for key in ["h", "o"] { app.keys[key].tap() }
-        XCTAssertEqual(app.searchFields["Search or create"].value as? String, "ho")
+        // A tap while the sheet still rises is lost; typeText needs no software keyboard.
+        let search = app.searchFields["Search or create"]
+        for _ in 0..<3 where !((search.value(forKey: "hasKeyboardFocus") as? Bool) ?? false) { search.tap() }
+        search.typeText("ho")
+        XCTAssertEqual(search.value as? String, "ho")
         app.buttons["home"].firstMatch.tap()
         app.navigationBars["Tags"].buttons["Done"].tap()
 

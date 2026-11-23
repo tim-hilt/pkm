@@ -128,7 +128,6 @@ extension ContentView {
         case .context(.books): BooksView()
         case .context(.notes): NotesView()
         case .context(.bookmarks): BookmarksView()
-        case .context(let context): ComingSoonView(context: context)
         }
     }
 
