@@ -55,26 +55,9 @@ struct QuickAddField: View {
             editor
             if !suggestions.isEmpty {
                 suggestionList
-            } else {
-                #if os(iOS)
-                    if isFocused { tagButton }
-                #endif
             }
         }
     }
-
-    #if os(iOS)
-        /// Types "@" for a Tag Shortcut. It sits below the editor, where a keyboard bar would cover text.
-        private var tagButton: some View {
-            Button {
-                text.replaceSelection(&selection, withCharacters: "@")
-            } label: {
-                Label("Tag", systemImage: "tag")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-        }
-    #endif
 
     private var suggestionList: some View {
         VStack(spacing: 2) {
@@ -110,6 +93,8 @@ struct QuickAddField: View {
             #if os(iOS)
                 .textInputAutocapitalization(.sentences)
                 .autocorrectionDisabled(false)
+                .keyboardType(.webSearch)
+                .submitLabel(.next)
             #endif
             .onAppear {
                 draw()
