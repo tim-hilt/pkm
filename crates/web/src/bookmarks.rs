@@ -355,6 +355,12 @@ impl BookmarkStore {
         Ok(rows.into_iter().map(Into::into).collect())
     }
 
+    /// The Tags some Bookmark carries, by Relevance.
+    #[wasm_bindgen(js_name = tagsInUse)]
+    pub fn tags_in_use(&self) -> Result<Vec<String>, JsError> {
+        self.bookmarks.tags_in_use().map_err(error)
+    }
+
     /// Every Bookmark carrying the Tag, newest Saved first.
     #[wasm_bindgen(js_name = bookmarksTagged)]
     pub fn bookmarks_tagged(&self, tag: &str) -> Result<Vec<Bookmark>, JsError> {

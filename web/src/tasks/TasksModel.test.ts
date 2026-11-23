@@ -873,11 +873,31 @@ describe("Tags", () => {
     });
   });
 
-  it("lists every Tag alphabetically, in Default", () => {
+  it("lists every Tag alphabetically among equal Relevance, in Default", () => {
     expect(model.allTags).toEqual([
-      { name: "home", color: undefined },
-      { name: "work", color: undefined },
+      { name: "home", color: undefined, relevance: 1 },
+      { name: "work", color: undefined, relevance: 1 },
     ]);
+  });
+
+  it("lists the Tags by Relevance, and a reset puts one last", () => {
+    model.add("Walk");
+    model.edit(
+      model.tasks.find((t) => t.title === "Walk")!,
+      {
+        title: "Walk",
+        description: "",
+        priority: 4,
+        tags: ["work"],
+      },
+    );
+    expect(model.allTags.map((t) => [t.name, t.relevance])).toEqual([
+      ["work", 2],
+      ["home", 1],
+    ]);
+    model.resetTagRelevance("work");
+    expect(model.allTags.map((t) => t.name)).toEqual(["home", "work"]);
+    expect(model.suggestTags("", []).matches).toEqual(["home", "work"]);
   });
 
   it("lists a Tag no Task carries any more", () => {

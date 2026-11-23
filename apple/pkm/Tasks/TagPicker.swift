@@ -71,11 +71,9 @@ struct TagPicker: View {
         picking = .one(toggle: toggle)
     }
 
-    /// Known and created Tags that contain what is searched, in alphabetical order.
+    /// Created and known Tags that contain what is searched; known ones by Relevance.
     private var names: [String] {
-        (model.allTags.map(\.name) + created)
-            .filter { query.isEmpty || $0.contains(query) }
-            .sorted()
+        (created + model.allTags.map(\.name)).filter { query.isEmpty || $0.contains(query) }
     }
 
     private var canCreate: Bool {

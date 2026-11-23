@@ -158,18 +158,19 @@ pub struct QueryCheck {
     pub unknown: Vec<String>,
 }
 
-/// A Tag that exists, with its Tag Color.
+/// A Tag that exists, with its Tag Color and Relevance.
 #[uniffi::remote(Record)]
 pub struct TagEntry {
     pub name: String,
     /// `#rrggbb`; none is Default.
     pub color: Option<String>,
+    pub relevance: u64,
 }
 
 /// What a Tag field offers for the typed text.
 #[uniffi::remote(Record)]
 pub struct TagSuggestions {
-    /// Known Tags: prefix matches, then matches anywhere, each sorted.
+    /// Known Tags: prefix matches, then matches anywhere, each by Relevance.
     pub matches: Vec<String>,
     /// Whether to offer "Create Tag" for the typed text.
     pub create: bool,
@@ -215,6 +216,7 @@ impl ListedTask {
     fn new(t: Task, known: &Tags) -> Self {
         let tags = t.tags.into_iter().map(|name| TagEntry {
             color: known.color(&name).map(str::to_owned),
+            relevance: known.relevance(&name),
             name,
         });
         Self {
@@ -518,7 +520,12 @@ impl TaskStore {
         Ok(self.0.delete_tag(&tag)?)
     }
 
-    /// Every known Tag with its Tag Color, alphabetically.
+    /// Resets a Tag's Relevance to 0.
+    pub fn reset_tag_relevance(&self, tag: String) -> Result<(), TasksError> {
+        Ok(self.0.reset_tag_relevance(&tag)?)
+    }
+
+    /// Every known Tag with its Tag Color and Relevance, by Relevance.
     pub fn tags(&self) -> Vec<TagEntry> {
         self.0.tags().list()
     }

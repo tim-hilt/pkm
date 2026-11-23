@@ -73,7 +73,7 @@ final class TasksModel {
     var isGrouped: Bool { groups.count > 1 }
     /// Every Filter, in the Filters list's order.
     private(set) var filters: [Filter] = []
-    /// Every known Tag with its Tag Color, alphabetically, whether or not a Task carries it.
+    /// Every known Tag with its Tag Color and Relevance, by Relevance, whether or not a Task carries it.
     private(set) var allTags: [TagEntry] = []
 
     /// Opens the sheet of the Open Task a link or address names, as the only one in the stack,
@@ -507,12 +507,18 @@ final class TasksModel {
         reload()
     }
 
+    /// Resets a Tag's Relevance to 0, which puts it after the Tags used since.
+    func resetTagRelevance(_ tag: String) {
+        try? store.resetTagRelevance(tag: tag)
+        refreshTags()
+    }
+
     /// Reads the known Tags again, after another Context put a new one on an Item.
     func refreshTags() { allTags = store.tags() }
 
     /// The Tag Color of a Tag by name; Default if it isn't known.
     func tagEntry(_ name: String) -> TagEntry {
-        allTags.first { $0.name == name } ?? TagEntry(name: name, color: nil)
+        allTags.first { $0.name == name } ?? TagEntry(name: name, color: nil, relevance: 0)
     }
 
     /// What a Tag field offers for the typed `query`, leaving out the Tags the

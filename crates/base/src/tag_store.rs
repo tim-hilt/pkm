@@ -49,6 +49,22 @@ impl TagStore {
         })
     }
 
+    /// Raises the Relevance of the valid `tags`, just put on an Item, adding
+    /// the unknown ones; reads nothing if there are none.
+    pub fn put_on(&self, tags: impl IntoIterator<Item = String>) -> io::Result<()> {
+        let mut tags = tags.into_iter().peekable();
+        if tags.peek().is_none() {
+            return Ok(());
+        }
+        let updated = iso8601(now_ms());
+        self.change(|known| {
+            for tag in tags {
+                known.raise(&tag, &updated);
+            }
+            Ok(true)
+        })
+    }
+
     /// Reads the Tags, lets `change` change them and writes them back if it
     /// says it did, all under one lock.
     pub fn change(&self, change: impl FnOnce(&mut Tags) -> io::Result<bool>) -> io::Result<()> {
@@ -79,9 +95,20 @@ mod tests {
     }
 
     #[test]
+    fn tags_put_on_an_item_are_known_and_raised() {
+        let store = store();
+        store.remember(["a".to_owned()]).unwrap();
+        store.put_on(["a".to_owned(), "b".to_owned()]).unwrap();
+        store.put_on(["a".to_owned()]).unwrap();
+        let tags = store.read();
+        assert_eq!((tags.relevance("a"), tags.relevance("b")), (2, 1));
+    }
+
+    #[test]
     fn remembering_nothing_new_writes_nothing() {
         let store = store();
         store.remember(Vec::new()).unwrap();
+        store.put_on(Vec::new()).unwrap();
         assert!(!store.files.exists(&store.path));
     }
 }

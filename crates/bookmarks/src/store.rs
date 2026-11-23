@@ -19,7 +19,7 @@ use pkm_base::random::Entropy;
 use pkm_base::tag;
 use pkm_base::tag_store::TagStore;
 use pkm_search::{Needle, Snippet, start_of};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io;
 use std::ops::Range;
@@ -182,7 +182,7 @@ impl Bookmarks {
             file.body = self.keep_article(&mut entropy, article, images)?;
         }
         self.files.write(&self.path(&id), &file.render())?;
-        self.tags.remember(kept_tags)?;
+        self.tags.put_on(kept_tags)?;
         Ok(Saved {
             bookmark: self.bookmark_of(&file, &id),
             existing: false,
@@ -287,6 +287,13 @@ impl Bookmarks {
         Ok(all)
     }
 
+    /// The Tags some Bookmark carries, by Relevance: what the list can be
+    /// narrowed to.
+    pub fn tags_in_use(&self) -> io::Result<Vec<String>> {
+        let tags: BTreeSet<String> = self.list()?.into_iter().flat_map(|b| b.tags).collect();
+        Ok(self.tags.read().ordered(tags))
+    }
+
     /// Renames the Bookmark `id` (one line, like Saving does); a blank
     /// `title` leaves it as it is. `NotFound` if there is no such Bookmark.
     pub fn rename(&self, id: &str, title: &str) -> io::Result<Bookmark> {
@@ -305,14 +312,20 @@ impl Bookmarks {
         if !tag::is_valid(tag) {
             return Err(io::ErrorKind::InvalidInput.into());
         }
+        let mut put_on = false;
         let bookmark = self.modify(id, |file| {
             let mut tags = tags_of(file);
             if !tags.iter().any(|t| t == tag) {
                 tags.push(tag.to_owned());
                 set_tags(file, tags);
+                put_on = true;
             }
         })?;
-        self.tags.remember([tag.to_owned()])?;
+        if put_on {
+            self.tags.put_on([tag.to_owned()])?;
+        } else {
+            self.tags.remember([tag.to_owned()])?;
+        }
         Ok(bookmark)
     }
 
@@ -666,7 +679,7 @@ impl Bookmarks {
                     }
                     file.body = self.keep_article(&mut entropy, &file.body, &images)?;
                     self.files.write(&self.path(&new_id), &file.render())?;
-                    self.tags.remember(tags_of(&file))?;
+                    self.tags.put_on(tags_of(&file))?;
                     mine.push(self.bookmark_of(&file, &new_id));
                     taken += 1;
                 }
@@ -928,6 +941,7 @@ fn new_id() -> String {
 mod tests {
     use super::*;
     use crate::article::read_article;
+    use pkm_base::tags::Tags;
 
     const PNG: &[u8] = b"\x89PNG\r\n\x1a\n rest";
 
@@ -1525,6 +1539,32 @@ mod tests {
             store.add_tag(&b.id, "Not A Tag").unwrap_err().kind(),
             io::ErrorKind::InvalidInput
         );
+    }
+
+    #[test]
+    fn tags_put_on_a_bookmark_raise_their_relevance_and_order_those_in_use() {
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let tags = ["a", "b"].map(String::from);
+        let one = store
+            .save(
+                "https://a.test/1",
+                &details("T"),
+                "",
+                &tags,
+                None,
+                &HashMap::new(),
+            )
+            .unwrap()
+            .bookmark;
+        let two = plain(&store, "https://a.test/2");
+        store.add_tag(&two.id, "b").unwrap();
+        store.add_tag(&two.id, "b").unwrap(); // carried already
+        store.remove_tag(&one.id, "a").unwrap();
+        store.add_tag(&two.id, "c").unwrap();
+        let known = Tags::parse(&tags_file(&scratch));
+        assert_eq!([known.relevance("a"), known.relevance("b")], [1, 2]);
+        assert_eq!(store.tags_in_use().unwrap(), ["b", "c"]);
     }
 
     #[test]

@@ -157,10 +157,8 @@ export class BookmarksModel {
     this.changed();
   }
 
-  /** The Tags some Bookmark carries, alphabetically: what the list can be narrowed to. */
-  get tagsInUse(): string[] {
-    return [...new Set(this.all.flatMap((bookmark) => bookmark.tags))].sort();
-  }
+  /** The Tags some Bookmark carries, by Relevance: what the list can be narrowed to. */
+  tagsInUse: string[] = [];
 
   /** Settles when what was changed is saved. */
   get saving(): Promise<void> {
@@ -493,6 +491,7 @@ export class BookmarksModel {
   private reload(): void {
     const { store } = this;
     this.all = store.bookmarks().map(plain);
+    this.tagsInUse = store.tagsInUse();
     this.shown = this.tag === undefined ? this.all : store.bookmarksTagged(this.tag).map(plain);
     this.results =
       this.searchText.trim() === ""

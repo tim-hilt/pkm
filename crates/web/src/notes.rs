@@ -221,7 +221,7 @@ impl NoteStore {
         Ok(rows.into_iter().map(Into::into).collect())
     }
 
-    /// The Tags some Note carries, alphabetically.
+    /// The Tags some Note carries, by Relevance.
     #[wasm_bindgen(js_name = tagsInUse)]
     pub fn tags_in_use(&self) -> Result<Vec<String>, JsError> {
         self.notes.tags_in_use().map_err(error)

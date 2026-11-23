@@ -46,6 +46,10 @@ _Avoid_: Label, category, hashtag
 The color a Tag is shown in, wherever it appears and on every Device; grey unless the user picks another.
 _Avoid_: Label color, Tag theme
 
+**Relevance**:
+How often a Tag has been put on Items, raised by one each time, on every Device; every list of Tags is ordered by it, highest first, alphabetically among equals.
+_Avoid_: Score, frequency, popularity, count
+
 **Delete a Tag**:
 Ending a Tag in Settings: it is Removed from every Item, Open or Closed, and its Tag Color forgotten.
 _Avoid_: Remove (that is one Item), clear

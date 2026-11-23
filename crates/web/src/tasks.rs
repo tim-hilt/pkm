@@ -105,13 +105,15 @@ pub struct QueryCheck {
     pub unknown: Vec<String>,
 }
 
-/// A Tag that exists, with its Tag Color.
+/// A Tag that exists, with its Tag Color and Relevance.
 #[wasm_bindgen(getter_with_clone)]
 #[derive(Clone)]
 pub struct TagEntry {
     pub name: String,
     /// `#rrggbb`; none is Default.
     pub color: Option<String>,
+    /// A JavaScript number, not a BigInt.
+    pub relevance: f64,
 }
 
 impl From<pkm_base::tags::Entry> for TagEntry {
@@ -119,6 +121,7 @@ impl From<pkm_base::tags::Entry> for TagEntry {
         Self {
             name: e.name,
             color: e.color,
+            relevance: e.relevance as f64,
         }
     }
 }
@@ -332,6 +335,7 @@ impl ListedTask {
         let t = row.task;
         let tags = t.tags.into_iter().map(|name| TagEntry {
             color: known.color(&name).map(str::to_owned),
+            relevance: known.relevance(&name) as f64,
             name,
         });
         Self {
@@ -559,7 +563,13 @@ impl TaskStore {
         })
     }
 
-    /// Every known Tag with its Tag Color, alphabetically.
+    /// Resets a Tag's Relevance to 0.
+    #[wasm_bindgen(js_name = resetTagRelevance)]
+    pub fn reset_tag_relevance(&self, tag: &str) -> Result<(), JsError> {
+        self.tasks.reset_tag_relevance(tag).map_err(error)
+    }
+
+    /// Every known Tag with its Tag Color and Relevance, by Relevance.
     #[wasm_bindgen(js_name = allTags)]
     pub fn all_tags(&self) -> Vec<TagEntry> {
         self.tasks

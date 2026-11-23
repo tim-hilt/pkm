@@ -55,11 +55,12 @@ export interface NewTask {
   tags?: string[];
 }
 
-/** A Tag that exists, with its Tag Color. */
+/** A Tag that exists, with its Tag Color and Relevance. */
 export interface Tag {
   name: string;
   /** `#rrggbb`; `undefined` is Default. */
   color: string | undefined;
+  relevance: number;
 }
 
 /** A Task another Task is Blocked by; a `closed` one no longer blocks. */
@@ -664,10 +665,10 @@ export class TasksModel {
     return plain;
   }
 
-  /** Every known Tag with its Tag Color, alphabetically. */
+  /** Every known Tag with its Tag Color and Relevance, by Relevance. */
   get allTags(): Tag[] {
     return this.files.store.allTags().map((tag) => {
-      const plain = { name: tag.name, color: tag.color ?? undefined };
+      const plain = { name: tag.name, color: tag.color ?? undefined, relevance: tag.relevance };
       tag.free();
       return plain;
     });
@@ -676,6 +677,11 @@ export class TasksModel {
   /** Gives a Tag its Tag Color (`#rrggbb`), or Default for `undefined`; open lists show it at once. */
   setTagColor(tag: string, color: string | undefined): void {
     this.apply(() => this.files.store.setTagColor(tag, color));
+  }
+
+  /** Resets a Tag's Relevance to 0, which puts it after the Tags used since. */
+  resetTagRelevance(tag: string): void {
+    this.apply(() => this.files.store.resetTagRelevance(tag));
   }
 
   /** Deletes a Tag: Removes it from every Task, Open or Closed, and forgets it and its Tag Color. */

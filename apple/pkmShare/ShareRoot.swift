@@ -94,7 +94,8 @@ struct ShareTagsField: View {
         .sheet(isPresented: $isPicking) { picker }
     }
 
-    private var names: [String] { (known + tags).uniqued().filter { query.isEmpty || $0.contains(query) }.sorted() }
+    /// The published Tags (by Relevance), then those created here.
+    private var names: [String] { (known + tags).uniqued().filter { query.isEmpty || $0.contains(query) } }
 
     private var canCreate: Bool { isValidTag(tag: query) && !names.contains(query) }
 

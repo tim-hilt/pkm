@@ -136,6 +136,19 @@ import Testing
         #expect(model.allTags.map(\.name) == ["home", "work/x"])
     }
 
+    @Test func tagsAreListedByRelevanceAndAResetPutsOneLast() throws {
+        let model = try openModel()
+        #expect(model.add(title: "One"))
+        #expect(model.add(title: "Two"))
+        model.edit(model.tasks[0], title: "One", description: "", priority: 4, tags: ["home", "work"])
+        model.edit(model.tasks[1], title: "Two", description: "", priority: 4, tags: ["work"])
+        #expect(model.allTags.map(\.name) == ["work", "home"])
+        #expect(model.allTags.map(\.relevance) == [2, 1])
+        model.resetTagRelevance("work")
+        #expect(model.allTags.map(\.name) == ["home", "work"])
+        #expect(model.suggestTags("", leaveOut: []).matches == ["home", "work"])
+    }
+
     @Test func aTagColorShowsInTheOpenListAtOnceAndDefaultResetsIt() throws {
         let model = try openModel()
         #expect(model.add(title: "Buy milk"))

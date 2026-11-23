@@ -105,7 +105,7 @@ impl Notes {
             set_tags(&mut file, tags.clone());
             self.files
                 .write(&self.root.join(file_name(&id)), &file.render())?;
-            self.tags.remember(tags)?;
+            self.tags.put_on(tags)?;
             return Ok(note_of(&file, &id));
         }
     }
@@ -146,12 +146,14 @@ impl Notes {
         }
         let (id, path, mut file) = self.find(id)?;
         let mut tags = tags_of(&file);
-        if !tags.iter().any(|t| t == tag) {
+        if tags.iter().any(|t| t == tag) {
+            self.tags.remember([tag.to_owned()])?;
+        } else {
             tags.push(tag.to_owned());
             set_tags(&mut file, tags);
             self.touch(&path, &mut file)?;
+            self.tags.put_on([tag.to_owned()])?;
         }
-        self.tags.remember([tag.to_owned()])?;
         Ok(note_of(&file, &id))
     }
 
@@ -229,12 +231,12 @@ impl Notes {
         Ok(rows)
     }
 
-    /// The Tags some Note carries, alphabetically: what the list can be narrowed to.
+    /// The Tags some Note carries, by Relevance: what the list can be narrowed to.
     pub fn tags_in_use(&self) -> io::Result<Vec<String>> {
         let tags: BTreeSet<_> = (self.list()?.into_iter())
             .flat_map(|row| row.tags)
             .collect();
-        Ok(tags.into_iter().collect())
+        Ok(self.tags.read().ordered(tags))
     }
 
     /// The Notes whose Title or Body has `query`, ignoring case
@@ -346,6 +348,7 @@ fn set_tags(file: &mut Document, tags: Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pkm_base::tags::Tags;
 
     /// A Notes folder in a temporary directory, removed afterwards.
     pub(super) struct Scratch(pub(super) PathBuf);
@@ -554,7 +557,21 @@ mod tests {
     }
 
     #[test]
-    fn the_list_narrows_to_an_exact_tag_newest_first_and_tags_in_use_are_sorted() {
+    fn tags_put_on_a_note_raise_their_relevance() {
+        let scratch = Scratch::new();
+        let notes = scratch.store();
+        let note = notes.create(&tags(&["a"])).unwrap();
+        notes.edit(&note.id, "t", "x").unwrap();
+        notes.add_tag(&note.id, "a").unwrap(); // carried already
+        notes.add_tag(&note.id, "b").unwrap();
+        notes.remove_tag(&note.id, "a").unwrap();
+        notes.add_tag(&note.id, "a").unwrap();
+        let known = Tags::parse(&tags_file(&scratch));
+        assert_eq!([known.relevance("a"), known.relevance("b")], [2, 1]);
+    }
+
+    #[test]
+    fn the_list_narrows_to_an_exact_tag_newest_first_and_tags_in_use_go_by_relevance() {
         let scratch = Scratch::new();
         let notes = scratch.store();
         let tagged = |names: &[&str], updated: &str| {
@@ -570,16 +587,18 @@ mod tests {
         let old = tagged(&["work"], "2020-01-01T00:00:00Z");
         let other = tagged(&["work/meetings", "home"], "2021-01-01T00:00:00Z");
         let new = tagged(&["work", "home"], "2022-01-01T00:00:00Z");
+        tagged(&["work/meetings"], "2019-01-01T00:00:00Z");
+        tagged(&["work/meetings"], "2019-01-01T00:00:00Z");
         let listed = |tag| -> Vec<String> {
             let rows = notes.list_tagged(tag).unwrap();
             rows.into_iter().map(|r| r.id).collect()
         };
         assert_eq!(listed("work"), [new.clone(), old]);
-        assert_eq!(listed("work/meetings"), [other]);
+        assert_eq!(listed("work/meetings")[0], other);
         assert!(listed("wor").is_empty());
         assert_eq!(
             notes.tags_in_use().unwrap(),
-            ["home", "work", "work/meetings"]
+            ["work/meetings", "home", "work"]
         );
     }
 

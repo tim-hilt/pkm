@@ -1,24 +1,35 @@
 //! The Tags that exist (ADR-0023): `Tags/tags.json`, beside the Context
 //! folders. A Tag lives from when it is first put on an Item until it is
-//! Deleted, whether or not an Item carries it. Knows nothing about Items or
-//! files: callers read and write the text.
+//! Deleted, whether or not an Item carries it. Every list of Tags is ordered
+//! by Relevance (ADR-0036). Knows nothing about Items or files: callers read
+//! and write the text.
 
 use crate::json::{self, Object, Value};
 use std::collections::BTreeMap;
 
-/// A Tag and its Tag Color.
+/// A Tag, its Tag Color and its Relevance.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
     pub name: String,
     /// `#rrggbb` (sRGB); `None` is Default.
     pub color: Option<String>,
+    pub relevance: u64,
+}
+
+/// What the file keeps of a Tag.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct Known {
+    meta: Meta,
+    /// How often the Tag was put on Items, since it was known or last reset.
+    relevance: u64,
 }
 
 /// Ordered by `updated` first, so that `max` picks the newer; a tie falls to
 /// the color, whichever side is local.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 struct Meta {
-    /// When the Tag or its color last changed, as a Task's `updated`.
+    /// When the Tag or its color last changed, as a Task's `updated`; a
+    /// change of Relevance leaves it.
     updated: String,
     color: Option<String>,
 }
@@ -27,7 +38,7 @@ struct Meta {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Suggestions {
     /// Known Tags: those starting with the text, then those containing it
-    /// elsewhere, each group alphabetical.
+    /// elsewhere, each group by Relevance.
     pub matches: Vec<String>,
     /// Whether to offer "Create Tag" for the text itself.
     pub create: bool,
@@ -35,7 +46,7 @@ pub struct Suggestions {
 
 /// Every known Tag, by name.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Tags(BTreeMap<String, Meta>);
+pub struct Tags(BTreeMap<String, Known>);
 
 impl Tags {
     /// Where the file is, from the folder that holds the Context folders.
@@ -56,7 +67,9 @@ impl Tags {
             if crate::tag::is_valid(name) {
                 let text = |key| meta.get(key).and_then(Value::as_str).map(str::to_owned);
                 let (color, updated) = (text("color"), text("updated").unwrap_or_default());
-                found.insert(name.to_owned(), Meta { updated, color });
+                let relevance = meta.get("relevance").and_then(Value::as_u64).unwrap_or(0);
+                let meta = Meta { updated, color };
+                found.insert(name.to_owned(), Known { meta, relevance });
             }
         }
         Some(Self(found))
@@ -66,7 +79,10 @@ impl Tags {
     /// last Sync (none if there was none). Per Tag: one gone from a side that
     /// had it at the last Sync is gone, even if its Tag Color changed on the
     /// other; otherwise a Tag on either side is kept, and the newer `updated`
-    /// decides its Tag Color. None if either isn't a Tags file.
+    /// decides its Tag Color. Its Relevance is the last Sync's plus both
+    /// sides' changes since, so that a reset merges as one more change; with
+    /// no Relevance at the last Sync, the higher side's (ADR-0036). None if
+    /// either isn't a Tags file.
     pub fn merge(base: Option<&[u8]>, local: &[u8], remote: &[u8]) -> Option<Vec<u8>> {
         let (local, remote) = (Self::of_bytes(local)?, Self::of_bytes(remote)?);
         // An unreadable base is as good as none.
@@ -76,14 +92,21 @@ impl Tags {
                 .is_some_and(|b| b.0.contains_key(name) && !side.0.contains_key(name))
         };
         let mut merged = BTreeMap::new();
-        for (name, meta) in local.0.iter().chain(&remote.0) {
+        for (name, known) in local.0.iter().chain(&remote.0) {
             if deleted(name, &local) || deleted(name, &remote) {
                 continue;
             }
+            let at_base = base.as_ref().and_then(|b| b.0.get(name));
             merged
                 .entry(name.clone())
-                .and_modify(|kept: &mut Meta| *kept = meta.max(kept).clone())
-                .or_insert_with(|| meta.clone());
+                .and_modify(|kept: &mut Known| {
+                    kept.meta = known.meta.clone().max(kept.meta.clone());
+                    kept.relevance = match at_base {
+                        Some(b) => (kept.relevance + known.relevance).saturating_sub(b.relevance),
+                        None => kept.relevance.max(known.relevance),
+                    };
+                })
+                .or_insert_with(|| known.clone());
         }
         Some(Self(merged).render().into_bytes())
     }
@@ -100,10 +123,13 @@ impl Tags {
     /// The file's text, with the Tags sorted.
     pub fn render(&self) -> String {
         let mut tags = Object::new();
-        for (name, meta) in &self.0 {
+        for (name, Known { meta, relevance }) in &self.0 {
             let mut entry = Object::new();
             if let Some(color) = &meta.color {
                 entry.insert("color".into(), Value::String(color.clone()));
+            }
+            if *relevance > 0 {
+                entry.insert("relevance".into(), Value::Number(*relevance as f64));
             }
             entry.insert("updated".into(), Value::String(meta.updated.clone()));
             tags.insert(name.clone(), Value::Object(entry));
@@ -113,15 +139,35 @@ impl Tags {
         Value::Object(root).to_json_pretty() + "\n"
     }
 
-    /// Every Tag, alphabetically.
+    /// Every Tag, by Relevance.
     pub fn list(&self) -> Vec<Entry> {
-        self.0
-            .iter()
-            .map(|(name, meta)| Entry {
+        let mut entries: Vec<Entry> = (self.0.iter())
+            .map(|(name, known)| Entry {
                 name: name.clone(),
-                color: meta.color.clone(),
+                color: known.meta.color.clone(),
+                relevance: known.relevance,
             })
-            .collect()
+            .collect();
+        // Stable, so equals stay alphabetical.
+        entries.sort_by_key(|e| std::cmp::Reverse(e.relevance));
+        entries
+    }
+
+    /// `names` by Relevance, highest first, alphabetically among equals; an
+    /// unknown Tag counts as 0.
+    pub fn ordered(&self, names: impl IntoIterator<Item = String>) -> Vec<String> {
+        let mut names: Vec<String> = names.into_iter().collect();
+        names.sort_by(|a, b| {
+            self.relevance(b)
+                .cmp(&self.relevance(a))
+                .then_with(|| a.cmp(b))
+        });
+        names
+    }
+
+    /// The Relevance of `tag`; 0 for an unknown Tag.
+    pub fn relevance(&self, tag: &str) -> u64 {
+        self.0.get(tag).map_or(0, |known| known.relevance)
     }
 
     /// Every Tag's name, alphabetically.
@@ -136,7 +182,7 @@ impl Tags {
 
     /// The Tag Color of `tag` (`#rrggbb`); `None` for Default or an unknown Tag.
     pub fn color(&self, tag: &str) -> Option<&str> {
-        self.0.get(tag)?.color.as_deref()
+        self.0.get(tag)?.meta.color.as_deref()
     }
 
     /// What to offer while `query` is typed into a Tag field, leaving out the
@@ -145,11 +191,12 @@ impl Tags {
     pub fn suggest(&self, query: &str, leave_out: &[String]) -> Suggestions {
         let left_out = |name: &&String| !leave_out.contains(name);
         let names = || self.0.keys().filter(left_out);
-        let (mut matches, anywhere): (Vec<String>, Vec<String>) = names()
+        let (matches, anywhere): (Vec<String>, Vec<String>) = names()
             .filter(|name| name.contains(query))
             .cloned()
             .partition(|name| name.starts_with(query));
-        matches.extend(anywhere);
+        let mut matches = self.ordered(matches);
+        matches.extend(self.ordered(anywhere));
         let create = !query.is_empty()
             && crate::tag::is_valid(query)
             && !self.contains(query)
@@ -167,8 +214,29 @@ impl Tags {
             updated: updated.to_owned(),
             color: None,
         };
-        self.0.insert(tag.to_owned(), meta);
+        let known = Known { meta, relevance: 0 };
+        self.0.insert(tag.to_owned(), known);
         true
+    }
+
+    /// Raises the Relevance of `tag` (valid), just put on an Item, by one;
+    /// adds it first (as `updated`) if it isn't known.
+    pub fn raise(&mut self, tag: &str, updated: &str) {
+        self.add(tag, updated);
+        if let Some(known) = self.0.get_mut(tag) {
+            known.relevance += 1;
+        }
+    }
+
+    /// Resets the Relevance of `tag` to 0. Whether it changed.
+    pub fn reset_relevance(&mut self, tag: &str) -> bool {
+        match self.0.get_mut(tag) {
+            Some(known) if known.relevance > 0 => {
+                known.relevance = 0;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Gives the known `tag` the Tag Color `color` (`#rrggbb`, kept lowercase),
@@ -181,7 +249,7 @@ impl Tags {
         if color.is_some_and(|c| !is_hex(c)) {
             return false;
         }
-        let Some(meta) = self.0.get_mut(tag) else {
+        let Some(Known { meta, .. }) = self.0.get_mut(tag) else {
             return false;
         };
         meta.color = color.map(str::to_ascii_lowercase);
@@ -213,12 +281,49 @@ mod tests {
         tags.list().into_iter().map(|e| e.name).collect()
     }
 
+    /// `tags` with each name raised by its count.
+    fn used(uses: &[(&str, u64)]) -> Tags {
+        let mut tags = Tags::default();
+        for (name, count) in uses {
+            tags.add(name, T);
+            for _ in 0..*count {
+                tags.raise(name, T);
+            }
+        }
+        tags
+    }
+
     #[test]
-    fn tags_are_listed_alphabetically() {
+    fn tags_are_listed_by_relevance_then_alphabetically() {
+        let tags = used(&[("work", 1), ("home", 0), ("a/b", 0), ("x", 3)]);
+        assert_eq!(names(&tags), ["x", "work", "a/b", "home"]);
         assert_eq!(
-            names(&tags(&["work", "home", "a/b"])),
-            ["a/b", "home", "work"]
+            tags.ordered(["home", "unknown", "work", "a/b"].map(String::from)),
+            ["work", "a/b", "home", "unknown"]
         );
+    }
+
+    #[test]
+    fn raising_adds_an_unknown_tag_at_one_and_leaves_updated() {
+        let mut tags = tags(&["work"]);
+        tags.raise("work", NEWER);
+        tags.raise("work", NEWER);
+        tags.raise("new", NEWER);
+        assert_eq!(tags.relevance("work"), 2);
+        assert_eq!(tags.relevance("new"), 1);
+        assert_eq!(tags.relevance("unknown"), 0);
+        assert!(tags.render().contains(&format!("\"{T}\"")));
+    }
+
+    #[test]
+    fn relevance_is_reset_to_zero() {
+        let mut tags = used(&[("work", 2), ("home", 0)]);
+        assert!(tags.reset_relevance("work"));
+        assert_eq!(tags.relevance("work"), 0);
+        assert!(!tags.reset_relevance("work"));
+        assert!(!tags.reset_relevance("home"));
+        assert!(!tags.reset_relevance("unknown"));
+        assert!(!tags.render().contains("relevance"));
     }
 
     fn left_out(names: &[&str]) -> Vec<String> {
@@ -231,6 +336,15 @@ mod tests {
         let found = tags.suggest("w", &[]);
         assert_eq!(found.matches, ["w", "work/a", "work/b", "bw", "network"]);
         assert!(tags.suggest("y", &[]).matches.is_empty());
+    }
+
+    #[test]
+    fn suggestions_order_each_group_by_relevance() {
+        let tags = used(&[("work/a", 0), ("work/b", 2), ("network", 0), ("bw", 1)]);
+        assert_eq!(
+            tags.suggest("w", &[]).matches,
+            ["work/b", "work/a", "bw", "network"]
+        );
     }
 
     #[test]
@@ -310,6 +424,7 @@ mod tests {
     },
     "work": {
       "color": "#d0021b",
+      "relevance": 2,
       "updated": "2026-01-02T00:00:00Z"
     }
   }
@@ -320,12 +435,14 @@ mod tests {
             tags.list(),
             [
                 Entry {
-                    name: "home".into(),
-                    color: None
+                    name: "work".into(),
+                    color: Some("#d0021b".into()),
+                    relevance: 2
                 },
                 Entry {
-                    name: "work".into(),
-                    color: Some("#d0021b".into())
+                    name: "home".into(),
+                    color: None,
+                    relevance: 0
                 },
             ]
         );
@@ -413,6 +530,54 @@ mod tests {
         let one = file(&[("a", Some("#111111"), NEWER)]);
         let two = file(&[("a", Some("#222222"), NEWER)]);
         merged(None, &one, &two); // `merged` checks the symmetry
+    }
+
+    fn relevances(tags: &Tags) -> Vec<(String, u64)> {
+        let mut found: Vec<_> = tags
+            .list()
+            .into_iter()
+            .map(|e| (e.name, e.relevance))
+            .collect();
+        found.sort();
+        found
+    }
+
+    fn rendered(uses: &[(&str, u64)]) -> Vec<u8> {
+        used(uses).render().into_bytes()
+    }
+
+    #[test]
+    fn relevance_raised_on_both_sides_adds_up() {
+        let base = rendered(&[("a", 2), ("b", 0)]);
+        let one = rendered(&[("a", 3), ("b", 0)]);
+        let two = rendered(&[("a", 5), ("b", 1), ("c", 1)]);
+        assert_eq!(
+            relevances(&merged(Some(&base), &one, &two)),
+            [("a".into(), 6), ("b".into(), 1), ("c".into(), 1)]
+        );
+    }
+
+    #[test]
+    fn a_reset_merges_with_uses_elsewhere() {
+        let base = rendered(&[("a", 5)]);
+        let reset = rendered(&[("a", 0)]);
+        let raised = rendered(&[("a", 7)]);
+        assert_eq!(
+            relevances(&merged(Some(&base), &reset, &raised)),
+            [("a".into(), 2)]
+        );
+    }
+
+    #[test]
+    fn without_relevance_at_the_last_sync_the_higher_wins() {
+        let one = rendered(&[("a", 3)]);
+        let two = rendered(&[("a", 5)]);
+        assert_eq!(relevances(&merged(None, &one, &two)), [("a".into(), 5)]);
+        let base = rendered(&[]);
+        assert_eq!(
+            relevances(&merged(Some(&base), &one, &two)),
+            [("a".into(), 5)]
+        );
     }
 
     #[test]

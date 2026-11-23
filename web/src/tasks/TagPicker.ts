@@ -60,8 +60,9 @@ export function pickTagsDialog(
     show();
   };
   const show = () => {
-    const names = [...known.map((t) => t.name), ...created].filter((n) => n.includes(search.value));
-    const rows = names.sort().map((tag) => {
+    // Known ones by Relevance.
+    const names = [...created, ...known.map((t) => t.name)].filter((n) => n.includes(search.value));
+    const rows = names.map((tag) => {
       const box = make("input", "");
       box.type = "checkbox";
       box.checked = selected.includes(tag);

@@ -7,8 +7,8 @@ import type { TasksModel } from "../tasks/TasksModel";
 const defaultGrey = "#808080";
 
 /**
- * Settings' Tags page: every Tag, alphabetically, in its Tag
- * Color, each with a color input, a Default and a Delete button; "No Tags"
+ * Settings' Tags page: every Tag by Relevance, in its Tag Color, each with its
+ * Relevance, a color input, a Default, a Reset to 0 and a Delete button; "No Tags"
  * if there are none. `back` returns to Settings. Call `show` to list the Tags as they are.
  */
 export class ManageTagsPage {
@@ -29,7 +29,7 @@ export class ManageTagsPage {
     const tags = this.tasks.allTags;
     this.empty.hidden = tags.length > 0;
     this.list.replaceChildren(
-      ...tags.map(({ name, color }) => {
+      ...tags.map(({ name, color, relevance }) => {
         const input = make("input", "manage-tags-color");
         input.type = "color";
         input.value = color ?? defaultGrey;
@@ -45,11 +45,19 @@ export class ManageTagsPage {
         });
         reset.disabled = color === undefined;
         reset.setAttribute("aria-label", `Reset ${name} to Default`);
+        const count = make("span", "manage-tags-relevance", [String(relevance)]);
+        count.setAttribute("aria-label", `Relevance ${relevance}`);
+        const resetRelevance = button("manage-tags-button", "Reset to 0", () => {
+          this.tasks.resetTagRelevance(name);
+          this.show();
+        });
+        resetRelevance.disabled = relevance === 0;
+        resetRelevance.setAttribute("aria-label", `Reset the Relevance of ${name} to 0`);
         const remove = button("manage-tags-button", "Delete", () => {
           deleteTagDialog(this.tasks, this.element, name, () => this.show());
         });
         remove.setAttribute("aria-label", `Delete ${name}`);
-        return make("li", "", [tagLabel(name, color), input, reset, remove]);
+        return make("li", "", [tagLabel(name, color), count, input, reset, resetRelevance, remove]);
       }),
     );
   }

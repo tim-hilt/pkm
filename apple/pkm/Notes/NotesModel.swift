@@ -33,7 +33,7 @@ final class NotesModel {
         }
     }
 
-    /// The Tags some Note carries, alphabetically: what the list can be narrowed to.
+    /// The Tags some Note carries, by Relevance: what the list can be narrowed to.
     var tagsInUse: [String] {
         _ = changes
         if let used { return used }

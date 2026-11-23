@@ -238,6 +238,11 @@ impl BookmarkStore {
         Ok(self.0.list()?)
     }
 
+    /// The Tags some Bookmark carries, by Relevance.
+    pub fn tags_in_use(&self) -> Result<Vec<String>, BookmarksError> {
+        Ok(self.0.tags_in_use()?)
+    }
+
     /// Every Bookmark carrying the Tag, newest Saved first.
     pub fn bookmarks_tagged(&self, tag: String) -> Result<Vec<Bookmark>, BookmarksError> {
         Ok(self.0.list_tagged(&tag)?)

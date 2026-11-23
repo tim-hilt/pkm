@@ -255,6 +255,7 @@ impl Tasks {
     /// position if it has a Parent. No Filter is written: a Task without a place
     /// follows the placed ones by `created`.
     fn insert(&self, new: &NewTask, parent: Option<(&str, f64)>) -> Result<Task, Error> {
+        self.tags.put_on(new.tags.iter().cloned())?;
         let mut entropy = Entropy::from_system();
         loop {
             let id = ItemId::new(&mut entropy);
@@ -517,6 +518,11 @@ impl Tasks {
         })
     }
 
+    /// Resets the Relevance of `tag` to 0; an unknown Tag is left alone.
+    pub fn reset_tag_relevance(&self, tag: &str) -> io::Result<()> {
+        self.tags.change(|tags| Ok(tags.reset_relevance(tag)))
+    }
+
     /// Deletes `tag`: removes it from every Task and every Filter's Group by
     /// (with its places), then forgets it and its Tag Color. In that order, so
     /// that repeating it after an interruption finishes the job.
@@ -579,9 +585,14 @@ impl Tasks {
     fn rewrite(&self, id: &ItemId, change: impl FnOnce(&mut Document)) -> Result<Document, Error> {
         let (mut file, _) = self.read_open(id)?;
         let before = file.render();
+        let tags_before = tags_of(&file);
         change(&mut file);
         self.drop_missing_blockers(&mut file);
         if file.render() != before {
+            let put_on = tags_of(&file)
+                .into_iter()
+                .filter(|t| !tags_before.contains(t));
+            self.tags.put_on(put_on)?;
             file.set_scalar("updated", iso8601(now_ms()));
             self.write(id, &file, Overwrite::Yes)?;
         }
@@ -1481,6 +1492,25 @@ mod tests {
         assert_eq!(known(&tasks, "w"), ["w", "work/a", "work/b"]);
         assert_eq!(known(&tasks, "").len(), 4);
         assert!(known(&tasks, "x").is_empty());
+    }
+
+    #[test]
+    fn each_tag_put_on_a_task_raises_its_relevance() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let task = tagged(&tasks, &["a", "b"]);
+        tasks.add_tag(&task.id, "a").unwrap(); // carried already
+        tasks
+            .edit(&task.id, "t", "", 4, &tag_names(&["a", "c"]))
+            .unwrap();
+        tasks.remove_tag(&task.id, "a").unwrap();
+        tasks.add_tag(&task.id, "a").unwrap();
+        tasks.create_subtask(&task.id, "s", 4, &[]).unwrap();
+        let relevance = |tag| tasks.tags().relevance(tag);
+        assert_eq!((relevance("a"), relevance("b"), relevance("c")), (3, 2, 2));
+        assert_eq!(known(&tasks, ""), ["a", "b", "c"]);
+        tasks.reset_tag_relevance("a").unwrap();
+        assert_eq!(known(&tasks, ""), ["b", "c", "a"]);
     }
 
     #[test]

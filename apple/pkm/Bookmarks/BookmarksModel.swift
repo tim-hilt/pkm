@@ -60,8 +60,8 @@ final class BookmarksModel {
     /// The Bookmarks that match `searchText`, Title matches first; empty when not searching.
     private(set) var results: [BookmarkFound] = []
 
-    /// The Tags some Bookmark carries, alphabetically: what the list can be narrowed to.
-    var tagsInUse: [String] { Set(bookmarks.flatMap(\.tags)).sorted() }
+    /// The Tags some Bookmark carries, by Relevance: what the list can be narrowed to.
+    private(set) var tagsInUse: [String] = []
 
     /// The Bookmark whose Article the Reader shows, if any.
     var openID: String?
@@ -352,6 +352,7 @@ final class BookmarksModel {
 
     private func reload() {
         bookmarks = (try? store.bookmarks()) ?? []
+        tagsInUse = (try? store.tagsInUse()) ?? []
         shown = tagFilter.flatMap { try? store.bookmarksTagged(tag: $0) } ?? bookmarks
         reloadResults()
     }

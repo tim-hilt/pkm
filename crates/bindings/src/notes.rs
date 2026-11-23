@@ -164,7 +164,7 @@ impl NoteStore {
             .collect())
     }
 
-    /// The Tags some Note carries, alphabetically.
+    /// The Tags some Note carries, by Relevance.
     pub fn tags_in_use(&self) -> Result<Vec<String>, NotesError> {
         Ok(self.0.tags_in_use()?)
     }

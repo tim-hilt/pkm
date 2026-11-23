@@ -38,7 +38,7 @@ export interface NoteText {
 export class NotesModel {
   /** The Notes the list shows, newest changed first: those carrying `tagFilter`, or all. */
   notes: ListedNote[] = [];
-  /** The Tags some Note carries, alphabetically: what the list can be narrowed to. */
+  /** The Tags some Note carries, by Relevance: what the list can be narrowed to. */
   tagsInUse: string[] = [];
   /** What Search looks for; empty when not searching. */
   searchText = "";

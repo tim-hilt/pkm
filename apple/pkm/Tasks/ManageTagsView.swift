@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// Every Tag, alphabetically, each `a/b` as one flat row written in its Tag Color;
-/// "No Tags" if there are none. Swiping a row offers Edit, which picks the Tag
-/// Color or resets it to Default, and Delete, which a full swipe runs.
+/// Every Tag by Relevance, each `a/b` as one flat row written in its Tag Color, its Relevance
+/// on the right; "No Tags" if there are none. Swiping a row offers Edit, which picks the Tag
+/// Color or resets it to Default, Reset to 0, which resets its Relevance, and Delete, which a
+/// full swipe runs.
 struct ManageTagsView: View {
     @Environment(TasksModel.self) private var tasks
     @Environment(BookmarksModel.self) private var bookmarks
@@ -12,17 +13,28 @@ struct ManageTagsView: View {
 
     var body: some View {
         List(tasks.allTags, id: \.name) { tag in
-            Text(tag.name).foregroundStyle(tag.style(default: .primary))
-                .swipeActions(edge: .trailing) {
-                    Button("Delete", systemImage: "trash", role: .destructive) { deletion.ask(for: tag.name) }
-                    Button("Edit", systemImage: "pencil") { editing = tag.name }.tint(.blue)
+            LabeledContent {
+                Text(tag.relevance, format: .number).monospacedDigit()
+            } label: {
+                Text(tag.name).foregroundStyle(tag.style(default: .primary))
+            }
+            .swipeActions(edge: .trailing) {
+                Button("Delete", systemImage: "trash", role: .destructive) { deletion.ask(for: tag.name) }
+                Button("Edit", systemImage: "pencil") { editing = tag.name }.tint(.blue)
+                if tag.relevance > 0 {
+                    Button("Reset to 0", systemImage: "arrow.counterclockwise") {
+                        tasks.resetTagRelevance(tag.name)
+                    }
                 }
-                .contextMenu {
-                    Button("Edit", systemImage: "pencil") { editing = tag.name }
-                    Button("Default Color") { tasks.setTagColor(tag.name, to: nil) }
-                        .disabled(tag.color == nil)
-                    Button("Delete", systemImage: "trash", role: .destructive) { deletion.ask(for: tag.name) }
-                }
+            }
+            .contextMenu {
+                Button("Edit", systemImage: "pencil") { editing = tag.name }
+                Button("Default Color") { tasks.setTagColor(tag.name, to: nil) }
+                    .disabled(tag.color == nil)
+                Button("Reset to 0", systemImage: "arrow.counterclockwise") { tasks.resetTagRelevance(tag.name) }
+                    .disabled(tag.relevance == 0)
+                Button("Delete", systemImage: "trash", role: .destructive) { deletion.ask(for: tag.name) }
+            }
         }
         .listStyle(.plain)
         .sheet(isPresented: isEditing) {
