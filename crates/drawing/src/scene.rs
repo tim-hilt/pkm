@@ -313,6 +313,9 @@ impl Handles {
     }
 }
 
+/// The member of `appState` that holds the Unit.
+const UNIT_KEY: &str = "pkmUnit";
+
 impl Scene {
     /// A Scene without Elements, with the members excalidraw.com exports.
     pub fn empty() -> Scene {
@@ -490,6 +493,37 @@ impl Scene {
             .and_then(|app_state| app_state.get("viewBackgroundColor"))
             .and_then(Value::as_str)
             .unwrap_or("#ffffff")
+    }
+
+    /// The Unit of the Drawing: how many Scene pixels one unit of Dimensions
+    /// is (ADR-0038). One if the file has none, or one that is not a
+    /// number above zero.
+    pub fn unit(&self) -> f64 {
+        self.root
+            .get("appState")
+            .and_then(Value::as_object)
+            .and_then(|app_state| app_state.get(UNIT_KEY))
+            .and_then(Value::as_f64)
+            .filter(|unit| unit.is_finite() && *unit > 0.0)
+            .unwrap_or(1.0)
+    }
+
+    /// Makes `unit` (finite and above zero) the Unit of the Drawing. One is
+    /// the Unit that is none: the member is removed, so that a Drawing that
+    /// was never calibrated, or was reset, saves as before.
+    pub(crate) fn set_unit(&mut self, unit: f64) {
+        if !matches!(self.root.get("appState"), Some(Value::Object(_))) {
+            self.root
+                .insert("appState".into(), Value::Object(Object::new()));
+        }
+        let Some(Value::Object(app_state)) = self.root.get_mut("appState") else {
+            return;
+        };
+        if unit == 1.0 {
+            app_state.remove(UNIT_KEY);
+        } else {
+            app_state.insert(UNIT_KEY.into(), Value::Number(unit));
+        }
     }
 
     /// The bytes of the file `id` of the Drawing's `files`, exactly as stored:

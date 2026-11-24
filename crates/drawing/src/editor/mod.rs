@@ -932,8 +932,9 @@ impl Editor {
         }
         let zoom = self.navigation.viewport().zoom();
         let colors = overlay::Colors::of(self.dark_mode);
+        let unit = self.scene.unit();
         if let Some(line) = self.measured_line() {
-            return dimensions::of_line(&edit_points::clean_path(&line), zoom, colors);
+            return dimensions::of_line(&edit_points::clean_path(&line), zoom, unit, colors);
         }
         let (frame, angle) = if let Some(shape) = &self.shape {
             (shape.frame(), 0.0)
@@ -943,7 +944,73 @@ impl Editor {
         } else {
             return None;
         };
-        Some(dimensions::of_box(frame, angle, zoom, colors))
+        Some(dimensions::of_box(frame, angle, zoom, unit, colors))
+    }
+
+    /// The Drawing's Unit: how many Scene pixels one unit of Dimensions is.
+    /// One until it is set; saved with the Drawing, see [`crate::scene`].
+    pub fn unit(&self) -> f64 {
+        self.scene.unit()
+    }
+
+    /// Whether [`Editor::set_unit`] has a measure: exactly one Element or one
+    /// group is selected.
+    pub fn can_set_unit(&self) -> bool {
+        self.measure().is_some()
+    }
+
+    /// The width of the only Element or group selected in units (the length
+    /// of a line or arrow), as its Dimensions show it, for the user to
+    /// change; `None` unless [`Editor::can_set_unit`].
+    pub fn selection_measure(&self) -> Option<f64> {
+        self.measure().map(|pixels| pixels / self.scene.unit())
+    }
+
+    /// Makes the Selection's measure (see [`Editor::selection_measure`]) read
+    /// `value`: the Unit becomes the measure in Scene pixels over it. One undo
+    /// step. Returns whether it did: not for a `value` that is not finite and
+    /// above zero, a Selection that cannot be measured or measures nothing,
+    /// or while a pointer is drawing or moving.
+    pub fn set_unit(&mut self, value: f64) -> bool {
+        self.finish_placing();
+        if self.is_gesturing() || !(value.is_finite() && value > 0.0) {
+            return false;
+        }
+        let Some(pixels) = self.measure() else {
+            return false;
+        };
+        let unit = pixels / value;
+        if !(unit.is_finite() && unit > 0.0) {
+            return false;
+        }
+        self.change_unit(unit);
+        true
+    }
+
+    /// Makes the Unit one Scene pixel again, as one undo step; does nothing
+    /// while a pointer is drawing or moving.
+    pub fn reset_unit(&mut self) {
+        self.finish_placing();
+        if !self.is_gesturing() {
+            self.change_unit(1.0);
+        }
+    }
+
+    /// The Selection's measure in Scene pixels, see [`dimensions::measure`].
+    fn measure(&self) -> Option<f64> {
+        dimensions::measure(&self.scene, &self.selection, self.editing_group.as_deref())
+    }
+
+    /// Makes `unit` the Unit as one undo step, unless it is that already.
+    fn change_unit(&mut self, unit: f64) {
+        if unit == self.scene.unit() {
+            return;
+        }
+        let mut step = Step::begin(&self.selection);
+        step.touch_unit(&self.scene);
+        self.scene.set_unit(unit);
+        self.history.record(step, &self.scene, &self.selection);
+        self.changed();
     }
 
     /// The line or arrow whose length is shown: the one being drawn or having

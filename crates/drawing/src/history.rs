@@ -18,6 +18,10 @@
 //! Selection alone is not an undo step: undo and redo are for the Drawing,
 //! and the Selection comes along with them, restored to what it was before
 //! the action when undoing and to what it was after when redoing.
+//!
+//! A step can also carry the Drawing's Unit (`appState.pkmUnit`, see
+//! [`Scene::unit`]) from before and after, which undo and redo swap like
+//! Elements.
 
 use std::collections::{HashMap, HashSet};
 
@@ -65,6 +69,8 @@ pub(crate) struct Step {
     order: Option<Vec<String>>,
     /// The place in `before` of each id in it, to find one in constant time.
     tracked: HashMap<String, usize>,
+    /// The Unit before the action, if it changes it.
+    unit: Option<f64>,
 }
 
 impl Step {
@@ -75,6 +81,7 @@ impl Step {
             before: Vec::new(),
             order: None,
             tracked: HashMap::new(),
+            unit: None,
         }
     }
 
@@ -138,6 +145,12 @@ impl Step {
         self.order.get_or_insert_with(|| scene.order());
     }
 
+    /// Notes that the action is about to change the Unit of the Scene, which
+    /// is as it was before.
+    pub fn touch_unit(&mut self, scene: &Scene) {
+        self.unit.get_or_insert_with(|| scene.unit());
+    }
+
     /// Notes that the action created the Element `id`.
     pub fn create(&mut self, id: &str) {
         if !self.tracked.contains_key(id) {
@@ -172,6 +185,8 @@ struct Entry {
     /// The Elements whose z-order changed, in the places they took before
     /// the action and after it.
     order: Option<(Vec<String>, Vec<String>)>,
+    /// The Unit before the action and after it, if it changed it.
+    unit: Option<(f64, f64)>,
     /// The Selection before the action and after it.
     selection: (Selection, Selection),
 }
@@ -208,9 +223,14 @@ impl Entry {
         let order = step
             .order
             .and_then(|before| reordered(before, scene.order()));
-        (!changes.is_empty() || order.is_some()).then(|| Self {
+        let unit = step
+            .unit
+            .map(|before| (before, scene.unit()))
+            .filter(|(before, after)| before != after);
+        (!changes.is_empty() || order.is_some() || unit.is_some()).then(|| Self {
             changes,
             order,
+            unit,
             selection: (step.selection, selection.clone()),
         })
     }
@@ -292,6 +312,9 @@ impl History {
         if let Some((before, _)) = &entry.order {
             scene.arrange(before);
         }
+        if let Some((before, _)) = entry.unit {
+            scene.set_unit(before);
+        }
         let selection = entry.selection.0.clone();
         self.redo.push(entry);
         Some(selection)
@@ -306,6 +329,9 @@ impl History {
         }
         if let Some((_, after)) = &entry.order {
             scene.arrange(after);
+        }
+        if let Some((_, after)) = entry.unit {
+            scene.set_unit(after);
         }
         let selection = entry.selection.1.clone();
         self.undo.push(entry);

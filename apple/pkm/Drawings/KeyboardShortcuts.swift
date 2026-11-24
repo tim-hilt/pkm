@@ -101,6 +101,12 @@ struct CanvasCommands: Commands {
                         get: { controller?.showDimensions ?? false }, set: { controller?.setShowDimensions($0) })
                 )
                 .disabled(controller == nil)
+                if controller?.showDimensions == true {
+                    Button("Set Unit…") { controller?.askUnit() }
+                        .disabled(controller?.canSetUnit != true)
+                    Button("Reset Unit") { controller?.resetUnit() }
+                        .disabled(controller?.canResetUnit != true)
+                }
             #endif
         }
         CommandMenu("Tools") {

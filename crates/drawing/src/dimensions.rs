@@ -7,10 +7,15 @@
 //! anchor and turned by their angle. Never part of the Scene, exports or the
 //! saved file.
 
+use crate::edit_points;
 use crate::frame::Frame;
 use crate::geometry::{Geometry, StrokeStyle};
+use crate::group;
 use crate::overlay::{Colors, NO_ELEMENT};
 use crate::path::Point;
+use crate::scene::Scene;
+use crate::selection::Selection;
+use crate::transform_handles::TransformBox;
 
 /// How far in view points a dimension line keeps from the box.
 const LINE_OFFSET: f64 = 20.0;
@@ -58,7 +63,7 @@ pub struct DimensionLabel {
 /// The Dimensions of a box of `frame` (where it is when not turned) turned
 /// clockwise by `angle` about its middle: its width below it and height left
 /// of it, along its own sides. Made for a view at `zoom`.
-pub(crate) fn of_box(frame: Frame, angle: f64, zoom: f64, colors: Colors) -> Dimensions {
+pub(crate) fn of_box(frame: Frame, angle: f64, zoom: f64, unit: f64, colors: Colors) -> Dimensions {
     let (width, height) = (frame.width(), frame.height());
     let (sin, cos) = angle.sin_cos();
     let (cx, cy) = frame.centre();
@@ -108,8 +113,8 @@ pub(crate) fn of_box(frame: Frame, angle: f64, zoom: f64, colors: Colors) -> Dim
         stroke.move_to(from.0 as f32, from.1 as f32);
         stroke.line_to(to.0 as f32, to.1 as f32);
     }
-    let width_text = format!("{width:.2}");
-    let height_text = format!("{height:.2}");
+    let width_text = format!("{:.2}", width / unit);
+    let height_text = format!("{:.2}", height / unit);
     let height_reach = LINE_OFFSET + LABEL_GAP + height_text.len() as f64 * CHARACTER_WIDTH / 2.0;
     let labels = [
         (
@@ -133,11 +138,12 @@ pub(crate) fn of_box(frame: Frame, angle: f64, zoom: f64, colors: Colors) -> Dim
 /// The Dimensions of a line or arrow whose clean path is the polyline `path`
 /// in the Scene: its length as one plain label at the middle of the path
 /// length, on one side of it (the upper one of a sideways path), and no
-/// lines. Made for a view at `zoom`; `None` for an empty path.
-pub(crate) fn of_line(path: &[Point], zoom: f64, colors: Colors) -> Option<Dimensions> {
-    let length: f64 = path.windows(2).map(|w| distance(w[0], w[1])).sum();
+/// lines. Made for a view at `zoom`; `None` for an empty path. Like all
+/// numbers it is in units of `unit` Scene pixels.
+pub(crate) fn of_line(path: &[Point], zoom: f64, unit: f64, colors: Colors) -> Option<Dimensions> {
+    let length = path_length(path);
     let ((x, y), (tx, ty)) = point_at(path, length / 2.0)?;
-    let text = format!("{length:.2}");
+    let text = format!("{:.2}", length / unit);
     // The side is the path's left one, which is up for one that runs right;
     // the label is moved out of the path by half its extent that way.
     let (nx, ny) = (ty, -tx);
@@ -156,6 +162,30 @@ pub(crate) fn of_line(path: &[Point], zoom: f64, colors: Colors) -> Option<Dimen
         color: colors.selection,
         opacity: OPACITY,
     })
+}
+
+/// The width that "Set unit…" measures, in Scene pixels: that of the only
+/// Element selected (the length of a line or arrow), or of the box of the
+/// only group selected, as the Dimensions show it. `None` for any other
+/// Selection.
+pub(crate) fn measure(scene: &Scene, selection: &Selection, editing: Option<&str>) -> Option<f64> {
+    let ids = selection.ids();
+    if let [id] = ids {
+        let element = scene.element_by_id(id)?;
+        if element.kind().is_linear() {
+            return Some(path_length(&edit_points::clean_path(&element)));
+        }
+    } else {
+        let groups = group::selected_members(scene, selection, editing);
+        if !matches!(groups.as_slice(), [members] if members.len() == ids.len()) {
+            return None;
+        }
+    }
+    Some(TransformBox::of(scene, selection)?.frame().width())
+}
+
+fn path_length(path: &[Point]) -> f64 {
+    path.windows(2).map(|w| distance(w[0], w[1])).sum()
 }
 
 fn distance(a: Point, b: Point) -> f64 {
@@ -635,7 +665,7 @@ mod tests {
         // No gesture reaches an elbow arrow yet (it has no point handles), so
         // its path, which is through its points, is measured directly.
         let path = [(0.0, 0.0), (50.0, 0.0), (50.0, 80.0), (100.0, 80.0)];
-        let dimensions = super::of_line(&path, 1.0, Colors::of(false)).unwrap();
+        let dimensions = super::of_line(&path, 1.0, 1.0, Colors::of(false)).unwrap();
         assert_eq!(dimensions.labels[0].text, "180.00");
     }
 
@@ -666,5 +696,181 @@ mod tests {
         drag_without_lifting(&mut editor, (356.0, 150.0), (406.0, 150.0));
 
         assert_eq!(label_texts(&editor), ["300.00", "100.00"]);
+    }
+
+    // --- The Unit ------------------------------------------------------------
+
+    /// The `appState` of the saved Drawing, as JSON; empty if it has none.
+    fn saved_app_state(editor: &Editor) -> String {
+        let saved = pkm_base::json::parse(&String::from_utf8(editor.save()).unwrap()).unwrap();
+        saved
+            .get("appState")
+            .map(|a| a.to_json())
+            .unwrap_or_default()
+    }
+
+    /// A line `a` selected, 100 + 100 = 200 long.
+    fn selected_line() -> Editor {
+        let mut editor = with_selected_line(&line("line", CORNER, ""), (150.0, 100.0));
+        assert_eq!(editor.selection_measure(), Some(200.0));
+        editor.set_show_dimensions(true);
+        editor
+    }
+
+    #[test]
+    fn the_unit_is_one_scene_pixel_and_not_in_the_file_until_set() {
+        let editor = selected(RECTANGLE);
+        assert_eq!(editor.unit(), 1.0);
+        assert!(!saved_app_state(&editor).contains("pkmUnit"));
+    }
+
+    #[test]
+    fn setting_the_unit_from_an_element_makes_its_width_read_as_the_value() {
+        let mut editor = selected(RECTANGLE);
+        assert_eq!(editor.selection_measure(), Some(100.0));
+        let revision = editor.revision();
+
+        // 100 pixels wide, to read 4: 25 pixels per unit.
+        assert!(editor.set_unit(4.0));
+
+        assert_eq!(editor.unit(), 25.0);
+        assert_eq!(editor.selection_measure(), Some(4.0));
+        assert!(saved_app_state(&editor).contains("\"pkmUnit\":25"));
+        assert!(editor.revision() > revision);
+    }
+
+    #[test]
+    fn dimensions_read_in_the_unit() {
+        let mut editor = selected(RECTANGLE);
+        assert!(editor.set_unit(4.0));
+
+        // 100 x 50 pixels are 4 x 2 units; the corner goes to 150 x 80.
+        drag_without_lifting(&mut editor, (206.0, 156.0), (256.0, 186.0));
+        assert_eq!(label_texts(&editor), ["6.00", "3.20"]);
+    }
+
+    #[test]
+    fn a_line_is_calibrated_by_its_length_and_reads_in_the_unit() {
+        let mut editor = selected_line();
+        assert!(editor.set_unit(10.0));
+        assert_eq!(editor.unit(), 20.0);
+
+        // The last point goes 100 down: 300 pixels long.
+        drag_without_lifting(&mut editor, (200.0, 200.0), (200.0, 300.0));
+        assert_eq!(label_texts(&editor), ["15.00"]);
+    }
+
+    #[test]
+    fn a_group_is_calibrated_by_the_width_of_its_box() {
+        let mut editor = editor_with(&[RECTANGLE, OTHER]);
+        editor.select_all();
+        assert!(!editor.can_set_unit(), "two Elements");
+        editor.group();
+        // The box is (100, 100)-(350, 150).
+        assert!(editor.can_set_unit());
+        assert_eq!(editor.selection_measure(), Some(250.0));
+
+        assert!(editor.set_unit(5.0));
+        assert_eq!(editor.unit(), 50.0);
+    }
+
+    #[test]
+    fn nothing_can_be_set_without_exactly_one_element_or_group() {
+        let mut editor = editor_with(&[RECTANGLE, OTHER]);
+        assert!(!editor.can_set_unit());
+        assert_eq!(editor.selection_measure(), None);
+        assert!(!editor.set_unit(2.0));
+
+        editor.select_all();
+        assert!(!editor.can_set_unit());
+        assert!(!editor.set_unit(2.0));
+        assert_eq!(editor.unit(), 1.0);
+    }
+
+    #[test]
+    fn values_that_are_not_finite_and_above_zero_are_rejected() {
+        let mut editor = selected(RECTANGLE);
+        let revision = editor.revision();
+        for value in [0.0, -3.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(!editor.set_unit(value), "{value}");
+        }
+        assert_eq!(editor.unit(), 1.0);
+        assert_eq!(editor.revision(), revision);
+        assert!(!editor.can_undo());
+    }
+
+    #[test]
+    fn resetting_goes_back_to_one_pixel_and_takes_the_member_out_of_the_file() {
+        let mut editor = selected(RECTANGLE);
+        assert!(editor.set_unit(4.0));
+        let revision = editor.revision();
+
+        editor.reset_unit();
+
+        assert_eq!(editor.unit(), 1.0);
+        assert!(!saved_app_state(&editor).contains("pkmUnit"));
+        assert!(editor.revision() > revision);
+    }
+
+    #[test]
+    fn setting_and_resetting_are_one_undo_step_each() {
+        let mut editor = selected(RECTANGLE);
+        assert!(editor.set_unit(4.0));
+        editor.reset_unit();
+
+        editor.undo();
+        assert_eq!(editor.unit(), 25.0);
+        editor.undo();
+        assert_eq!(editor.unit(), 1.0);
+        assert!(!editor.can_undo());
+        assert!(!saved_app_state(&editor).contains("pkmUnit"));
+
+        editor.redo();
+        assert_eq!(editor.unit(), 25.0);
+        editor.redo();
+        assert_eq!(editor.unit(), 1.0);
+        assert!(!editor.can_redo());
+    }
+
+    #[test]
+    fn undoing_a_unit_selects_what_was_selected_when_it_was_set() {
+        let mut editor = selected(RECTANGLE);
+        assert!(editor.set_unit(4.0));
+        tap(&mut editor, "mouse", (500.0, 500.0), 0.0);
+        assert!(editor.selection().is_empty());
+
+        editor.undo();
+        assert_eq!(editor.selection(), ["a"]);
+    }
+
+    #[test]
+    fn a_unit_that_changes_nothing_is_no_step() {
+        let mut editor = selected(RECTANGLE);
+        assert!(editor.set_unit(100.0));
+        editor.reset_unit();
+        assert!(!editor.can_undo());
+    }
+
+    #[test]
+    fn a_unit_the_file_has_that_is_nonsense_reads_as_one_pixel() {
+        for unit in ["0", "-2", "\"x\""] {
+            let mut editor = Editor::new();
+            let file = format!(
+                r##"{{"type":"excalidraw","version":2,"elements":[],"appState":{{"pkmUnit":{unit}}},"files":{{}}}}"##
+            );
+            editor.load(file.as_bytes()).unwrap();
+            assert_eq!(editor.unit(), 1.0, "{unit}");
+        }
+    }
+
+    #[test]
+    fn the_unit_comes_to_another_device_by_a_merge() {
+        let mut here = selected(RECTANGLE);
+        let mut there = editor_with(&[RECTANGLE]);
+        assert!(here.set_unit(4.0));
+
+        there.merge_synced(&here.save()).unwrap();
+
+        assert_eq!(there.unit(), 25.0);
     }
 }

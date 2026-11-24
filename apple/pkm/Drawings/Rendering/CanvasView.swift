@@ -798,6 +798,13 @@ final class CanvasController {
     private(set) var hasSelection = false
     /// Whether the Scene has Elements: Export has something to export.
     private(set) var hasElements = false
+    /// Whether "Set unit…" has a measure (one Element or Group is selected), and whether
+    /// "Reset unit" has anything to reset (the Unit is not one Scene pixel).
+    private(set) var canSetUnit = false
+    private(set) var canResetUnit = false
+    /// The "Set unit…" alert: shown while `isAskingUnit`, with the value in `unitText`.
+    var isAskingUnit = false
+    var unitText = ""
     /// The zoom in whole percent, as the reset zoom button shows it. Whole
     /// percent, so that a pinch updates the chrome only when the number does.
     private(set) var zoomPercent = 100
@@ -818,6 +825,8 @@ final class CanvasController {
         properties = editor.showsProperties() ? editor.properties() : nil
         hasSelection = !editor.selection().isEmpty
         hasElements = editor.elementCount() > 0
+        canSetUnit = editor.canSetUnit()
+        canResetUnit = editor.unit() != 1
         zoomPercent = Int((editor.viewport().zoom * 100).rounded())
     }
 
@@ -857,6 +866,23 @@ final class CanvasController {
         settings.set(on, forKey: Self.showDimensionsKey)
         canvas?.perform { $0.setShowDimensions(on: on) }
     }
+    /// Opens the "Set unit…" alert, filled with the Selection's current measure in units.
+    func askUnit() {
+        guard let measure = canvas?.editor?.selectionMeasure() else { return }
+        unitText = measure.formatted(.number.precision(.fractionLength(2)).grouping(.never))
+        isAskingUnit = true
+    }
+    /// The decimal in `unitText`, if it is one that can be the measure: above zero.
+    var unitValue: Double? {
+        guard let value = try? Double(unitText, format: .number), value.isFinite, value > 0 else { return nil }
+        return value
+    }
+    /// Makes the Selection's measure read `unitText`; nothing for an invalid one.
+    func setUnitFromText() {
+        guard let value = unitValue else { return }
+        canvas?.perform { _ = $0.setUnit(value: value) }
+    }
+    func resetUnit() { canvas?.perform { $0.resetUnit() } }
     func perform(_ command: Command) { canvas?.perform { $0.perform(command: command) } }
     func duplicate() { canvas?.perform { $0.duplicate() } }
     func group() { canvas?.perform { $0.group() } }

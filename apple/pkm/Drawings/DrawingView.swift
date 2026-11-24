@@ -70,6 +70,21 @@ struct DrawingView: View {
             defaultFilename: drawing.name
         ) { _ in }
         .sheet(item: $exported) { ExportSheet(exported: $0) }
+        .alert(
+            "Set unit", isPresented: Binding(get: { controller.isAskingUnit }, set: { controller.isAskingUnit = $0 })
+        ) {
+            TextField(
+                "Measure in units", text: Binding(get: { controller.unitText }, set: { controller.unitText = $0 })
+            )
+            #if !os(macOS)
+                .keyboardType(.decimalPad)
+            #endif
+            Button("Set", action: controller.setUnitFromText)
+                .disabled(controller.unitValue == nil)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("What the selected width, or length of a line, reads as.")
+        }
         .focusedSceneValue(\.drawingFile, file)
         #if os(macOS)
             .focusedSceneValue(\.backToGallery, onBack)
@@ -256,6 +271,12 @@ extension View {
                         isOn: Binding(
                             get: { controller.showDimensions }, set: { controller.setShowDimensions($0) })
                     ) { Label("Show dimensions", systemImage: "ruler") }
+                    if controller.showDimensions {
+                        Button("Set unit…", systemImage: "scalemass", action: controller.askUnit)
+                            .disabled(!controller.canSetUnit)
+                        Button("Reset unit", systemImage: "arrow.counterclockwise", action: controller.resetUnit)
+                            .disabled(!controller.canResetUnit)
+                    }
                 }
             } label: {
                 Label("Menu", systemImage: "ellipsis")

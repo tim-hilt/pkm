@@ -1347,6 +1347,35 @@ impl Editor {
         self.editor().set_show_dimensions(on);
     }
 
+    /// The Drawing's Unit: Scene pixels per unit of Dimensions, one until
+    /// set. See [`pkm_drawing::Editor::unit`].
+    pub fn unit(&self) -> f64 {
+        self.editor().unit()
+    }
+
+    /// Whether [`Editor::set_unit`] can measure: one Element or one group is
+    /// selected.
+    pub fn can_set_unit(&self) -> bool {
+        self.editor().can_set_unit()
+    }
+
+    /// The selected Element's or group's width (a line's length) in units,
+    /// to pre-fill the dialog; `None` unless [`Editor::can_set_unit`].
+    pub fn selection_measure(&self) -> Option<f64> {
+        self.editor().selection_measure()
+    }
+
+    /// Makes the Selection's measure read `value`; one undo step. `false`
+    /// if `value` is not finite and above zero or nothing can be measured.
+    pub fn set_unit(&self, value: f64) -> bool {
+        self.editor().set_unit(value)
+    }
+
+    /// Makes the Unit one Scene pixel again; one undo step.
+    pub fn reset_unit(&self) {
+        self.editor().reset_unit();
+    }
+
     /// Differs from before whenever the Scene changed; read it after
     /// forwarding input and ask for [`Editor::geometry`] again if it moved.
     pub fn revision(&self) -> u64 {
@@ -2076,6 +2105,40 @@ mod tests {
 
         editor.pointer(mouse(PointerPhase::Up, (64.0, 74.0)));
         assert!(editor.dimensions().is_none());
+    }
+
+    #[test]
+    fn the_unit_is_set_and_reset_through_the_bindings() {
+        let editor = Editor::new();
+        editor
+            .load(
+                br##"{"type":"excalidraw","elements":[
+                    {"id":"a","type":"rectangle","x":10,"y":20,"width":30,"height":40,
+                     "backgroundColor":"#ffc9c9"}]}"##
+                    .to_vec(),
+            )
+            .unwrap();
+        assert!(!editor.can_set_unit());
+        for phase in [PointerPhase::Down, PointerPhase::Up] {
+            editor.pointer(PointerEvent {
+                id: 0,
+                phase,
+                x: 20.0,
+                y: 30.0,
+                kind: PointerKind::Mouse,
+                button: PointerButton::Primary,
+                pressure: 0.5,
+                timestamp: 0.0,
+                modifiers: Modifiers::default(),
+            });
+        }
+        assert_eq!(editor.selection_measure(), Some(30.0));
+
+        assert!(!editor.set_unit(0.0));
+        assert!(editor.set_unit(3.0));
+        assert_eq!(editor.unit(), 10.0);
+        editor.reset_unit();
+        assert_eq!(editor.unit(), 1.0);
     }
 
     #[test]
