@@ -1,45 +1,5 @@
 import SwiftUI
 
-/// The line in an Item's sheet that shows its Tags as pills in their Tag Colors,
-/// and opens the picker when tapped.
-struct TagsRow: View {
-    let tags: [String]
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: "tag").foregroundStyle(.secondary)
-                if tags.isEmpty {
-                    Text("Add Tags").foregroundStyle(.secondary)
-                } else {
-                    ForEach(tags, id: \.self) { TagPill(tag: $0) }
-                }
-                Spacer(minLength: 0)
-            }
-            .lineLimit(1)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("task-tags")
-    }
-}
-
-/// A Tag as a capsule in its Tag Color (grey if it has none), wherever Tags are listed.
-struct TagPill: View {
-    @Environment(TasksModel.self) private var model
-    let tag: String
-
-    var body: some View {
-        let style = model.tagEntry(tag).style(default: .secondary)
-        Text(tag)
-            .foregroundStyle(style)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 2)
-            .background(style.opacity(0.18), in: .capsule)
-    }
-}
-
 /// Every known Tag with a checkbox on the right, and search at the bottom, which also offers
 /// to create a Tag; the keyboard opens only when search is tapped. Done hands back the checked Tags;
 /// leaving otherwise changes nothing. In single-toggle mode there is no Done: a tap on a Tag, or

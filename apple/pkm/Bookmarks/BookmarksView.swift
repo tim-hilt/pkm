@@ -150,8 +150,8 @@ private struct BookmarkRow: View {
                     .lineLimit(2).font(.subheadline).foregroundStyle(.secondary)
                 }
                 if !bookmark.tags.isEmpty {
-                    HStack(spacing: 4) { ForEach(bookmark.tags, id: \.self) { TagPill(tag: $0) } }
-                        .font(.caption2).lineLimit(1)
+                    TagPills(tags: bookmark.tags)
+                        .font(.caption2)
                 }
             }
         }

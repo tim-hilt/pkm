@@ -394,16 +394,6 @@ private struct ClosedToast: View {
     }
 }
 
-/// A Tag's name in its Tag Color, Default being a grey fainter than the Description's on iPhone
-/// and iPad, the same on the Mac.
-private func tagText(_ tag: TagEntry) -> Text {
-    #if os(macOS)
-        Text(tag.name).foregroundStyle(tag.style(default: .secondary))
-    #else
-        Text(tag.name).foregroundStyle(tag.style(default: .tertiary))
-    #endif
-}
-
 /// A symbol and a text, close together and secondary grey, for the line of Tags.
 private func marker(_ text: Text, symbol: String) -> some View {
     HStack(spacing: 3) {
@@ -455,11 +445,7 @@ struct TaskRow: View {
                                 .truncationMode(.tail)
                                 .opacity(0.7)
                         }
-                        if let first = task.tags.first {
-                            // One Text, so that too many Tags are cut off at the end, not each.
-                            task.tags.dropFirst().reduce(tagText(first)) { Text("\($0) \(tagText($1))") }
-                                .lineLimit(1)
-                        }
+                        if !task.tags.isEmpty { TagPills(tags: task.tags.map(\.name)) }
                     }
                     // No grey of its own: a nested one resolves differently in a `List`.
                     .font(.subheadline)

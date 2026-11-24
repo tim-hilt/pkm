@@ -179,8 +179,8 @@ private struct NoteRow: View {
                 Text("New Note").foregroundStyle(.secondary)
             }
             if !row.tags.isEmpty {
-                HStack(spacing: 4) { ForEach(row.tags, id: \.self) { TagPill(tag: $0) } }
-                    .font(.caption).lineLimit(1)
+                TagPills(tags: row.tags)
+                    .font(.caption)
             }
         }
     }
