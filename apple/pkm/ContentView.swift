@@ -67,13 +67,24 @@ struct ContentView: View {
     }
 }
 
+extension View {
+    /// The Context's name as the large title of its first screen; pushed screens set their own inline.
+    fileprivate func largeTitle(_ context: AppContext) -> some View {
+        #if os(iOS)
+            navigationTitle(Text(context.title)).navigationBarTitleDisplayMode(.large)
+        #else
+            navigationTitle(Text(context.title))
+        #endif
+    }
+}
+
 extension ContentView {
     private var tabs: some View {
         @Bindable var navigation = navigation
         return TabView(selection: $navigation.selected) {
             ForEach(AppContext.allCases) { context in
                 Tab(value: context) {
-                    NavigationStack(path: path(of: context)) { root(of: context).settingsButton() }
+                    NavigationStack(path: path(of: context)) { root(of: context) }
                 } label: {
                     context.label
                 }
@@ -99,11 +110,11 @@ extension ContentView {
 
     @ViewBuilder private func root(of context: AppContext) -> some View {
         switch context {
-        case .drawings: GalleryView(gallery: gallery)
-        case .tasks: TasksView()
-        case .books: BooksView()
-        case .notes: NotesView()
-        case .bookmarks: BookmarksView()
+        case .drawings: GalleryView(gallery: gallery).largeTitle(context).settingsButton()
+        case .tasks: TasksView().settingsButton()
+        case .books: BooksView().largeTitle(context)
+        case .notes: NotesView().largeTitle(context)
+        case .bookmarks: BookmarksView().largeTitle(context)
         }
     }
 

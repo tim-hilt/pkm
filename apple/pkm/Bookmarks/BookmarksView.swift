@@ -34,7 +34,6 @@ struct BookmarksView: View {
                 Button("Delete", systemImage: "trash", role: .destructive) { deleting = bookmark }
             }
         }
-        .navigationTitle("Bookmarks")
         .searchable(text: $model.searchText)
         #if os(iOS)
             .searchToolbarBehavior(.minimize)
@@ -49,10 +48,6 @@ struct BookmarksView: View {
             }
         }
         .toolbar {
-            #if os(iOS)
-                // At the top, so that the bottom stays free for the "+", as in Notes and Books.
-                DefaultToolbarItem(kind: .search, placement: .topBarTrailing)
-            #endif
             if !model.tagsInUse.isEmpty {
                 ToolbarItem {
                     Menu("Tag", systemImage: "line.3.horizontal.decrease") {
@@ -64,6 +59,11 @@ struct BookmarksView: View {
                     .accessibilityIdentifier("bookmark-tag-filter")
                 }
             }
+            #if os(iOS)
+                // At the top, so that the bottom stays free for the "+", as in Notes and Books; after the own controls.
+                DefaultToolbarItem(kind: .search, placement: .topBarTrailing)
+                SettingsToolbarItem()
+            #endif
         }
         .addButton(
             "Add Bookmark", identifier: "add-bookmark", isCovered: isSaving || model.detailsID != nil

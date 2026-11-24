@@ -79,10 +79,6 @@ private struct NotesBrowser: View {
             .searchToolbarBehavior(.minimize)
         #endif
         .toolbar {
-            #if os(iOS)
-                // At the top, so that the bottom stays free for the "+", as in Books.
-                DefaultToolbarItem(kind: .search, placement: .topBarTrailing)
-            #endif
             if !model.tagsInUse.isEmpty {
                 ToolbarItem {
                     Menu("Tag", systemImage: "line.3.horizontal.decrease") {
@@ -94,6 +90,11 @@ private struct NotesBrowser: View {
                     .accessibilityIdentifier("note-tag-filter")
                 }
             }
+            #if os(iOS)
+                // At the top, so that the bottom stays free for the "+", as in Books.
+                DefaultToolbarItem(kind: .search, placement: .topBarTrailing)
+                SettingsToolbarItem()
+            #endif
         }
         .overlay {
             if isSearching {

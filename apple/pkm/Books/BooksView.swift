@@ -72,6 +72,7 @@ struct BooksView: View {
             #if os(iOS)
                 // At the top, so that the bottom stays free for the "+", where the other Galleries have it.
                 DefaultToolbarItem(kind: .search, placement: .topBarTrailing)
+                SettingsToolbarItem()
             #endif
         }
         .onKeyPress(phases: [.down, .repeat]) { press in

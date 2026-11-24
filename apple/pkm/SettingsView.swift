@@ -51,31 +51,29 @@ struct SettingsView: View {
     }
 }
 
-extension View {
-    /// The Settings gear, last in the trailing toolbar of a Context's first
-    /// screen on iPhone and iPad; the Mac has ⌘, instead. Pushed screens have
-    /// their own toolbar, so they show none.
-    func settingsButton() -> some View {
-        #if os(iOS)
-            modifier(SettingsButton())
-        #else
-            self
-        #endif
-    }
-}
-
 #if os(iOS)
-    private struct SettingsButton: ViewModifier {
+    /// The Settings gear, last in the trailing toolbar of a Context's first screen on iPhone and
+    /// iPad (after the Context's own controls and Search, so declare it last in the toolbar); the
+    /// Mac has ⌘, instead. Pushed screens have their own toolbar, so they show none.
+    struct SettingsToolbarItem: ToolbarContent {
         @Environment(AppNavigation.self) private var navigation
 
-        func body(content: Content) -> some View {
-            content.toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Settings", systemImage: "gearshape") { navigation.isShowingSettings = true }
-                        .accessibilityIdentifier("settings")
-                }
+        var body: some ToolbarContent {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Settings", systemImage: "gearshape") { navigation.isShowingSettings = true }
+                    .accessibilityIdentifier("settings")
             }
         }
+    }
+
+    extension View {
+        /// The gear as the last item of what is declared so far; for a Context whose toolbar has
+        /// no Search to come after it.
+        func settingsButton() -> some View { toolbar { SettingsToolbarItem() } }
+    }
+#else
+    extension View {
+        func settingsButton() -> some View { self }
     }
 #endif
 
