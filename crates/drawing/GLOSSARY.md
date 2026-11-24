@@ -80,6 +80,14 @@ _Avoid_: Action Bar (the removed floating bar), popover, popup, long-press menu
 The panel that sets stroke colour, background colour, fill style, stroke width, stroke style, sloppiness, edges and opacity (and, for text, font size and text alignment) on the Selection, and, with an empty Selection, as the style of the next Element. It shows the Selection's current values, or none chosen where they are mixed. With a Selection it also has layer (z-order), align (two or more groups or Elements) and distribute (three or more) buttons. Shown as a panel beside the Canvas on wide screens; on a phone it is split by concern into popovers opened from the Action row.
 _Avoid_: Inspector, style bar, sidebar, property popover
 
+**Dimensions**:
+The subtle, unitless sizes shown beside an Element (or the Selection's box) while it is resized or drawn, in Units: width and height along its own sides, or, for a line or arrow, its length along its path (also while a Point handle is dragged). They fade out shortly after the pointer lifts and are never part of the Drawing. Shown only while the user has turned them on, per Device, in the main menu.
+_Avoid_: Measurements, rulers, sizes, dimension mode
+
+**Unit**:
+How long one unit of the Dimensions is on the Canvas, the same on every Device at every zoom; kept in the Drawing, one Scene pixel unless the user sets it by giving one Element's size in units.
+_Avoid_: Scale, scaling factor, ratio
+
 **Action row**:
 The row above the phone toolbar holding the Properties panel's triggers and the Selection's actions.
 _Avoid_: Style bar, bottom bar (that is the Action row and toolbar together)
