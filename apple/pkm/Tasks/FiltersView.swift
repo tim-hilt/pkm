@@ -5,7 +5,7 @@ import SwiftUI
 /// edits or Deletes it, the latter after a confirmation. An empty list offers to create one.
 struct FiltersList: View {
     @Environment(TasksModel.self) private var model
-    @State private var editing: Filter?
+    @Binding var editing: Filter?
     @State private var deleting: Filter?
     let onNew: () -> Void
 

@@ -6,6 +6,10 @@ struct TasksView: View {
     @Environment(TasksModel.self) private var model
     @State private var isAdding = false
     @State private var isAddingFilter = false
+    @State private var editingFilter: Filter?
+
+    /// Whether the New Task or a Task's sheet covers this Context.
+    private var isTaskSheetShown: Bool { isAdding || !model.editing.isEmpty }
 
     var body: some View {
         // In the Tasks tab's stack, whose path is `model.openFilterPath`.
@@ -14,12 +18,19 @@ struct TasksView: View {
             case .filter:
                 TaskListView(emptyText: "No Open Tasks match.")
             case .filters:
-                FiltersList { isAddingFilter = true }
+                FiltersList(editing: $editingFilter) { isAddingFilter = true }
             }
         }
+        .addButton(
+            model.barEntry == .filters ? "New Filter" : "New Task",
+            identifier: model.barEntry == .filters ? "add-filter" : "add-task",
+            isCovered: isAddingFilter || editingFilter != nil || isTaskSheetShown
+        ) {
+            if model.barEntry == .filters { isAddingFilter = true } else { isAdding = true }
+        }
         #if os(iOS)
-            // The bar shares the row of the "+" below, in thumb reach; the toast sits above it.
-            .safeAreaInset(edge: .bottom) {
+            // The bar shares the "+"'s row, which the "+" keeps clear; the toast sits above it.
+            .overlay(alignment: .bottomLeading) {
                 TasksBar()
                 .padding(.leading, AddButtonMetrics.margin)
                 .padding(.trailing, AddButtonMetrics.size + 2 * AddButtonMetrics.margin)
@@ -27,12 +38,6 @@ struct TasksView: View {
                 .padding(.vertical, AddButtonMetrics.margin)
             }
         #endif
-        .addButton(
-            model.barEntry == .filters ? "New Filter" : "New Task",
-            identifier: model.barEntry == .filters ? "add-filter" : "add-task"
-        ) {
-            if model.barEntry == .filters { isAddingFilter = true } else { isAdding = true }
-        }
         #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)  // slim top bar: no title
         #endif
@@ -41,13 +46,7 @@ struct TasksView: View {
         #endif
         .navigationDestination(for: String.self) { id in
             TaskListView(emptyText: "No Open Tasks match.")
-                #if os(iOS)
-                    // Room to scroll the last row clear of the "+", as the bar gives it below.
-                    .safeAreaInset(edge: .bottom) {
-                        Color.clear.frame(height: AddButtonMetrics.size + 2 * AddButtonMetrics.margin)
-                    }
-                #endif
-                .addButton("New Task", identifier: "add-task") { isAdding = true }
+                .addButton("New Task", identifier: "add-task", isCovered: isTaskSheetShown) { isAdding = true }
                 .taskSheets(isAdding: $isAdding, isInFront: true)
                 .navigationTitle(model.filters.first { $0.id == id }?.title ?? "")
                 #if os(iOS)

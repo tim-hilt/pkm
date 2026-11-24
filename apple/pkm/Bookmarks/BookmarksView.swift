@@ -65,7 +65,9 @@ struct BookmarksView: View {
                 }
             }
         }
-        .addButton("Add Bookmark", identifier: "add-bookmark") { isSaving = true }
+        .addButton(
+            "Add Bookmark", identifier: "add-bookmark", isCovered: isSaving || model.detailsID != nil
+        ) { isSaving = true }
         .sheet(isPresented: $isSaving, onDismiss: showExisting) { AppSaveSheet { existing = $0.id } }
         .bookmarkDetailsSheet(isInFront: model.openID == nil)
         .navigationDestination(for: String.self) { ArticleReader(id: $0) }
