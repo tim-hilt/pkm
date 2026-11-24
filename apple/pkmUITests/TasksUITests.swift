@@ -29,6 +29,11 @@ import XCTest
         XCTAssertTrue(app.buttons["Reject"].waitForExistence(timeout: 5))
     }
 
+    /// Drag tests are slow and flaky (synthesized presses); they run only with `make test-ui SLOW=1`.
+    private func skipUnlessSlow() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["PKM_SLOW_UI"] == "1", "slow; set SLOW=1")
+    }
+
     /// Drags the row `title` from its middle to `offset` of the row `target`, after a press shorter
     /// than the context menu's, until `landed`. A synthesized press sometimes lifts the row late, so
     /// it holds long at the target, or scrolls instead (with `List` too), so it is tried up to three times.
@@ -42,7 +47,8 @@ import XCTest
     }
 
     /// The middle of a row onto the middle of another makes it a Subtask there.
-    func testATaskDroppedOntoAnotherBecomesItsSubtask() {
+    func testATaskDroppedOntoAnotherBecomesItsSubtask() throws {
+        try skipUnlessSlow()
         let parentMarker = row("Reply to Anna's email").staticTexts["Book the dentist"]
         drag("Reply to Anna's email", to: "Book the dentist", at: CGVector(dx: 0.5, dy: 0.5)) {
             parentMarker.waitForExistence(timeout: 2)
@@ -51,7 +57,8 @@ import XCTest
     }
 
     /// Onto the line between two rows, a Task only moves there.
-    func testATaskDraggedBetweenRowsOnlyMoves() {
+    func testATaskDraggedBetweenRowsOnlyMoves() throws {
+        try skipUnlessSlow()
         func isAbove() -> Bool { row("Reply to Anna's email").frame.minY < row("Book the dentist").frame.minY }
         drag("Reply to Anna's email", to: "Book the dentist", at: CGVector(dx: 0.5, dy: 0)) {
             _ = row("Reply to Anna's email").waitForExistence(timeout: 2)

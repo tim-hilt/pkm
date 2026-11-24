@@ -103,9 +103,9 @@ test-ios: apple-project sim
 	$(XCTEST) -destination 'platform=iOS Simulator,name=$(SIM)'
 
 # XCUITests (Gallery → Canvas → back); kept out of `make test`, as UI tests on
-# macOS need the Accessibility permission.
+# macOS need the Accessibility permission. The slow drag tests run only with SLOW=1.
 test-ui: apple-project sim
-	SCHEME=pkmUITests LOG=/tmp/pkm-ui-test.log $(XCTEST) -destination 'platform=iOS Simulator,name=$(SIM)'
+	$(if $(SLOW),TEST_RUNNER_PKM_SLOW_UI=1) SCHEME=pkmUITests LOG=/tmp/pkm-ui-test.log $(XCTEST) -destination 'platform=iOS Simulator,name=$(SIM)'
 
 # Re-records the renderer reference images that no longer match (and creates
 # missing ones) on macOS; review the diff of apple/pkmTests/References
