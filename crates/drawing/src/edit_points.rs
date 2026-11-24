@@ -425,6 +425,17 @@ pub(crate) fn shown_points(element: &Element) -> Vec<Point> {
     element.points().into_iter().map(|p| shown.at(p)).collect()
 }
 
+/// The clean path of a line or arrow (see [`linear::clean_path`]) where it is
+/// shown in the Scene. A closed line's last point is its first, so its
+/// closing segment is part of it.
+pub(crate) fn clean_path(element: &Element) -> Vec<Point> {
+    let shown = Shown::of(element);
+    linear::clean_path(element)
+        .into_iter()
+        .map(|p| shown.at(p))
+        .collect()
+}
+
 /// Where the points of an Element are shown: the Element's frame turned by its
 /// angle about the middle of its box.
 struct Shown {

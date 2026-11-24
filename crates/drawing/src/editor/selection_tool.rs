@@ -289,6 +289,7 @@ impl Editor {
         let Some((handles, grab)) = self.grabbed_point(origin.x, origin.y, origin.kind) else {
             return;
         };
+        // The length appears with the gesture, even before the first change.
         self.overlay_revision += 1;
         let start = self.navigation.viewport().scene_at(origin.x, origin.y);
         self.point_dragging = Some(handles.drag(
@@ -325,6 +326,8 @@ impl Editor {
                 if let Some(dragging) = self.point_dragging.take() {
                     self.history
                         .record(dragging.finish(), &self.scene, &self.selection);
+                    // The length ends with the gesture.
+                    self.dimensions_changed();
                 }
             }
             PointerPhase::Cancel => self.drop_point_drag(),

@@ -919,7 +919,8 @@ impl Editor {
     }
 
     /// The Dimensions of what the pointer is resizing by a transform handle
-    /// or drawing as a shape, in Scene coordinates and for the current zoom,
+    /// or drawing as a shape, or the length of a line or arrow it is drawing
+    /// or whose points it drags, in Scene coordinates and for the current zoom,
     /// if [`Editor::show_dimensions`] is on; otherwise `None`. A Selection of
     /// several Elements, or a Group, has one pair for its transform box.
     /// Drawn after the overlay. Clients ask again when
@@ -929,6 +930,11 @@ impl Editor {
         if !self.show_dimensions {
             return None;
         }
+        let zoom = self.navigation.viewport().zoom();
+        let colors = overlay::Colors::of(self.dark_mode);
+        if let Some(line) = self.measured_line() {
+            return dimensions::of_line(&edit_points::clean_path(&line), zoom, colors);
+        }
         let (frame, angle) = if let Some(shape) = &self.shape {
             (shape.frame(), 0.0)
         } else if self.transforming.as_ref()?.is_resize() {
@@ -937,12 +943,20 @@ impl Editor {
         } else {
             return None;
         };
-        Some(dimensions::of_box(
-            frame,
-            angle,
-            self.navigation.viewport().zoom(),
-            overlay::Colors::of(self.dark_mode),
-        ))
+        Some(dimensions::of_box(frame, angle, zoom, colors))
+    }
+
+    /// The line or arrow whose length is shown: the one being drawn or having
+    /// its points dragged. A line alone has no transform box to resize (see
+    /// [`TransformBox::of`]), and in a Selection of several Elements it is
+    /// part of the box that is measured.
+    fn measured_line(&self) -> Option<Element<'_>> {
+        let handle = match (&self.linear, &self.point_dragging) {
+            (Some(linear), _) => linear.handle(),
+            (None, Some(dragging)) => dragging.element_handle(),
+            (None, None) => return None,
+        };
+        self.scene.element(handle)
     }
 
     /// Notes that the Dimensions of a shape being drawn may have changed.

@@ -163,15 +163,7 @@ pub(crate) fn label_anchor(element: &Element) -> Point {
 /// The point halfway along the length of the cubic from `p0` to `p3`.
 fn halfway_along_cubic(p0: Point, p1: Point, p2: Point, p3: Point) -> Point {
     const STEPS: usize = 256;
-    let at = |t: f64| {
-        let u = 1.0 - t;
-        let (a, b, c, d) = (u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
-        (
-            a * p0.0 + b * p1.0 + c * p2.0 + d * p3.0,
-            a * p0.1 + b * p1.1 + c * p2.1 + d * p3.1,
-        )
-    };
-    let samples: Vec<Point> = (0..=STEPS).map(|i| at(i as f64 / STEPS as f64)).collect();
+    let samples = cubic_samples([p0, p1, p2, p3], STEPS);
     let lengths: Vec<f64> = samples
         .windows(2)
         .map(|w| (w[1].0 - w[0].0).hypot(w[1].1 - w[0].1))
@@ -186,6 +178,56 @@ fn halfway_along_cubic(p0: Point, p1: Point, p2: Point, p3: Point) -> Point {
         remaining -= length;
     }
     samples[STEPS]
+}
+
+/// `steps + 1` points at equal steps of the parameter along a cubic, from its
+/// start to its end.
+fn cubic_samples([p0, p1, p2, p3]: [Point; 4], steps: usize) -> Vec<Point> {
+    (0..=steps)
+        .map(|i| {
+            let t = i as f64 / steps as f64;
+            let u = 1.0 - t;
+            let (a, b, c, d) = (u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
+            (
+                a * p0.0 + b * p1.0 + c * p2.0 + d * p3.0,
+                a * p0.1 + b * p1.1 + c * p2.1 + d * p3.1,
+            )
+        })
+        .collect()
+}
+
+/// The line or arrow's clean path (not the sketched stroke) in the Element's
+/// own frame as a polyline: through its points (a closed line also back to
+/// its first), or for a rounded one along its curve, finely enough that its
+/// length is the curve's to a millionth.
+pub(crate) fn clean_path(element: &Element) -> Vec<Point> {
+    const STEPS_PER_CUBIC: usize = 64;
+    let Some(ops) = exact_curve(element) else {
+        let mut points = element.points();
+        if element.kind() == ElementType::Line
+            && is_loop(&points)
+            && points.first() != points.last()
+        {
+            points.push(points[0]);
+        }
+        return points;
+    };
+    let mut path = Vec::new();
+    let mut from = (0.0, 0.0);
+    for op in ops {
+        match op {
+            Op::Move(p) | Op::Line(p) => {
+                path.push(p);
+                from = p;
+            }
+            Op::Cubic(c1, c2, end) => {
+                let samples = cubic_samples([from, c1, c2, end], STEPS_PER_CUBIC);
+                path.extend(samples.into_iter().skip(1));
+                from = end;
+            }
+        }
+    }
+    path
 }
 
 /// The corners (top left, bottom right) in the Scene of the box Excalidraw

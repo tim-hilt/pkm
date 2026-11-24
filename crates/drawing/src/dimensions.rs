@@ -24,6 +24,9 @@ const LABEL_OFFSET: f64 = 12.0;
 /// use): the label is centred on its anchor, so it needs half its width.
 const LABEL_GAP: f64 = 6.0;
 const CHARACTER_WIDTH: f64 = 7.0;
+/// Half the height of a label in view points, for keeping a line's label
+/// clear of it.
+const HALF_LABEL_HEIGHT: f64 = 8.0;
 const LINE_WIDTH: f64 = 1.0;
 const OPACITY: f32 = 0.6;
 
@@ -127,6 +130,68 @@ pub(crate) fn of_box(frame: Frame, angle: f64, zoom: f64, colors: Colors) -> Dim
     }
 }
 
+/// The Dimensions of a line or arrow whose clean path is the polyline `path`
+/// in the Scene: its length as one plain label at the middle of the path
+/// length, on one side of it (the upper one of a sideways path), and no
+/// lines. Made for a view at `zoom`; `None` for an empty path.
+pub(crate) fn of_line(path: &[Point], zoom: f64, colors: Colors) -> Option<Dimensions> {
+    let length: f64 = path.windows(2).map(|w| distance(w[0], w[1])).sum();
+    let ((x, y), (tx, ty)) = point_at(path, length / 2.0)?;
+    let text = format!("{length:.2}");
+    // The side is the path's left one, which is up for one that runs right;
+    // the label is moved out of the path by half its extent that way.
+    let (nx, ny) = (ty, -tx);
+    let reach = LABEL_GAP
+        + nx.abs() * text.len() as f64 * CHARACTER_WIDTH / 2.0
+        + ny.abs() * HALF_LABEL_HEIGHT;
+    let label = DimensionLabel {
+        text,
+        x: x + nx * reach / zoom,
+        y: y + ny * reach / zoom,
+        angle: 0.0,
+    };
+    Some(Dimensions {
+        geometry: Geometry::new(),
+        labels: vec![label],
+        color: colors.selection,
+        opacity: OPACITY,
+    })
+}
+
+fn distance(a: Point, b: Point) -> f64 {
+    (b.0 - a.0).hypot(b.1 - a.1)
+}
+
+/// The point `along` the polyline `path` from its start, with the unit
+/// direction of the segment it is on (rightwards for a path without length).
+fn point_at(path: &[Point], along: f64) -> Option<(Point, Point)> {
+    let mut remaining = along;
+    let mut found = None;
+    for w in path.windows(2) {
+        let length = distance(w[0], w[1]);
+        if length == 0.0 {
+            continue;
+        }
+        let direction = ((w[1].0 - w[0].0) / length, (w[1].1 - w[0].1) / length);
+        found = Some((w[0], w[1], length, direction));
+        if remaining <= length {
+            break;
+        }
+        remaining -= length;
+    }
+    let Some((from, _, length, direction)) = found else {
+        return Some((*path.first()?, (1.0, 0.0)));
+    };
+    let f = (remaining / length).min(1.0);
+    Some((
+        (
+            from.0 + direction.0 * length * f,
+            from.1 + direction.1 * length * f,
+        ),
+        direction,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     //! Dimensions while resizing, tested at the Editor seam with recorded
@@ -134,8 +199,10 @@ mod tests {
     //! are worked out by hand in the comments.
 
     use super::DimensionLabel;
+    use crate::overlay::Colors;
     use crate::test_support::{editor_with, replay, tap};
     use crate::{Editor, Tool, Verb};
+    use crate::{Modifiers, PointerKind};
 
     /// A rectangle at (100, 100), 100 x 50, whose middle is (150, 125). Its
     /// south-east handle is centred on (206, 156), 4 for the selection frame
@@ -424,5 +491,180 @@ mod tests {
             "2.0 down 1 mouse 100 100\n2.1 move 1 mouse 150 150",
         );
         assert!(editor.dimensions().is_none());
+    }
+
+    /// A line of `kind` from (100, 100) with `points`, to be selected by
+    /// tapping on its first segment.
+    fn line(kind: &str, points: &str, extra: &str) -> String {
+        format!(
+            r##"{{"id":"a","type":"{kind}","x":100,"y":100,"width":100,"height":100,
+            "points":{points},{extra}"roughness":0,"version":3,"versionNonce":7}}"##
+        )
+    }
+
+    fn label_texts(editor: &Editor) -> Vec<String> {
+        let dimensions = editor.dimensions().expect("shown");
+        dimensions.labels.iter().map(|l| l.text.clone()).collect()
+    }
+
+    /// With the given Tool chosen, a mouse draws from (100, 100) to (160, 180).
+    fn drawn_line(tool: Tool) -> Editor {
+        let mut editor = Editor::new();
+        editor.set_tool(tool);
+        editor.set_show_dimensions(true);
+        replay(
+            &mut editor,
+            "1.0 down 1 mouse 100 100\n1.1 move 1 mouse 130 140\n1.2 move 1 mouse 160 180",
+        );
+        editor
+    }
+
+    #[test]
+    fn drawing_a_line_or_arrow_shows_its_length_as_one_label_beside_its_middle() {
+        for tool in [Tool::Line, Tool::Arrow] {
+            let mut editor = drawn_line(tool);
+            let dimensions = editor.dimensions().expect("shown while drawing");
+            let [label] = &dimensions.labels[..] else {
+                panic!("{:?}", dimensions.labels)
+            };
+            // 60 right and 80 down is 100 long, in direction (0.6, 0.8), so
+            // the left side is (0.8, -0.6). The six characters take 21 either
+            // side of their middle and the text 8 above and below: the label
+            // is 6 + 0.8 * 21 + 0.6 * 8 = 27.6 from the middle, (130, 140).
+            assert_eq!(label.text, "100.00");
+            near(label, (130.0 + 0.8 * 27.6, 140.0 - 0.6 * 27.6));
+            assert_eq!(label.angle, 0.0);
+            assert!(dimensions.geometry.parts().is_empty(), "no lines or ticks");
+
+            lift(&mut editor, (160.0, 180.0));
+            assert!(editor.dimensions().is_none(), "{tool:?}");
+        }
+    }
+
+    #[test]
+    fn a_line_follows_the_pointer_and_is_shown_while_its_points_are_placed() {
+        let mut editor = Editor::new();
+        editor.set_tool(Tool::Line);
+        editor.set_show_dimensions(true);
+        tap(&mut editor, "mouse", (0.0, 0.0), 0.0);
+        tap(&mut editor, "mouse", (30.0, 0.0), 1.0);
+        let revision = editor.overlay_revision();
+        editor.hover(30.0, 40.0, PointerKind::Mouse, Modifiers::default());
+
+        // A new line is rounded: the curve through (0, 0), (30, 0), (30, 40)
+        // is 71.52 long (numerically integrated apart from the code), not
+        // the 70 of its corner.
+        assert_eq!(label_texts(&editor), ["71.52"]);
+        assert_ne!(editor.overlay_revision(), revision);
+    }
+
+    #[test]
+    fn nothing_is_shown_for_a_line_with_the_setting_off() {
+        let mut editor = drawn_line(Tool::Line);
+        lift(&mut editor, (160.0, 180.0));
+        editor.set_show_dimensions(false);
+        replay(&mut editor, "2.0 down 1 mouse 0 0\n2.1 move 1 mouse 50 50");
+        assert!(editor.dimensions().is_none());
+    }
+
+    #[test]
+    fn the_label_is_the_same_screen_distance_from_the_middle_at_any_zoom() {
+        let mut editor = Editor::new();
+        editor.set_tool(Tool::Line);
+        editor.set_show_dimensions(true);
+        editor.set_viewport((0.0, 0.0), 2.0);
+        // Sideways, 100 long from (50, 50) to (150, 50) in the Scene. The label
+        // is 6 + 8 = 14 view points above its middle: 7 units.
+        replay(
+            &mut editor,
+            "1.0 down 1 mouse 100 100\n1.1 move 1 mouse 200 100\n1.2 move 1 mouse 300 100",
+        );
+        let dimensions = editor.dimensions().unwrap();
+        assert_eq!(dimensions.labels[0].text, "100.00");
+        near(&dimensions.labels[0], (100.0, 50.0 - 7.0));
+    }
+
+    /// Selects the line `a` by tapping it at `at`.
+    fn with_selected_line(json: &str, at: (f64, f64)) -> Editor {
+        let mut editor = editor_with(&[json]);
+        tap(&mut editor, "mouse", at, 0.0);
+        editor.set_show_dimensions(true);
+        editor
+    }
+
+    const CORNER: &str = "[[0,0],[100,0],[100,100]]";
+
+    #[test]
+    fn dragging_a_point_shows_the_length_of_a_straight_polyline() {
+        let mut editor = with_selected_line(&line("line", CORNER, ""), (150.0, 100.0));
+        assert!(editor.dimensions().is_none(), "selected only");
+
+        // The last point, at (200, 200), is taken 100 further down: the
+        // segments are 100 and 200 long.
+        drag_without_lifting(&mut editor, (200.0, 200.0), (200.0, 300.0));
+        assert_eq!(label_texts(&editor), ["300.00"]);
+
+        lift(&mut editor, (200.0, 300.0));
+        assert!(editor.dimensions().is_none());
+    }
+
+    #[test]
+    fn dragging_a_middle_handle_adds_a_point_and_shows_the_new_length() {
+        let mut editor = with_selected_line(&line("line", CORNER, ""), (150.0, 100.0));
+
+        // The middle of the first segment, (150, 100), goes 50 up: two
+        // segments of 50 * sqrt(2) = 70.7107, then the 100 of the second.
+        drag_without_lifting(&mut editor, (150.0, 100.0), (150.0, 50.0));
+        assert_eq!(label_texts(&editor), ["241.42"]);
+    }
+
+    #[test]
+    fn a_closed_polyline_is_measured_with_its_closing_segment() {
+        let triangle = line("line", "[[0,0],[30,0],[30,40],[0,0]]", r#""polygon":true,"#);
+        let mut editor = with_selected_line(&triangle, (115.0, 100.0));
+
+        // The corner at (130, 140) goes 30 down to (130, 170): the sides
+        // are 30 and 70, and the closing one back to (100, 100) is
+        // sqrt(30^2 + 70^2) = 76.1577 long.
+        drag_without_lifting(&mut editor, (130.0, 140.0), (130.0, 170.0));
+        assert_eq!(label_texts(&editor), ["176.16"]);
+    }
+
+    #[test]
+    fn an_elbow_arrow_is_measured_segment_by_segment() {
+        // No gesture reaches an elbow arrow yet (it has no point handles), so
+        // its path, which is through its points, is measured directly.
+        let path = [(0.0, 0.0), (50.0, 0.0), (50.0, 80.0), (100.0, 80.0)];
+        let dimensions = super::of_line(&path, 1.0, Colors::of(false)).unwrap();
+        assert_eq!(dimensions.labels[0].text, "180.00");
+    }
+
+    #[test]
+    fn a_rounded_line_is_measured_along_its_curve() {
+        let rounded = line("line", CORNER, r#""roundness":{"type":2},"#);
+        let mut editor = with_selected_line(&rounded, (100.0, 100.0));
+
+        // The last point goes to (100, 200) from the first: the curve
+        // through (0, 0), (100, 0), (100, 200) is 308.28 long (numerically
+        // integrated apart from the code), longer than the 300 of its
+        // corner as it swings out beyond it.
+        drag_without_lifting(&mut editor, (200.0, 200.0), (200.0, 300.0));
+        assert_eq!(label_texts(&editor), ["308.28"]);
+    }
+
+    #[test]
+    fn a_line_in_a_selection_of_several_elements_has_the_box_pair_not_a_length() {
+        let mut editor = editor_with(&[&line("line", CORNER, ""), OTHER]);
+        editor.set_show_dimensions(true);
+        replay(
+            &mut editor,
+            "0.0 down 1 mouse 50 50\n0.1 move 1 mouse 360 260\n0.2 up 1 mouse 360 260",
+        );
+        assert_eq!(editor.selection().len(), 2);
+        // The box is (100, 100)-(350, 200); its east handle is 6 beyond the
+        // middle of its east side. Pulling it 50 right makes it 300 wide.
+        drag_without_lifting(&mut editor, (356.0, 150.0), (406.0, 150.0));
+
+        assert_eq!(label_texts(&editor), ["300.00", "100.00"]);
     }
 }

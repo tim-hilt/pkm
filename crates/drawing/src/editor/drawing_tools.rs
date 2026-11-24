@@ -101,6 +101,7 @@ impl Editor {
                 zoom,
             ));
             self.changed();
+            self.dimensions_changed();
         }
     }
 
@@ -108,7 +109,11 @@ impl Editor {
     pub(super) fn linear_updated(&mut self, update: Update) {
         match update {
             Update::Unchanged => {}
-            Update::Changed => self.changed(),
+            Update::Changed => {
+                self.changed();
+                // The length follows the pointer.
+                self.dimensions_changed();
+            }
             Update::Finished => self.finish_linear(),
             Update::Abandoned => self.drop_linear(),
         }
@@ -131,10 +136,12 @@ impl Editor {
                 }
                 self.history.record(step, &self.scene, &self.selection);
                 self.changed();
+                self.dimensions_changed();
                 true
             }
             Outcome::Dropped => {
                 self.changed();
+                self.dimensions_changed();
                 false
             }
         }
@@ -163,6 +170,7 @@ impl Editor {
         if let Some(linear) = self.linear.take() {
             linear.cancel(&mut self.scene, &mut self.entropy);
             self.changed();
+            self.dimensions_changed();
         }
     }
 
