@@ -145,7 +145,15 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
     private var draws: [Draw] = []
     /// What is drawn over the overlay, see `setDimensions`.
     private(set) var dimensions: (any GeometrySource)?
-    /// The draws of `overlay` and `dimensions`, and the flattening level they were built for.
+    /// How strongly `dimensions` are drawn, 1 for fully down to 0.
+    var dimensionsStrength: Float = 1 {
+        didSet {
+            guard dimensionsStrength != oldValue else { return }
+            overlayIsStale = true
+            onNeedsDisplay?()
+        }
+    }
+    /// The draws of `overlay` and `dimensions` (at `dimensionsStrength`), and the flattening level they were built for.
     private var overlayDraws: [Draw] = []
     private var overlayLevel: Int?
     private var overlayIsStale = true
@@ -193,6 +201,22 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         case stroke(StrokeDraw)
         case fill(FillDraw)
         case image(ImageDraw)
+
+        /// This draw at `strength` of its own opacity.
+        func faded(by strength: Float) -> Draw {
+            switch self {
+            case .stroke(var stroke):
+                // The colour is premultiplied: scaling all channels scales the opacity.
+                stroke.uniforms.color *= strength
+                return .stroke(stroke)
+            case .fill(var fill):
+                fill.uniforms.color *= strength
+                return .fill(fill)
+            case .image(var image):
+                image.uniforms.opacity *= strength
+                return .image(image)
+            }
+        }
     }
 
     /// The draws of one Element at the version and flattening level they were built for.
@@ -538,11 +562,12 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         overlayIsStale = false
         overlayLevel = level
         let tolerance = Self.flatteningTolerancePixels / exp2(Float(level))
-        overlayDraws = [overlay, dimensions].flatMap { source in
+        func draws(of source: (any GeometrySource)?) -> [Draw] {
             source?.withBuffers { buffers in
                 buffers.parts.compactMap { makeDraw(for: $0, in: buffers, tolerance: tolerance) }
             } ?? []
         }
+        overlayDraws = draws(of: overlay) + draws(of: dimensions).map { $0.faded(by: dimensionsStrength) }
     }
 
     /// Brings `draws` up to date with the geometry and the zoom: rebuilds

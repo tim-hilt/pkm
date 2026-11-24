@@ -76,6 +76,9 @@ final class CanvasMetalView: MTKView {
     let textOverlay = TextEditorOverlay()
     /// The numbers of the Dimensions, over the Canvas.
     private let dimensionLabels = DimensionLabels()
+    /// The Dimensions as they are on screen, fading after a resize.
+    private var dimensionsFade = DimensionsFade()
+    private var fadeTask: Task<Void, Never>?
     #if !os(macOS)
         /// The system's edit menu (see `CanvasContextMenu`) and the menu it is
         /// about to show.
@@ -371,9 +374,52 @@ final class CanvasMetalView: MTKView {
         guard let editor, editor.overlayRevision() != shownOverlayRevision else { return }
         shownOverlayRevision = editor.overlayRevision()
         renderer?.setOverlay(editor.overlay())
-        let dimensions = editor.dimensions()
-        renderer?.setDimensions(dimensions?.geometry)
-        dimensionLabels.show(dimensions, in: Viewport(editor.viewport()))
+        updateDimensions(editor.dimensions(), setting: editor.showDimensions())
+    }
+
+    /// Shows the core's Dimensions output, letting the last one fade out when
+    /// it goes away, and has VoiceOver say the numbers when a resize ends.
+    private func updateDimensions(_ output: Dimensions?, setting: Bool) {
+        let now = CACurrentMediaTime()
+        guard setting else {
+            // Nothing fades or is announced while the setting is off.
+            dimensionsFade.reset()
+            drawDimensions(at: now)
+            return
+        }
+        if let announcement = dimensionsFade.update(output, at: now) { announce(announcement) }
+        drawDimensions(at: now)
+        guard dimensionsFade.isFading(at: now), fadeTask == nil else { return }
+        // On demand, like the rest: frames only while a fade runs.
+        fadeTask = Task { [weak self] in
+            while let self, self.dimensionsFade.isFading(at: CACurrentMediaTime()) {
+                self.drawDimensions(at: CACurrentMediaTime())
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+            self?.drawDimensions(at: CACurrentMediaTime())
+            self?.fadeTask = nil
+        }
+    }
+
+    private func drawDimensions(at now: TimeInterval) {
+        let visible = dimensionsFade.visible(at: now)
+        renderer?.setDimensions(visible?.dimensions.geometry)
+        renderer?.dimensionsStrength = visible?.strength ?? 1
+        guard let editor else { return }
+        dimensionLabels.show(visible?.dimensions, in: Viewport(editor.viewport()))
+        dimensionLabels.strength = visible?.strength ?? 1
+    }
+
+    private func announce(_ text: String) {
+        #if os(macOS)
+            guard NSWorkspace.shared.isVoiceOverEnabled else { return }
+            NSAccessibility.post(
+                element: self, notification: .announcementRequested,
+                userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.high.rawValue])
+        #else
+            guard UIAccessibility.isVoiceOverRunning else { return }
+            UIAccessibility.post(notification: .announcement, argument: text)
+        #endif
     }
 
     /// Shows what the core says is in view. Cheap: the renderer ignores an

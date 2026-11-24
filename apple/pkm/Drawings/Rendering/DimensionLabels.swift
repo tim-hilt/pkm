@@ -22,6 +22,17 @@ final class DimensionLabels {
         place(in: viewport)
     }
 
+    /// How strongly the labels are drawn, 1 for fully down to 0.
+    var strength: Float {
+        get { layer.opacity }
+        set {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            layer.opacity = newValue
+            CATransaction.commit()
+        }
+    }
+
     /// Puts the labels where `viewport` has their anchors; pans and zooms
     /// move them.
     func place(in viewport: Viewport) {
