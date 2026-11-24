@@ -644,7 +644,7 @@ export class Editor {
     this.inner.setPencilOnlyDrawing(on);
   }
 
-  /** Whether Dimensions are shown while resizing; the core never decides this, the client restores its stored choice. */
+  /** Whether Dimensions are shown while resizing or drawing; the core never decides this, the client restores its stored choice. */
   showDimensions(): boolean {
     return this.inner.showDimensions();
   }

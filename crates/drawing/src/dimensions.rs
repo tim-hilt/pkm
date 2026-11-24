@@ -192,8 +192,9 @@ fn distance(a: Point, b: Point) -> f64 {
     (b.0 - a.0).hypot(b.1 - a.1)
 }
 
-/// The point `along` the polyline `path` from its start, with the unit
-/// direction of the segment it is on (rightwards for a path without length).
+/// The point `along` the polyline `path` from its start (its end, if the path
+/// is shorter), with the unit direction of the segment it is on (rightwards
+/// for a path without length); `None` for an empty path.
 fn point_at(path: &[Point], along: f64) -> Option<(Point, Point)> {
     let mut remaining = along;
     let mut found = None;
@@ -203,23 +204,17 @@ fn point_at(path: &[Point], along: f64) -> Option<(Point, Point)> {
             continue;
         }
         let direction = ((w[1].0 - w[0].0) / length, (w[1].1 - w[0].1) / length);
-        found = Some((w[0], w[1], length, direction));
+        let step = remaining.min(length);
+        found = Some((
+            (w[0].0 + direction.0 * step, w[0].1 + direction.1 * step),
+            direction,
+        ));
         if remaining <= length {
             break;
         }
         remaining -= length;
     }
-    let Some((from, _, length, direction)) = found else {
-        return Some((*path.first()?, (1.0, 0.0)));
-    };
-    let f = (remaining / length).min(1.0);
-    Some((
-        (
-            from.0 + direction.0 * length * f,
-            from.1 + direction.1 * length * f,
-        ),
-        direction,
-    ))
+    found.or_else(|| Some((*path.first()?, (1.0, 0.0))))
 }
 
 #[cfg(test)]
@@ -243,7 +238,7 @@ mod tests {
     /// The same turned a quarter clockwise about (150, 125); its east handle
     /// is then 56 below the middle, at (150, 181); grabbed 2 closer.
     const TURNED: &str = r##"{"id":"a","type":"rectangle","x":100,"y":100,"width":100,"height":50,
-    "angle":1.5707963267948966,"strokeWidth":2,"backgroundColor":"#ffc9c9","roundness":null,"backgroundColor":"#ffc9c9","roundness":null,"version":3,"versionNonce":7}"##;
+    "angle":1.5707963267948966,"strokeWidth":2,"backgroundColor":"#ffc9c9","roundness":null,"version":3,"versionNonce":7}"##;
 
     fn selected(element: &str) -> Editor {
         let mut editor = editor_with(&[element]);

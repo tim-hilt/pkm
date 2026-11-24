@@ -749,7 +749,7 @@ impl Editor {
         self.inner.borrow_mut().set_pencil_only_drawing(on);
     }
 
-    /// Whether Dimensions are shown while resizing; off by default. The
+    /// Whether Dimensions are shown while resizing or drawing; off by default. The
     /// client restores its stored choice. See
     /// [`pkm_drawing::Editor::show_dimensions`].
     #[wasm_bindgen(js_name = showDimensions)]
@@ -763,7 +763,7 @@ impl Editor {
         self.inner.borrow_mut().set_show_dimensions(on);
     }
 
-    /// The Dimensions of the resize in progress, if shown; ask again when
+    /// The Dimensions of the resize or drawing in progress, if shown; ask again when
     /// [`Editor::overlay_revision`] moves. See
     /// [`pkm_drawing::Editor::dimensions`].
     pub fn dimensions(&self) -> Option<Dimensions> {

@@ -289,7 +289,6 @@ impl Editor {
         let Some((handles, grab)) = self.grabbed_point(origin.x, origin.y, origin.kind) else {
             return;
         };
-        // The length appears with the gesture, even before the first change.
         self.overlay_revision += 1;
         let start = self.navigation.viewport().scene_at(origin.x, origin.y);
         self.point_dragging = Some(handles.drag(
@@ -475,7 +474,7 @@ impl Editor {
             start,
         ));
         // Dimensions appear with the gesture, even before the first change.
-        self.overlay_revision += 1;
+        self.dimensions_changed();
         self.follow_transform(event);
     }
 
@@ -507,7 +506,7 @@ impl Editor {
                     self.history
                         .record(transforming.finish(), &self.scene, &self.selection);
                     // Dimensions end with the gesture.
-                    self.overlay_revision += 1;
+                    self.dimensions_changed();
                 }
             }
             PointerPhase::Cancel => self.drop_transform(),

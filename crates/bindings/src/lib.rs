@@ -1335,7 +1335,7 @@ impl Editor {
         self.editor().set_pencil_only_drawing(on);
     }
 
-    /// Whether Dimensions are shown while resizing; off by default. The
+    /// Whether Dimensions are shown while resizing or drawing; off by default. The
     /// client stores it per Device.
     pub fn show_dimensions(&self) -> bool {
         self.editor().show_dimensions()
@@ -1568,7 +1568,7 @@ impl Editor {
         })
     }
 
-    /// The Dimensions of the resize in progress, if shown; ask again when
+    /// The Dimensions of the resize or drawing in progress, if shown; ask again when
     /// [`Editor::overlay_revision`] moves. See
     /// [`pkm_drawing::Editor::dimensions`].
     pub fn dimensions(&self) -> Option<Dimensions> {

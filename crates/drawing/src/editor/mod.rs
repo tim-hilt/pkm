@@ -972,8 +972,11 @@ impl Editor {
     /// above zero, a Selection that cannot be measured or measures nothing,
     /// or while a pointer is drawing or moving.
     pub fn set_unit(&mut self, value: f64) -> bool {
+        if !(value.is_finite() && value > 0.0) {
+            return false;
+        }
         self.finish_placing();
-        if self.is_gesturing() || !(value.is_finite() && value > 0.0) {
+        if self.is_gesturing() {
             return false;
         }
         let Some(pixels) = self.measure() else {
@@ -1026,18 +1029,19 @@ impl Editor {
         self.scene.element(handle)
     }
 
-    /// Notes that the Dimensions of a shape being drawn may have changed.
-    /// Without a Selection nothing else is drawn over the Scene, so the
-    /// overlay otherwise stays as it is.
+    /// Notes that the Dimensions may have changed: a gesture that has them
+    /// began, moved or ended. Only with the setting on: without a Selection
+    /// nothing else is drawn over the Scene, so the overlay otherwise stays
+    /// as it is.
     fn dimensions_changed(&mut self) {
         if self.show_dimensions {
             self.overlay_revision += 1;
         }
     }
 
-    /// Tells whether [`Editor::overlay`] and [`Editor::dimensions`] may differ from before: it changes
-    /// whenever the Selection, a selected Element or the zoom does, and
-    /// never for a pan. Clients compare it with the one they last drew
+    /// Tells whether [`Editor::overlay`] and [`Editor::dimensions`] may
+    /// differ from before: it changes whenever the Selection, a selected
+    /// Element, the zoom or the Dimensions do, and never for a pan. Clients compare it with the one they last drew
     /// with, like [`Editor::revision`].
     pub fn overlay_revision(&self) -> u64 {
         self.overlay_revision

@@ -512,7 +512,7 @@ impl Scene {
     /// the Unit that is none: the member is removed, so that a Drawing that
     /// was never calibrated, or was reset, saves as before.
     pub(crate) fn set_unit(&mut self, unit: f64) {
-        if !matches!(self.root.get("appState"), Some(Value::Object(_))) {
+        if unit != 1.0 && !matches!(self.root.get("appState"), Some(Value::Object(_))) {
             self.root
                 .insert("appState".into(), Value::Object(Object::new()));
         }

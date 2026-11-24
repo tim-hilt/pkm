@@ -780,7 +780,7 @@ final class CanvasController {
     /// Pencil input; it is stored in `settings` once it is on or the user
     /// chose, and restored into each editor before it is first read.
     private(set) var pencilOnlyDrawing = false
-    /// Whether resizing shows Dimensions: the user's choice, kept per Device
+    /// Whether resizing and drawing show Dimensions: the user's choice, kept per Device
     /// in `settings` and restored into each editor; off by default.
     private(set) var showDimensions = false
     @ObservationIgnored private var restoredEditor: Editor?

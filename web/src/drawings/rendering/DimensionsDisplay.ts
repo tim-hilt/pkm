@@ -46,7 +46,8 @@ export class DimensionsDisplay {
   private readonly fade = new DimensionsFade<Dimensions>();
   /** What the lines and numbers were last given; owns the geometry to free. */
   private shown: Dimensions | undefined;
-  private readValue: number | undefined;
+  /** The overlay revision the output was last read at. */
+  private readRevision: number | undefined;
   private frame: number | undefined;
 
   constructor(
@@ -62,9 +63,9 @@ export class DimensionsDisplay {
     if (!this.editor.showDimensions()) {
       // Nothing fades while the setting is off.
       this.fade.reset();
-      this.readValue = undefined;
-    } else if (this.editor.overlayRevision() !== this.readValue) {
-      this.readValue = this.editor.overlayRevision();
+      this.readRevision = undefined;
+    } else if (this.editor.overlayRevision() !== this.readRevision) {
+      this.readRevision = this.editor.overlayRevision();
       this.fade.update(this.editor.dimensions(), now);
     }
     this.draw(now);
