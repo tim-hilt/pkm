@@ -918,22 +918,40 @@ impl Editor {
         geometry
     }
 
-    /// The Dimensions of the resize in progress, in Scene coordinates and for
-    /// the current zoom, if [`Editor::show_dimensions`] is on and a transform
-    /// handle resizes one box Element (rectangle, diamond, ellipse, image or
-    /// text); otherwise `None`. Drawn after the overlay. Clients ask again
-    /// when [`Editor::overlay_revision`] changes; the Dimensions are gone
-    /// the moment the pointer lifts.
+    /// The Dimensions of what the pointer is resizing by a transform handle
+    /// or drawing as a shape, in Scene coordinates and for the current zoom,
+    /// if [`Editor::show_dimensions`] is on; otherwise `None`. A Selection of
+    /// several Elements, or a Group, has one pair for its transform box.
+    /// Drawn after the overlay. Clients ask again when
+    /// [`Editor::overlay_revision`] changes; the Dimensions are gone the
+    /// moment the pointer lifts.
     pub fn dimensions(&self) -> Option<Dimensions> {
-        if !self.show_dimensions || !self.transforming.as_ref()?.is_resize() {
+        if !self.show_dimensions {
             return None;
         }
-        dimensions::of_box_element(
-            &self.scene,
-            &self.selection,
+        let (frame, angle) = if let Some(shape) = &self.shape {
+            (shape.frame(), 0.0)
+        } else if self.transforming.as_ref()?.is_resize() {
+            let transform_box = TransformBox::of(&self.scene, &self.selection)?;
+            (transform_box.frame(), transform_box.angle())
+        } else {
+            return None;
+        };
+        Some(dimensions::of_box(
+            frame,
+            angle,
             self.navigation.viewport().zoom(),
             overlay::Colors::of(self.dark_mode),
-        )
+        ))
+    }
+
+    /// Notes that the Dimensions of a shape being drawn may have changed.
+    /// Without a Selection nothing else is drawn over the Scene, so the
+    /// overlay otherwise stays as it is.
+    fn dimensions_changed(&mut self) {
+        if self.show_dimensions {
+            self.overlay_revision += 1;
+        }
     }
 
     /// Tells whether [`Editor::overlay`] and [`Editor::dimensions`] may differ from before: it changes

@@ -24,6 +24,7 @@ impl Editor {
                         at,
                     ));
                     self.changed();
+                    self.dimensions_changed();
                 }
             }
             PointerPhase::Move if drawing_pointer == Some(event.id) => {
@@ -33,12 +34,16 @@ impl Editor {
                 });
                 if moved {
                     self.changed();
+                    // The Dimensions follow the pointer.
+                    self.dimensions_changed();
                 }
             }
             PointerPhase::Up if drawing_pointer == Some(event.id) => {
                 let Some(shape) = self.shape.take() else {
                     return;
                 };
+                // The Dimensions end with the gesture.
+                self.dimensions_changed();
                 let id = shape.id().to_owned();
                 match shape.finish(&mut self.scene) {
                     Outcome::Drawn(step) => {
@@ -282,6 +287,7 @@ impl Editor {
         if let Some(shape) = self.shape.take() {
             shape.cancel(&mut self.scene);
             self.changed();
+            self.dimensions_changed();
         }
     }
 }

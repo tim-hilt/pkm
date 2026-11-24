@@ -1,4 +1,4 @@
-//! Dimensions: the size of what is being resized, shown beside it while the
+//! Dimensions: the size of what is being resized or drawn, shown beside it while the
 //! pointer is down (the "Show dimensions" setting, off by default).
 //!
 //! The output is made for one zoom like the overlay, and clients ask again
@@ -11,9 +11,6 @@ use crate::frame::Frame;
 use crate::geometry::{Geometry, StrokeStyle};
 use crate::overlay::{Colors, NO_ELEMENT};
 use crate::path::Point;
-use crate::scene::{ElementType, Scene};
-use crate::selection::Selection;
-use crate::transform_handles::targets;
 
 /// How far in view points a dimension line keeps from the box.
 const LINE_OFFSET: f64 = 20.0;
@@ -30,7 +27,7 @@ const CHARACTER_WIDTH: f64 = 7.0;
 const LINE_WIDTH: f64 = 1.0;
 const OPACITY: f32 = 0.6;
 
-/// What to draw for the Dimensions of a resize, in Scene coordinates.
+/// What to draw for the Dimensions of a resize or drawn shape, in Scene coordinates.
 #[derive(Debug)]
 pub struct Dimensions {
     /// Dimension lines with end ticks, strokes in the overlay's format.
@@ -55,30 +52,11 @@ pub struct DimensionLabel {
     pub angle: f64,
 }
 
-/// The Dimensions of the Selection if it is one box Element: its unrotated
-/// width below it and height left of it, along its own sides. Made for a view
-/// at `zoom`. `None` for anything else.
-pub(crate) fn of_box_element(
-    scene: &Scene,
-    selection: &Selection,
-    zoom: f64,
-    colors: Colors,
-) -> Option<Dimensions> {
-    let mut selected = targets(scene, selection);
-    let element = selected.next().filter(|_| selected.next().is_none())?;
-    if !matches!(
-        element.kind(),
-        ElementType::Rectangle
-            | ElementType::Diamond
-            | ElementType::Ellipse
-            | ElementType::Image
-            | ElementType::Text
-    ) {
-        return None;
-    }
-    let frame = Frame::of(&element);
+/// The Dimensions of a box of `frame` (where it is when not turned) turned
+/// clockwise by `angle` about its middle: its width below it and height left
+/// of it, along its own sides. Made for a view at `zoom`.
+pub(crate) fn of_box(frame: Frame, angle: f64, zoom: f64, colors: Colors) -> Dimensions {
     let (width, height) = (frame.width(), frame.height());
-    let angle = element.angle();
     let (sin, cos) = angle.sin_cos();
     let (cx, cy) = frame.centre();
     // From a point relative to the middle of the box, not turned, to the Scene.
@@ -141,12 +119,12 @@ pub(crate) fn of_box_element(
         let (x, y) = to_scene(anchor);
         DimensionLabel { text, x, y, angle }
     });
-    Some(Dimensions {
+    Dimensions {
         geometry,
         labels: labels.to_vec(),
         color: colors.selection,
         opacity: OPACITY,
-    })
+    }
 }
 
 #[cfg(test)]
@@ -157,7 +135,7 @@ mod tests {
 
     use super::DimensionLabel;
     use crate::test_support::{editor_with, replay, tap};
-    use crate::{Editor, Verb};
+    use crate::{Editor, Tool, Verb};
 
     /// A rectangle at (100, 100), 100 x 50, whose middle is (150, 125). Its
     /// south-east handle is centred on (206, 156), 4 for the selection frame
@@ -324,24 +302,127 @@ mod tests {
     }
 
     #[test]
-    fn are_not_shown_for_rotating_or_for_several_elements() {
+    fn are_not_shown_for_rotating_moving_or_tapping() {
         let mut editor = selected(RECTANGLE);
         // The rotation handle is 22 above the top: (150, 100 - 4 - 2 - 16).
         drag_without_lifting(&mut editor, (150.0, 78.0), (180.0, 78.0));
         assert!(editor.dimensions().is_none(), "rotating");
         lift(&mut editor, (180.0, 78.0));
 
-        let other = r##"{"id":"b","type":"rectangle","x":300,"y":100,"width":50,"height":50,
-        "version":3,"versionNonce":7}"##;
-        let mut editor = editor_with(&[RECTANGLE, other]);
+        drag_without_lifting(&mut editor, (150.0, 125.0), (170.0, 135.0));
+        assert!(editor.dimensions().is_none(), "moving");
+        lift(&mut editor, (170.0, 135.0));
+
+        tap(&mut editor, "mouse", (170.0, 135.0), 5.0);
+        assert!(editor.dimensions().is_none(), "tapping");
+    }
+
+    const OTHER: &str = r##"{"id":"b","type":"rectangle","x":300,"y":100,"width":50,"height":50,
+    "version":3,"versionNonce":7}"##;
+
+    #[test]
+    fn several_elements_resized_together_have_one_pair_for_their_box() {
+        let mut editor = editor_with(&[RECTANGLE, OTHER]);
         editor.set_show_dimensions(true);
         replay(
             &mut editor,
             "0.0 down 1 mouse 50 50\n0.1 move 1 mouse 360 160\n0.2 up 1 mouse 360 160",
         );
         assert_eq!(editor.selection().len(), 2);
-        // The box is now (100, 100)-(350, 150); resize by its east handle.
-        drag_without_lifting(&mut editor, (356.0, 125.0), (400.0, 125.0));
+        // The box is (100, 100)-(350, 150), 250 x 50; its east handle is
+        // 6 beyond the middle of its east side. Pulling it 50 right makes
+        // it 300 wide.
+        drag_without_lifting(&mut editor, (356.0, 125.0), (406.0, 125.0));
+
+        let dimensions = editor.dimensions().expect("shown while resizing");
+        let texts: Vec<_> = dimensions.labels.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(texts, ["300.00", "50.00"]);
+    }
+
+    #[test]
+    fn a_group_resized_has_one_pair_for_its_box() {
+        let grouped = |id, x| {
+            format!(
+                r##"{{"id":"{id}","type":"rectangle","x":{x},"y":100,"width":50,"height":50,
+                "groupIds":["g"],"version":3,"versionNonce":7}}"##
+            )
+        };
+        let mut editor = editor_with(&[&grouped("a", 100), &grouped("b", 200)]);
+        editor.set_show_dimensions(true);
+        tap(&mut editor, "mouse", (100.0, 125.0), 0.0);
+        assert_eq!(editor.selection().len(), 2);
+        // The box is (100, 100)-(250, 150), 150 x 50; pull its east handle
+        // 30 right. A Group keeps the ratio of its sides: 180 x 60.
+        drag_without_lifting(&mut editor, (256.0, 125.0), (286.0, 125.0));
+
+        let dimensions = editor.dimensions().expect("shown while resizing");
+        let texts: Vec<_> = dimensions.labels.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(texts, ["180.00", "60.00"]);
+    }
+
+    /// With the given Tool chosen, a mouse draws from (100, 100) towards
+    /// (160, 130), staying down.
+    fn drawing(tool: Tool) -> Editor {
+        let mut editor = Editor::new();
+        editor.set_tool(tool);
+        editor.set_show_dimensions(true);
+        replay(
+            &mut editor,
+            "1.0 down 1 mouse 100 100\n1.1 move 1 mouse 130 115\n1.2 move 1 mouse 160 130",
+        );
+        editor
+    }
+
+    #[test]
+    fn drawing_a_shape_follows_the_pointer_from_zero_size() {
+        for tool in [Tool::Rectangle, Tool::Diamond, Tool::Ellipse] {
+            let mut editor = Editor::new();
+            editor.set_tool(tool);
+            editor.set_show_dimensions(true);
+            replay(&mut editor, "1.0 down 1 mouse 100 100");
+            let at_start = editor.dimensions().expect("shown");
+            let texts: Vec<_> = at_start.labels.iter().map(|l| l.text.as_str()).collect();
+            assert_eq!(texts, ["0.00", "0.00"], "{tool:?}");
+
+            replay(&mut editor, "1.1 move 1 mouse 160 130");
+            let revision = editor.overlay_revision();
+            replay(&mut editor, "1.2 move 1 mouse 170 140");
+            assert_ne!(editor.overlay_revision(), revision, "{tool:?}");
+            let texts: Vec<_> = editor
+                .dimensions()
+                .unwrap()
+                .labels
+                .iter()
+                .map(|l| l.text.clone())
+                .collect();
+            assert_eq!(texts, ["70.00", "40.00"], "{tool:?}");
+        }
+    }
+
+    #[test]
+    fn a_drawn_shape_has_dimensions_next_to_it_until_the_pointer_lifts() {
+        let mut editor = drawing(Tool::Rectangle);
+        // 60 x 30 from (100, 100): the width label is 20 + 12 below its
+        // bottom side at y 130, in the middle at x 130.
+        let dimensions = editor.dimensions().unwrap();
+        near(&dimensions.labels[0], (130.0, 130.0 + 32.0));
+        assert_eq!(dimensions.labels[0].text, "60.00");
+
+        let before = editor.overlay_revision();
+        lift(&mut editor, (160.0, 130.0));
+        assert!(editor.dimensions().is_none());
+        assert_ne!(editor.overlay_revision(), before, "so clients redraw");
+    }
+
+    #[test]
+    fn drawing_shows_nothing_with_the_setting_off() {
+        let mut editor = drawing(Tool::Rectangle);
+        lift(&mut editor, (160.0, 130.0));
+        editor.set_show_dimensions(false);
+        replay(
+            &mut editor,
+            "2.0 down 1 mouse 100 100\n2.1 move 1 mouse 150 150",
+        );
         assert!(editor.dimensions().is_none());
     }
 }

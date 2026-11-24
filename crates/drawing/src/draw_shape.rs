@@ -5,6 +5,7 @@
 //! pointer lifts it stays, unless it never grew, in which case it was a tap
 //! and nothing is drawn.
 
+use crate::frame::Frame;
 use crate::history::Step;
 use crate::properties::{self, takes_edges};
 use crate::scene::{ElementType, Scene};
@@ -85,6 +86,15 @@ impl ShapeGesture {
     /// The id of the shape being drawn.
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    /// Where the shape is now, not turned.
+    pub fn frame(&self) -> Frame {
+        let (x, y, width, height) = self.frame;
+        Frame {
+            min: (x, y),
+            max: (x + width, y + height),
+        }
     }
 
     /// Stretches the shape from where the pointer went down to `to`, as a
