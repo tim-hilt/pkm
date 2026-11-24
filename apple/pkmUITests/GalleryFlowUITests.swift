@@ -12,18 +12,15 @@ import XCTest
         app.launch()
     }
 
-    /// Taps the Context's sidebar row: the sidebar is a column on an iPad and
-    /// a Mac, and on an iPhone a list behind the navigation bar's back button.
-    private func openSidebarRow(_ name: String) {
-        let row = app.cells.staticTexts[name]
-        if !row.waitForExistence(timeout: 5) {
-            app.navigationBars.buttons["BackButton"].tap()
-        }
+    /// Taps the Context's tab: in the tab bar of an iPhone and (at the top) an iPad, in the sidebar of a Mac.
+    private func openTab(_ name: String) {
+        let tab = app.tabBars.buttons[name]
+        let row = tab.waitForExistence(timeout: 10) ? tab : app.cells.staticTexts[name]
         XCTAssertTrue(row.waitForExistence(timeout: 10), name)
         row.tap()
     }
 
-    private func openDrawings() { openSidebarRow("Drawings") }
+    private func openDrawings() { openTab("Drawings") }
 
     /// An empty Drawing is not kept when left, so these tests draw something.
     private func drawARectangle() {
@@ -45,7 +42,7 @@ import XCTest
         let back = app.buttons["back-to-gallery"]
         XCTAssertTrue(back.waitForExistence(timeout: 10), "the Canvas is shown")
         XCTAssertFalse(newDrawing.exists, "the Gallery is gone")
-        XCTAssertFalse(app.cells.staticTexts["Tasks"].exists, "the sidebar is hidden")
+        XCTAssertFalse(app.tabBars.buttons["Tasks"].exists, "the tabs are hidden")
 
         drawARectangle()
         back.tap()
@@ -75,7 +72,7 @@ import XCTest
         app.buttons["new-drawing"].tap()
         drawARectangle()
         app.buttons["back-to-gallery"].tap()
-        openSidebarRow("Tasks")
+        openTab("Tasks")
         XCTAssertTrue(app.buttons["add-filter"].waitForExistence(timeout: 10))  // no Favorites: the Filters list
 
         openDrawings()
@@ -146,21 +143,20 @@ import XCTest
         XCTAssertTrue(card.waitForNonExistence(timeout: 5), "the Drawing is gone")
     }
 
-    func testSettingsIsASidebarRowOnPhonesAndPadsAndNoGearIsInAToolbar() throws {
+    func testSettingsIsASheetFromAGearOnEveryFirstScreenOnPhonesAndPads() throws {
         #if os(macOS)
-            throw XCTSkip("a Mac has ⌘, and no Settings row")
+            throw XCTSkip("a Mac has ⌘, and no gear")
         #endif
         for name in ["Tasks", "Notes", "Drawings", "Bookmarks", "Books"] {
-            openSidebarRow(name)
-            XCTAssertFalse(app.navigationBars.buttons["settings"].exists, name)
+            openTab(name)
+            XCTAssertTrue(app.navigationBars.buttons["settings"].waitForExistence(timeout: 5), name)
+            XCTAssertFalse(app.navigationBars.buttons["BackButton"].exists, "\(name) has no Back")
         }
-        let back = app.navigationBars.buttons["BackButton"]
-        if back.waitForExistence(timeout: 5) {  // an iPhone's list is one step back
-            back.tap()
-            XCTAssertTrue(back.waitForNonExistence(timeout: 5))  // a push during the pop is dropped
-        }
-        app.buttons["settings"].tap()
+        openDrawings()
+        app.navigationBars.buttons["settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        app.buttons["close-settings"].tap()
+        XCTAssertTrue(app.buttons["new-drawing"].waitForExistence(timeout: 5), "back on the Gallery")
     }
 
     /// The Gallery and menu buttons are the system's navigation bar buttons.

@@ -8,7 +8,7 @@ struct TasksView: View {
     @State private var isAddingFilter = false
 
     var body: some View {
-        // In `ContentView`'s stack, whose path is `model.openFilterPath`.
+        // In the Tasks tab's stack, whose path is `model.openFilterPath`.
         Group {
             switch model.barEntry {
             case .filter:
@@ -34,7 +34,7 @@ struct TasksView: View {
             if model.barEntry == .filters { isAddingFilter = true } else { isAdding = true }
         }
         #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)  // slim top bar: the sidebar button, no title
+            .navigationBarTitleDisplayMode(.inline)  // slim top bar: no title
         #endif
         #if os(macOS)
             .toolbar { ToolbarItem(placement: .principal) { TasksBar() } }

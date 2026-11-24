@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// The single window: the five Contexts in a sidebar (on an iPhone a list the
-/// sidebar button or an edge swipe reveals; on iPhone and iPad with Settings
-/// pinned to its bottom), or, while a Drawing or a Book is open, that alone.
+/// The single window: the five Contexts as tabs (a tab bar on an iPhone, which
+/// an iPad and a Mac can turn into a sidebar), each with its own stack of
+/// pushed screens; or, while a Drawing or a Book is open, that alone. On
+/// iPhone and iPad Settings is a sheet over the tabs.
 struct ContentView: View {
     @State private var gallery = Gallery.forLaunch()
     @Environment(AppNavigation.self) private var navigation
@@ -13,8 +14,6 @@ struct ContentView: View {
     @Environment(BookmarksModel.self) private var bookmarks
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.scenePhase) private var scenePhase
-    /// An iPhone opens into the detail; its sidebar is one step back.
-    @State private var column = NavigationSplitViewColumn.detail
     #if os(macOS)
         @Environment(\.openSettings) private var openSettings
     #endif
@@ -32,15 +31,14 @@ struct ContentView: View {
                 // A new Reader per Book, so that nothing of the previous one carries over.
                 OpenBookView(book: book, onGoToGallery: library.closeBook).id(book.id)
             } else {
-                NavigationSplitView(preferredCompactColumn: $column) {
-                    sidebar
-                } detail: {
-                    // One stack for every destination: on an iPhone, a detail whose own
-                    // stack replaced the last one's never appeared (no `task`, `onAppear`).
-                    NavigationStack(path: path) { detail }
-                }
+                tabs
             }
         }
+        #if os(iOS)
+            .sheet(isPresented: Bindable(navigation).isShowingSettings) { SettingsView() }
+            // A sheet that is presented from the first frame is dropped; this one waits for the tabs.
+            .task { navigation.isShowingSettings = AppNavigation.opensSettingsAtLaunch }
+        #endif
         .onOpenURL {
             AppLinks(navigation: navigation, gallery: gallery, library: library, tasks: tasks, bookmarks: bookmarks)
                 .follow($0)
@@ -70,64 +68,42 @@ struct ContentView: View {
 }
 
 extension ContentView {
-    private var sidebar: some View {
-        List(
-            selection: Binding(
-                get: { navigation.destination },
-                set: { destination in
-                    // nil when an iPhone goes back to the list: it stays there.
-                    guard let destination else { return }
-                    navigation.destination = destination
-                    column = .detail
-                })
-        ) {
+    private var tabs: some View {
+        @Bindable var navigation = navigation
+        return TabView(selection: $navigation.selected) {
             ForEach(AppContext.allCases) { context in
-                context.label.tag(AppNavigation.Destination.context(context))
+                Tab(value: context) {
+                    NavigationStack(path: path(of: context)) { root(of: context).settingsButton() }
+                } label: {
+                    context.label
+                }
             }
         }
-        .navigationTitle("pkm")
-        #if os(iOS)
-            .safeAreaInset(edge: .bottom) {
-                Button {
-                    navigation.destination = .settings
-                    column = .detail
-                } label: {
-                    Label("Settings", systemImage: "gearshape")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(navigation.isShowingSettings ? Color.accentColor : .primary)
-                .background(.bar)
-                .accessibilityIdentifier("settings")
-            }
-        #endif
+        .tabViewStyle(.sidebarAdaptable)
     }
 
-    /// What is pushed in the detail: Tasks and, where the editor doesn't fit beside the list,
-    /// Notes push by path, the others by link.
-    private var path: Binding<[String]> {
-        switch navigation.destination {
-        case .context(.tasks):
+    /// What is pushed over the Context's first screen: Tasks and, where the editor doesn't fit
+    /// beside the list, Notes push by path, Bookmarks too, the others push nothing.
+    private func path(of context: AppContext) -> Binding<[String]> {
+        switch context {
+        case .tasks:
             return Binding(get: { tasks.openFilterPath }, set: { tasks.openFilterPath = $0 })
-        case .context(.notes) where NotesLayout.pushes(sizeClass):
+        case .notes where NotesLayout.pushes(sizeClass):
             return Binding(get: { notes.pushedPath }, set: { notes.pushedPath = $0 })
-        case .context(.bookmarks):
+        case .bookmarks:
             return Binding(get: { bookmarks.pushedPath }, set: { bookmarks.pushedPath = $0 })
         default:
             return .constant([])
         }
     }
 
-    @ViewBuilder private var detail: some View {
-        switch navigation.destination {
-        case .settings: SettingsView()
-        case .context(.drawings): GalleryView(gallery: gallery)
-        case .context(.tasks): TasksView()
-        case .context(.books): BooksView()
-        case .context(.notes): NotesView()
-        case .context(.bookmarks): BookmarksView()
+    @ViewBuilder private func root(of context: AppContext) -> some View {
+        switch context {
+        case .drawings: GalleryView(gallery: gallery)
+        case .tasks: TasksView()
+        case .books: BooksView()
+        case .notes: NotesView()
+        case .bookmarks: BookmarksView()
         }
     }
 
@@ -153,7 +129,7 @@ extension ContentView {
 
 extension AppNavigation {
     /// `-UITestingOpenSettings` (used by `make screenshot SCREEN=settings`)
-    /// shows Settings over an empty temporary Gallery.
+    /// shows Settings (the sheet) over an empty temporary Gallery.
     static var opensSettingsAtLaunch: Bool {
         ProcessInfo.processInfo.arguments.contains("-UITestingOpenSettings")
     }
@@ -184,7 +160,6 @@ extension AppNavigation {
         } else if arguments.contains("-UITestingOpenBooks") || arguments.contains("-UITestingOpenReader") {
             navigation.selected = .books
         }
-        navigation.isShowingSettings = opensSettingsAtLaunch
         return navigation
     }
 }

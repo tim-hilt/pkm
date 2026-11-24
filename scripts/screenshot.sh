@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Usage: DEVICE=mac|ipad|iphone|web [SCREEN=canvas|dimensions|settings|books|reader|tasks|task|filters|filter|grouped|notes|note|bookmarks|article|bookmark|bookmark-search|article-find] [OUT=path] scripts/screenshot.sh
 # Builds the app, launches it with the sample Drawing already open
-# (-UITestingOpenSampleDrawing), or with Settings open (SCREEN=settings,
+# (-UITestingOpenSampleDrawing), or with the Settings sheet open (SCREEN=settings,
 # -UITestingOpenSettings), or with the Books Gallery over sample Books
 # (SCREEN=books, -UITestingOpenBooks), or with the first sample Book open in
 # the Reader (SCREEN=reader, -UITestingOpenReader), or with the Tasks list over

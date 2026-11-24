@@ -3,16 +3,25 @@ import UniformTypeIdentifiers
 
 /// The Settings, grouped: Appearance, Common (Tags, Cloud Backing), then a row
 /// per Context with settings of its own (today only Books). A window on the Mac
-/// (⌘,), the sidebar's Settings destination on iPhone and iPad.
+/// (⌘,), a sheet with its own stack and a close button on iPhone and iPad.
 struct SettingsView: View {
     @Environment(CloudBackingModel.self) private var cloud
+    #if os(iOS)
+        @Environment(\.dismiss) private var dismiss
+    #endif
 
     var body: some View {
         #if os(macOS)
             NavigationStack { form }.frame(width: 460, height: 460)
         #else
-            // In `ContentView`'s stack.
-            form.navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
+            NavigationStack {
+                form.navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(role: .close) { dismiss() }.accessibilityIdentifier("close-settings")
+                        }
+                    }
+            }
         #endif
     }
 
@@ -41,6 +50,34 @@ struct SettingsView: View {
         .formStyle(.grouped)
     }
 }
+
+extension View {
+    /// The Settings gear, last in the trailing toolbar of a Context's first
+    /// screen on iPhone and iPad; the Mac has ⌘, instead. Pushed screens have
+    /// their own toolbar, so they show none.
+    func settingsButton() -> some View {
+        #if os(iOS)
+            modifier(SettingsButton())
+        #else
+            self
+        #endif
+    }
+}
+
+#if os(iOS)
+    private struct SettingsButton: ViewModifier {
+        @Environment(AppNavigation.self) private var navigation
+
+        func body(content: Content) -> some View {
+            content.toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Settings", systemImage: "gearshape") { navigation.isShowingSettings = true }
+                        .accessibilityIdentifier("settings")
+                }
+            }
+        }
+    }
+#endif
 
 /// Cloud Backing: pick a Cloud Provider, enter the WebDAV server's URL,
 /// username and password, or grant iCloud Drive, and Connect; once Connected,
