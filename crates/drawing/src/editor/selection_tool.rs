@@ -471,6 +471,8 @@ impl Editor {
             handle,
             start,
         ));
+        // Dimensions appear with the gesture, even before the first change.
+        self.overlay_revision += 1;
         self.follow_transform(event);
     }
 
@@ -501,6 +503,8 @@ impl Editor {
                 if let Some(transforming) = self.transforming.take() {
                     self.history
                         .record(transforming.finish(), &self.scene, &self.selection);
+                    // Dimensions end with the gesture.
+                    self.overlay_revision += 1;
                 }
             }
             PointerPhase::Cancel => self.drop_transform(),

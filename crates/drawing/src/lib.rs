@@ -11,6 +11,7 @@ mod color;
 mod context_menu;
 mod cursor;
 mod delete;
+mod dimensions;
 mod draw_freedraw;
 mod draw_linear;
 mod draw_shape;
@@ -67,6 +68,7 @@ pub use align::{Alignment, Distribution};
 pub use color::dark_mode_color;
 pub use context_menu::ContextMenu;
 pub use cursor::Cursor;
+pub use dimensions::{DimensionLabel, Dimensions};
 pub use editor::{Editor, Export, ExportScope, MergeSyncedError};
 pub use geometry::{
     Dash, FillRule, FillStyle, Geometry, Image, ImageStatus, Part, PartKind, PartWriter,

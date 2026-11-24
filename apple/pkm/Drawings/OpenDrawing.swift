@@ -54,6 +54,7 @@ final class OpenDrawing {
         let editor = Editor.withExcalifont()
         let stamp = store.stamp(of: name)
         try editor.load(bytes: store.open(name))
+        if ProcessInfo.processInfo.arguments.contains("-UITestingHoldResize") { try SampleDrawing.holdResize(editor) }
         savedStamp = stamp
         self.name = name
         self.editor = editor

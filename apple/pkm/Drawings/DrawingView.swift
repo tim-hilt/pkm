@@ -234,7 +234,7 @@ extension View {
 
 #if !os(macOS)
     /// Excalidraw's main menu in the navigation bar, as the system's own
-    /// menu button: Save As and Export. On a Mac its items are in the menu
+    /// menu button: Save As, Export and the settings. On a Mac its items are in the menu
     /// bar instead (`CanvasCommands`), which also has their shortcuts.
     private struct MainMenu: View {
         let file: DrawingFile
@@ -245,13 +245,17 @@ extension View {
                 Button("Save As…", systemImage: "square.and.arrow.down", action: file.saveAs)
                 Button("Export…", systemImage: "photo", action: file.export)
                     .disabled(!controller.hasElements)
-                if offersPencilOnlyDrawing {
-                    Section("Settings") {
+                Section("Settings") {
+                    if offersPencilOnlyDrawing {
                         Toggle(
                             isOn: Binding(
                                 get: { controller.pencilOnlyDrawing }, set: { controller.setPencilOnlyDrawing($0) })
                         ) { Label("Pencil-only drawing", systemImage: "applepencil") }
                     }
+                    Toggle(
+                        isOn: Binding(
+                            get: { controller.showDimensions }, set: { controller.setShowDimensions($0) })
+                    ) { Label("Show dimensions", systemImage: "ruler") }
                 }
             } label: {
                 Label("Menu", systemImage: "ellipsis")

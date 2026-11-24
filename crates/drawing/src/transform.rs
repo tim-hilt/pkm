@@ -283,6 +283,11 @@ impl TransformGesture {
         self.handle
     }
 
+    /// Whether the handle resizes, rather than rotates.
+    pub fn is_resize(&self) -> bool {
+        self.handle != Handle::Rotation
+    }
+
     /// How the box was turned when the gesture began.
     pub fn angle(&self) -> f64 {
         self.transform_box.angle()

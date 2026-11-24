@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: DEVICE=mac|ipad|iphone|web [SCREEN=canvas|settings|books|reader|tasks|task|filters|filter|grouped|notes|note|bookmarks|article|bookmark|bookmark-search|article-find] [OUT=path] scripts/screenshot.sh
+# Usage: DEVICE=mac|ipad|iphone|web [SCREEN=canvas|dimensions|settings|books|reader|tasks|task|filters|filter|grouped|notes|note|bookmarks|article|bookmark|bookmark-search|article-find] [OUT=path] scripts/screenshot.sh
 # Builds the app, launches it with the sample Drawing already open
 # (-UITestingOpenSampleDrawing), or with Settings open (SCREEN=settings,
 # -UITestingOpenSettings), or with the Books Gallery over sample Books
@@ -14,7 +14,8 @@
 # -UITestingOpenNote), or with the Bookmarks list over sample Bookmarks
 # (SCREEN=bookmarks, -UITestingOpenBookmarks) or the first one's Article in the
 # Reader (SCREEN=article, -UITestingOpenArticle) or its Details (SCREEN=bookmark,
-# -UITestingOpenBookmarkDetails), and saves a screenshot to $OUT
+# -UITestingOpenBookmarkDetails), or with one turned rectangle held mid-resize
+# with Dimensions on (SCREEN=dimensions), and saves a screenshot to $OUT
 # (default /tmp/wt-$DEVICE.png). DEVICE=web captures the web app (see
 # screenshot-web.sh). On Mac only the app's window is captured.
 set -euo pipefail
@@ -27,6 +28,7 @@ cd "$(dirname "$0")/../apple"
 DEVICE=${DEVICE:-iphone}
 case "${SCREEN:-canvas}" in
 canvas) LAUNCH_ARG=-UITestingOpenSampleDrawing WINDOW_NAME= ;;
+dimensions) LAUNCH_ARG='-UITestingOpenSampleDrawing -UITestingHoldResize -showDimensions YES' WINDOW_NAME= ;;
 settings) LAUNCH_ARG=-UITestingOpenSettings WINDOW_NAME=Settings ;;
 books) LAUNCH_ARG=-UITestingOpenBooks WINDOW_NAME= ;;
 reader) LAUNCH_ARG=-UITestingOpenReader WINDOW_NAME= ;;
@@ -42,7 +44,7 @@ bookmark) LAUNCH_ARG=-UITestingOpenBookmarkDetails WINDOW_NAME= ;;
 article) LAUNCH_ARG=-UITestingOpenArticle WINDOW_NAME= ;;
 bookmark-search) LAUNCH_ARG=-UITestingSearchBookmarks WINDOW_NAME= ;;
 article-find) LAUNCH_ARG=-UITestingFindInArticle WINDOW_NAME= ;;
-*) echo "SCREEN must be canvas, settings, books, reader, tasks, task, filters, filter, grouped, notes, note, bookmarks, article, bookmark, bookmark-search or article-find" >&2; exit 2 ;;
+*) echo "SCREEN must be canvas, dimensions, settings, books, reader, tasks, task, filters, filter, grouped, notes, note, bookmarks, article, bookmark, bookmark-search or article-find" >&2; exit 2 ;;
 esac
 OUT=${OUT:-/tmp/wt-$DEVICE.png}
 DERIVED=build
@@ -67,7 +69,7 @@ if [ "$DEVICE" = mac ]; then
     pkill -x 'pkm' 2>/dev/null || true
     while pgrep -xq 'pkm'; do sleep 0.2; done # so its window isn't the one captured
     caffeinate -u -t 1 # wakes the display: a sleeping one shows no windows
-    open -n "$app" --args "$LAUNCH_ARG"
+    open -n "$app" --args $LAUNCH_ARG
     # Capture just the app's window, so other windows never end up in the file.
     # Waits up to 60 s for it, as a busy Mac can take long to launch the app.
     window=
@@ -97,7 +99,7 @@ else
     xcrun simctl boot "$SIM" 2>/dev/null || true
     xcrun simctl bootstatus "$SIM" >/dev/null
     xcrun simctl install "$SIM" "$DERIVED/Build/Products/Debug-iphonesimulator/pkm.app"
-    xcrun simctl launch --terminate-running-process "$SIM" com.timhilt.pkm "$LAUNCH_ARG" >/dev/null
+    xcrun simctl launch --terminate-running-process "$SIM" com.timhilt.pkm $LAUNCH_ARG >/dev/null
     sleep 8
     xcrun simctl io "$SIM" screenshot "$OUT"
 fi

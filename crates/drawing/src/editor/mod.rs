@@ -11,6 +11,7 @@ use crate::clipboard;
 use crate::color::{dark_mode, parse_color};
 use crate::context_menu::ContextMenu;
 use crate::delete;
+use crate::dimensions::{self, Dimensions};
 use crate::draw_freedraw::StrokeDrawing;
 use crate::draw_linear::{LinearDrawing, Update};
 use crate::draw_shape::{Outcome, ShapeGesture};
@@ -187,6 +188,8 @@ pub struct Editor {
     /// Whether fingers are held to selecting, panning and zooming, see
     /// [`Editor::pencil_only_drawing`].
     pencil_only: PencilOnly,
+    /// Whether resizing shows Dimensions, see [`Editor::show_dimensions`].
+    show_dimensions: bool,
     /// The kind of the last pointer seen, which the handles of the overlay
     /// are sized for.
     last_pointer: PointerKind,
@@ -251,6 +254,7 @@ impl Editor {
             points: PointSelection::default(),
             box_selecting: None,
             pencil_only: PencilOnly::default(),
+            show_dimensions: false,
             last_pointer: PointerKind::Finger,
             overlay_revision: 0,
             overlay_zoom: 1.0,
@@ -544,6 +548,21 @@ impl Editor {
     /// not call off a drag that is in progress.
     pub fn set_pencil_only_drawing(&mut self, on: bool) {
         self.pencil_only.choose(on);
+    }
+
+    /// Whether Dimensions are shown, see [`Editor::dimensions`]; off by
+    /// default. Only the client sets it, from what the user chose; clients
+    /// store it per Device.
+    pub fn show_dimensions(&self) -> bool {
+        self.show_dimensions
+    }
+
+    /// Turns showing Dimensions on or off, see [`Editor::show_dimensions`].
+    pub fn set_show_dimensions(&mut self, on: bool) {
+        if self.show_dimensions != on {
+            self.show_dimensions = on;
+            self.overlay_revision += 1;
+        }
     }
 
     /// Whether the Tool lock is on: the Tool then stays after drawing a shape
@@ -899,7 +918,25 @@ impl Editor {
         geometry
     }
 
-    /// Tells whether [`Editor::overlay`] may differ from before: it changes
+    /// The Dimensions of the resize in progress, in Scene coordinates and for
+    /// the current zoom, if [`Editor::show_dimensions`] is on and a transform
+    /// handle resizes one box Element (rectangle, diamond, ellipse, image or
+    /// text); otherwise `None`. Drawn after the overlay. Clients ask again
+    /// when [`Editor::overlay_revision`] changes; the Dimensions are gone
+    /// the moment the pointer lifts.
+    pub fn dimensions(&self) -> Option<Dimensions> {
+        if !self.show_dimensions || !self.transforming.as_ref()?.is_resize() {
+            return None;
+        }
+        dimensions::of_box_element(
+            &self.scene,
+            &self.selection,
+            self.navigation.viewport().zoom(),
+            overlay::Colors::of(self.dark_mode),
+        )
+    }
+
+    /// Tells whether [`Editor::overlay`] and [`Editor::dimensions`] may differ from before: it changes
     /// whenever the Selection, a selected Element or the zoom does, and
     /// never for a pan. Clients compare it with the one they last drew
     /// with, like [`Editor::revision`].

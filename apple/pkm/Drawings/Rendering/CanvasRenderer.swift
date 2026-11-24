@@ -143,7 +143,9 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
     private(set) var overlay: (any GeometrySource)?
     /// Everything to draw, in z-order: the cached draws of all Elements.
     private var draws: [Draw] = []
-    /// The draws of `overlay`, and the flattening level they were built for.
+    /// What is drawn over the overlay, see `setDimensions`.
+    private(set) var dimensions: (any GeometrySource)?
+    /// The draws of `overlay` and `dimensions`, and the flattening level they were built for.
     private var overlayDraws: [Draw] = []
     private var overlayLevel: Int?
     private var overlayIsStale = true
@@ -353,6 +355,16 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         onNeedsDisplay?()
     }
 
+    /// Replaces what is drawn over the overlay (Dimensions, in Scene
+    /// coordinates like the overlay); nil draws nothing. The same object again
+    /// is a no-op.
+    func setDimensions(_ dimensions: (any GeometrySource)?) {
+        guard dimensions !== self.dimensions else { return }
+        self.dimensions = dimensions
+        overlayIsStale = true
+        onNeedsDisplay?()
+    }
+
     /// `rgba` (`0xRRGGBBAA`) as the colour to clear to.
     private static func clearColor(_ rgba: UInt32) -> MTLClearColor {
         let channel = { (shift: UInt32) in Double((rgba >> shift) & 0xff) / 255 }
@@ -526,10 +538,11 @@ final class CanvasRenderer: NSObject, MTKViewDelegate {
         overlayIsStale = false
         overlayLevel = level
         let tolerance = Self.flatteningTolerancePixels / exp2(Float(level))
-        overlayDraws =
-            overlay?.withBuffers { buffers in
+        overlayDraws = [overlay, dimensions].flatMap { source in
+            source?.withBuffers { buffers in
                 buffers.parts.compactMap { makeDraw(for: $0, in: buffers, tolerance: tolerance) }
             } ?? []
+        }
     }
 
     /// Brings `draws` up to date with the geometry and the zoom: rebuilds

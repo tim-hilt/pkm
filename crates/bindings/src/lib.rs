@@ -21,10 +21,10 @@ use pkm_cloud::{
 };
 use pkm_drawing::scene::{FillPattern, LineStyle};
 use pkm_drawing::{
-    Alignment, Command, ContextMenu, Cursor, Distribution, Edges, ExportScope, FontSize, ImageFile,
-    MagnifyEvent, Modifiers, PencilDoubleTap, PointerButton, PointerEvent, PointerKind,
-    PointerPhase, Properties, Property, ScrollEvent, Sections, Shortcut, Sloppiness, StrokeWidth,
-    TextAlign, TextEditor, Tool, ZOrder,
+    Alignment, Command, ContextMenu, Cursor, DimensionLabel, Distribution, Edges, ExportScope,
+    FontSize, ImageFile, MagnifyEvent, Modifiers, PencilDoubleTap, PointerButton, PointerEvent,
+    PointerKind, PointerPhase, Properties, Property, ScrollEvent, Sections, Shortcut, Sloppiness,
+    StrokeWidth, TextAlign, TextEditor, Tool, ZOrder,
 };
 
 uniffi::setup_scaffolding!("pkmCore");
@@ -1335,6 +1335,18 @@ impl Editor {
         self.editor().set_pencil_only_drawing(on);
     }
 
+    /// Whether Dimensions are shown while resizing; off by default. The
+    /// client stores it per Device.
+    pub fn show_dimensions(&self) -> bool {
+        self.editor().show_dimensions()
+    }
+
+    /// The user's choice in settings, or the stored setting restored at
+    /// launch.
+    pub fn set_show_dimensions(&self, on: bool) {
+        self.editor().set_show_dimensions(on);
+    }
+
     /// Differs from before whenever the Scene changed; read it after
     /// forwarding input and ask for [`Editor::geometry`] again if it moved.
     pub fn revision(&self) -> u64 {
@@ -1527,6 +1539,18 @@ impl Editor {
         })
     }
 
+    /// The Dimensions of the resize in progress, if shown; ask again when
+    /// [`Editor::overlay_revision`] moves. See
+    /// [`pkm_drawing::Editor::dimensions`].
+    pub fn dimensions(&self) -> Option<Dimensions> {
+        self.editor().dimensions().map(|d| Dimensions {
+            geometry: Arc::new(Geometry { inner: d.geometry }),
+            labels: d.labels,
+            color: d.color,
+            opacity: d.opacity,
+        })
+    }
+
     /// A step of a finger, Pencil or mouse; see
     /// [`pkm_drawing::Editor::pointer`].
     pub fn pointer(&self, event: PointerEvent) {
@@ -1601,6 +1625,27 @@ impl Editor {
             inner: self.editor().geometry(),
         })
     }
+}
+
+/// Dimensions to draw over the overlay: lines and ticks as geometry, and the
+/// labels for the client to draw in the system font.
+#[derive(uniffi::Record)]
+pub struct Dimensions {
+    pub geometry: Arc<Geometry>,
+    pub labels: Vec<DimensionLabel>,
+    /// The colour of lines and labels, `0xRRGGBBAA`, drawn at `opacity`.
+    pub color: u32,
+    pub opacity: f32,
+}
+
+/// One number of the Dimensions: its text, the Scene point it is centred on
+/// and its angle (clockwise, radians).
+#[uniffi::remote(Record)]
+pub struct DimensionLabel {
+    pub text: String,
+    pub x: f64,
+    pub y: f64,
+    pub angle: f64,
 }
 
 /// Zero-copy geometry (ADR-0007): the format is documented in
@@ -1988,6 +2033,49 @@ mod tests {
         // 20..60 is too small for the handles on its sides, so four corners
         // and the rotation handle are drawn, each a fill and a stroke.
         assert_eq!(editor.overlay().part_count(), 1 + 5 * 2);
+    }
+
+    #[test]
+    fn dimensions_show_while_a_resize_runs_with_the_setting_on() {
+        let editor = Editor::new();
+        editor
+            .load(
+                br##"{"type":"excalidraw","elements":[
+                    {"id":"a","type":"rectangle","x":10,"y":20,"width":30,"height":40,
+                     "backgroundColor":"#ffc9c9"}]}"##
+                    .to_vec(),
+            )
+            .unwrap();
+        assert!(!editor.show_dimensions());
+        editor.set_show_dimensions(true);
+        let mouse = |phase, (x, y)| PointerEvent {
+            id: 0,
+            phase,
+            x,
+            y,
+            kind: PointerKind::Mouse,
+            button: PointerButton::Primary,
+            pressure: 0.5,
+            timestamp: 0.0,
+            modifiers: Modifiers::default(),
+        };
+        editor.pointer(mouse(PointerPhase::Down, (20.0, 30.0)));
+        editor.pointer(mouse(PointerPhase::Up, (20.0, 30.0)));
+        assert!(editor.dimensions().is_none());
+
+        // The south-east handle is 6 beyond the corner (40, 60); the pointer
+        // keeps its distance, so the corner ends at (60, 70).
+        editor.pointer(mouse(PointerPhase::Down, (44.0, 64.0)));
+        editor.pointer(mouse(PointerPhase::Move, (54.0, 69.0)));
+        editor.pointer(mouse(PointerPhase::Move, (64.0, 74.0)));
+
+        let dimensions = editor.dimensions().expect("shown while resizing");
+        let texts: Vec<_> = dimensions.labels.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(texts, ["50.00", "50.00"]);
+        assert_eq!(dimensions.geometry.part_count(), 1);
+
+        editor.pointer(mouse(PointerPhase::Up, (64.0, 74.0)));
+        assert!(editor.dimensions().is_none());
     }
 
     #[test]

@@ -26,7 +26,7 @@ use crate::transform_handles::{Grip, TransformBox};
 #[derive(Clone, Copy)]
 pub(crate) struct Colors {
     /// `--color-selection`, opaque.
-    selection: u32,
+    pub(crate) selection: u32,
     /// `groupSelectionColor`.
     group: u32,
     /// The fill of handles.
@@ -138,7 +138,7 @@ fn group_frame(geometry: &mut Geometry, bounds: &Frame, zoom: f64, colors: Color
 /// What overlay parts that belong to no Element (transform handles, the
 /// box-select rectangle) name in its place: clients do not cache the overlay
 /// by Element (see [`Editor::overlay`]).
-const NO_ELEMENT: u32 = u32::MAX;
+pub(crate) const NO_ELEMENT: u32 = u32::MAX;
 
 /// The transform handles of a Selection: a white square with the selection
 /// colour around it at every handle's centre, as big as the pointer's grip

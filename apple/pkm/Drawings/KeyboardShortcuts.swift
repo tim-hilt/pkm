@@ -93,6 +93,15 @@ struct CanvasCommands: Commands {
         }
         CommandGroup(after: .toolbar) {
             items(for: [.zoomIn, .zoomOut, .resetZoom, .zoomToFit])
+            #if os(macOS)
+                Divider()
+                Toggle(
+                    "Show Dimensions",
+                    isOn: Binding(
+                        get: { controller?.showDimensions ?? false }, set: { controller?.setShowDimensions($0) })
+                )
+                .disabled(controller == nil)
+            #endif
         }
         CommandMenu("Tools") {
             items { if case .setTool = $0 { true } else { false } }

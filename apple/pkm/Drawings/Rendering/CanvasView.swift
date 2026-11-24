@@ -74,6 +74,8 @@ final class CanvasMetalView: MTKView {
     private var shownOverlayRevision: UInt64?
     /// The native text view over the Canvas while a text is edited.
     let textOverlay = TextEditorOverlay()
+    /// The numbers of the Dimensions, over the Canvas.
+    private let dimensionLabels = DimensionLabels()
     #if !os(macOS)
         /// The system's edit menu (see `CanvasContextMenu`) and the menu it is
         /// about to show.
@@ -102,6 +104,11 @@ final class CanvasMetalView: MTKView {
         enableSetNeedsDisplay = true
         delegate = renderer
         renderer?.onNeedsDisplay = { [weak self] in self?.requestRedraw() }
+        #if os(macOS)
+            layer?.addSublayer(dimensionLabels.layer)
+        #else
+            layer.addSublayer(dimensionLabels.layer)
+        #endif
         textOverlay.onChange = { [weak self] text in
             self?.perform { $0.setEditingText(text: text) }
             self?.followCaret()
@@ -364,6 +371,9 @@ final class CanvasMetalView: MTKView {
         guard let editor, editor.overlayRevision() != shownOverlayRevision else { return }
         shownOverlayRevision = editor.overlayRevision()
         renderer?.setOverlay(editor.overlay())
+        let dimensions = editor.dimensions()
+        renderer?.setDimensions(dimensions?.geometry)
+        dimensionLabels.show(dimensions, in: Viewport(editor.viewport()))
     }
 
     /// Shows what the core says is in view. Cheap: the renderer ignores an
@@ -371,6 +381,7 @@ final class CanvasMetalView: MTKView {
     private func syncViewport() {
         guard let editor else { return }
         renderer?.viewport = Viewport(editor.viewport())
+        dimensionLabels.place(in: Viewport(editor.viewport()))
     }
 
     #if os(macOS)
@@ -723,9 +734,13 @@ final class CanvasController {
     /// Pencil input; it is stored in `settings` once it is on or the user
     /// chose, and restored into each editor before it is first read.
     private(set) var pencilOnlyDrawing = false
+    /// Whether resizing shows Dimensions: the user's choice, kept per Device
+    /// in `settings` and restored into each editor; off by default.
+    private(set) var showDimensions = false
     @ObservationIgnored private var restoredEditor: Editor?
     @ObservationIgnored private let settings: UserDefaults
     private static let pencilOnlyKey = "pencilOnlyDrawing"
+    private static let showDimensionsKey = "showDimensions"
     /// Whether there is something to undo or redo.
     private(set) var canUndo = false
     private(set) var canRedo = false
@@ -751,7 +766,7 @@ final class CanvasController {
         tool = editor.tool()
         toolLock = editor.toolLock()
         isEditingText = editor.textEditor() != nil
-        syncPencilOnlyDrawing(editor)
+        syncSettings(editor)
         canUndo = editor.canUndo()
         canRedo = editor.canRedo()
         properties = editor.showsProperties() ? editor.properties() : nil
@@ -760,13 +775,17 @@ final class CanvasController {
         zoomPercent = Int((editor.viewport().zoom * 100).rounded())
     }
 
-    private func syncPencilOnlyDrawing(_ editor: Editor) {
+    /// Restores the stored settings into a new `editor`, and shows the
+    /// settings as it has them.
+    private func syncSettings(_ editor: Editor) {
         let stored = settings.object(forKey: Self.pencilOnlyKey) as? Bool
         if restoredEditor !== editor {
             restoredEditor = editor
             // Only a stored setting is a decision; without one the core decides.
             if let stored { editor.setPencilOnlyDrawing(on: stored) }
+            editor.setShowDimensions(on: settings.bool(forKey: Self.showDimensionsKey))
         }
+        showDimensions = editor.showDimensions()
         pencilOnlyDrawing = editor.pencilOnlyDrawing()
         // The core turned it on by itself: keep that for the next launch.
         if pencilOnlyDrawing != (stored ?? false) {
@@ -787,6 +806,10 @@ final class CanvasController {
     func setPencilOnlyDrawing(_ on: Bool) {
         settings.set(on, forKey: Self.pencilOnlyKey)
         canvas?.perform { $0.setPencilOnlyDrawing(on: on) }
+    }
+    func setShowDimensions(_ on: Bool) {
+        settings.set(on, forKey: Self.showDimensionsKey)
+        canvas?.perform { $0.setShowDimensions(on: on) }
     }
     func perform(_ command: Command) { canvas?.perform { $0.perform(command: command) } }
     func duplicate() { canvas?.perform { $0.duplicate() } }
