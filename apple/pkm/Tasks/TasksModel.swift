@@ -363,17 +363,29 @@ final class TasksModel {
         reload()
     }
 
-    /// Moves the row at `source` to land before the row at `destination` of the Group `tag` (none:
-    /// the Tasks without a Group; `onMove`'s meaning); past its last row, to the end of it. Only
-    /// that Group's order changes. The Parent stays. A Subtask passing a sibling also moves in its
-    /// Subtask order. In a Sorted Filter, a drop out of the Task's Priority group turns it Manual.
-    func move(in tag: String? = nil, from source: IndexSet, to destination: Int) {
-        guard let id = list.filterID, let rows = groups.first(where: { $0.tag == tag })?.tasks,
-            let index = source.first, index != destination
-        else { return }
-        let target = destination < rows.count ? rows[destination] : nil
-        try? store.moveInFilter(id: id, group: tag, task: rows[index].id, before: target?.id)
+    /// Moves the Task `id` to land before the row `before` of the Group `tag` (none: the Tasks
+    /// without a Group); `nil`, to the end of it. Only that Group's order changes. The Parent stays.
+    /// A Subtask passing a sibling also moves in its Subtask order. In a Sorted Filter, a drop out
+    /// of the Task's Priority group turns it Manual.
+    func move(_ id: String, before: String?, in tag: String? = nil) {
+        guard let filter = list.filterID, groups.contains(where: { $0.tag == tag }) else { return }
+        try? store.moveInFilter(id: filter, group: tag, task: id, before: before)
         reload()
+    }
+
+    /// Drops the Task `id`, dragged in the Group `tag`, at `zone` of the row `row` of that Group
+    /// (`nil`: below its rows, which moves it to the end); see `RowDrop`.
+    func drop(_ id: String, on row: String?, at zone: DropZone, in tag: String? = nil) {
+        guard let rows = groups.first(where: { $0.tag == tag })?.tasks,
+            let drop = RowDrop(dragging: id, on: row, at: zone, rows: rows.map(\.id))
+        else { return }
+        switch drop {
+        case .move(let before): move(id, before: before, in: tag)
+        case .onto(let parent):
+            guard let task = rows.first(where: { $0.id == id }), let parent = rows.first(where: { $0.id == parent })
+            else { return }
+            dropOnto(task, parent: parent, in: tag)
+        }
     }
 
     /// Makes `task`, dropped onto `parent` in the Group `tag`, a Subtask of `parent`, keeping its

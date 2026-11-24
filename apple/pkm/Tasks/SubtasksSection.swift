@@ -21,11 +21,6 @@ struct SubtasksSection: View {
                     TaskRow(task: subtask, showsParent: false, onCircle: { model.toggleDone(subtask) })
                         .contentShape(Rectangle())
                         .onTapGesture { if canOpen { model.open(id: subtask.id) } }
-                        .swipeActions(edge: .trailing) {
-                            if !subtask.done {
-                                Button("Reject", role: .destructive) { model.close(subtask, as: .rejected) }
-                            }
-                        }
                         .taskQuickActions(subtask)
                 }
                 .onMove { model.moveSubtask(of: task.id, from: $0, to: $1) }

@@ -86,10 +86,25 @@ private struct TaskSheets: ViewModifier {
 }
 
 /// The Tasks of the list shown (`model.tasks`) as rows with their actions, and the toast of a
-/// pending Close. Dragging orders only the Group of the row.
+/// pending Close. A row dragged onto another of its Group becomes its Subtask, between two it
+/// moves there, and below the rows or on a heading to the end of its Group (`RowDrop`).
+/// Not a `List`: there, a drag only reorders and never reaches a row's drop target.
 private struct TaskListView: View {
     @Environment(TasksModel.self) private var model
     let emptyText: LocalizedStringKey
+    /// The row being dragged, from its lift until it is dropped.
+    @State private var dragged: GroupRow?
+    /// The row the dragged one hovers over, and where on it.
+    @State private var mark: RowMark?
+    /// The visible height, which the space below the rows fills.
+    @State private var viewportHeight: CGFloat = 0
+    #if os(iOS)
+        @Environment(\.horizontalSizeClass) private var sizeClass
+        /// The rows' leading and trailing margin, wider on a wide screen as in a `List`.
+        private var margin: CGFloat { sizeClass == .regular ? 20 : 16 }
+    #else
+        private let margin: CGFloat = 8
+    #endif
 
     var body: some View {
         Group {
@@ -100,35 +115,32 @@ private struct TaskListView: View {
                     Text(emptyText)
                 }
             } else {
-                List {
-                    ForEach(model.groups, id: \.tag) { group in
-                        Section {
-                            ForEach(group.tasks) { task in
-                                TaskRow(task: task, onCircle: { model.toggleDone(task) })
-                                    .listRowSeparator(
-                                        task.id == group.tasks.first?.id ? .hidden : .automatic, edges: .top
-                                    )
-                                    .contentShape(Rectangle())
-                                    .onTapGesture { model.startEditing(task) }
-                                    .swipeActions(edge: .trailing) {
-                                        if !task.done {
-                                            Button("Reject", role: .destructive) { model.close(task, as: .rejected) }
-                                        }
-                                    }
-                                    .taskQuickActions(task)
-                            }
-                            // A drop lands within the Section: no target outside the row's Group.
-                            .onMove { model.move(in: group.tag, from: $0, to: $1) }
-                        } header: {
-                            if let tag = group.tag {
-                                Text(tag)
-                                    .foregroundStyle(model.tagEntry(tag).style())
-                                    .accessibilityIdentifier("group-\(tag)")
+                ScrollView {
+                    VStack(spacing: 0) {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(model.groups, id: \.tag) { group in
+                                if let tag = group.tag {
+                                    GroupHeading(tag: tag, margin: margin)
+                                        .onDrop(of: [.text], delegate: endDrop)
+                                }
+                                ForEach(group.tasks) { task in
+                                    row(task, in: group.tag)
+                                }
                             }
                         }
+                        .swipeActionsContainerIfAvailable()
+                        Color.clear
+                            .frame(maxWidth: .infinity, minHeight: 88, maxHeight: .infinity)
+                            .contentShape(Rectangle())
+                            .onDrop(of: [.text], delegate: endDrop)
                     }
+                    .frame(minHeight: viewportHeight, alignment: .top)
                 }
-                .listStyle(.plain)
+                .onScrollGeometryChange(for: CGFloat.self) {
+                    $0.containerSize.height
+                } action: {
+                    viewportHeight = $1
+                }
             }
         }
         .toolbar { ToolbarItem(placement: .primaryAction) { SortMenu() } }
@@ -139,6 +151,189 @@ private struct TaskListView: View {
             }
         }
         .animation(.default, value: model.pendingClose)
+    }
+
+    private func row(_ task: ListedTask, in tag: String?) -> some View {
+        let row = GroupRow(id: task.id, tag: tag)
+        return TaskListRow(task: task, margin: margin, mark: mark?.row == row ? mark?.zone : nil) {
+            dragged = row
+        } dropDelegate: { height in
+            RowDropDelegate(row: row, height: height, dragged: $dragged, mark: $mark, drop: perform)
+        }
+    }
+
+    /// The space below the rows and the headings: the end of the dragged row's Group.
+    private var endDrop: RowDropDelegate {
+        RowDropDelegate(row: nil, height: 0, dragged: $dragged, mark: $mark, drop: perform)
+    }
+
+    private func perform(_ dragged: GroupRow, on row: String?, at zone: DropZone) {
+        withAnimation { model.drop(dragged.id, on: row, at: zone, in: dragged.tag) }
+    }
+}
+
+/// A row of a Group: its Task and the Group's Tag (none: the Tasks without a Group). A Task in
+/// several Groups has a row in each.
+private struct GroupRow: Equatable {
+    let id: String
+    let tag: String?
+}
+
+/// The layout `List` gave the rows and headings.
+private enum RowMetrics {
+    #if os(macOS)
+        static let vertical: CGFloat = 4
+        static let minHeight: CGFloat = 0
+        static let headingFont = Font.subheadline.bold()
+        static let headingStyle = HierarchicalShapeStyle.secondary
+        static let headingHeight: CGFloat = 21
+        static let headingBottom: CGFloat = 8
+        /// Whether a separator runs to the trailing edge, or stops at the margin.
+        static let separatorReachesEdge = true
+    #else
+        static let vertical: CGFloat = 15
+        static let minHeight: CGFloat = 44
+        static let headingFont = Font.headline
+        static let headingStyle = HierarchicalShapeStyle.tertiary
+        static let headingHeight: CGFloat = 52
+        static let headingBottom: CGFloat = 10
+        static let separatorReachesEdge = false
+    #endif
+}
+
+/// Where on which row a dragged row would land.
+private struct RowMark: Equatable {
+    let row: GroupRow
+    let zone: DropZone
+}
+
+/// The heading of a Group: its Tag, in its Tag Color.
+private struct GroupHeading: View {
+    @Environment(TasksModel.self) private var model
+    let tag: String
+    let margin: CGFloat
+
+    var body: some View {
+        Text(tag)
+            .font(RowMetrics.headingFont)
+            .foregroundStyle(model.tagEntry(tag).style(default: RowMetrics.headingStyle))
+            .accessibilityIdentifier("group-\(tag)")
+            .frame(maxWidth: .infinity, minHeight: RowMetrics.headingHeight, alignment: .bottomLeading)
+            .padding(.horizontal, margin)
+            .padding(.bottom, RowMetrics.headingBottom)
+            .contentShape(Rectangle())
+    }
+}
+
+/// One row of the list: the Task, a separator below it from its Title on, and while a row is
+/// dragged over it the mark of where it would land.
+private struct TaskListRow: View {
+    @Environment(TasksModel.self) private var model
+    let task: ListedTask
+    let margin: CGFloat
+    let mark: DropZone?
+    /// The row is lifted for dragging.
+    let onLift: () -> Void
+    /// The row's drop target, for its height.
+    let dropDelegate: (CGFloat) -> RowDropDelegate
+    @State private var height: CGFloat = 0
+
+    var body: some View {
+        TaskRow(task: task, onCircle: { model.toggleDone(task) })
+            .padding(.vertical, RowMetrics.vertical)
+            .padding(.horizontal, margin)
+            .frame(minHeight: RowMetrics.minHeight)
+            .overlayPreferenceValue(TitleLeading.self) { anchor in
+                GeometryReader { proxy in
+                    Divider()
+                        .padding(.leading, anchor.map { proxy[$0].x } ?? margin)
+                        .padding(.trailing, RowMetrics.separatorReachesEdge ? 0 : margin)
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                }
+            }
+            .overlay { DropMark(zone: mark) }
+            .contentShape(Rectangle())
+            .onTapGesture { model.startEditing(task) }
+            .onDrag {
+                onLift()
+                return NSItemProvider(object: task.id as NSString)
+            }
+            .taskQuickActions(task)
+            .onGeometryChange(for: CGFloat.self) {
+                $0.size.height
+            } action: {
+                height = $0
+            }
+            .onDrop(of: [.text], delegate: dropDelegate(height))
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("task-row")
+    }
+}
+
+/// Where a dragged row would land on the row under it: an accent line above or below it, or an
+/// accent outline around it for a drop onto it.
+private struct DropMark: View {
+    let zone: DropZone?
+
+    var body: some View {
+        switch zone {
+        case .before: line.frame(maxHeight: .infinity, alignment: .top)
+        case .after: line.frame(maxHeight: .infinity, alignment: .bottom)
+        case .onto:
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.accentColor, lineWidth: 2)
+                .background(Color.accentColor.opacity(0.1), in: .rect(cornerRadius: 8))
+                .padding(.horizontal, 4)
+        case nil: EmptyView()
+        }
+    }
+
+    private var line: some View { Color.accentColor.frame(height: 2) }
+}
+
+/// Takes the dragged row's drops on one row (`row`, `height` high) or, `row` nil, on the space
+/// below the rows. Only drops from a row of the same Group are taken, never on the dragged row.
+private struct RowDropDelegate: DropDelegate {
+    let row: GroupRow?
+    let height: CGFloat
+    @Binding var dragged: GroupRow?
+    @Binding var mark: RowMark?
+    let drop: (_ dragged: GroupRow, _ row: String?, _ zone: DropZone) -> Void
+
+    func validateDrop(info: DropInfo) -> Bool {
+        guard let dragged else { return false }
+        guard let row else { return true }
+        return dragged != row && dragged.tag == row.tag
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        if let row {
+            let zone = DropZone(y: info.location.y, height: height)
+            let new = RowMark(row: row, zone: zone)
+            if mark != new { mark = new }
+        } else if mark != nil {
+            mark = nil
+        }
+        return DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        if let row, mark?.row == row { mark = nil }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard let dragged, validateDrop(info: info) else { return false }
+        let zone = DropZone(y: info.location.y, height: height)
+        (self.dragged, mark) = (nil, nil)
+        drop(dragged, row?.id, zone)
+        return true
+    }
+}
+
+extension View {
+    /// Lets the rows' swipe actions work outside a `List`, where the system can.
+    @ViewBuilder fileprivate func swipeActionsContainerIfAvailable() -> some View {
+        if #available(iOS 27, macOS 27, *) { swipeActionsContainer() } else { self }
     }
 }
 
@@ -203,17 +398,23 @@ private struct ClosedToast: View {
     }
 }
 
-/// A Tag's name in its Tag Color, Default being the secondary grey.
+/// A Tag's name in its Tag Color, Default being a grey fainter than the Description's on iPhone
+/// and iPad, the same on the Mac.
 private func tagText(_ tag: TagEntry) -> Text {
-    Text(tag.name).foregroundStyle(tag.style())
+    #if os(macOS)
+        Text(tag.name).foregroundStyle(tag.style(default: .secondary))
+    #else
+        Text(tag.name).foregroundStyle(tag.style(default: .tertiary))
+    #endif
 }
 
-/// A symbol and a text, close together, for the line of Tags.
+/// A symbol and a text, close together and secondary grey, for the line of Tags.
 private func marker(_ text: Text, symbol: String) -> some View {
     HStack(spacing: 3) {
         Image(systemName: symbol).imageScale(.small)
         text
     }
+    .foregroundStyle(.secondary)
 }
 
 /// One Task: a circle, coloured by Priority and filled while Done, and beside
@@ -237,6 +438,7 @@ struct TaskRow: View {
             .accessibilityLabel(task.done ? "Revert Done" : "Done")
             VStack(alignment: .leading, spacing: 2) {
                 Text(AttributedString(title: task.title))
+                    .anchorPreference(key: TitleLeading.self, value: .leading) { $0 }
                 let preview = rowPreview(text: task.description)
                 if !preview.isEmpty {
                     Text(AttributedString(title: preview))
@@ -263,8 +465,8 @@ struct TaskRow: View {
                                 .lineLimit(1)
                         }
                     }
+                    // No grey of its own: a nested one resolves differently in a `List`.
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
                 }
             }
             if task.blocked {
@@ -278,10 +480,20 @@ struct TaskRow: View {
     }
 }
 
+/// Where a `TaskRow`'s Title starts, for a separator to line up with it.
+struct TitleLeading: PreferenceKey {
+    static let defaultValue: SwiftUI.Anchor<CGPoint>? = nil
+
+    static func reduce(value: inout SwiftUI.Anchor<CGPoint>?, nextValue: () -> SwiftUI.Anchor<CGPoint>?) {
+        value = value ?? nextValue()
+    }
+}
+
 extension View {
     /// The quick actions of a Task row: its context menu (long press, right click: the Priority
-    /// palette, "Tags…", a divider, then Reject) and, on iPhone and iPad, a leading swipe that opens
-    /// the same Tag picker. A pending Done (reverted at its circle) has neither.
+    /// palette, "Tags…", a divider, then Reject), a trailing swipe that Rejects and, on iPhone and
+    /// iPad, a leading swipe that opens the same Tag picker. A pending Done (reverted at its
+    /// circle) has none.
     func taskQuickActions(_ task: ListedTask) -> some View {
         modifier(TaskQuickActions(task: task))
     }
@@ -294,6 +506,11 @@ private struct TaskQuickActions: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .swipeActions(edge: .trailing) {
+                if !task.done {
+                    Button("Reject", role: .destructive) { model.close(task, as: .rejected) }
+                }
+            }
             #if os(iOS)
                 .swipeActions(edge: .leading, allowsFullSwipe: true) {
                     if !task.done {

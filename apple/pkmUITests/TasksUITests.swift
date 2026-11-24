@@ -19,19 +19,46 @@ import XCTest
 
     /// The row of the Task `title` in the list.
     private func row(_ title: String) -> XCUIElement {
-        app.cells.containing(.staticText, identifier: title).firstMatch
+        app.otherElements.matching(identifier: "task-row").containing(.staticText, identifier: title).firstMatch
     }
 
-    /// A press shorter than the context menu's lifts the row for dragging.
+    /// A trailing swipe offers Reject; outside a `List` only from iOS 27 on.
+    func testARowSwipedLeftOffersReject() throws {
+        guard #available(iOS 27, *) else { throw XCTSkip("swipe actions need a List before iOS 27") }
+        row("Book the dentist").swipeLeft()
+        XCTAssertTrue(app.buttons["Reject"].waitForExistence(timeout: 5))
+    }
+
+    /// Drags the row `title` from its middle to `offset` of the row `target`, after a press shorter
+    /// than the context menu's, until `landed`. A synthesized press sometimes lifts the row late, so
+    /// it holds long at the target, or scrolls instead (with `List` too), so it is tried up to three times.
+    private func drag(_ title: String, to target: String, at offset: CGVector, until landed: () -> Bool) {
+        for _ in 0..<3 {
+            let to = row(target).coordinate(withNormalizedOffset: offset)
+            row(title).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                .press(forDuration: 0.5, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 2)
+            if landed() { return }
+        }
+    }
+
+    /// The middle of a row onto the middle of another makes it a Subtask there.
+    func testATaskDroppedOntoAnotherBecomesItsSubtask() {
+        let parentMarker = row("Reply to Anna's email").staticTexts["Book the dentist"]
+        drag("Reply to Anna's email", to: "Book the dentist", at: CGVector(dx: 0.5, dy: 0.5)) {
+            parentMarker.waitForExistence(timeout: 2)
+        }
+        XCTAssertTrue(parentMarker.exists)
+    }
+
+    /// Onto the line between two rows, a Task only moves there.
     func testATaskDraggedBetweenRowsOnlyMoves() {
-        let dentist = row("Book the dentist")
-        let above = dentist.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
-        row("Reply to Anna's email").coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            .press(forDuration: 0.5, thenDragTo: above, withVelocity: .slow, thenHoldForDuration: 1)
-        let reply = row("Reply to Anna's email")
-        XCTAssertTrue(reply.waitForExistence(timeout: 5))
-        XCTAssertLessThan(reply.frame.minY, row("Book the dentist").frame.minY)
-        XCTAssertFalse(reply.staticTexts["Book the dentist"].exists)
+        func isAbove() -> Bool { row("Reply to Anna's email").frame.minY < row("Book the dentist").frame.minY }
+        drag("Reply to Anna's email", to: "Book the dentist", at: CGVector(dx: 0.5, dy: 0)) {
+            _ = row("Reply to Anna's email").waitForExistence(timeout: 2)
+            return isAbove()
+        }
+        XCTAssertTrue(isAbove())
+        XCTAssertFalse(row("Reply to Anna's email").staticTexts["Book the dentist"].exists)
     }
 
     func testABlockerOpensOnTopAndBackReturns() {

@@ -580,11 +580,47 @@ import Testing
     @Test func aTaskIsDraggedBeforeAnotherAndToTheEnd() throws {
         let model = try openModel()
         for title in ["a", "b", "c"] { model.add(title: title) }
-        model.move(from: [2], to: 0)
+        model.move(model.tasks[2].id, before: model.tasks[0].id)
         #expect(model.tasks.map(\.title) == ["c", "a", "b"])
-        model.move(from: [0], to: 3)
+        model.move(model.tasks[0].id, before: nil)
         #expect(model.tasks.map(\.title) == ["a", "b", "c"])
         #expect(try openModel().tasks.map(\.title) == ["a", "b", "c"])
+    }
+
+    @Test func aDropZoneIsTheRowsTopQuarterMiddleHalfOrBottomQuarter() {
+        #expect(
+            [0, 24, 25, 50, 75, 76, 100].map { DropZone(y: $0, height: 100) }
+                == [.before, .before, .onto, .onto, .onto, .after, .after])
+    }
+
+    @Test func aDropOnARowMovesBeforeOrAfterItOrMakesASubtask() {
+        let rows = ["a", "b", "c"]
+        #expect(RowDrop(dragging: "c", on: "a", at: .before, rows: rows) == .move(before: "a"))
+        #expect(RowDrop(dragging: "c", on: "a", at: .after, rows: rows) == .move(before: "b"))
+        #expect(RowDrop(dragging: "a", on: "c", at: .after, rows: rows) == .move(before: nil))
+        #expect(RowDrop(dragging: "a", on: "b", at: .onto, rows: rows) == .onto(parent: "b"))
+        #expect(RowDrop(dragging: "a", on: nil, at: .onto, rows: rows) == .move(before: nil))
+        // Not on the dragged row, nor across Groups.
+        #expect(RowDrop(dragging: "a", on: "a", at: .onto, rows: rows) == nil)
+        #expect(RowDrop(dragging: "x", on: "a", at: .before, rows: rows) == nil)
+        #expect(RowDrop(dragging: "a", on: "x", at: .before, rows: rows) == nil)
+    }
+
+    @Test func aTaskDroppedOnARowOfItsGroupMovesOrBecomesASubtask() throws {
+        let model = try openModel()
+        for title in ["a", "b", "c"] { model.add(title: title) }
+        let (a, b, c) = (model.tasks[0].id, model.tasks[1].id, model.tasks[2].id)
+        model.drop(a, on: b, at: .after)
+        #expect(model.tasks.map(\.title) == ["b", "a", "c"])
+        model.drop(a, on: b, at: .before)
+        #expect(model.tasks.map(\.title) == ["a", "b", "c"])
+        model.drop(a, on: nil, at: .before)
+        #expect(model.tasks.map(\.title) == ["b", "c", "a"])
+        model.drop(c, on: b, at: .onto)
+        #expect(model.tasks.map(\.title) == ["b", "c", "a"])
+        #expect(model.tasks[1].parent == b)
+        model.drop(b, on: c, at: .onto)  // not onto its own Subtask
+        #expect(model.tasks[0].parent == nil)
     }
 
     @Test func aTaskDroppedOntoAnotherBecomesItsSubtaskJustBelowIt() throws {
@@ -604,7 +640,7 @@ import Testing
         model.add(title: "a")
         model.addSubtask(title: "b", under: model.tasks[0])
         let parent = model.tasks[0].id
-        model.move(from: [1], to: 0)
+        model.move(model.tasks[1].id, before: model.tasks[0].id)
         #expect(model.tasks.map(\.title) == ["b", "a"])
         #expect(model.tasks.map(\.parent) == [parent, nil])
     }
@@ -629,7 +665,7 @@ import Testing
         let p = model.tasks[0]
         for title in ["x", "y"] { model.addSubtask(title: title, under: p) }
         #expect(model.tasks.map(\.title) == ["p", "x", "y"])
-        model.move(from: [2], to: 1)
+        model.move(model.tasks[2].id, before: model.tasks[1].id)
         #expect(model.tasks.map(\.title) == ["p", "y", "x"])
         #expect(model.subtasks(of: p.id).map(\.title) == ["y", "x"])
     }
@@ -863,7 +899,7 @@ import Testing
         model.addFilter(title: "Other", query: "@work")
         model.list = .filter(model.filters[0].id)
 
-        model.move(from: IndexSet(integer: 2), to: 0)
+        model.move(model.tasks[2].id, before: model.tasks[0].id)
         #expect(model.tasks.map(\.title) == ["three", "one", "two"])
         model.list = .filter(model.filters[1].id)
         #expect(model.tasks.map(\.title) == ["one", "two", "three"])
@@ -887,7 +923,7 @@ import Testing
         #expect(model.tasks.map(\.title) == ["low", "mid", "high"])
 
         // A drag across Priorities turns the Filter Manual, keeping what is shown.
-        model.move(from: IndexSet(integer: 2), to: 0)
+        model.move(model.tasks[2].id, before: model.tasks[0].id)
         #expect(model.sort == .manual)
         #expect(model.tasks.map(\.title) == ["high", "low", "mid"])
     }
@@ -1015,7 +1051,7 @@ import Testing
         model.addFilter(title: "All", query: "*")
         let filter = TasksList.filter(model.filters[0].id)
         model.list = filter
-        model.move(from: IndexSet(integer: 2), to: 0)
+        model.move(model.tasks[2].id, before: model.tasks[0].id)
         let moved = model.tasks[0]
 
         model.list = .filter(model.filters[1].id)
@@ -1093,11 +1129,13 @@ import Testing
         #expect(model.addFilter(title: "G", query: "*", groupBy: "@a @b"))
         model.list = .filter(model.filters[0].id)
 
-        model.move(in: "a", from: [1], to: 0)
+        let (p, q) = (model.groups[0].tasks[0].id, model.groups[0].tasks[1].id)
+        let (x, y) = (model.groups[1].tasks[0].id, model.groups[1].tasks[1].id)
+        model.move(y, before: x, in: "a")
         #expect(model.groups.map { $0.tasks.map(\.title) } == [["p", "q"], ["y", "x"], ["x", "y"]])
-        model.move(in: nil, from: [0], to: 2)
+        model.move(p, before: nil, in: nil)
         #expect(model.groups.map { $0.tasks.map(\.title) } == [["q", "p"], ["y", "x"], ["x", "y"]])
-        model.move(in: "c", from: [0], to: 1)  // no such Group
+        model.move(p, before: q, in: "c")  // no such Group
         #expect(model.groups.map { $0.tasks.map(\.title) } == [["q", "p"], ["y", "x"], ["x", "y"]])
     }
 
