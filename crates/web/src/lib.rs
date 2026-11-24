@@ -748,6 +748,75 @@ impl Editor {
     pub fn set_pencil_only_drawing(&self, on: bool) {
         self.inner.borrow_mut().set_pencil_only_drawing(on);
     }
+
+    /// Whether Dimensions are shown while resizing; off by default. The
+    /// client restores its stored choice. See
+    /// [`pkm_drawing::Editor::show_dimensions`].
+    #[wasm_bindgen(js_name = showDimensions)]
+    pub fn show_dimensions(&self) -> bool {
+        self.inner.borrow().show_dimensions()
+    }
+
+    /// The user's choice (or the stored one) of showing Dimensions.
+    #[wasm_bindgen(js_name = setShowDimensions)]
+    pub fn set_show_dimensions(&self, on: bool) {
+        self.inner.borrow_mut().set_show_dimensions(on);
+    }
+
+    /// The Dimensions of the resize in progress, if shown; ask again when
+    /// [`Editor::overlay_revision`] moves. See
+    /// [`pkm_drawing::Editor::dimensions`].
+    pub fn dimensions(&self) -> Option<Dimensions> {
+        let shown = self.inner.borrow().dimensions()?;
+        let mut texts = Vec::new();
+        let mut places = Vec::new();
+        for label in shown.labels {
+            texts.push(label.text);
+            places.extend([label.x, label.y, label.angle]);
+        }
+        Some(Dimensions {
+            geometry: Some(Geometry {
+                inner: shown.geometry,
+            }),
+            texts,
+            places,
+            color: shown.color,
+            opacity: shown.opacity,
+        })
+    }
+
+    /// The Drawing's Unit: Scene pixels per unit of Dimensions, one until
+    /// set. See [`pkm_drawing::Editor::unit`].
+    pub fn unit(&self) -> f64 {
+        self.inner.borrow().unit()
+    }
+
+    /// Whether [`Editor::set_unit`] can measure: one Element or one group is
+    /// selected.
+    #[wasm_bindgen(js_name = canSetUnit)]
+    pub fn can_set_unit(&self) -> bool {
+        self.inner.borrow().can_set_unit()
+    }
+
+    /// The selected Element's or group's width (a line's length) in units,
+    /// to pre-fill the dialog; `undefined` unless [`Editor::can_set_unit`].
+    #[wasm_bindgen(js_name = selectionMeasure)]
+    pub fn selection_measure(&self) -> Option<f64> {
+        self.inner.borrow().selection_measure()
+    }
+
+    /// Makes the Selection's measure read `value`; one undo step. `false`
+    /// if `value` is not finite and above zero or nothing can be measured.
+    #[wasm_bindgen(js_name = setUnit)]
+    pub fn set_unit(&self, value: f64) -> bool {
+        self.inner.borrow_mut().set_unit(value)
+    }
+
+    /// Makes the Unit one Scene pixel again; one undo step.
+    #[wasm_bindgen(js_name = resetUnit)]
+    pub fn reset_unit(&self) {
+        self.inner.borrow_mut().reset_unit();
+    }
 }
 
 /// The Context menu to show; see [`pkm_drawing::ContextMenu`].
@@ -789,6 +858,44 @@ impl Export {
     #[wasm_bindgen(js_name = takeGeometry)]
     pub fn take_geometry(&mut self) -> Option<Geometry> {
         self.geometry.take()
+    }
+}
+
+/// Dimensions to draw over the overlay: lines and ticks as geometry, and the
+/// numbers for the client to draw in the system font; see
+/// [`pkm_drawing::Dimensions`].
+#[wasm_bindgen]
+pub struct Dimensions {
+    geometry: Option<Geometry>,
+    texts: Vec<String>,
+    /// `x, y, angle` of each text.
+    places: Vec<f64>,
+    /// The colour of the numbers, `0xRRGGBBAA`, drawn at `opacity`.
+    #[wasm_bindgen(readonly)]
+    pub color: u32,
+    #[wasm_bindgen(readonly)]
+    pub opacity: f32,
+}
+
+#[wasm_bindgen]
+impl Dimensions {
+    /// The lines and ticks; they can be taken once.
+    #[wasm_bindgen(js_name = takeGeometry)]
+    pub fn take_geometry(&mut self) -> Option<Geometry> {
+        self.geometry.take()
+    }
+
+    /// The formatted numbers.
+    #[wasm_bindgen(getter)]
+    pub fn texts(&self) -> Vec<String> {
+        self.texts.clone()
+    }
+
+    /// For each number in turn: the Scene point it is centred on (`x`, `y`)
+    /// and its angle (clockwise, radians).
+    #[wasm_bindgen(getter)]
+    pub fn places(&self) -> Vec<f64> {
+        self.places.clone()
     }
 }
 

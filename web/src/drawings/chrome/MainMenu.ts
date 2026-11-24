@@ -9,6 +9,14 @@ export interface MainMenuActions {
   canExport(): boolean;
   pencilOnlyDrawing(): boolean;
   setPencilOnlyDrawing(on: boolean): void;
+  showDimensions(): boolean;
+  setShowDimensions(on: boolean): void;
+  /** Whether "Set unit…" can measure: one Element or one group is selected. */
+  canSetUnit(): boolean;
+  /** Whether "Reset unit" has anything to reset: the Unit is not one Scene pixel. */
+  canResetUnit(): boolean;
+  askUnit(): void;
+  resetUnit(): void;
 }
 
 const moreGlyph = `<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`;
@@ -16,13 +24,17 @@ const moreGlyph = `<svg viewBox="0 0 24 24" width="20" height="20" fill="current
 /**
  * Excalidraw's main menu, top right, a port of the Swift `MainMenu`: Save as
  * (the `.excalidraw` file), Export (the image) with their shortcuts, and the
- * Pen-only drawing setting.
+ * settings: Pen-only drawing and Show dimensions, with "Set unit…" and
+ * "Reset unit" while that is on.
  */
 export class MainMenu {
   private readonly menu = new MenuButton("Menu", () => this.update());
   readonly element = this.menu.element;
   private readonly exportItem: HTMLButtonElement;
   private readonly penOnly: HTMLButtonElement;
+  private readonly dimensions: HTMLButtonElement;
+  private readonly setUnit: HTMLButtonElement;
+  private readonly resetUnit: HTMLButtonElement;
 
   constructor(private readonly actions: MainMenuActions) {
     this.menu.toggle.innerHTML = moreGlyph;
@@ -34,6 +46,11 @@ export class MainMenu {
     this.penOnly = this.menu.item("Pen-only drawing", "menuitemcheckbox", () =>
       actions.setPencilOnlyDrawing(!actions.pencilOnlyDrawing()),
     );
+    this.dimensions = this.menu.item("Show dimensions", "menuitemcheckbox", () =>
+      actions.setShowDimensions(!actions.showDimensions()),
+    );
+    this.setUnit = this.menu.item("Set unit…", "menuitem", () => actions.askUnit());
+    this.resetUnit = this.menu.item("Reset unit", "menuitem", () => actions.resetUnit());
     this.menu.set(
       this.menu.item("Save as…", "menuitem", () => actions.saveAs(), {
         label: fileShortcutLabel(FileCommand.SaveAs, apple),
@@ -42,6 +59,9 @@ export class MainMenu {
       this.exportItem,
       this.menu.separator("Settings"),
       this.penOnly,
+      this.dimensions,
+      this.setUnit,
+      this.resetUnit,
     );
     this.update();
   }
@@ -50,6 +70,12 @@ export class MainMenu {
   update(): void {
     this.exportItem.disabled = !this.actions.canExport();
     this.penOnly.setAttribute("aria-checked", String(this.actions.pencilOnlyDrawing()));
+    const dimensions = this.actions.showDimensions();
+    this.dimensions.setAttribute("aria-checked", String(dimensions));
+    // The Unit items are only there while Dimensions are on.
+    this.setUnit.hidden = this.resetUnit.hidden = !dimensions;
+    this.setUnit.disabled = !this.actions.canSetUnit();
+    this.resetUnit.disabled = !this.actions.canResetUnit();
   }
 
   dispose(): void {

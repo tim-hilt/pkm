@@ -16,6 +16,9 @@ import { PhoneChrome } from "./chrome/PhoneChrome";
 import { ContextMenu } from "./chrome/ContextMenu";
 import { type MenuEntry, openContextMenu } from "./chrome/ContextMenuModel";
 import { MainMenu } from "./chrome/MainMenu";
+import { askUnit } from "./chrome/UnitPrompt";
+import { DimensionLabels } from "./rendering/DimensionLabels";
+import { DimensionsDisplay } from "./rendering/DimensionsDisplay";
 import { TextEditorOverlay } from "./text/TextEditorOverlay";
 import { caretInView, keyboardCovering, textAboveKeyboard } from "./text/KeyboardAvoidance";
 import type { Appearance } from "../settings/Appearance";
@@ -87,6 +90,8 @@ export function showCanvas(
 
   const sync = new SceneSync(editor, renderer);
   sync.showScene();
+  const dimensionLabels = new DimensionLabels();
+  const dimensions = new DimensionsDisplay(editor, renderer, dimensionLabels);
 
   let pointer: { x: number; y: number } | undefined;
   const zoomControls = new ZoomControls(editor, () => didReachEditor());
@@ -124,6 +129,21 @@ export function showCanvas(
     pencilOnlyDrawing: () => handlers.settings.pencilOnlyDrawing(editor),
     setPencilOnlyDrawing: (on) => {
       handlers.settings.setPencilOnlyDrawing(editor, on);
+      didReachEditor();
+    },
+    showDimensions: () => handlers.settings.showDimensions(editor),
+    setShowDimensions: (on) => {
+      handlers.settings.setShowDimensions(editor, on);
+      didReachEditor();
+    },
+    canSetUnit: () => editor.canSetUnit(),
+    canResetUnit: () => editor.unit() !== 1,
+    askUnit: () => {
+      askUnit(editor);
+      didReachEditor();
+    },
+    resetUnit: () => {
+      editor.resetUnit();
       didReachEditor();
     },
   });
@@ -175,6 +195,7 @@ export function showCanvas(
     // Panning moves the Text view too: shown once more.
     if (syncTextView(typed)) syncTextView(false);
     sync.sync();
+    dimensions.sync();
     handlers.edited();
     zoomControls.update();
     zoomMenu.update();
@@ -238,6 +259,7 @@ export function showCanvas(
       pointer = { x, y };
       editor.hover(x, y, kind, modifiers);
       sync.sync();
+      dimensions.sync();
       canvas.style.cursor = cssCursor(editor.cursor(x, y));
     },
     // Off the Canvas, a paste from the keyboard lands in the middle of the view.
@@ -245,6 +267,7 @@ export function showCanvas(
       pointer = undefined;
       editor.endHover();
       sync.sync();
+      dimensions.sync();
     },
   });
 
@@ -271,6 +294,7 @@ export function showCanvas(
   };
   root.replaceChildren(
     canvas,
+    dimensionLabels.element,
     back,
     toolbar.element,
     properties.element,
@@ -327,6 +351,7 @@ export function showCanvas(
     gone = true;
     renderer.dispose();
     sync.dispose();
+    dimensions.dispose();
     context.unconfigure();
     root.replaceChildren();
   };

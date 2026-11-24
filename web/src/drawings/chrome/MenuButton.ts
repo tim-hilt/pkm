@@ -93,7 +93,9 @@ export class MenuButton {
   }
 
   private items(): HTMLButtonElement[] {
-    return [...this.menu.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+    return [
+      ...this.menu.querySelectorAll<HTMLButtonElement>("button:not(:disabled):not([hidden])"),
+    ];
   }
 
   private key(event: KeyboardEvent): void {

@@ -569,3 +569,59 @@ describe("editing text", () => {
     editor.free();
   });
 });
+
+describe("Dimensions and the Unit", () => {
+  const rectangle = drawing(
+    `{"id":"a","type":"rectangle","x":10,"y":20,"width":30,"height":40,"backgroundColor":"#ffc9c9"}`,
+  );
+  /** Selects the rectangle and drags its south-east handle (6 beyond the corner) to resize it to 50 by 50. */
+  const resize = (editor: Editor) => {
+    tap(editor, 20, 30);
+    press(editor, [
+      [44, 64],
+      [64, 74],
+    ]);
+  };
+
+  it("shows Dimensions only while a resize runs and the setting is on", () => {
+    let editor = core.makeEditor();
+    editor.load(rectangle);
+    expect(editor.showDimensions()).toBe(false);
+    resize(editor);
+    expect(editor.dimensions()).toBeUndefined();
+    editor.free();
+
+    editor = core.makeEditor();
+    editor.load(rectangle);
+    editor.setShowDimensions(true);
+    expect(editor.showDimensions()).toBe(true);
+    resize(editor);
+    const shown = editor.dimensions()!;
+    expect(shown.labels.map((l) => l.text)).toEqual(["50.00", "50.00"]);
+    expect(shown.geometry.withBuffers((b) => b.parts.length)).toBe(1);
+    shown.geometry.free();
+    editor.pointer(step(PointerPhase.Up, [64, 74]));
+    expect(editor.dimensions()).toBeUndefined();
+    editor.free();
+  });
+
+  it("sets and resets the Unit from the Selection's measure", () => {
+    const editor = core.makeEditor();
+    editor.load(rectangle);
+    expect(editor.unit()).toBe(1);
+    expect(editor.canSetUnit()).toBe(false);
+    expect(editor.selectionMeasure()).toBeUndefined();
+
+    tap(editor, 20, 30);
+    expect(editor.canSetUnit()).toBe(true);
+    expect(editor.selectionMeasure()).toBe(30);
+    expect(editor.setUnit(0)).toBe(false);
+    expect(editor.setUnit(3)).toBe(true);
+    expect(editor.unit()).toBe(10);
+    expect(editor.selectionMeasure()).toBe(3);
+
+    editor.resetUnit();
+    expect(editor.unit()).toBe(1);
+    editor.free();
+  });
+});

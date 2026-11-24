@@ -38,6 +38,8 @@ export interface RenderHarness {
       pixelsPerPoint?: number;
       size?: number;
       overlay?: GeometrySource;
+      /** The lines of Dimensions over the overlay, at `strength` (default 1). */
+      dimensions?: { lines: GeometrySource; strength?: number };
       /** Where the images' files come from. */
       files?: ImageFileSource;
     },
@@ -65,6 +67,9 @@ export async function makeRenderHarness(): Promise<RenderHarness> {
       renderer.files = options?.files;
       renderer.setGeometry(geometry);
       if (options?.overlay) renderer.setOverlay(options.overlay);
+      if (options?.dimensions) {
+        renderer.setDimensions(options.dimensions.lines, options.dimensions.strength);
+      }
       renderer.viewport = viewport;
       return harness.draw(renderer, options);
     },

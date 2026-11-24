@@ -39,6 +39,24 @@
       }
       /* The Text view (TextEditorOverlay): the box of the text, nothing else.
          Placement and look come from the core, inline. */
+      /* The numbers of Dimensions (DimensionLabels): over the Canvas, the system
+         font at a constant size, never in the way of a pointer. */
+      .dimension-labels {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        pointer-events: none;
+        font:
+          11px system-ui,
+          sans-serif;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .dimension-labels span {
+        position: absolute;
+        left: 0;
+        top: 0;
+      }
       .text-view {
         position: absolute;
         box-sizing: border-box;
@@ -712,6 +730,9 @@
         font: inherit;
         text-align: left;
         cursor: pointer;
+      }
+      .menu-item[hidden] {
+        display: none;
       }
       .menu-item:hover:not(:disabled),
       .menu-item:focus-visible {

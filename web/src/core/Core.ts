@@ -180,6 +180,26 @@ export interface ImageExport {
   height: number;
 }
 
+/** The Dimensions of a resize or drawn shape to show over the overlay. */
+export interface Dimensions {
+  /** Dimension lines and end ticks in Scene coordinates, made for the current zoom. */
+  geometry: Geometry;
+  /** The numbers, to draw in the system font over the geometry. */
+  labels: DimensionLabel[];
+  /** The colour of the numbers as `0xRRGGBBAA`, drawn at `opacity`. */
+  color: number;
+  opacity: number;
+}
+
+/** A number of the Dimensions, centred on a Scene point. */
+export interface DimensionLabel {
+  text: string;
+  x: number;
+  y: number;
+  /** Clockwise, in radians. */
+  angle: number;
+}
+
 /** What the Canvas shows: a plain value, as the wasm object is freed on reading. */
 export interface Viewport {
   /** Scene point at the Canvas's top-left corner. */
@@ -622,6 +642,61 @@ export class Editor {
   /** The user's choice or the stored one; Pencil input no longer turns it on by itself after that. */
   setPencilOnlyDrawing(on: boolean): void {
     this.inner.setPencilOnlyDrawing(on);
+  }
+
+  /** Whether Dimensions are shown while resizing; the core never decides this, the client restores its stored choice. */
+  showDimensions(): boolean {
+    return this.inner.showDimensions();
+  }
+
+  setShowDimensions(on: boolean): void {
+    this.inner.setShowDimensions(on);
+  }
+
+  /** The Dimensions of the resize or drawing in progress; `undefined` when none are shown. Read it when `overlayRevision()` moved. Free its geometry when done. */
+  dimensions(): Dimensions | undefined {
+    const shown = this.inner.dimensions();
+    if (!shown) return undefined;
+    const texts = shown.texts;
+    const places = shown.places;
+    const result: Dimensions = {
+      geometry: new Geometry(shown.takeGeometry()!, this.views),
+      labels: texts.map((text, i) => ({
+        text,
+        x: places[3 * i],
+        y: places[3 * i + 1],
+        angle: places[3 * i + 2],
+      })),
+      color: shown.color,
+      opacity: shown.opacity,
+    };
+    shown.free();
+    return result;
+  }
+
+  /** The Drawing's Unit: Scene pixels per unit of Dimensions; one until set. */
+  unit(): number {
+    return this.inner.unit();
+  }
+
+  /** Whether `setUnit` can measure: the Selection is one Element or one group. */
+  canSetUnit(): boolean {
+    return this.inner.canSetUnit();
+  }
+
+  /** The selected Element's or group's width (a line's length) in units, to pre-fill the dialog; `undefined` unless `canSetUnit()`. */
+  selectionMeasure(): number | undefined {
+    return this.inner.selectionMeasure();
+  }
+
+  /** Makes the Selection's measure read `value`; one undo step. `false` for a value that is not finite and above zero. */
+  setUnit(value: number): boolean {
+    return this.inner.setUnit(value);
+  }
+
+  /** Makes the Unit one Scene pixel again; one undo step. */
+  resetUnit(): void {
+    this.inner.resetUnit();
   }
 
   /** Whether the chrome shows the Properties panel: a drawing Tool is armed, text is edited or something is selected. */

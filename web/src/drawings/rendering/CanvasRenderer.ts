@@ -73,7 +73,7 @@ export interface Viewport {
  * instead; when they arrive the Elements that show the file are redrawn.
  *
  * The overlay (selection frames, handles) is drawn over the Scene in the same
- * frame.
+ * frame, and the lines of Dimensions over the overlay (see `setDimensions`).
  */
 export class CanvasRenderer {
   /** Samples per pixel of the colour and stencil a frame is drawn into. */
@@ -94,6 +94,12 @@ export class CanvasRenderer {
   private overlayDraws: Draw[] = [];
   private overlayLevel: number | undefined;
   private overlayIsStale = true;
+  /** The lines of Dimensions, see `setDimensions`; drawn over the overlay. */
+  private dimensions: GeometrySource | undefined;
+  private dimensionsStrength = 1;
+  private dimensionsDraws: Draw[] = [];
+  private dimensionsLevel: number | undefined;
+  private dimensionsAreStale = true;
   /** Frames rendered so far; stays constant while nothing changes. */
   framesRendered = 0;
 
@@ -390,6 +396,20 @@ export class CanvasRenderer {
   }
 
   /**
+   * Replaces the lines of Dimensions drawn over the overlay (Scene
+   * coordinates, made for one zoom like the overlay), `strength` of the way
+   * from invisible (0) to as made (1). The same source at the same strength
+   * is a no-op.
+   */
+  setDimensions(dimensions: GeometrySource | undefined, strength = 1): void {
+    if (dimensions === this.dimensions && strength === this.dimensionsStrength) return;
+    this.dimensions = dimensions;
+    this.dimensionsStrength = strength;
+    this.dimensionsAreStale = true;
+    this.onNeedsDisplay?.();
+  }
+
+  /**
    * Renders one frame into `target` (a single-sampled 2D texture in the
    * renderer's format with render-attachment usage, such as the canvas'
    * current texture), cleared to the Canvas background first.
@@ -403,6 +423,7 @@ export class CanvasRenderer {
     const level = flatteningLevel(scale);
     this.refreshDraws(level);
     this.refreshOverlay(level);
+    this.refreshDimensions(level);
 
     this.device.queue.writeBuffer(
       this.frameBuffer,
@@ -438,8 +459,8 @@ export class CanvasRenderer {
       },
     });
     pass.setBindGroup(0, this.frameGroup);
-    // The Scene, then the overlay on top; no copy of the (large) draws.
-    for (const draws of [this.draws, this.overlayDraws]) {
+    // The Scene, then the overlay and the Dimensions on top; no copy of the (large) draws.
+    for (const draws of [this.draws, this.overlayDraws, this.dimensionsDraws]) {
       for (const draw of draws) {
         if (draw.kind === "fill") {
           this.drawFill(pass, draw);
@@ -524,6 +545,26 @@ export class CanvasRenderer {
     this.overlayDraws = draws;
   }
 
+  /** Brings `dimensionsDraws` up to date with the lines, their strength and the flattening level. */
+  private refreshDimensions(level: number): void {
+    if (!(this.dimensionsAreStale || level !== this.dimensionsLevel)) return;
+    this.dimensionsAreStale = false;
+    this.dimensionsLevel = level;
+    const tolerance = CanvasRenderer.flatteningTolerancePixels / 2 ** level;
+    this.dimensionsDraws.forEach((draw) => draw.destroy());
+    const draws: Draw[] = [];
+    this.dimensions?.withBuffers((buffers) => {
+      for (let index = 0; index < buffers.parts.length; index++) {
+        const part = buffers.parts.at(index);
+        // Dimensions are strokes; the strength scales their opacity.
+        if (part.kind !== strokeKind) continue;
+        const draw = this.strokeDraw(part, buffers, tolerance, this.dimensionsStrength);
+        if (draw) draws.push(draw);
+      }
+    });
+    this.dimensionsDraws = draws;
+  }
+
   /**
    * Brings `draws` up to date with the geometry and the zoom: rebuilds the
    * Elements that changed or were flattened for another power-of-two zoom
@@ -591,6 +632,8 @@ export class CanvasRenderer {
     this.textures.keepOnly(new Set());
     this.overlayDraws.forEach((draw) => draw.destroy());
     this.overlayDraws = [];
+    this.dimensionsDraws.forEach((draw) => draw.destroy());
+    this.dimensionsDraws = [];
     this.frameTargets?.color.destroy();
     this.frameTargets?.stencil.destroy();
     this.frameTargets = undefined;
@@ -621,11 +664,13 @@ export class CanvasRenderer {
     part: GeometryPart,
     buffers: GeometryBuffers,
     tolerance: number,
+    /** Scales the part's opacity. */
+    strength = 1,
   ): StrokeDraw | undefined {
     const segments = strokeSegments(part, buffers, tolerance);
     if (segments.length === 0) return undefined;
 
-    const color = premultipliedColor(part.color, part.opacity);
+    const color = premultipliedColor(part.color, part.opacity * strength);
     const isTranslucent = color[3] < 1;
     const hole = holeOf(part);
     // One uniform slot per way the part is drawn, each at its own aligned

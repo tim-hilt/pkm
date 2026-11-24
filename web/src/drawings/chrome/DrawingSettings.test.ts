@@ -69,4 +69,21 @@ describe("the settings of the main menu", () => {
     editor.free();
     next.free();
   });
+
+  it("has Show dimensions off until chosen, then keeps it per Device", () => {
+    const storage = memory();
+    const first = core.makeEditor();
+    const settings = new DrawingSettings(storage);
+    expect(settings.showDimensions(first)).toBe(false);
+    expect(storage.values.has("showDimensions")).toBe(false);
+
+    settings.setShowDimensions(first, true);
+    expect(settings.showDimensions(first)).toBe(true);
+
+    const second = core.makeEditor();
+    expect(new DrawingSettings(storage).showDimensions(second)).toBe(true);
+
+    settings.setShowDimensions(first, false);
+    expect(new DrawingSettings(storage).showDimensions(core.makeEditor())).toBe(false);
+  });
 });
