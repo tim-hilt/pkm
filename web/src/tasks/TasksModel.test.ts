@@ -508,6 +508,21 @@ describe("order and moving", () => {
     ]);
   });
 
+  it("makes a Task dropped on another its Subtask, just below it", () => {
+    model.dropOnto(task("c"), task("a"));
+    expect(model.tasks.map((t) => [t.title, t.parentTitle])).toEqual([
+      ["a", undefined],
+      ["c", "a"],
+      ["b", undefined],
+    ]);
+  });
+
+  it("refuses to make a Task a Subtask of its own Subtask", () => {
+    model.addSubtask("sub", task("a"));
+    model.dropOnto(task("a"), task("sub"));
+    expect(task("a").parent).toBeUndefined();
+  });
+
   it("keeps the order after reopening", async () => {
     model.moveBefore(task("c"), task("a"));
     await model.saved();

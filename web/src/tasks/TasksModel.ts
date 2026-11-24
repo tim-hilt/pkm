@@ -508,6 +508,17 @@ export class TasksModel {
   }
 
   /**
+   * Makes `task`, dropped onto `parent` in the Group `group` of the Filter shown,
+   * a Subtask of `parent`, keeping its Tags; in Manual order it moves just below
+   * `parent`'s Subtasks. Refused for `parent` being `task` or one of its Subtasks.
+   */
+  dropOnto(task: ListedTask, parent: ListedTask, group?: string): void {
+    const list = this.shownList;
+    if (list.kind !== "filter") return;
+    this.apply(() => this.files.store.makeSubtaskInFilter(list.id, group, task.id, parent.id));
+  }
+
+  /**
    * Sorts a Filter by `key`, in `direction` if the key has one (else its
    * default). Manual keeps the order shown, Priority from Manual discards it.
    */

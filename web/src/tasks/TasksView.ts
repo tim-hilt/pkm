@@ -25,7 +25,8 @@ const plusGlyph = `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" s
  * and the Tags fainter still. The circle marks the Task Done, and a toast
  * offers to Revert a Close, in the edit view while that is shown. A Parent
  * shows how many of its Subtasks are Open, a Subtask its Parent's Title,
- * before the Tags; rows are dragged to reorder. A row opens the edit view; its
+ * before the Tags; rows are dragged to reorder, or onto another to become its
+ * Subtask. A row opens the edit view; its
  * menu (right click, long press) Rejects. The Filters entry of
  * the bar lists the Favorites, each a Filter, and the Filters, with how many Tasks each matches; opening one shows
  * its Tasks as rows, under its Title, with a Sort menu in the toolbar above them. A port of the Swift
@@ -267,14 +268,18 @@ export class TasksView {
   }
 
   /**
-   * The drag of the Group `tag` (none: the Tasks without a Group). A drop off
-   * the rows, below the list or on a heading, moves to the end of the Group.
+   * The drag of the Group `tag` (none: the Tasks without a Group). A drop onto
+   * a row makes the Task its Subtask; off the rows, below the list or on a
+   * heading, it moves to the end of the Group.
    */
   private dragOf(tag: string | undefined): RowDrag<ListedTask> {
     const key = tag ?? "";
     let drag = this.groupDrags.get(key);
     if (!drag) {
-      drag = new RowDrag((task, before) => this.model.moveBefore(task, before, tag));
+      drag = new RowDrag(
+        (task, before) => this.model.moveBefore(task, before, tag),
+        (task, parent) => this.model.dropOnto(task, parent, tag),
+      );
       drag.attachEnd(this.scroll);
       this.groupDrags.set(key, drag);
     }

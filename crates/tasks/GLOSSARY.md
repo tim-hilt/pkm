@@ -103,7 +103,7 @@ _Avoid_: Remove, close
 ### Structure
 
 **Subtask**:
-A Task under another Task, its **Parent**. A Task has at most one Parent, at any depth.
+A Task under another Task, its **Parent**. A Task has at most one Parent, at any depth. Dropping a Task onto another in a Filter makes it that one's Subtask.
 _Avoid_: Child, nested task, checklist item
 
 **Blocked by**:

@@ -20,6 +20,7 @@ pub enum TasksError {
     BlockedBySubtask,
     BlockedByLoop,
     NotASibling,
+    SubtaskOfItself,
     EmptyFilterTitle,
     InvalidQuery(String),
     InvalidGroupBy(String),
@@ -36,6 +37,7 @@ impl std::fmt::Display for TasksError {
             Self::BlockedBySubtask => Error::BlockedBySubtask.fmt(f),
             Self::BlockedByLoop => Error::BlockedByLoop.fmt(f),
             Self::NotASibling => Error::NotASibling.fmt(f),
+            Self::SubtaskOfItself => Error::SubtaskOfItself.fmt(f),
             Self::EmptyFilterTitle => Error::EmptyFilterTitle.fmt(f),
             Self::InvalidQuery(message) | Self::InvalidGroupBy(message) => f.write_str(message),
             Self::Failed(message) => f.write_str(message),
@@ -59,6 +61,7 @@ impl From<Error> for TasksError {
             Error::BlockedBySubtask => Self::BlockedBySubtask,
             Error::BlockedByLoop => Self::BlockedByLoop,
             Error::NotASibling => Self::NotASibling,
+            Error::SubtaskOfItself => Self::SubtaskOfItself,
             Error::EmptyFilterTitle => Self::EmptyFilterTitle,
             Error::InvalidQuery(e) => Self::InvalidQuery(e.to_string()),
             e @ (Error::UnknownGroupByTag(_) | Error::InvalidGroupByTag(_)) => {
@@ -604,6 +607,20 @@ impl TaskStore {
         Ok(self
             .0
             .move_in_filter(&id, group.as_deref(), &task, before.as_deref())?)
+    }
+
+    /// Makes a Task a Subtask of another it was dropped onto in a Group of a
+    /// Filter; in Manual order it moves just below its new Parent's Subtasks.
+    pub fn make_subtask_in_filter(
+        &self,
+        id: String,
+        group: Option<String>,
+        task: String,
+        parent: String,
+    ) -> Result<(), TasksError> {
+        Ok(self
+            .0
+            .make_subtask_in_filter(&id, group.as_deref(), &task, &parent)?)
     }
 
     /// Sorts a Filter; Manual keeps the order shown, Priority from Manual

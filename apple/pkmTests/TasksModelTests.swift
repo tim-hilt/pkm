@@ -587,6 +587,18 @@ import Testing
         #expect(try openModel().tasks.map(\.title) == ["a", "b", "c"])
     }
 
+    @Test func aTaskDroppedOntoAnotherBecomesItsSubtaskJustBelowIt() throws {
+        let model = try openModel()
+        for title in ["a", "b", "c"] { model.add(title: title, tags: ["x"]) }
+        model.dropOnto(model.tasks[2], parent: model.tasks[0])
+        #expect(model.tasks.map(\.title) == ["a", "c", "b"])
+        #expect(model.tasks[1].parentTitle == "a")
+        #expect(model.tasks[1].tags.map(\.name) == ["x"])
+        // Not onto one of its own Subtasks.
+        model.dropOnto(model.tasks[0], parent: model.tasks[1])
+        #expect(model.tasks[0].parent == nil)
+    }
+
     @Test func aSubtaskIsDraggedAboveItsParentAndKeepsIt() throws {
         let model = try openModel()
         model.add(title: "a")

@@ -10,7 +10,7 @@ use pkm_base::clock::{iso8601, now_ms};
 use pkm_base::front_matter::{Document, Value};
 use pkm_base::item_id::ItemId;
 use pkm_base::random::Entropy;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io;
 use std::iter;
 use std::path::PathBuf;
@@ -370,6 +370,49 @@ impl Tasks {
         };
         self.place_subtask(&nodes, moved, parent, anchor)
             .map_err(Error::into_io)
+    }
+
+    /// Drops `task` onto `parent` in the Group `group` of the Filter `id`:
+    /// `task` becomes a Subtask of `parent` (see `make_subtask`) and, in
+    /// Manual order, moves just below the last row of `parent` and its
+    /// Subtasks at any depth. A Sorted Filter keeps its Sort. Fails as
+    /// `make_subtask` does, or with `NotFound` for an unknown Filter, before
+    /// saving anything.
+    pub fn make_subtask_in_filter(
+        &self,
+        id: &str,
+        group: Option<&str>,
+        task: &str,
+        parent: &str,
+    ) -> Result<(), Error> {
+        let filter = self.stored_filter(id)?;
+        self.make_subtask(task, parent)?;
+        if filter.filter.sort != FilterSort::Manual {
+            return Ok(());
+        }
+        let nodes = self.shown()?;
+        let groups = shown_groups(&nodes, &filter);
+        let Some((_, rows)) = groups.iter().find(|(tag, _)| tag.as_deref() == group) else {
+            return Ok(());
+        };
+        if !rows.iter().any(|n| n.task.id == task) {
+            return Ok(());
+        }
+        let subtree = |root| -> HashSet<String> {
+            (super::open_subtree(&nodes, root).iter())
+                .map(ToString::to_string)
+                .collect()
+        };
+        let (own, family) = (subtree(task), subtree(parent));
+        // Its own Subtasks are no place to land, and `task` is in `family` now.
+        let others: Vec<&str> = (rows.iter())
+            .map(|n| n.task.id.as_str())
+            .filter(|r| !own.contains(*r))
+            .collect();
+        let Some(last) = others.iter().rposition(|r| family.contains(*r)) else {
+            return Ok(());
+        };
+        Ok(self.move_in_filter(id, group, task, others.get(last + 1).copied())?)
     }
 
     /// Sorts the Filter `id`. Manual keeps the order shown: every Task shown
@@ -1383,6 +1426,74 @@ mod tests {
 
     fn sheet(tasks: &Tasks, parent: &str) -> Vec<String> {
         titles(tasks.subtasks(parent).unwrap())
+    }
+
+    #[test]
+    fn a_task_dropped_on_another_follows_its_new_parent_and_its_subtasks() {
+        let (_, tasks, f, ids) = subtask_fixture();
+        let nested = tasks.create_subtask(&ids[3], "n", 4, &[]).unwrap().id;
+        tasks
+            .move_in_filter(&f.id, None, &nested, Some(&ids[4]))
+            .unwrap();
+        // Below the last row of p's Subtasks at any depth.
+        tasks
+            .make_subtask_in_filter(&f.id, None, &ids[6], &ids[0])
+            .unwrap();
+        assert_eq!(
+            shown(&tasks, &f),
+            ["p", "s1", "s2", "s3", "n", "t3", "t1", "t2"]
+        );
+        assert_eq!(sheet(&tasks, &ids[0]), ["s1", "s2", "s3", "t3"]);
+    }
+
+    #[test]
+    fn a_task_dropped_on_one_below_it_moves_down_to_it() {
+        let (_, tasks, f, ids) = subtask_fixture();
+        tasks
+            .make_subtask_in_filter(&f.id, None, &ids[4], &ids[5])
+            .unwrap();
+        assert_eq!(shown(&tasks, &f), ["p", "s1", "s2", "s3", "t2", "t1", "t3"]);
+        assert_eq!(sheet(&tasks, &ids[5]), ["t1"]);
+    }
+
+    #[test]
+    fn a_task_dropped_on_another_in_a_sorted_filter_keeps_the_sort() {
+        let (files, tasks, f, ids) = subtask_fixture();
+        let sorted = FilterSort::Priority(Direction::Ascending);
+        tasks.set_sort(&f.id, sorted).unwrap();
+        let filter_file = || {
+            files
+                .read(Path::new(&format!("Filters/{}.md", f.id)))
+                .unwrap()
+        };
+        let before = filter_file();
+        tasks
+            .make_subtask_in_filter(&f.id, None, &ids[4], &ids[6])
+            .unwrap();
+        assert_eq!(filter_file(), before);
+        assert_eq!(sheet(&tasks, &ids[6]), ["t1"]);
+    }
+
+    #[test]
+    fn a_refused_drop_on_another_task_changes_nothing() {
+        let (files, tasks, f, ids) = subtask_fixture();
+        let read = |path: String| files.read(Path::new(&path)).ok();
+        let snapshot = || {
+            (ids.iter().map(|id| read(format!("Tasks/{id}.md"))))
+                .chain([read(format!("Filters/{}.md", f.id))])
+                .collect::<Vec<_>>()
+        };
+        let before = snapshot();
+        assert!(matches!(
+            tasks.make_subtask_in_filter(&f.id, None, &ids[0], &ids[1]),
+            Err(Error::SubtaskOfItself)
+        ));
+        assert!(
+            tasks
+                .make_subtask_in_filter("zzzzzzzzzzzz", None, &ids[4], &ids[0])
+                .is_err()
+        );
+        assert_eq!(snapshot(), before);
     }
 
     #[test]

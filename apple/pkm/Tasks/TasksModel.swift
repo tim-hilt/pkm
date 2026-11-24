@@ -376,6 +376,15 @@ final class TasksModel {
         reload()
     }
 
+    /// Makes `task`, dropped onto `parent` in the Group `tag`, a Subtask of `parent`, keeping its
+    /// Tags; in Manual order it moves just below `parent`'s Subtasks. Refused for `parent` being
+    /// `task` or one of its Subtasks.
+    func dropOnto(_ task: ListedTask, parent: ListedTask, in tag: String? = nil) {
+        guard let filter = list.filterID else { return }
+        try? store.makeSubtaskInFilter(id: filter, group: tag, task: task.id, parent: parent.id)
+        reload()
+    }
+
     /// Moves the Subtask at `source` of `subtasks(of: parent)` to land before the one at
     /// `destination` (`onMove`'s meaning); past the last, after it. It stays among its siblings.
     func moveSubtask(of parent: String, from source: IndexSet, to destination: Int) {

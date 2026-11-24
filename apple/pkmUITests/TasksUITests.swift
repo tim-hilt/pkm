@@ -17,6 +17,23 @@ import XCTest
         app.navigationBars[title].waitForExistence(timeout: 5)
     }
 
+    /// The row of the Task `title` in the list.
+    private func row(_ title: String) -> XCUIElement {
+        app.cells.containing(.staticText, identifier: title).firstMatch
+    }
+
+    /// A press shorter than the context menu's lifts the row for dragging.
+    func testATaskDraggedBetweenRowsOnlyMoves() {
+        let dentist = row("Book the dentist")
+        let above = dentist.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
+        row("Reply to Anna's email").coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.5, thenDragTo: above, withVelocity: .slow, thenHoldForDuration: 1)
+        let reply = row("Reply to Anna's email")
+        XCTAssertTrue(reply.waitForExistence(timeout: 5))
+        XCTAssertLessThan(reply.frame.minY, row("Book the dentist").frame.minY)
+        XCTAssertFalse(reply.staticTexts["Book the dentist"].exists)
+    }
+
     func testABlockerOpensOnTopAndBackReturns() {
         app.staticTexts["Book the dentist"].tap()
         XCTAssertTrue(showsForm(of: "Book the dentist"))

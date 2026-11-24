@@ -126,6 +126,8 @@ pub enum Error {
     /// A Subtask only moves among its siblings: the Task to move isn't a
     /// Subtask, or the Task to move before isn't its sibling.
     NotASibling,
+    /// A Task can't be a Subtask of itself or of one of its own Subtasks.
+    SubtaskOfItself,
     Io(io::Error),
 }
 
@@ -163,6 +165,9 @@ impl std::fmt::Display for Error {
             Self::BlockedBySubtask => f.write_str("A Task can't be Blocked by its Subtask."),
             Self::BlockedByLoop => f.write_str("Tasks can't be Blocked by each other in a loop."),
             Self::NotASibling => f.write_str("A Subtask moves only among its siblings."),
+            Self::SubtaskOfItself => {
+                f.write_str("A Task can't be a Subtask of itself or of its own Subtask.")
+            }
             Self::EmptyFilterTitle => f.write_str("A Filter needs a Title."),
             Self::InvalidQuery(e) => e.fmt(f),
             Self::UnknownGroupByTag(tag) => write!(f, "Group by: @{tag} doesn't exist."),
@@ -337,6 +342,34 @@ impl Tasks {
             self.place_subtask(&nodes, moved, parent, anchor)?;
         }
         Ok(moved.task.clone())
+    }
+
+    /// Makes the Open Task `id` a Subtask of the Open Task `parent`, last in
+    /// its Subtask order, writing only its file. Its Tags and its own
+    /// Subtasks stay; `parent` being its Parent already changes nothing.
+    /// Fails with `NotFound` for an unknown Task, or `SubtaskOfItself` for
+    /// `id` itself or one of its Subtasks at any depth, before saving anything.
+    pub fn make_subtask(&self, id: &str, parent: &str) -> Result<Task, Error> {
+        let nodes = self.load()?;
+        let moved = nodes.get(id).ok_or(io::ErrorKind::NotFound)?;
+        nodes.get(parent).ok_or(io::ErrorKind::NotFound)?;
+        if open_subtree(&nodes, id)
+            .iter()
+            .any(|s| s.as_str() == parent)
+        {
+            return Err(Error::SubtaskOfItself);
+        }
+        if moved.task.parent.as_deref() == Some(parent) {
+            return Ok(moved.task.clone());
+        }
+        let keys: Vec<f64> = (subtask_order(&nodes, parent).iter())
+            .filter_map(|n| n.subtask_position)
+            .collect();
+        let position = end_key(&keys).to_string();
+        self.modify(id, |file| {
+            file.set_scalar("parent", parent);
+            file.set_scalar(SUBTASK_POSITION, position);
+        })
     }
 
     /// Puts the Subtask `moved` of `parent` at `anchor` among its siblings in
@@ -2000,6 +2033,64 @@ mod tests {
             Err(Error::NotASibling)
         ));
         assert_eq!(subtask_titles(&tasks, &a), ["x"]);
+    }
+
+    #[test]
+    fn a_task_made_a_subtask_goes_last_in_its_new_parents_subtask_order() {
+        let dir = Scratch::new();
+        let (tasks, [a, b, c]) = move_fixture(&dir);
+        subtask(&tasks, &a, "x");
+        let y = subtask(&tasks, &b, "y");
+        let made = tasks.make_subtask(&c.id, &a.id).unwrap();
+        assert_eq!(made.parent.as_deref(), Some(a.id.as_str()));
+        tasks.make_subtask(&y.id, &a.id).unwrap();
+        assert_eq!(subtask_titles(&dir.store(), &a), ["x", "c", "y"]);
+        assert!(subtask_titles(&tasks, &b).is_empty());
+    }
+
+    #[test]
+    fn a_task_made_a_subtask_keeps_its_tags_and_its_own_subtasks() {
+        let dir = Scratch::new();
+        let tasks = dir.store();
+        let a = tasks.create("a", 4, &tag_names(&["work"])).unwrap();
+        let b = tasks.create("b", 4, &tag_names(&["home"])).unwrap();
+        let nested = subtask(&tasks, &b, "nested");
+        let made = tasks.make_subtask(&b.id, &a.id).unwrap();
+        assert_eq!(made.tags, ["home"]);
+        assert_eq!(subtask_titles(&tasks, &b), [nested.title]);
+    }
+
+    #[test]
+    fn making_a_task_a_subtask_of_its_parent_again_changes_nothing() {
+        let dir = Scratch::new();
+        let (tasks, [a, ..]) = move_fixture(&dir);
+        let [x, _] = ["x", "y"].map(|t| subtask(&tasks, &a, t));
+        let before = file_of(&dir, &x);
+        tasks.make_subtask(&x.id, &a.id).unwrap();
+        assert_eq!(file_of(&dir, &x), before);
+        assert_eq!(subtask_titles(&tasks, &a), ["x", "y"]);
+    }
+
+    #[test]
+    fn a_task_is_refused_as_a_subtask_of_itself_or_of_its_own_subtasks() {
+        let dir = Scratch::new();
+        let (tasks, [a, b, _]) = move_fixture(&dir);
+        let x = subtask(&tasks, &a, "x");
+        let nested = subtask(&tasks, &x, "nested");
+        let before = file_of(&dir, &a);
+        for parent in [&a, &x, &nested] {
+            assert!(matches!(
+                tasks.make_subtask(&a.id, &parent.id),
+                Err(Error::SubtaskOfItself)
+            ));
+        }
+        assert_eq!(file_of(&dir, &a), before);
+        for (id, parent) in [(a.id.as_str(), "zzzzzzzzzzzz"), ("zzzzzzzzzzzz", &b.id)] {
+            assert!(matches!(
+                tasks.make_subtask(id, parent),
+                Err(Error::Io(e)) if e.kind() == io::ErrorKind::NotFound
+            ));
+        }
     }
 
     fn created_of(dir: &Scratch, id: &str) -> Option<String> {

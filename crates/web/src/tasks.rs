@@ -685,6 +685,21 @@ impl TaskStore {
             .map_err(error)
     }
 
+    /// Makes a Task a Subtask of another it was dropped onto in a Group of a
+    /// Filter; in Manual order it moves just below its new Parent's Subtasks.
+    #[wasm_bindgen(js_name = makeSubtaskInFilter)]
+    pub fn make_subtask_in_filter(
+        &self,
+        id: &str,
+        group: Option<String>,
+        task: &str,
+        parent: &str,
+    ) -> Result<(), JsError> {
+        self.tasks
+            .make_subtask_in_filter(id, group.as_deref(), task, parent)
+            .map_err(error)
+    }
+
     /// Sorts a Filter by `key`; Manual keeps the order shown, Priority from
     /// Manual discards it. A key with a Direction takes `direction`, or its
     /// default (P1 first) if none. No Task changes.
