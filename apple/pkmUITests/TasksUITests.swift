@@ -120,17 +120,27 @@ import XCTest
         XCTAssertFalse(app.navigationBars["Buy milk"].buttons["Find the oat milk"].exists)
     }
 
+    /// Picks `list` from the title menu: the large title on iPhone and iPad, a segmented control on the Mac.
+    private func showList(_ list: String) {
+        #if os(macOS)
+            app.radioButtons[list].tap()
+        #else
+            let title = NSPredicate(format: "NOT identifier IN {'settings', 'sort-menu'}")
+            app.navigationBars.firstMatch.buttons.matching(title).firstMatch.tap()
+            app.buttons[list].firstMatch.tap()
+        #endif
+    }
+
     func testTheListSwitchSwitchesTheLists() throws {
-        // A row of buttons in the bottom bar on iPhone and iPad.
-        app.buttons["Backlog"].tap()
+        showList("Backlog")
         XCTAssertTrue(app.staticTexts["Learn Rust"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Book the dentist"].exists)
-        app.buttons["Active"].tap()
+        showList("Active")
         XCTAssertTrue(app.staticTexts["Book the dentist"].waitForExistence(timeout: 5))
     }
 
     func testAFavoriteOpenedFromTheFiltersListIsPushedOnIt() {
-        app.buttons["Filters"].tap()
+        showList("Filters")
         app.staticTexts["@backlog"].tap()
         XCTAssertTrue(app.staticTexts["Learn Rust"].waitForExistence(timeout: 5))
         app.staticTexts["Learn Rust"].tap()  // its sheet shows over the pushed Filter

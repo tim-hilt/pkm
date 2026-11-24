@@ -1,46 +1,47 @@
 import SwiftUI
 
-/// The Tasks bar: the Favorites, Filters. On iPhone and iPad it scrolls sideways when
-/// the entries don't fit; on the Mac it is a segmented control in the toolbar, whose overflow takes them.
-struct TasksBar: View {
-    @Environment(TasksModel.self) private var model
-
-    var body: some View {
-        #if os(iOS)
-            ScrollViewReader { scroll in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(model.bar, id: \.self) { entry in
-                            Button {
-                                model.list = entry
-                            } label: {
-                                label(entry)
-                            }
-                            .buttonStyle(.bordered)
-                            .background(.background, in: .capsule)
-                            .tint(entry == model.barEntry ? .accentColor : .secondary)
-                            .id(entry)
-                            .accessibilityAddTraits(entry == model.barEntry ? .isSelected : [])
-                        }
-                    }
-                }
-                .onChange(of: model.barEntry, initial: true) { scroll.scrollTo(model.barEntry, anchor: .center) }
-            }
-            .accessibilityIdentifier("tasks-lists")
-        #else
-            Picker("List", selection: Binding(get: { model.barEntry }, set: { model.list = $0 })) {
-                ForEach(model.bar, id: \.self) { label($0).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .accessibilityIdentifier("tasks-lists")
-        #endif
-    }
-
-    private func label(_ entry: TasksList) -> Text {
+extension TasksModel {
+    /// The name of a bar entry: a Filter's Title, or "Filters".
+    func title(of entry: TasksList) -> String {
         switch entry {
-        case .filters: Text("Filters")
-        case .filter(let id): Text(verbatim: model.filters.first { $0.id == id }?.title ?? "")
+        case .filters: String(localized: "Filters")
+        case .filter(let id): filters.first { $0.id == id }?.title ?? ""
         }
     }
 }
+
+/// Picks the list shown from the bar's entries: the Favorites, then Filters.
+private struct TasksListPicker: View {
+    @Environment(TasksModel.self) private var model
+
+    var body: some View {
+        Picker("List", selection: Binding(get: { model.barEntry }, set: { model.list = $0 })) {
+            ForEach(model.bar.dropLast(), id: \.self) { Text(verbatim: model.title(of: $0)).tag($0) }
+            #if os(iOS)
+                Divider()
+            #endif
+            Text("Filters").tag(TasksList.filters)
+        }
+        .accessibilityIdentifier("tasks-lists")
+    }
+}
+
+#if os(iOS)
+    extension View {
+        /// The shown list's name as the title; tapping it opens a menu of the Favorites in Filter
+        /// order, a divider and "Filters". Inline: the menu opens from an inline title,
+        /// not from an expanded large one.
+        func tasksTitleMenu(_ model: TasksModel) -> some View {
+            navigationTitle(model.title(of: model.barEntry))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarTitleMenu { TasksListPicker() }
+        }
+    }
+#else
+    /// The Mac's bar: a segmented control in the toolbar, whose overflow takes the entries.
+    struct TasksBar: View {
+        var body: some View {
+            TasksListPicker().pickerStyle(.segmented).labelsHidden()
+        }
+    }
+#endif

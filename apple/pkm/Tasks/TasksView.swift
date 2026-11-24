@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The Tasks Context: the Filters and the Tasks they match, as Todoist-style rows. A Filter
-/// opens on top of the Filters list; a Favorite opened from the bar is shown directly.
+/// opens on top of the Filters list; a Favorite picked from the title menu is shown directly.
 struct TasksView: View {
     @Environment(TasksModel.self) private var model
     @State private var isAdding = false
@@ -29,17 +29,7 @@ struct TasksView: View {
             if model.barEntry == .filters { isAddingFilter = true } else { isAdding = true }
         }
         #if os(iOS)
-            // The bar shares the "+"'s row, which the "+" keeps clear; the toast sits above it.
-            .overlay(alignment: .bottomLeading) {
-                TasksBar()
-                .padding(.leading, AddButtonMetrics.margin)
-                .padding(.trailing, AddButtonMetrics.size + 2 * AddButtonMetrics.margin)
-                .frame(height: AddButtonMetrics.size)
-                .padding(.vertical, AddButtonMetrics.margin)
-            }
-        #endif
-        #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)  // slim top bar: no title
+            .tasksTitleMenu(model)
         #endif
         #if os(macOS)
             .toolbar { ToolbarItem(placement: .principal) { TasksBar() } }
