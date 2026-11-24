@@ -17,6 +17,9 @@ struct QuickAddField: View {
     var taskTags: [String] = []
     /// Takes the keyboard focus when it appears.
     var autofocus = true
+    /// The focus was taken because of `autofocus`; the owner then clears it, as a row that scrolls
+    /// off and on again appears anew and must not take the focus from the field being edited.
+    var onAutofocus: () -> Void = {}
     /// Return was pressed.
     let onSubmit: () -> Void
     /// The field lost focus. Not while the suggestion list is open: picking from it may take focus
@@ -98,7 +101,10 @@ struct QuickAddField: View {
             #endif
             .onAppear {
                 draw()
-                isFocused = autofocus
+                if autofocus {
+                    isFocused = true
+                    onAutofocus()
+                }
             }
             .onChange(of: isFocused) {
                 draw()

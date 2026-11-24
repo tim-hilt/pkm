@@ -587,6 +587,8 @@ private struct NewTaskSheet: View {
     @State private var description = ""
     /// Changes per Task, so that the field redraws empty; it keeps its focus, and so the keyboard.
     @State private var revision = 0
+    /// Only the Title's first appearance takes the focus, not a later one after scrolling.
+    @State private var autofocusTitle = true
 
     init(model: TasksModel) {
         _quickAdd = State(initialValue: model.newQuickAdd())
@@ -596,7 +598,8 @@ private struct NewTaskSheet: View {
         NavigationStack {
             Form {
                 QuickAddField(
-                    quickAdd: quickAdd, title: $title, revision: revision, refocusOnRevision: true, onSubmit: add
+                    quickAdd: quickAdd, title: $title, revision: revision, refocusOnRevision: true,
+                    autofocus: autofocusTitle, onAutofocus: { autofocusTitle = false }, onSubmit: add
                 )
                 .accessibilityIdentifier("task-title")
                 MarkdownEditor(text: $description, placeholder: "Description", images: model.images)
