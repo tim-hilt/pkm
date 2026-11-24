@@ -15,7 +15,6 @@ final class AppNavigation {
     var isItemOpen = false
 
     /// Whether the Settings sheet is open over the Context (iPhone and iPad).
-    /// Settings is not remembered as the last Context.
     var isShowingSettings = false
 
     /// Focused work is not left by accident: no switching while an Item is open.

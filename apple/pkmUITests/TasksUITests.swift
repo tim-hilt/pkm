@@ -120,7 +120,7 @@ import XCTest
         XCTAssertFalse(app.navigationBars["Buy milk"].buttons["Find the oat milk"].exists)
     }
 
-    /// Picks `list` from the title menu: the large title on iPhone and iPad, a segmented control on the Mac.
+    /// Picks `list` from the title menu: the title on iPhone and iPad, a segmented control on the Mac.
     private func showList(_ list: String) {
         #if os(macOS)
             app.radioButtons[list].tap()
@@ -129,6 +129,17 @@ import XCTest
             app.navigationBars.firstMatch.buttons.matching(title).firstMatch.tap()
             app.buttons[list].firstMatch.tap()
         #endif
+    }
+
+    /// The trailing toolbar ends with Settings, after the Context's own Sort.
+    func testTheSettingsGearFollowsTheSortMenu() throws {
+        #if os(macOS)
+            throw XCTSkip("a Mac has ⌘, and no gear")
+        #endif
+        let sort = app.navigationBars.buttons["sort-menu"]
+        let gear = app.navigationBars.buttons["settings"]
+        XCTAssertTrue(sort.waitForExistence(timeout: 5))
+        XCTAssertLessThan(sort.frame.minX, gear.frame.minX)
     }
 
     func testTheListSwitchSwitchesTheLists() throws {

@@ -26,6 +26,7 @@ import XCTest
 
     func testTappingTheSelectedTabAgainReturnsToTheFirstScreen() {
         app.tabBars.buttons["Notes"].tap()
+        XCTAssertTrue(noteBody.waitForNonExistence(timeout: 5), "the Note is popped")
         XCTAssertTrue(app.buttons["add-note"].waitForExistence(timeout: 5))
     }
 

@@ -31,14 +31,22 @@ struct TasksView: View {
         #if os(iOS)
             .tasksTitleMenu(model)
         #endif
-        #if os(macOS)
-            .toolbar { ToolbarItem(placement: .principal) { TasksBar() } }
-        #endif
+        // One toolbar, so that its order holds: a parent's items come before a child's.
+        .toolbar {
+            #if os(macOS)
+                ToolbarItem(placement: .principal) { TasksBar() }
+            #endif
+            if model.barEntry != .filters { ToolbarItem { SortMenu() } }
+            #if os(iOS)
+                SettingsToolbarItem()
+            #endif
+        }
         .navigationDestination(for: String.self) { id in
             TaskListView(emptyText: "No Open Tasks match.")
                 .addButton("New Task", identifier: "add-task", isCovered: isTaskSheetShown) { isAdding = true }
                 .taskSheets(isAdding: $isAdding, isInFront: true)
-                .navigationTitle(model.filters.first { $0.id == id }?.title ?? "")
+                .toolbar { ToolbarItem { SortMenu() } }
+                .navigationTitle(model.title(of: .filter(id)))
                 #if os(iOS)
                     .navigationBarTitleDisplayMode(.inline)
                 #endif
@@ -132,7 +140,6 @@ private struct TaskListView: View {
                 }
             }
         }
-        .toolbar { ToolbarItem(placement: .primaryAction) { SortMenu() } }
         .safeAreaInset(edge: .bottom) {
             // While the edit sheet is open, its own toast shows instead.
             if let pendingClose = model.pendingClose, model.editing.isEmpty {

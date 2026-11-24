@@ -66,6 +66,9 @@ struct GalleryView: View {
                     .accessibilityIdentifier("sync-warning")
                 }
             }
+            #if os(iOS)
+                SettingsToolbarItem()
+            #endif
         }
         .addButton("New Drawing", identifier: "new-drawing") { gallery.createDrawing() }
         .overlay {

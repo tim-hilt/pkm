@@ -36,8 +36,6 @@ struct ContentView: View {
         }
         #if os(iOS)
             .sheet(isPresented: Bindable(navigation).isShowingSettings) { SettingsView() }
-            // A sheet that is presented from the first frame is dropped; this one waits for the tabs.
-            .task { navigation.isShowingSettings = AppNavigation.opensSettingsAtLaunch }
         #endif
         .onOpenURL {
             AppLinks(navigation: navigation, gallery: gallery, library: library, tasks: tasks, bookmarks: bookmarks)
@@ -57,8 +55,16 @@ struct ContentView: View {
             cloud.appBecame(inFront: scenePhase == .active)
             if scenePhase == .background { tasks.commit() }
         }
+        .task {
+            guard AppNavigation.opensSettingsAtLaunch else { return }
+            #if os(iOS)
+                // Not set in `forLaunch`: a sheet that is presented from the first frame is dropped.
+                navigation.isShowingSettings = true
+            #else
+                openSettings()
+            #endif
+        }
         #if os(macOS)
-            .task { if AppNavigation.opensSettingsAtLaunch { openSettings() } }
             // A Mac app quits without going to the background first.
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                 tasks.commit()
@@ -91,6 +97,9 @@ extension ContentView {
             }
         }
         .tabViewStyle(.sidebarAdaptable)
+        #if os(iOS)
+            .tabBarMinimizeBehavior(.onScrollDown)
+        #endif
     }
 
     /// What is pushed over the Context's first screen: Tasks and, where the editor doesn't fit
@@ -110,8 +119,8 @@ extension ContentView {
 
     @ViewBuilder private func root(of context: AppContext) -> some View {
         switch context {
-        case .drawings: GalleryView(gallery: gallery).largeTitle(context).settingsButton()
-        case .tasks: TasksView().settingsButton()
+        case .drawings: GalleryView(gallery: gallery).largeTitle(context)
+        case .tasks: TasksView()
         case .books: BooksView().largeTitle(context)
         case .notes: NotesView().largeTitle(context)
         case .bookmarks: BookmarksView().largeTitle(context)

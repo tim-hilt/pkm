@@ -16,7 +16,7 @@ private struct TasksListPicker: View {
 
     var body: some View {
         Picker("List", selection: Binding(get: { model.barEntry }, set: { model.list = $0 })) {
-            ForEach(model.bar.dropLast(), id: \.self) { Text(verbatim: model.title(of: $0)).tag($0) }
+            ForEach(model.bar.filter { $0 != .filters }, id: \.self) { Text(verbatim: model.title(of: $0)).tag($0) }
             #if os(iOS)
                 Divider()
             #endif
