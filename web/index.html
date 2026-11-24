@@ -301,8 +301,8 @@
       }
       /* The phone layout (DrawingLayout's phoneQuery, the same rule as
          layoutFor): the bottom bar in place of the top toolbar and the
-         Properties panel, no zoom buttons (pinch) and undo and redo at the
-         top left. */
+         Properties panel, the zoom menu in place of the zoom buttons and
+         undo and redo at the top left. */
       .phone-chrome {
         display: none;
         position: absolute;
@@ -318,6 +318,9 @@
         .properties-panel,
         .zoom-controls {
           display: none;
+        }
+        .top-right .zoom-menu {
+          display: block;
         }
         /* Beside the back button. */
         .bottom-left {
@@ -642,34 +645,48 @@
         font-size: 0.75rem;
         color: #e03131;
       }
-      /* The main menu, top right. */
-      .main-menu {
+      /* The main menu, top right, and on a phone the zoom menu to its left, on one island. */
+      .top-right {
         position: absolute;
         top: 16px;
         right: 16px;
+        display: flex;
+        border-radius: 8px;
+        background: var(--island-fill);
+        box-shadow: 0 0 3px rgb(0 0 0 / 0.2);
       }
-      .main-menu-button {
-        width: 36px;
+      .menu {
+        position: relative;
+      }
+      .menu-button {
+        min-width: 36px;
         height: 36px;
         padding: 0;
         border: 0;
         border-radius: 8px;
-        background: var(--island-fill);
+        background: none;
         color: var(--control-ink);
         display: flex;
         align-items: center;
         justify-content: center;
-        box-shadow: 0 0 3px rgb(0 0 0 / 0.2);
         cursor: pointer;
         touch-action: manipulation;
         position: relative;
       }
-      .main-menu-button::after {
+      .menu-button::after {
         content: "";
         position: absolute;
         inset: -4px;
       }
-      .main-menu-items {
+      .zoom-menu {
+        display: none;
+      }
+      .zoom-menu .menu-button {
+        padding: 0 4px 0 12px;
+        font-size: 0.9rem;
+        font-variant-numeric: tabular-nums;
+      }
+      .menu-items {
         position: absolute;
         top: 44px;
         right: 0;
@@ -680,10 +697,10 @@
         color: var(--control-ink);
         box-shadow: 0 2px 10px rgb(0 0 0 / 0.3);
       }
-      .main-menu-items[hidden] {
+      .menu-items[hidden] {
         display: none;
       }
-      .main-menu-item {
+      .menu-item {
         display: block;
         width: 100%;
         min-height: 44px;
@@ -696,34 +713,34 @@
         text-align: left;
         cursor: pointer;
       }
-      .main-menu-item:hover:not(:disabled),
-      .main-menu-item:focus-visible {
+      .menu-item:hover:not(:disabled),
+      .menu-item:focus-visible {
         background: rgb(128 128 128 / 0.2);
       }
-      .main-menu-item:disabled {
+      .menu-item:disabled {
         opacity: 0.4;
         cursor: default;
       }
-      .main-menu-item:has(kbd) {
+      .menu-item:has(kbd) {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 16px;
       }
-      .main-menu-item kbd {
+      .menu-item kbd {
         font: inherit;
         font-size: 0.8rem;
         opacity: 0.6;
       }
-      .main-menu-item[role="menuitemcheckbox"]::before {
+      .menu-item[role="menuitemcheckbox"]::before {
         content: "";
         display: inline-block;
         width: 1.4em;
       }
-      .main-menu-item[aria-checked="true"]::before {
+      .menu-item[aria-checked="true"]::before {
         content: "✓";
       }
-      .main-menu-heading {
+      .menu-heading {
         padding: 8px 12px 2px;
         font-size: 0.75rem;
         opacity: 0.6;

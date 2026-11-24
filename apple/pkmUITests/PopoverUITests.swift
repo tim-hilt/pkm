@@ -10,7 +10,7 @@ import XCTest
         app.launchArguments = ["-UITestingOpenSampleDrawing"]
         app.launch()
         try XCTSkipUnless(app.buttons["Hand"].waitForExistence(timeout: 10))
-        try XCTSkipIf(app.buttons["Zoom in"].exists, "the phone toolbar only")
+        try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .phone, "the phone toolbar only")
     }
 
     private func openShapePicker() {

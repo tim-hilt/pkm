@@ -1,4 +1,11 @@
-import type { Editor } from "../../core/Core";
+/** The editor's zoom commands, all the zoom controls need. */
+export interface Zoom {
+  zoomIn(): void;
+  zoomOut(): void;
+  resetZoom(): void;
+  zoomToFit(): void;
+  viewport(): { zoom: number };
+}
 
 /** The zoom in whole percent, as the reset button shows it; whole percent, so a pinch updates the label only when the number does. */
 export const zoomPercent = (zoom: number): number => Math.round(zoom * 100);
@@ -13,7 +20,7 @@ export class ZoomControls {
   private readonly percent: HTMLButtonElement;
 
   constructor(
-    private readonly editor: Editor,
+    private readonly editor: Zoom,
     private readonly onChange: () => void,
   ) {
     this.element.className = "zoom-controls";

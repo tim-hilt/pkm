@@ -8,6 +8,7 @@ import { FileCommand, fileCommandOf } from "./input/KeyboardShortcuts";
 import { ExportDialog } from "./export/ExportDialog";
 import { insertImages } from "./images/ImageInsertion";
 import { ZoomControls } from "./chrome/ZoomControls";
+import { ZoomMenu } from "./chrome/ZoomMenu";
 import { Toolbar } from "./chrome/Toolbar";
 import { UndoRedoControls } from "./chrome/UndoRedoControls";
 import { PropertiesPanel } from "./chrome/PropertiesPanel";
@@ -89,6 +90,7 @@ export function showCanvas(
 
   let pointer: { x: number; y: number } | undefined;
   const zoomControls = new ZoomControls(editor, () => didReachEditor());
+  const zoomMenu = new ZoomMenu(editor, () => didReachEditor());
   const undoRedo = new UndoRedoControls(editor, () => didReachEditor());
   /** Images from the file picker, a drop or a paste; they are prepared asynchronously and inserted once ready. */
   const images = {
@@ -125,6 +127,10 @@ export function showCanvas(
       didReachEditor();
     },
   });
+  // The phone's zoom menu shares the main menu's island, to its left.
+  const topRight = document.createElement("div");
+  topRight.className = "top-right";
+  topRight.append(zoomMenu.element, mainMenu.element);
   const back = document.createElement("button");
   back.type = "button";
   back.className = "back-to-gallery";
@@ -171,6 +177,7 @@ export function showCanvas(
     sync.sync();
     handlers.edited();
     zoomControls.update();
+    zoomMenu.update();
     undoRedo.update();
     toolbar.update();
     properties.update();
@@ -268,7 +275,7 @@ export function showCanvas(
     toolbar.element,
     properties.element,
     phone.element,
-    mainMenu.element,
+    topRight,
     bottomLeft,
     contextMenu.element,
     exportDialog.element,
@@ -310,6 +317,7 @@ export function showCanvas(
     imageInput.dispose();
     stopClipboard();
     mainMenu.dispose();
+    zoomMenu.dispose();
     exportDialog.element.close();
     contextMenu.hide();
     visual?.removeEventListener("resize", keyboardChanged);

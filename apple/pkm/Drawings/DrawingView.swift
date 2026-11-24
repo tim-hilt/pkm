@@ -19,6 +19,8 @@ struct DrawingView: View {
     @State private var actionRow = ActionRowModel()
     @State private var actionAnchors: [ActionRowItem: CGRect] = [:]
     @State private var actionRowTop: CGFloat = 0
+    /// The chrome's layout, which the navigation bar follows too.
+    @State private var layout = DrawingLayout.desktop
     @State private var isSavingAs = false
     /// The image Export shows while it is open.
     @State private var exported: ExportedImage?
@@ -43,6 +45,11 @@ struct DrawingView: View {
                         ToolbarItem(placement: .navigation) {
                             Button("Gallery", systemImage: "chevron.backward", action: onBack)
                             .accessibilityIdentifier("back-to-gallery")
+                        }
+                        // Beside the main menu, in its capsule: the phone
+                        // has no room for the zoom group at the bottom.
+                        if layout == .mobile {
+                            ToolbarItem(placement: .primaryAction) { ZoomMenu(controller: controller) }
                         }
                         ToolbarItem(placement: .primaryAction) {
                             MainMenu(file: file, controller: controller)
@@ -79,6 +86,9 @@ struct DrawingView: View {
         .overlay {
             GeometryReader { container in
                 chrome(in: container.size, bottomInset: container.safeAreaInsets.bottom)
+            }
+            .onGeometryChange(for: DrawingLayout.self, of: { DrawingLayout(containerSize: $0.size) }) {
+                layout = $0
             }
             .dynamicTypeSize(...Self.largestChromeType)
         }
@@ -137,8 +147,8 @@ struct DrawingView: View {
     }
 
     /// excalidraw.com's phone layout (docs/layout-reference §4): everything
-    /// in the bottom bar within thumb reach; no zoom buttons (pinch),
-    /// properties in popovers. The chrome sits in the keyboard's safe area
+    /// in the bottom bar within thumb reach, properties in popovers; zoom is
+    /// a menu in the navigation bar (`ZoomMenu`). The chrome sits in the keyboard's safe area
     /// (only the Canvas ignores it), so the bar rises above the keyboard with
     /// the popover anchored to it, whose maximum height is the room left above
     /// the bar (`DrawingLayout.popoverPlacement`).
@@ -247,6 +257,28 @@ extension View {
                 Label("Menu", systemImage: "ellipsis")
             }
             .accessibilityIdentifier("main-menu")
+        }
+    }
+
+    /// The phone's zoom controls: the zoom in percent, opening a menu of
+    /// the zoom group's commands.
+    private struct ZoomMenu: View {
+        let controller: CanvasController
+
+        var body: some View {
+            Menu {
+                Button("Zoom In", systemImage: "plus.magnifyingglass") { controller.zoomIn() }
+                Button("Zoom Out", systemImage: "minus.magnifyingglass") { controller.zoomOut() }
+                Button("Reset", systemImage: "1.magnifyingglass") { controller.resetZoom() }
+                Button("Zoom to Content", systemImage: "arrow.up.left.and.arrow.down.right") {
+                    controller.zoomToFit()
+                }
+            } label: {
+                Text(verbatim: "\(controller.zoomPercent)%").monospacedDigit()
+            }
+            .accessibilityLabel(Text("Zoom"))
+            .accessibilityValue(Text(verbatim: "\(controller.zoomPercent)%"))
+            .accessibilityIdentifier("zoom-menu")
         }
     }
 #endif
@@ -435,8 +467,8 @@ private struct ActionRowInputs: Equatable {
     let width: CGFloat
 }
 
-/// Excalidraw's zoom group: out, reset (tap the percentage), in. Zoom to fit
-/// is a menu command (`CanvasCommands`).
+/// Excalidraw's zoom group: out, reset (tap the percentage), in, and zoom to
+/// fit, which excalidraw.com has as a shortcut only.
 private struct ZoomControls: View {
     let controller: CanvasController
 
@@ -453,6 +485,8 @@ private struct ZoomControls: View {
             .accessibilityLabel(Text("Reset zoom"))
             .accessibilityValue(Text(verbatim: "\(controller.zoomPercent)%"))
             Button("Zoom in", systemImage: "plus") { controller.zoomIn() }.controlButton().buttonPointer()
+            Button("Zoom to fit", systemImage: "arrow.up.left.and.arrow.down.right") { controller.zoomToFit() }
+                .controlButton().buttonPointer()
         }
         .controlGroup()
     }
