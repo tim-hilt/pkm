@@ -24,7 +24,7 @@ struct FiltersList: View {
                     NavigationLink(value: filter.id) { FilterRow(filter: filter) }
                         .swipeActions(edge: .trailing) {
                             Button("Delete", systemImage: "trash", role: .destructive) { deleting = filter }
-                            Button("Edit", systemImage: "pencil") { editing = filter }.tint(.blue)
+                            Button("Edit", systemImage: "pencil") { editing = filter }.tint(.accentColor)
                         }
                         .swipeActions(edge: .leading) { favoriteButton(filter).tint(.yellow) }
                         .contextMenu {

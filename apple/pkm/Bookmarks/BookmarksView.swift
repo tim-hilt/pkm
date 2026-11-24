@@ -24,7 +24,7 @@ struct BookmarksView: View {
             }
             .buttonStyle(.plain)
             .swipeActions(edge: .leading) {
-                Button("Edit", systemImage: "pencil") { model.detailsID = bookmark.id }.tint(.blue)
+                Button("Edit", systemImage: "pencil") { model.detailsID = bookmark.id }.tint(.accentColor)
             }
             .swipeActions(edge: .trailing) {
                 Button("Delete", systemImage: "trash", role: .destructive) { deleting = bookmark }
@@ -34,6 +34,7 @@ struct BookmarksView: View {
                 Button("Delete", systemImage: "trash", role: .destructive) { deleting = bookmark }
             }
         }
+        .listStyle(.plain)
         .searchable(text: $model.searchText)
         #if os(iOS)
             .searchToolbarBehavior(.minimize)

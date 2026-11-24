@@ -503,7 +503,7 @@ private struct TaskQuickActions: ViewModifier {
             #if os(iOS)
                 .swipeActions(edge: .leading, allowsFullSwipe: true) {
                     if !task.done {
-                        Button("Tags", systemImage: "tag") { isPickingTags = true }.tint(.indigo)
+                        Button("Tags", systemImage: "tag") { isPickingTags = true }.tint(.accentColor)
                     }
                 }
             #endif

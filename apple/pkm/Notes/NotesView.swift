@@ -74,6 +74,7 @@ private struct NotesBrowser: View {
                 }
             }
         }
+        .listStyle(.plain)
         .searchable(text: Bindable(model).searchText)
         #if os(iOS)
             .searchToolbarBehavior(.minimize)

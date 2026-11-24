@@ -20,7 +20,7 @@ struct ManageTagsView: View {
             }
             .swipeActions(edge: .trailing) {
                 Button("Delete", systemImage: "trash", role: .destructive) { deletion.ask(for: tag.name) }
-                Button("Edit", systemImage: "pencil") { editing = tag.name }.tint(.blue)
+                Button("Edit", systemImage: "pencil") { editing = tag.name }.tint(.accentColor)
                 if tag.relevance > 0 {
                     Button("Reset to 0", systemImage: "arrow.counterclockwise") {
                         tasks.resetTagRelevance(tag.name)
