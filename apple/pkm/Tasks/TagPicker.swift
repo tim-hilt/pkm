@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Every known Tag with a checkbox on the right, and search at the bottom, which also offers
+/// Every known Tag with a checkbox on the right, and search on top, which also offers
 /// to create a Tag; the keyboard opens only when search is tapped. Done hands back the checked Tags;
 /// leaving otherwise changes nothing. In single-toggle mode there is no Done: a tap on a Tag, or
 /// creating one, hands back that one Tag to `toggle` and the caller closes the picker; Cancel leaves.
@@ -83,7 +83,16 @@ struct TagPicker: View {
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
             #endif
-            .searchable(text: $query, prompt: "Search or create")
+            // iOS 26 crashes presenting the default bottom search bar inside a sheet.
+            #if os(iOS)
+                .searchable(
+                    text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search or create")
+            #else
+                .searchable(text: $query, prompt: "Search or create")
+            #endif
+            #if os(iOS)
+                .searchPresentationToolbarBehavior(.avoidHidingContent)
+            #endif
             .autocorrectionDisabled()
             .onChange(of: query) { _, text in
                 let allowed = TasksModel.allowedTagText(text)
