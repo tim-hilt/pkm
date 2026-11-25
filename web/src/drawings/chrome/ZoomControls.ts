@@ -1,7 +1,5 @@
 /** The editor's zoom commands, all the zoom controls need. */
 export interface Zoom {
-  zoomIn(): void;
-  zoomOut(): void;
   resetZoom(): void;
   zoomToFit(): void;
   viewport(): { zoom: number };
@@ -11,7 +9,7 @@ export interface Zoom {
 export const zoomPercent = (zoom: number): number => Math.round(zoom * 100);
 
 /**
- * Excalidraw's zoom group, bottom left: out, reset (the percentage), in; and
+ * Excalidraw's zoom group, bottom left: reset (the percentage) and
  * zoom to fit, until the main menu and shortcuts have it. The core is the
  * source of truth: `update` re-reads the zoom after every event.
  */
@@ -29,9 +27,7 @@ export class ZoomControls {
     this.percent = this.button("Reset zoom", "100%", () => editor.resetZoom());
     this.percent.classList.add("zoom-percent");
     this.element.replaceChildren(
-      this.button("Zoom out", "−", () => editor.zoomOut()),
       this.percent,
-      this.button("Zoom in", "+", () => editor.zoomIn()),
       this.button("Zoom to fit", "⤢", () => editor.zoomToFit()),
     );
     this.update();

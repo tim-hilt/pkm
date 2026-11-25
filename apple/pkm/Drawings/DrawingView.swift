@@ -292,8 +292,6 @@ extension View {
 
         var body: some View {
             Menu {
-                Button("Zoom In", systemImage: "plus.magnifyingglass") { controller.zoomIn() }
-                Button("Zoom Out", systemImage: "minus.magnifyingglass") { controller.zoomOut() }
                 Button("Reset", systemImage: "1.magnifyingglass") { controller.resetZoom() }
                 Button("Zoom to Content", systemImage: "arrow.up.left.and.arrow.down.right") {
                     controller.zoomToFit()
@@ -492,14 +490,13 @@ private struct ActionRowInputs: Equatable {
     let width: CGFloat
 }
 
-/// Excalidraw's zoom group: out, reset (tap the percentage), in, and zoom to
+/// Excalidraw's zoom group: reset (tap the percentage) and zoom to
 /// fit, which excalidraw.com has as a shortcut only.
 private struct ZoomControls: View {
     let controller: CanvasController
 
     var body: some View {
         HStack(spacing: 0) {
-            Button("Zoom out", systemImage: "minus") { controller.zoomOut() }.controlButton().buttonPointer()
             Button {
                 controller.resetZoom()
             } label: {
@@ -509,7 +506,6 @@ private struct ZoomControls: View {
             .buttonPointer()
             .accessibilityLabel(Text("Reset zoom"))
             .accessibilityValue(Text(verbatim: "\(controller.zoomPercent)%"))
-            Button("Zoom in", systemImage: "plus") { controller.zoomIn() }.controlButton().buttonPointer()
             Button("Zoom to fit", systemImage: "arrow.up.left.and.arrow.down.right") { controller.zoomToFit() }
                 .controlButton().buttonPointer()
         }

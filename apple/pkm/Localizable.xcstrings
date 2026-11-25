@@ -2432,28 +2432,6 @@
         }
       }
     },
-    "Zoom in": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Zoom in"
-          }
-        }
-      }
-    },
-    "Zoom out": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Zoom out"
-          }
-        }
-      }
-    },
     "Zoom to Fit": {
       "extractionState": "manual",
       "localizations": {

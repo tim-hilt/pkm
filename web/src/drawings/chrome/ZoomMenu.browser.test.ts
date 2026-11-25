@@ -4,12 +4,6 @@ import { ZoomMenu } from "./ZoomMenu";
 describe("ZoomMenu", () => {
   const zoom = {
     zoom: 1,
-    zoomIn() {
-      this.zoom *= 2;
-    },
-    zoomOut() {
-      this.zoom /= 2;
-    },
     resetZoom() {
       this.zoom = 1;
     },
@@ -47,23 +41,16 @@ describe("ZoomMenu", () => {
   it("offers the zoom group's commands", () => {
     toggle().click();
     expect(items().map((item) => item.textContent)).toEqual([
-      "Zoom In",
-      "Zoom Out",
       "Reset",
       "Zoom to Content",
     ]);
   });
 
   it("runs a command, shows the new zoom and closes", () => {
-    pick("Zoom In");
-    expect(toggle().textContent).toBe("200%");
-    expect(changes).toBe(1);
-    expect(toggle().getAttribute("aria-expanded")).toBe("false");
-    pick("Zoom Out");
-    pick("Zoom Out");
-    expect(toggle().textContent).toBe("50%");
     pick("Zoom to Content");
     expect(toggle().textContent).toBe("25%");
+    expect(changes).toBe(1);
+    expect(toggle().getAttribute("aria-expanded")).toBe("false");
     pick("Reset");
     expect(toggle().textContent).toBe("100%");
   });

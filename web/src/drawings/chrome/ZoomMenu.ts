@@ -20,8 +20,6 @@ export class ZoomMenu {
     this.element = this.menu.element;
     this.element.classList.add("zoom-menu");
     this.menu.set(
-      this.menu.item("Zoom In", "menuitem", () => zoom.zoomIn()),
-      this.menu.item("Zoom Out", "menuitem", () => zoom.zoomOut()),
       this.menu.item("Reset", "menuitem", () => zoom.resetZoom()),
       this.menu.item("Zoom to Content", "menuitem", () => zoom.zoomToFit()),
     );

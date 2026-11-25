@@ -218,7 +218,7 @@ Screenshots: `iphone-portrait-*.png`, `iphone-landscape-*.png` (taken at 2×).
 | **Bottom bar** (action row + toolbar) | horizontally centred, `width = min(100% − 28, 450)`, bottom aligned with a **10 px** gap: portrait `14,750.8`/365 wide; landscape `201,291.8`/450 wide | 365×91.2 | column: action row, 4 gap, toolbar |
 | Action row | top of bottom bar | width × 43.2 | transparent background, no shadow, item gap 6 |
 | Toolbar island | bottom of bottom bar | 365×44 (portrait), 450×44 (landscape) | white, radius 8, shadow as §2, padding 4; inner row `x+4`, 357×36, `justify-content: space-between`, min gap 4, horizontally scrollable when too narrow |
-| Zoom controls | left part of the main-menu island, top right | | excalidraw.com has none (pinch only); this app shows the zoom in percent, opening a menu: Zoom In, Zoom Out, Reset, Zoom to Content. The zoom group does not fit the bottom bar |
+| Zoom controls | left part of the main-menu island, top right | | excalidraw.com has none (pinch only); this app shows the zoom in percent, opening a menu: Reset, Zoom to Content. The zoom group does not fit the bottom bar |
 
 ### 4.2 Toolbar (portrait, 365 wide, 36×36 buttons, radius 4 highlight, icons 16×16)
 

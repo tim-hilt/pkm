@@ -18,29 +18,21 @@ import XCTest
         wait(for: [expectation(for: shown, evaluatedWith: element)], timeout: 5)
     }
 
-    func testTheGroupZoomsInResetsAndZoomsToFit() throws {
+    func testTheGroupResetsAndZoomsToFit() throws {
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .phone, "the large layout only")
         let reset = app.buttons["Reset zoom"]
-        reset.tap()
-        shows(reset, "100%")
-        app.buttons["Zoom in"].tap()
-        XCTAssertNotEqual(reset.value as? String, "100%")
         reset.tap()
         shows(reset, "100%")
         XCTAssertTrue(app.buttons["Zoom to fit"].exists)
     }
 
-    func testThePhoneMenuZoomsInResetsAndZoomsToContent() throws {
+    func testThePhoneMenuResetsAndZoomsToContent() throws {
         try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .phone, "the phone layout only")
         let menu = app.buttons["zoom-menu"]
         menu.tap()
         app.buttons["Reset"].tap()
         shows(menu, "100%")
         menu.tap()
-        app.buttons["Zoom In"].tap()
-        XCTAssertNotEqual(menu.value as? String, "100%")
-        menu.tap()
-        XCTAssertTrue(app.buttons["Zoom Out"].exists)
         XCTAssertTrue(app.buttons["Zoom to Content"].exists)
     }
 }
