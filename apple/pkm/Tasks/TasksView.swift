@@ -575,7 +575,8 @@ private struct NewTaskSheet: View {
     @State private var shortcutPriority: UInt8?
     @State private var shortcutTags: [String] = []
     @State private var isPickingTags = false
-    /// Changes per Task, so that the field redraws empty; it keeps its focus, and so the keyboard.
+    /// Changes per Task, so that the field redraws empty, and when a pick Ignores its Priority Shortcut;
+    /// the field keeps its focus, and so the keyboard.
     @State private var revision = 0
     /// Only the Title's first appearance takes the focus, not a later one after scrolling.
     @State private var autofocusTitle = true
@@ -620,17 +621,18 @@ private struct NewTaskSheet: View {
                 .padding(.horizontal)
                 .padding(.vertical, 8)
             }
+            .sheet(isPresented: $isPickingTags) {
+                TagPicker(selected: shownTags) { checked in
+                    // The Title keeps the Shortcut Tags: deleting their `@` word removes them.
+                    pickedTags = checked.filter { !shortcutTags.contains($0) }
+                    isPickingTags = false
+                }
+            }
         #endif
         #if os(macOS)
             .frame(minWidth: 360)
         #endif
         .presentationDetents([.medium, .large])
-        .sheet(isPresented: $isPickingTags) {
-            TagPicker(selected: shownTags) {
-                pickedTags = $0
-                isPickingTags = false
-            }
-        }
         .onDisappear { model.releaseImages() }
     }
 
@@ -713,7 +715,7 @@ private struct EditTaskSheet: View {
 /// and when their field loses focus, everything else at once; the Tags are picked in their own
 /// sheet. The Title is Quick Add: the pause saves it without pending Shortcuts, and Return, losing focus and leaving the view apply them. While the Title is empty the rest still
 /// saves (the last saved Title stays), a hint shows, and the view can't be left.
-/// On macOS `done` closes the whole sheet. An Open Blocker, a Subtask or the Parent is a row that
+/// `done` closes the whole sheet (the Mac's Done, the close button elsewhere). An Open Blocker, a Subtask or the Parent is a row that
 /// opens its own form on top (the Parent just below is gone back to); Back then shows this one as last saved.
 private struct EditTaskForm: View {
     @Environment(TasksModel.self) private var model
@@ -903,8 +905,8 @@ private struct EditTaskForm: View {
         quickAddRevision += 1
     }
 
-    /// Applies the Shortcuts in the Title field: they leave the field, the Priority picker and the
-    /// Tag list show the result. With none pending it just saves.
+    /// Applies the Shortcuts in the Title field: they leave the field, the Priority and Tags buttons
+    /// show the result. With none pending it just saves.
     private func commitQuickAdd() {
         guard quickAdd.priority() != nil || !quickAdd.tags().isEmpty,
             let saved = model.commit(quickAdd, to: task, description: description, priority: priority, tags: tags)

@@ -59,7 +59,7 @@ struct QuickAddField: View {
         VStack(alignment: .leading, spacing: 8) {
             editor
             if !suggestions.isEmpty {
-                suggestionList
+                suggestionList.font(.body)  // not the Title's, which a Task's sheet makes large
             }
         }
     }

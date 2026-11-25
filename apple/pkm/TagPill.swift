@@ -23,7 +23,9 @@ struct TagPills: View {
         HStack(spacing: 4) { ForEach(tags, id: \.self) { TagPill(tag: $0) } }
             .lineLimit(1)
             .fixedSize()
-            .frame(maxWidth: .infinity, alignment: .leading)
+            // Only a minimum lets the frame be narrower than the pills: with only a maximum it takes
+            // their full width, overflowing its slot instead of cutting them off.
+            .frame(minWidth: 0, alignment: .leading)
             .clipped()
     }
 }

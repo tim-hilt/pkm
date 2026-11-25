@@ -210,9 +210,12 @@ import XCTest
         XCTAssertTrue(picker.waitForNonExistence(timeout: 5))
         app.navigationBars["New Task"].buttons["Add"].tap()
         app.navigationBars["New Task"].buttons["Cancel"].tap()
-        // "health" is also on the sample Task Book the dentist.
-        XCTAssertTrue(app.staticTexts["Call"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.staticTexts.matching(identifier: "health").count, 2)
+        let call = app.staticTexts["Call"]
+        XCTAssertTrue(call.waitForExistence(timeout: 5))
+        call.tap()
+        XCTAssertTrue(showsForm(of: "Call"))
+        let added = app.buttons["task-tags"].label
+        XCTAssertTrue(added.contains("health") && added.contains("home"), added)
     }
 
     func testAPriorityIsSetFromARowsContextMenu() {
