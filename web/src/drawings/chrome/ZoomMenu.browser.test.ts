@@ -40,10 +40,7 @@ describe("ZoomMenu", () => {
 
   it("offers the zoom group's commands", () => {
     toggle().click();
-    expect(items().map((item) => item.textContent)).toEqual([
-      "Reset",
-      "Zoom to Content",
-    ]);
+    expect(items().map((item) => item.textContent)).toEqual(["Reset", "Zoom to Content"]);
   });
 
   it("runs a command, shows the new zoom and closes", () => {

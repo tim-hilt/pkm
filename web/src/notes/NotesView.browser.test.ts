@@ -1,4 +1,5 @@
-import { userEvent } from "vitest/browser";
+import indexHtml from "../../index.html?raw";
+import { page, userEvent } from "vitest/browser";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { loadCore } from "../core/Core";
 import wasmUrl from "../../generated/pkm_web_bg.wasm?url";
@@ -56,5 +57,27 @@ describe("NotesView", () => {
     expect([...menu.options].map((option) => option.text)).toEqual(["All Notes", "work"]);
     await userEvent.selectOptions(menu, "work");
     expect(view.element.querySelectorAll(".note-row")).toHaveLength(1);
+  });
+
+  it("shows the Tags button of the open Note on a wide screen, in the app's own styles", async () => {
+    await page.viewport(1000, 700);
+    const style = document.createElement("style");
+    style.textContent = [...indexHtml.matchAll(/<style>([\s\S]*?)<\/style>/g)]
+      .map((m) => m[1])
+      .join("");
+    document.head.append(style);
+    const model = new NotesModel(await NoteFiles.open(new MemoryStorage()));
+    const view = new NotesView(model);
+    document.body.append(view.element);
+    views.push(view);
+    try {
+      model.add();
+      const pick = view.element.querySelector<HTMLElement>('[aria-label="Pick Tags"]')!;
+      expect(getComputedStyle(pick.parentElement!).display).toBe("flex");
+      expect(getComputedStyle(pick).visibility).toBe("visible");
+    } finally {
+      style.remove();
+      await page.viewport(414, 896);
+    }
   });
 });
