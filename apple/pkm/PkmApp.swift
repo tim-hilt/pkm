@@ -4,6 +4,14 @@ import SwiftUI
 struct PkmApp: App {
     #if os(macOS)
         init() { _ = MainWindowFrame.applies }  // before the window saves its frame
+    #else
+        /// UI tests (`-UITesting…`) run without UIKit animations: a row's context menu, with the row
+        /// draggable, would never let the app idle, so each step on it waited 60 s.
+        init() {
+            if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("-UITesting") }) {
+                UIView.setAnimationsEnabled(false)
+            }
+        }
     #endif
 
     @State private var cloud = CloudBackingModel()

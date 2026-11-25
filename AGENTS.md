@@ -66,6 +66,8 @@ Search with `rg` or `git grep`: they skip the gitignored `node_modules` folders,
 
 Run `make check` before committing.
 
+UI tests take ~25 s each. While iterating, run only the affected ones: `make test-ui ONLY=pkmUITests/TasksUITests/testX` (space-separated; `ONLY` works for `make test` and `make test-ios` too). Run the full `make test-ui` once at the end. A test that runs over a minute fails.
+
 ## Seeing the app
 
 `make screenshot DEVICE=mac|ipad|iphone [OUT=path]` builds the app, launches it with the sample Drawing open (launch argument `-UITestingOpenSampleDrawing`, temporary store) and writes a PNG (default `/tmp/wt-<device>.png`) that you can read to check layout by eye. `SCREEN=tasks` shows the sample Tasks instead, `SCREEN=task` the sheet of one with a Subtask; `NOBUILD=1` relaunches the last build.

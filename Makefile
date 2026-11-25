@@ -1,7 +1,8 @@
 # Terminal-only build entry points; no Xcode GUI needed.
 SWIFT_SRC := apple/pkm apple/pkmShare apple/pkmTests apple/pkmUITests
 XCODEBUILD := cd apple && xcodebuild -quiet -allowProvisioningUpdates -scheme pkm
-XCTEST := scripts/apple-test.sh
+# ONLY="pkmUITests/TasksUITests pkmTests/FooTests/testBar" runs just those tests.
+XCTEST := scripts/apple-test.sh $(foreach t,$(ONLY),-only-testing:$(t))
 
 # Simulators matching the project's target devices.
 SIM_IPHONE := iPhone 15 Pro
