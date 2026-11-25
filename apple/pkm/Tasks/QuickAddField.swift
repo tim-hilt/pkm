@@ -49,8 +49,7 @@ struct QuickAddField: View {
     }
 
     var body: some View {
-        // The list grows the row instead of floating: a Form clips a row's overlay (iOS) and draws
-        // the next row over it (macOS).
+        // The list grows the row instead of floating: a Form draws the next row over a row's overlay.
         VStack(alignment: .leading, spacing: 8) {
             editor
             #if os(macOS)
@@ -65,7 +64,7 @@ struct QuickAddField: View {
     }
 
     private var choices: TagChoices {
-        TagChoices(items: suggestions, selected: selected) { pick($0) }
+        TagChoices(field: ObjectIdentifier(quickAdd), items: suggestions, selected: selected) { pick($0) }
     }
 
     #if os(macOS)
@@ -75,19 +74,14 @@ struct QuickAddField: View {
                     Button {
                         pick(suggestion)
                     } label: {
-                        Label {
-                            Text(suggestion.isNew ? "Create Tag '\(suggestion.tag)'" : suggestion.tag)
-                        } icon: {
-                            Image(systemName: "tag")
-                        }
-                        .foregroundStyle(model.tagEntry(suggestion.tag).style(default: .primary))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
-                        .background(
-                            index == selected ? Color.accentColor.opacity(0.2) : .clear, in: .rect(cornerRadius: 10)
-                        )
-                        .padding(.horizontal, -8)  // the highlight's margin, without moving the label
+                        TagChoiceLabel(choice: suggestion)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(
+                                index == selected ? Color.accentColor.opacity(0.2) : .clear, in: .rect(cornerRadius: 10)
+                            )
+                            .padding(.horizontal, -8)  // the highlight's margin, without moving the label
                     }
                     .buttonStyle(.plain)
                 }

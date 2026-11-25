@@ -268,7 +268,7 @@ import XCTest
         XCTAssertFalse(picker.buttons["Done"].exists)  // a row's circle is "Done" too
         app.buttons["home"].firstMatch.tap()
         XCTAssertTrue(picker.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["health home"].waitForExistence(timeout: 5))
+        XCTAssertTrue(row("Book the dentist").staticTexts["home"].waitForExistence(timeout: 5))
     }
 
     func testATagCreatedInTheQuickPickerIsAdded() {
@@ -285,7 +285,7 @@ import XCTest
         search.typeText("errand")
         app.buttons["Create Tag 'errand'"].tap()
         XCTAssertTrue(picker.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["health errand"].waitForExistence(timeout: 5))
+        XCTAssertTrue(row("Book the dentist").staticTexts["errand"].waitForExistence(timeout: 5))
     }
 
     func testAnImageIsCopiedFromItsMenu() {

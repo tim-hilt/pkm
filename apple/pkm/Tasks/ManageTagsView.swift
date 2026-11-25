@@ -13,10 +13,12 @@ struct ManageTagsView: View {
 
     var body: some View {
         List {
-            Section {
-                ForEach(tasks.allTags, id: \.name) { tag in row(tag) }
-            } header: {
-                LabeledContent("Tag", value: "Relevance").font(.subheadline)
+            if !tasks.allTags.isEmpty {
+                Section {
+                    ForEach(tasks.allTags, id: \.name) { tag in row(tag) }
+                } header: {
+                    LabeledContent("Tag", value: "Relevance").font(.subheadline)
+                }
             }
         }
         .listStyle(.plain)
