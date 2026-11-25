@@ -64,9 +64,9 @@ Search with `rg` or `git grep`: they skip the gitignored `node_modules` folders,
 
 ## Checking
 
-`make check` formats, lints, then runs the Rust tests, failing at the cheapest step; run it before committing.
+Run `make check` before committing.
 
 ## Seeing the app
 
-`make screenshot DEVICE=mac|ipad|iphone [OUT=path]` builds the app, launches it with the sample Drawing open (launch argument `-UITestingOpenSampleDrawing`, temporary store) and writes a PNG (default `/tmp/wt-<device>.png`) that you can read to check layout by eye. `SCREEN=tasks` shows the sample Tasks instead, `SCREEN=task` the sheet of one with a Subtask.
+`make screenshot DEVICE=mac|ipad|iphone [OUT=path]` builds the app, launches it with the sample Drawing open (launch argument `-UITestingOpenSampleDrawing`, temporary store) and writes a PNG (default `/tmp/wt-<device>.png`) that you can read to check layout by eye. `SCREEN=tasks` shows the sample Tasks instead, `SCREEN=task` the sheet of one with a Subtask; `NOBUILD=1` relaunches the last build.
 

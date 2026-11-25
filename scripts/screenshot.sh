@@ -17,7 +17,8 @@
 # -UITestingOpenBookmarkDetails), or with one turned rectangle held mid-resize
 # with Dimensions on (SCREEN=dimensions), and saves a screenshot to $OUT
 # (default /tmp/wt-$DEVICE.png). DEVICE=web captures the web app (see
-# screenshot-web.sh). On Mac only the app's window is captured.
+# screenshot-web.sh). On Mac only the app's window is captured. NOBUILD=1
+# relaunches the last build.
 set -euo pipefail
 
 if [ "${DEVICE:-}" = web ]; then
@@ -63,7 +64,7 @@ if [ "$DEVICE" = mac ]; then
         exit 1
     fi
     # Signed ad hoc without the App Group, which needs a developer account; screenshots don't use it.
-    xcodebuild -quiet -scheme pkm -destination 'platform=macOS' -derivedDataPath "$DERIVED" build \
+    [ -n "${NOBUILD:-}" ] || xcodebuild -quiet -scheme pkm -destination 'platform=macOS' -derivedDataPath "$DERIVED" build \
         CODE_SIGN_IDENTITY=- CODE_SIGN_ENTITLEMENTS=
     app="$DERIVED/Build/Products/Debug/pkm.app"
     pkill -x 'pkm' 2>/dev/null || true
@@ -95,12 +96,32 @@ if [ "$DEVICE" = mac ]; then
     pkill -x 'pkm' || true
 else
     xcrun simctl list devices available | grep -qF "    $SIM (" || xcrun simctl create "$SIM" "$SIM" >/dev/null
-    xcodebuild -quiet -scheme pkm -destination "platform=iOS Simulator,name=$SIM" -derivedDataPath "$DERIVED" build
+    [ -n "${NOBUILD:-}" ] || xcodebuild -quiet -scheme pkm -destination "platform=iOS Simulator,name=$SIM" -derivedDataPath "$DERIVED" build
     xcrun simctl boot "$SIM" 2>/dev/null || true
     xcrun simctl bootstatus "$SIM" >/dev/null
-    xcrun simctl install "$SIM" "$DERIVED/Build/Products/Debug-iphonesimulator/pkm.app"
+    [ -n "${NOBUILD:-}" ] || xcrun simctl install "$SIM" "$DERIVED/Build/Products/Debug-iphonesimulator/pkm.app"
     xcrun simctl launch --terminate-running-process "$SIM" com.timhilt.pkm $LAUNCH_ARG >/dev/null
-    sleep 8
-    xcrun simctl io "$SIM" screenshot "$OUT"
+    # Waits until the screen has content and holds still for 2 s: the first launch after an
+    # install stays blank for seconds, and sheets animate in. A blank screen compresses to
+    # under 0.04 bytes a pixel, a drawn one to well over.
+    frame=$(mktemp -d)
+    pixels=
+    still=0
+    for i in $(seq 60); do
+        sleep 1
+        xcrun simctl io "$SIM" screenshot "$frame/$i.png" >/dev/null 2>&1
+        : "${pixels:=$(sips -g pixelWidth -g pixelHeight "$frame/$i.png" | awk '/pixel(Width|Height)/ { p = p ? p * $2 : $2 } END { print p }')}"
+        if [ $(($(stat -f%z "$frame/$i.png") * 100 / pixels)) -lt 4 ]; then
+            still=0
+        elif cmp -s "$frame/$i.png" "$frame/$((i - 1)).png"; then
+            still=$((still + 1))
+            [ "$still" -ge 2 ] && break
+        else
+            still=0
+        fi
+    done
+    [ "$still" -ge 2 ] || echo "warning: the screen never held still within 60 s; captured anyway" >&2
+    mv "$frame/$i.png" "$OUT"
+    rm -rf "$frame"
 fi
 echo "$OUT"

@@ -42,8 +42,9 @@ web-test: web-install web-wasm
 	cd web && bun run test
 
 # The fetch script against a local site, in the BusyBox image it runs in
-# (needs Docker).
+# (needs Docker; skipped with a warning when it isn't running).
 web-cgi-test:
+	@docker info >/dev/null 2>&1 || { echo 'warning: web-cgi-test skipped: Docker is not running' >&2; exit 0; }; \
 	docker run --rm -v '$(CURDIR)/web/cgi-bin:/cgi:ro' busybox:musl sh /cgi/fetch.test.sh
 
 # Renderer tests in Chromium with WebGPU (reference images, pixel probes); kept
@@ -137,10 +138,11 @@ fmt: web-fmt
 	cargo fmt --all
 
 # The web app's formatting, lint, wasm build and Node tests, then fixes the
-# native formatting, lints and runs the Rust tests: cheapest failure first.
-# Run this before committing.
-check: web-lint web-test web-cgi-test fmt lint
+# native formatting, lints and runs the Rust tests and the CGI test: cheapest
+# failure first. Run this before committing.
+check: web-lint web-test fmt lint
 	cargo test --workspace --locked -q
+	@$(MAKE) --no-print-directory web-cgi-test
 
 # Prints the next version and the changelog since the last tag (cliff.toml);
 # changes nothing. Tag a release with that version to ship it.
@@ -187,4 +189,4 @@ clean:
 # make screenshot DEVICE=mac|ipad|iphone|web [SCREEN=canvas|dimensions|settings|books|reader|tasks|task|filters|filter|grouped|notes|note|bookmarks|article|bookmark|bookmark-search|article-find] [OUT=/tmp/wt-<device>.png]
 DEVICE ?= iphone
 screenshot: $(if $(filter web,$(DEVICE)),web-install web-wasm,apple-project)
-	DEVICE=$(DEVICE) SCREEN='$(SCREEN)' OUT='$(OUT)' scripts/screenshot.sh
+	DEVICE=$(DEVICE) SCREEN='$(SCREEN)' OUT='$(OUT)' NOBUILD='$(NOBUILD)' scripts/screenshot.sh
