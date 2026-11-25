@@ -141,12 +141,15 @@ private struct Card: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        GalleryCell(
+            name: drawing.name,
+            detail: Text(drawing.modified, format: .dateTime.day().month().year().hour().minute()),
+            pageAspect: 4 / 3
+        ) {
             // The frame has the thumbnail's shape from the start, so that the
             // grid does not move while thumbnails arrive.
             RoundedRectangle(cornerRadius: 12)
                 .fill(.quaternary)
-                .aspectRatio(4 / 3, contentMode: .fit)
                 .overlay {
                     if let image = thumbnail?.image {
                         Image(decorative: image, scale: 1)
@@ -175,10 +178,6 @@ private struct Card: View {
                 // this, every thumbnail seen would stay in memory. `thumbnails`
                 // still has it in memory for when the card comes back.
                 .onDisappear { thumbnail = nil }
-            Text(drawing.name).font(.subheadline).lineLimit(2)
-            Text(drawing.modified, format: .dateTime.day().month().year().hour().minute())
-                .font(.caption).foregroundStyle(.secondary)
         }
-        .contentShape(Rectangle())
     }
 }

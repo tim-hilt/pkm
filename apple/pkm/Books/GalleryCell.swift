@@ -1,60 +1,52 @@
 import SwiftUI
 
-/// A Gallery grid cell: an A4-portrait page area with a caption of up to 2
-/// lines under it. The caption always reserves both lines, so cells in a row
-/// line up whatever their text. A `percentRead` shows a progress indicator
-/// along the page area's bottom edge, over whatever `page` shows.
+/// A Gallery grid cell, the same for Drawings and Books: a page area of the
+/// given aspect ratio, then the name (2 lines at most) and one secondary
+/// detail line.
 struct GalleryCell<Page: View>: View {
-    let caption: String
-    var percentRead: Int?
+    let name: String
+    /// The line under the name: a Drawing's modified date, a Book's Reading Progress.
+    let detail: Text
+    /// Width over height of the page area.
+    let pageAspect: CGFloat
     @ViewBuilder let page: Page
 
-    /// A4 portrait.
-    private static var pageAspect: CGFloat { 1 / 1.414 }
-
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
             page
-                .aspectRatio(Self.pageAspect, contentMode: .fit)
+                .aspectRatio(pageAspect, contentMode: .fit)
                 .frame(maxWidth: .infinity)
-                .overlay(alignment: .bottom) {
-                    if let percentRead { ReadingProgressIndicator(percent: percentRead) }
-                }
-            Text(caption)
-                .font(.caption)
-                .lineLimit(2, reservesSpace: true)
-                .multilineTextAlignment(.center)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                    .font(.subheadline)
+                    .lineLimit(2)
+                detail
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .multilineTextAlignment(.leading)
         }
         .contentShape(.rect)
     }
 }
 
-/// A thin bar across the full width, filled to `percent`, with the number in
-/// a capsule above it in the bottom-right corner. A Cover shows its original
-/// colors whatever the Appearance, so the indicator is light too; the
-/// material keeps the number readable on it.
-private struct ReadingProgressIndicator: View {
+/// A thin bar across the full width of the page area, filled to `percent`.
+/// A Cover shows its original colors whatever the Appearance, so the bar is
+/// light too.
+private struct ReadingProgressBar: View {
     let percent: Int
-    private static let barHeight: CGFloat = 3
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 4) {
-            Text("\(percent) %")
-                .font(.caption2.monospacedDigit())
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(.ultraThinMaterial, in: .capsule)
-                .padding(.trailing, 4)
-            Rectangle().fill(.ultraThinMaterial)
-                .overlay(alignment: .leading) {
-                    GeometryReader { bar in
-                        Rectangle().fill(Color.accentColor).frame(width: bar.size.width * Double(percent) / 100)
-                    }
+        Rectangle().fill(.ultraThinMaterial)
+            .overlay(alignment: .leading) {
+                GeometryReader { bar in
+                    Rectangle().fill(Color.accentColor).frame(width: bar.size.width * Double(percent) / 100)
                 }
-                .frame(height: Self.barHeight)
-        }
-        .environment(\.colorScheme, .light)
-        .accessibilityHidden(true)
+            }
+            .frame(height: 3)
+            .environment(\.colorScheme, .light)
+            .accessibilityHidden(true)
     }
 }
 
@@ -83,7 +75,7 @@ extension ShapeStyle where Self == Color {
 /// is rendered only while the Gallery is still (see `ScrollActivity`), and
 /// that request is dropped if the cell scrolls away first. A Cover wider than
 /// the cell's page shape is scaled to fit and centred vertically; the space
-/// around it is transparent. The progress indicator stays on the cell's
+/// around it is transparent. The progress bar stays on the page's
 /// bottom edge.
 struct BookCell: View {
     @Environment(LibraryModel.self) private var library
@@ -91,8 +83,14 @@ struct BookCell: View {
     let book: Book
     @State private var cover: CGImage?
 
+    /// A4 portrait.
+    private static let pageAspect: CGFloat = 1 / 1.414
+
     var body: some View {
-        GalleryCell(caption: book.title, percentRead: book.percentRead.map(Int.init)) {
+        let percent = book.percentRead.map(Int.init)
+        GalleryCell(
+            name: book.title, detail: Text(percent.map { "\($0) %" } ?? ""), pageAspect: Self.pageAspect
+        ) {
             ZStack {
                 if let cover {
                     Image(decorative: cover, scale: 1)
@@ -105,6 +103,9 @@ struct BookCell: View {
                 }
             }
             .animation(.default, value: cover == nil)
+            .overlay(alignment: .bottom) {
+                if let percent { ReadingProgressBar(percent: percent) }
+            }
         }
         .task(id: LoadKey(book: book.id, galleryIsStill: scroll.isStill)) {
             if cover == nil { cover = await library.savedCover(for: book) }
