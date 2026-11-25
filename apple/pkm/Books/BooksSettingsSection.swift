@@ -11,14 +11,14 @@ struct BooksSettingsSection: View {
 
     var body: some View {
         @Bindable var reader = reader
-        Section("Page Style") {
+        Section {
             Picker("Page Style", selection: $reader.pageStyle) {
                 ForEach(PageStyle.allCases) { Text($0.title).tag($0) }
             }
             .accessibilityIdentifier("page-style")
         }
         Section("Page Colors") {
-            PageColorsEditor()
+            PageColorsEditor(resetTitle: "Reset Page Colors")
         }
         Section {
             HighlightColorGrid(

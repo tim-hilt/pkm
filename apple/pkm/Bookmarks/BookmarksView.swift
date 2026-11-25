@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The Bookmarks Context: its Bookmarks, newest Saved first, each with Cover, Title, Site, Tags and a
 /// mark if it has an Article, narrowed to one Tag from the menu. Tapping one opens its Article in the
-/// Reader, or else its page in the system's browser; swipe right or the context menu Edit it (its
+/// Reader, or else its page in the in-app browser; swipe right or the context menu Edit it (its
 /// Details), swipe left or the context menu Delete it, after asking. "+" opens the Save sheet.
 /// Searching lists the matches instead, each with a snippet of where the words were found.
 struct BookmarksView: View {
@@ -107,7 +107,7 @@ struct BookmarksView: View {
         if bookmark.hasArticle {
             model.openID = bookmark.id
         } else if let url = URL(string: bookmark.address) {
-            openURL(url)
+            openURL(url, prefersInApp: true)
         }
     }
 }

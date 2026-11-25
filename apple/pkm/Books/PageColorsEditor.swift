@@ -1,16 +1,17 @@
 import SwiftUI
 
 /// Pickers for the Page color (paper) and Text color (ink) of Dark Pages, and a
-/// Reset button, in the Reader popover.
+/// Reset button: three rows in a Form, or children of the caller's stack in the Reader popover.
 struct PageColorsEditor: View {
     @Environment(ReaderSettings.self) private var settings
+    var resetTitle: LocalizedStringKey = "Reset"
 
     var body: some View {
         @Bindable var settings = settings
-        VStack(alignment: .leading, spacing: 12) {
+        Group {
             ColorPicker("Page", selection: binding($settings.pageColors.paper), supportsOpacity: false)
             ColorPicker("Text", selection: binding($settings.pageColors.ink), supportsOpacity: false)
-            Button("Reset") { settings.resetPageColors() }
+            Button(resetTitle) { settings.resetPageColors() }
                 .disabled(settings.pageColors == .default)
         }
     }

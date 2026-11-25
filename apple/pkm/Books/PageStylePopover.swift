@@ -17,7 +17,7 @@ struct PageStylePopover: View {
                 PageStylePicker(selection: $settings.pageStyle, paper: settings.pageColors.paper)
                 if settings.arePagesDark(systemScheme: colorScheme) {
                     Text("Dark Page Colors").font(.headline)
-                    PageColorsEditor()
+                    VStack(alignment: .leading, spacing: 12) { PageColorsEditor() }
                 }
                 Divider()
                 BookInfoList(info: BookInfo(book))

@@ -12,28 +12,11 @@ struct ManageTagsView: View {
     @State private var editing: String?
 
     var body: some View {
-        List(tasks.allTags, id: \.name) { tag in
-            LabeledContent {
-                Text(tag.relevance, format: .number).monospacedDigit()
-            } label: {
-                Text(tag.name).foregroundStyle(tag.style(default: .primary))
-            }
-            .swipeActions(edge: .trailing) {
-                Button("Delete", systemImage: "trash", role: .destructive) { deletion.ask(for: tag.name) }
-                Button("Edit", systemImage: "pencil") { editing = tag.name }.tint(.accentColor)
-                if tag.relevance > 0 {
-                    Button("Reset to 0", systemImage: "arrow.counterclockwise") {
-                        tasks.resetTagRelevance(tag.name)
-                    }
-                }
-            }
-            .contextMenu {
-                Button("Edit", systemImage: "pencil") { editing = tag.name }
-                Button("Default Color") { tasks.setTagColor(tag.name, to: nil) }
-                    .disabled(tag.color == nil)
-                Button("Reset to 0", systemImage: "arrow.counterclockwise") { tasks.resetTagRelevance(tag.name) }
-                    .disabled(tag.relevance == 0)
-                Button("Delete", systemImage: "trash", role: .destructive) { deletion.ask(for: tag.name) }
+        List {
+            Section {
+                ForEach(tasks.allTags, id: \.name) { tag in row(tag) }
+            } header: {
+                LabeledContent("Tag", value: "Relevance").font(.subheadline)
             }
         }
         .listStyle(.plain)
@@ -67,6 +50,31 @@ struct ManageTagsView: View {
         .overlay { if tasks.allTags.isEmpty { Text("No Tags").foregroundStyle(.secondary) } }
         .navigationTitle("Tags")
         .onAppear(perform: tasks.refreshTags)
+    }
+
+    private func row(_ tag: TagEntry) -> some View {
+        LabeledContent {
+            Text(tag.relevance, format: .number).monospacedDigit()
+        } label: {
+            Text(tag.name).foregroundStyle(tag.style(default: .primary))
+        }
+        .swipeActions(edge: .trailing) {
+            Button("Delete", systemImage: "trash", role: .destructive) { deletion.ask(for: tag.name) }
+            Button("Edit", systemImage: "pencil") { editing = tag.name }.tint(.accentColor)
+            if tag.relevance > 0 {
+                Button("Reset to 0", systemImage: "arrow.counterclockwise") {
+                    tasks.resetTagRelevance(tag.name)
+                }
+            }
+        }
+        .contextMenu {
+            Button("Edit", systemImage: "pencil") { editing = tag.name }
+            Button("Default Color") { tasks.setTagColor(tag.name, to: nil) }
+                .disabled(tag.color == nil)
+            Button("Reset to 0", systemImage: "arrow.counterclockwise") { tasks.resetTagRelevance(tag.name) }
+                .disabled(tag.relevance == 0)
+            Button("Delete", systemImage: "trash", role: .destructive) { deletion.ask(for: tag.name) }
+        }
     }
 
     /// The dialog shows while a Tag is pending; dismissing it cancels.

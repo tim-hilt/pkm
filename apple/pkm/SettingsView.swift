@@ -1,7 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The Settings, grouped: Appearance, Common (Tags, Cloud Backing), then a row
+/// The Settings, grouped: Appearance, then Tags and Cloud Backing, then a row
 /// per Context with settings of its own (today only Books). A window on the Mac
 /// (⌘,), a sheet with its own stack and a close button on iPhone and iPad.
 struct SettingsView: View {
@@ -30,7 +30,7 @@ struct SettingsView: View {
             Section("Appearance") {
                 AppearancePicker().pickerStyle(.segmented).labelsHidden()
             }
-            Section("Common") {
+            Section {
                 NavigationLink("Tags") { ManageTagsView() }
                     .accessibilityIdentifier("manage-tags")
                 NavigationLink {
@@ -137,14 +137,8 @@ struct CloudBackingSection: View {
     }
 
     @ViewBuilder private func connected(to connection: CloudConnection) -> some View {
-        LabeledContent {
+        LabeledContent(connection.provider.detailLabel) {
             Text(connection.detail).textSelection(.enabled)
-        } label: {
-            Label {
-                Text(connection.provider.detailLabel)
-            } icon: {
-                connection.provider.icon
-            }
         }
         .accessibilityIdentifier("cloud-connected")
         LabeledContent("Status") {
