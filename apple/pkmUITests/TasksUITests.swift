@@ -192,6 +192,29 @@ import XCTest
         XCTAssertTrue(app.staticTexts["Call"].waitForExistence(timeout: 5))
     }
 
+    func testATaskGetsTheTagsPickedAboveTheKeyboardAndItsShortcutTags() {
+        app.buttons["add-task"].tap()
+        XCTAssertTrue(app.keys["C"].waitForExistence(timeout: 5))
+        for key in ["C", "a", "l", "l", "space"] { app.keys[key].tap() }
+        app.keys["more"].tap()
+        app.keys["@"].tap()
+        app.keys["more"].tap()
+        for key in ["h", "o", "m", "e"] { app.keys[key].tap() }
+        let tags = app.buttons["task-tags"]
+        XCTAssertTrue(tags.waitForExistence(timeout: 5))
+        tags.tap()
+        let picker = app.navigationBars["Tags"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        app.buttons["health"].firstMatch.tap()
+        picker.buttons["Done"].tap()
+        XCTAssertTrue(picker.waitForNonExistence(timeout: 5))
+        app.navigationBars["New Task"].buttons["Add"].tap()
+        app.navigationBars["New Task"].buttons["Cancel"].tap()
+        // "health" is also on the sample Task Book the dentist.
+        XCTAssertTrue(app.staticTexts["Call"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts.matching(identifier: "health").count, 2)
+    }
+
     func testAPriorityIsSetFromARowsContextMenu() {
         app.staticTexts["Book the dentist"].press(forDuration: 1)
         XCTAssertTrue(app.buttons["Reject"].waitForExistence(timeout: 5))

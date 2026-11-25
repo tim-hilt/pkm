@@ -559,7 +559,8 @@ extension ListedTask {
 }
 
 /// Asks for a Title and a Description; the Task is added. The sheet stays open after each
-/// Add, cleared and focused for the next Task; Cancel or swiping down ends it.
+/// Add, cleared and focused for the next Task; Cancel or swiping down ends it. On iOS a bar
+/// above the keyboard picks the Priority and Tags, showing what the Task will get, Shortcuts included.
 private struct NewTaskSheet: View {
     @Environment(TasksModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -567,6 +568,13 @@ private struct NewTaskSheet: View {
     /// Quick Add's Title, kept up to date by the field.
     @State private var title = ""
     @State private var description = ""
+    /// The Priority picked from the menu, used unless Quick Add has a Priority Shortcut.
+    @State private var pickedPriority: UInt8 = 4
+    @State private var pickedTags: [String] = []
+    /// What Quick Add's Shortcuts give, kept up to date by the field.
+    @State private var shortcutPriority: UInt8?
+    @State private var shortcutTags: [String] = []
+    @State private var isPickingTags = false
     /// Changes per Task, so that the field redraws empty; it keeps its focus, and so the keyboard.
     @State private var revision = 0
     /// Only the Title's first appearance takes the focus, not a later one after scrolling.
@@ -581,7 +589,8 @@ private struct NewTaskSheet: View {
             Form {
                 QuickAddField(
                     quickAdd: quickAdd, title: $title, revision: revision, refocusOnRevision: true,
-                    autofocus: autofocusTitle, onAutofocus: { autofocusTitle = false }, onSubmit: add
+                    autofocus: autofocusTitle, onAutofocus: { autofocusTitle = false },
+                    onShortcutsChange: readShortcuts, onSubmit: add
                 )
                 .accessibilityIdentifier("task-title")
                 MarkdownEditor(text: $description, placeholder: "Description", images: model.images)
@@ -593,27 +602,63 @@ private struct NewTaskSheet: View {
                 .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel", role: .cancel) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add", action: add).disabled(title.isEmpty)
+                    Button("Add", role: .confirm, action: add).disabled(title.isEmpty)
                 }
             }
         }
+        #if os(iOS)
+            // `ToolbarItemGroup(placement: .keyboard)` showed nothing over the Title's editor; an inset
+            // rides above the keyboard just the same.
+            .safeAreaInset(edge: .bottom) {
+                HStack(spacing: 8) {
+                    PriorityMenu(priority: Binding(get: { shortcutPriority ?? pickedPriority }, set: pickPriority))
+                    TagsButton(tags: shownTags) { isPickingTags = true }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+            }
+        #endif
         #if os(macOS)
             .frame(minWidth: 360)
         #endif
         .presentationDetents([.medium, .large])
+        .sheet(isPresented: $isPickingTags) {
+            TagPicker(selected: shownTags) {
+                pickedTags = $0
+                isPickingTags = false
+            }
+        }
         .onDisappear { model.releaseImages() }
     }
 
+    /// The picked Tags, then the Shortcut Tags not among them.
+    private var shownTags: [String] { pickedTags + shortcutTags.filter { !pickedTags.contains($0) } }
+
+    private func readShortcuts() {
+        shortcutPriority = quickAdd.priority()
+        shortcutTags = quickAdd.tags()
+    }
+
+    /// A pick Ignores an earlier Priority Shortcut (the last action wins).
+    private func pickPriority(_ priority: UInt8) {
+        pickedPriority = priority
+        quickAdd.ignorePriority()
+        revision += 1
+    }
+
     private func add() {
-        let priority = quickAdd.priority() ?? 4
-        let tags = quickAdd.tags()
-        guard model.add(title: title, description: description, priority: priority, tags: tags) else { return }
+        guard model.add(quickAdd, description: description, priority: pickedPriority, tags: pickedTags) else {
+            return
+        }
         model.releaseImages()
         quickAdd = model.newQuickAdd()
         title = ""
         description = ""
+        pickedPriority = 4
+        pickedTags = []
         revision += 1
     }
 }

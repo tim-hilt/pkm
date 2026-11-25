@@ -224,6 +224,16 @@ final class TasksModel {
         return true
     }
 
+    /// Adds the Task Quick Add describes. A Priority Shortcut in it replaces the picked `priority`
+    /// (a pick made after it Ignored the Shortcut), and its Tags join the picked `tags`.
+    /// False, adding nothing, if the Title is empty or a Tag invalid.
+    @discardableResult
+    func add(_ quickAdd: TaskQuickAdd, description: String, priority: UInt8, tags: [String]) -> Bool {
+        add(
+            title: quickAdd.title(), description: description, priority: quickAdd.priority() ?? priority,
+            tags: tags + quickAdd.tags().filter { !tags.contains($0) })
+    }
+
     /// Adds a Subtask under `parent`, with a Description, Priority and Tags if given, and shows it.
     /// False, adding nothing, if the Title is empty or a Tag invalid.
     @discardableResult

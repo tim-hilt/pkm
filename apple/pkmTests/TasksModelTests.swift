@@ -28,6 +28,25 @@ import Testing
         #expect(model.tasks.map(\.priority) == [1])
     }
 
+    @Test func aPriorityPickedAfterAShortcutWinsAndAShortcutTypedAfterThePickWins() throws {
+        let model = try openModel()
+        let quickAdd = TaskQuickAdd()
+        quickAdd.replace(start: 0, end: 0, with: "Fix p1")
+        quickAdd.ignorePriority()  // the Priority menu was used
+        #expect(model.add(quickAdd, description: "", priority: 3, tags: []))
+        quickAdd.replace(start: 0, end: 6, with: "Call p2")
+        #expect(model.add(quickAdd, description: "", priority: 3, tags: []))
+        #expect(model.tasks.map(\.priority).sorted() == [2, 3])
+    }
+
+    @Test func aNewTaskGetsThePickedTagsAndTheShortcutTags() throws {
+        let model = try openModel()
+        let quickAdd = TaskQuickAdd()
+        quickAdd.replace(start: 0, end: 0, with: "Fix @bug @home")
+        #expect(model.add(quickAdd, description: "", priority: 4, tags: ["home", "ui"]))
+        #expect(Set(model.tasks[0].tags.map(\.name)) == ["home", "ui", "bug"])
+    }
+
     private func fileExists(_ reference: String) -> Bool {
         FileManager.default.fileExists(atPath: root.appending(path: "Tasks/\(reference)").path)
     }

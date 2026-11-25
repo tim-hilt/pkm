@@ -20,6 +20,8 @@ struct QuickAddField: View {
     /// The focus was taken because of `autofocus`; the owner then clears it, as a row that scrolls
     /// off and on again appears anew and must not take the focus from the field being edited.
     var onAutofocus: () -> Void = {}
+    /// Quick Add's Shortcuts may have changed (it was drawn).
+    var onShortcutsChange: () -> Void = {}
     /// Return was pressed.
     let onSubmit: () -> Void
     /// The field lost focus. Not while the suggestion list is open: picking from it may take focus
@@ -251,6 +253,7 @@ struct QuickAddField: View {
         let plain = quickAdd.text()
         title = quickAdd.title()
         highlighted = quickAdd.highlights()
+        onShortcutsChange()
         // Raw markers while focused; unfocused, formatted with the markers too small to see.
         var drawn = AttributedString(title: plain, markers: isFocused ? .shown : .hidden)
         for shortcut in highlighted {
