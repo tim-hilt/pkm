@@ -612,14 +612,17 @@ private struct NewTaskSheet: View {
         #if os(iOS)
             // `ToolbarItemGroup(placement: .keyboard)` showed nothing over the Title's editor; an inset
             // rides above the keyboard just the same.
-            .safeAreaInset(edge: .bottom) {
-                HStack(spacing: 8) {
-                    PriorityMenu(priority: Binding(get: { shortcutPriority ?? pickedPriority }, set: pickPriority))
-                    TagsButton(tags: shownTags) { isPickingTags = true }
-                    Spacer(minLength: 0)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: 0) {
+                    TagChoiceBar()
+                    HStack(spacing: 8) {
+                        PriorityMenu(priority: Binding(get: { shortcutPriority ?? pickedPriority }, set: pickPriority))
+                        TagsButton(tags: shownTags) { isPickingTags = true }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
                 }
-                .padding(.horizontal)
-                .padding(.vertical, 8)
             }
             .sheet(isPresented: $isPickingTags) {
                 TagPicker(selected: shownTags) { checked in
@@ -697,8 +700,13 @@ private struct EditTaskSheet: View {
             form(model.editing.first)
                 .navigationDestination(for: String.self) { form($0) }
         }
-        .safeAreaInset(edge: .bottom) {
-            if let pendingClose = model.pendingClose { ClosedToast(closing: pendingClose) }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                #if os(iOS)
+                    TagChoiceBar()
+                #endif
+                if let pendingClose = model.pendingClose { ClosedToast(closing: pendingClose) }
+            }
         }
         .animation(.default, value: model.pendingClose)
         .interactiveDismissDisabled(model.isLeavingBlocked)

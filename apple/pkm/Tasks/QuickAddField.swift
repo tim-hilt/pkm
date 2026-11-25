@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// The Title field of a Task: Quick Add's text, with its Shortcuts highlighted, and the Tags
-/// to suggest below it while the cursor is in an `@` word. It only draws and forwards what is typed,
+/// to suggest while the cursor is in an `@` word: a list below it on the Mac, chips above the
+/// keyboard elsewhere (see `TagChoices`). It only draws and forwards what is typed,
 /// the cursor, Return, picks and Ignores; every rule lives in the core's `TaskQuickAdd`.
 struct QuickAddField: View {
     @Environment(TasksModel.self) private var model
@@ -40,17 +41,11 @@ struct QuickAddField: View {
     @State private var isClosed = false
 
     /// What the list offers: matching Tags, then Create for a new valid one; empty while closed.
-    private var suggestions: [Suggestion] {
+    private var suggestions: [TagChoice] {
         guard let query, !isClosed else { return [] }
         let found = model.suggestTags(query.query, leaveOut: query.leaveOut + taskTags)
-        return found.matches.map { Suggestion(tag: $0, isNew: false) }
-            + (found.create ? [Suggestion(tag: query.query, isNew: true)] : [])
-    }
-
-    private struct Suggestion: Identifiable {
-        let tag: String
-        let isNew: Bool
-        var id: String { tag }
+        return found.matches.map { TagChoice(tag: $0, isNew: false) }
+            + (found.create ? [TagChoice(tag: query.query, isNew: true)] : [])
     }
 
     var body: some View {
@@ -58,36 +53,47 @@ struct QuickAddField: View {
         // the next row over it (macOS).
         VStack(alignment: .leading, spacing: 8) {
             editor
-            if !suggestions.isEmpty {
-                suggestionList.font(.body)  // not the Title's, which a Task's sheet makes large
-            }
+            #if os(macOS)
+                if !suggestions.isEmpty {
+                    suggestionList.font(.body)  // not the Title's, which a Task's sheet makes large
+                }
+            #endif
         }
+        #if os(iOS)
+            .focusedSceneValue(\.tagChoices, isFocused && !suggestions.isEmpty ? choices : nil)
+        #endif
     }
 
-    private var suggestionList: some View {
-        VStack(spacing: 2) {
-            ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
-                Button {
-                    pick(suggestion)
-                } label: {
-                    Label {
-                        Text(suggestion.isNew ? "Create Tag '\(suggestion.tag)'" : suggestion.tag)
-                    } icon: {
-                        Image(systemName: "tag")
+    private var choices: TagChoices {
+        TagChoices(items: suggestions, selected: selected) { pick($0) }
+    }
+
+    #if os(macOS)
+        private var suggestionList: some View {
+            VStack(spacing: 2) {
+                ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
+                    Button {
+                        pick(suggestion)
+                    } label: {
+                        Label {
+                            Text(suggestion.isNew ? "Create Tag '\(suggestion.tag)'" : suggestion.tag)
+                        } icon: {
+                            Image(systemName: "tag")
+                        }
+                        .foregroundStyle(model.tagEntry(suggestion.tag).style(default: .primary))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(
+                            index == selected ? Color.accentColor.opacity(0.2) : .clear, in: .rect(cornerRadius: 10)
+                        )
+                        .padding(.horizontal, -8)  // the highlight's margin, without moving the label
                     }
-                    .foregroundStyle(model.tagEntry(suggestion.tag).style(default: .primary))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .background(
-                        index == selected ? Color.accentColor.opacity(0.2) : .clear, in: .rect(cornerRadius: 10)
-                    )
-                    .padding(.horizontal, -8)  // the highlight's margin, without moving the label
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
-    }
+    #endif
 
     private var editor: some View {
         SwiftUI.TextEditor(text: $text, selection: $selection)
@@ -191,7 +197,7 @@ struct QuickAddField: View {
         return true
     }
 
-    private func pick(_ suggestion: Suggestion) {
+    private func pick(_ suggestion: TagChoice) {
         quickAdd.pickTag(tag: suggestion.tag)
         draw()
         isFocused = true

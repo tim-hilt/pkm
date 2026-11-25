@@ -218,6 +218,37 @@ import XCTest
         XCTAssertTrue(added.contains("health") && added.contains("home"), added)
     }
 
+    func testAChipAboveTheKeyboardCompletesTheAtWord() {
+        app.buttons["add-task"].tap()
+        XCTAssertTrue(app.keys["C"].waitForExistence(timeout: 5))
+        for key in ["C", "a", "l", "l", "space"] { app.keys[key].tap() }
+        app.keys["more"].tap()
+        app.keys["@"].tap()
+        app.keys["more"].tap()
+        app.keys["h"].tap()
+        let chip = app.buttons.matching(identifier: "tag-choice").firstMatch
+        XCTAssertTrue(chip.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(chip.frame.minY, app.navigationBars["New Task"].frame.maxY)
+        chip.tap()
+        XCTAssertTrue(chip.waitForNonExistence(timeout: 5), "the word is complete")
+        XCTAssertTrue(app.buttons["task-tags"].label.contains("h"))
+    }
+
+    func testASubtaskFieldShowsTheChipsToo() {
+        app.staticTexts["Book the dentist"].tap()
+        XCTAssertTrue(showsForm(of: "Book the dentist"))
+        let add = app.buttons["add-subtask"]
+        for _ in 0..<4 where !add.isHittable { app.collectionViews.firstMatch.swipeUp() }
+        add.tap()
+        XCTAssertTrue(app.keys["C"].waitForExistence(timeout: 5))
+        for key in ["C", "a", "l", "l", "space"] { app.keys[key].tap() }
+        app.keys["more"].tap()
+        app.keys["@"].tap()
+        app.keys["more"].tap()
+        app.keys["h"].tap()
+        XCTAssertTrue(app.buttons.matching(identifier: "tag-choice").firstMatch.waitForExistence(timeout: 5))
+    }
+
     func testAPriorityIsSetFromARowsContextMenu() {
         app.staticTexts["Book the dentist"].press(forDuration: 1)
         XCTAssertTrue(app.buttons["Reject"].waitForExistence(timeout: 5))
