@@ -262,6 +262,39 @@ import XCTest
         XCTAssertEqual(app.buttons["task-done"].label, "Done")
     }
 
+    func testTheCloseButtonClosesTheSheetUnlessTheTitleIsEmpty() throws {
+        app.staticTexts["Book the dentist"].tap()
+        XCTAssertTrue(showsForm(of: "Book the dentist"))
+        let close = app.buttons["close-task"]
+        guard close.waitForExistence(timeout: 5) else { throw XCTSkip("Mac has Done instead") }
+        // The field's accessibility frame is empty, so the tap lands beside the circle, at the end of its line.
+        let circle = app.buttons["task-done"]
+        // A tap while the sheet still rises is lost.
+        for _ in 0..<4 where !app.keyboards.firstMatch.exists {
+            sleep(1)
+            circle.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5)).withOffset(CGVector(dx: 200, dy: 0)).tap()
+            _ = app.keyboards.firstMatch.waitForExistence(timeout: 2)
+        }
+        // As in the Subtask test, the keyboard is tapped: `typeText` doesn't see the field's focus.
+        for _ in 0..<16 { app.keys["delete"].tap() }
+        XCTAssertFalse(close.isEnabled)
+        app.keys["B"].tap()
+        XCTAssertTrue(close.isEnabled)
+        close.tap()
+        XCTAssertTrue(close.waitForNonExistence(timeout: 5))
+    }
+
+    func testRejectInTheSheetsMenuRejectsTheTaskWithAToastToRevert() throws {
+        app.staticTexts["Book the dentist"].tap()
+        XCTAssertTrue(showsForm(of: "Book the dentist"))
+        let more = app.buttons["task-more"]
+        guard more.waitForExistence(timeout: 5) else { throw XCTSkip("Mac has Done instead") }
+        more.tap()
+        app.buttons["Reject"].tap()
+        XCTAssertTrue(app.staticTexts["Task Rejected"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Revert"].exists)
+    }
+
     func testTagsArePickedInTheirOwnSheet() {
         app.staticTexts["Book the dentist"].tap()
         XCTAssertTrue(showsForm(of: "Book the dentist"))

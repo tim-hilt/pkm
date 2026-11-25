@@ -388,7 +388,7 @@ private struct ClosedToast: View {
         }
         .padding(.horizontal)
         .frame(minHeight: AddButtonMetrics.size)
-        .background(.regularMaterial, in: .rect(cornerRadius: 12))
+        .glassEffect(.regular, in: .rect(cornerRadius: 12))
         .padding(.horizontal)
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
@@ -803,6 +803,21 @@ private struct EditTaskForm: View {
         .toolbar {
             #if os(iOS)
                 ToolbarItem(placement: .principal) { Color.clear.accessibilityHidden(true) }
+                if task.id == model.editing.first {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(role: .close, action: done)
+                            .disabled(!hasTitle)
+                            .accessibilityIdentifier("close-task")
+                    }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Menu("More", systemImage: "ellipsis") {
+                        Button("Reject", systemImage: "xmark.circle", role: .destructive) {
+                            model.close(saved, as: .rejected)
+                        }
+                    }
+                    .accessibilityIdentifier("task-more")
+                }
             #endif
             #if os(macOS)
                 ToolbarItem(placement: .confirmationAction) {
