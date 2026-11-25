@@ -200,7 +200,7 @@ import XCTest
 
         app.staticTexts["Book the dentist"].tap()
         XCTAssertTrue(showsForm(of: "Book the dentist"))
-        XCTAssertTrue(app.buttons["P1"].isSelected)
+        XCTAssertEqual(app.buttons["task-priority"].label, "P1")
     }
 
     func testATagIsToggledFromARowsContextMenu() {
@@ -248,6 +248,18 @@ import XCTest
         XCTAssertTrue(copy.waitForExistence(timeout: 5))
         copy.tap()
         XCTAssertTrue(UIPasteboard.general.hasImages)
+    }
+
+    func testTheSheetsCircleMarksTheTaskDoneAndTheToastReverts() {
+        app.staticTexts["Book the dentist"].tap()
+        XCTAssertTrue(showsForm(of: "Book the dentist"))
+
+        app.buttons["task-done"].tap()
+        let revert = app.buttons["Revert"]
+        XCTAssertTrue(revert.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons["task-done"].label, "Revert Done")
+        revert.tap()
+        XCTAssertEqual(app.buttons["task-done"].label, "Done")
     }
 
     func testTagsArePickedInTheirOwnSheet() {

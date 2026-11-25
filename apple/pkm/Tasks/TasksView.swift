@@ -706,33 +706,53 @@ private struct EditTaskForm: View {
 
     private var hasTitle: Bool { !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
+    /// The Task as last saved, for its Done state, which the toast Reverts.
+    private var saved: ListedTask { model.task(id: task.id) ?? task }
+
     /// What the typing pause waits on.
     private var text: [String] { [title, description] }
 
     var body: some View {
         Form {
-            QuickAddField(
-                quickAdd: quickAdd, title: $title, revision: quickAddRevision, taskTags: tags, autofocus: false,
-                onSubmit: commitQuickAdd, onBlur: commitQuickAdd
-            )
-            .accessibilityIdentifier("task-title")
-            if !hasTitle {
-                Text("A Task needs a Title.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+            Section {
+                HStack(alignment: .top, spacing: 12) {
+                    Button {
+                        model.toggleDone(saved)
+                    } label: {
+                        Image(systemName: saved.done ? "circle.inset.filled" : "circle")
+                            .font(.title)
+                            .foregroundStyle(ListedTask.color(ofPriority: priority))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(saved.done ? "Revert Done" : "Done")
+                    .accessibilityIdentifier("task-done")
+                    QuickAddField(
+                        quickAdd: quickAdd, title: $title, revision: quickAddRevision, taskTags: tags,
+                        autofocus: false, onSubmit: commitQuickAdd, onBlur: commitQuickAdd
+                    )
+                    .font(.title2.weight(.semibold))
+                    .accessibilityIdentifier("task-title")
+                }
+                if !hasTitle {
+                    Text("A Task needs a Title.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                MarkdownEditor(text: $description, placeholder: "Description", images: model.images, onBlur: save)
+                    .accessibilityIdentifier("task-description")
+                HStack(spacing: 8) {
+                    PriorityMenu(priority: $priority)
+                    TagsButton(tags: tags) { isPickingTags = true }
+                    Spacer(minLength: 0)
+                }
+                .onChange(of: priority) {
+                    quickAdd.ignorePriority()  // the last action wins
+                    quickAddRevision += 1
+                    save()
+                }
             }
-            MarkdownEditor(text: $description, placeholder: "Description", images: model.images, onBlur: save)
-                .accessibilityIdentifier("task-description")
-            Picker("Priority", selection: $priority) {
-                ForEach(UInt8(1)...4, id: \.self) { Text(verbatim: "P\($0)").tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .onChange(of: priority) {
-                quickAdd.ignorePriority()  // the last action wins
-                quickAddRevision += 1
-                save()
-            }
-            TagsRow(tags: tags) { isPickingTags = true }
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
             if let parent = task.parent {
                 Section("Parent") {
                     NavigationLink(value: parent) { Text(AttributedString(title: task.parentTitle ?? "")) }
@@ -759,7 +779,7 @@ private struct EditTaskForm: View {
                     }
                 }
                 if !blockerCandidates.isEmpty {
-                    Menu("Add Blocked by") {
+                    Menu("Add Blocker") {
                         ForEach(blockerCandidates) { candidate in
                             Button {
                                 blockedBy.append(Blocker(id: candidate.id, title: candidate.title, closed: false))
@@ -774,12 +794,16 @@ private struct EditTaskForm: View {
             }
         }
         .formStyle(.grouped)
-        // As last saved; also the back button's label on the Blocker's form.
+        // As last saved; only the back button's label on the Blocker's form, the bar itself shows
+        // no title (the header has it).
         .navigationTitle(Text(AttributedString(title: task.title)))
         #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
+            #if os(iOS)
+                ToolbarItem(placement: .principal) { Color.clear.accessibilityHidden(true) }
+            #endif
             #if os(macOS)
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done", action: done).disabled(!hasTitle)
@@ -836,5 +860,56 @@ private struct EditTaskForm: View {
 
     private func saveBlockedBy() {
         model.setBlockedBy(task, to: blockedBy.map(\.id))
+    }
+}
+
+/// The Priority button of a Task's sheet: its circle and "P n", a menu of the four Priorities.
+private struct PriorityMenu: View {
+    @Binding var priority: UInt8
+
+    var body: some View {
+        Menu {
+            // As in the row's palette, `tint` colours the circles.
+            Picker("Priority", selection: $priority) {
+                ForEach(UInt8(1)...4, id: \.self) { priority in
+                    Label {
+                        Text(verbatim: "P\(priority)")
+                    } icon: {
+                        Image(systemName: "circle.fill")
+                    }
+                    .tint(ListedTask.color(ofPriority: priority))
+                    .tag(priority)
+                }
+            }
+        } label: {
+            Label {
+                Text(verbatim: "P\(priority)")
+            } icon: {
+                Image(systemName: "circle.fill").foregroundStyle(ListedTask.color(ofPriority: priority))
+            }
+        }
+        .buttonStyle(.glass)
+        .accessibilityIdentifier("task-priority")
+    }
+}
+
+/// The Tags button of a Task's sheet: the Tags as pills, or "Add Tags"; it opens the Tag picker.
+private struct TagsButton: View {
+    let tags: [String]
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            if tags.isEmpty {
+                Label("Add Tags", systemImage: "tag")
+            } else {
+                HStack(spacing: 6) {
+                    Image(systemName: "tag")
+                    TagPills(tags: tags)
+                }
+            }
+        }
+        .buttonStyle(.glass)
+        .accessibilityIdentifier("task-tags")
     }
 }
