@@ -777,7 +777,7 @@ private struct EditTaskForm: View {
                         model.toggleDone(saved)
                     } label: {
                         Image(systemName: saved.done ? "circle.inset.filled" : "circle")
-                            .font(.title)
+                            .font(.title2)
                             .foregroundStyle(ListedTask.color(ofPriority: priority))
                     }
                     .buttonStyle(.plain)
@@ -788,14 +788,17 @@ private struct EditTaskForm: View {
                         autofocus: false, onSubmit: commitQuickAdd, onBlur: commitQuickAdd
                     )
                     .font(.title2.weight(.semibold))
+                    .padding(.vertical, -8)  // the editor's own inset, so that the circle lines up with the text
                     .accessibilityIdentifier("task-title")
                 }
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 0, trailing: 16))
                 if !hasTitle {
                     Text("A Task needs a Title.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
                 MarkdownEditor(text: $description, placeholder: "Description", images: model.images, onBlur: save)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
                     .accessibilityIdentifier("task-description")
                 HStack(spacing: 8) {
                     PriorityMenu(priority: $priority)
@@ -851,6 +854,9 @@ private struct EditTaskForm: View {
             }
         }
         .formStyle(.grouped)
+        #if os(iOS)
+            .contentMargins(.top, 0, for: .scrollContent)
+        #endif
         // As last saved; only the back button's label on the Blocker's form, the bar itself shows
         // no title (the header has it).
         .navigationTitle(Text(AttributedString(title: task.title)))
