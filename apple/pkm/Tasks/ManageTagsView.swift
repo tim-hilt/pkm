@@ -1,15 +1,15 @@
 import SwiftUI
 
 /// Every Tag by Relevance, each `a/b` as one flat row written in its Tag Color, its Relevance
-/// on the right; "No Tags" if there are none. Swiping a row offers Edit, which picks the Tag
-/// Color or resets it to Default, Reset to 0, which resets its Relevance, and Delete, which a
-/// full swipe runs.
+/// on the right; "No Tags" if there are none. Tapping a row offers Change Color, Default Color and
+/// Reset to 0, which resets its Relevance; swiping it offers Delete, which a full swipe runs.
 struct ManageTagsView: View {
     @Environment(TasksModel.self) private var tasks
     @Environment(BookmarksModel.self) private var bookmarks
     @Environment(NotesModel.self) private var notes
     @State private var deletion = TagDeletion()
     @State private var editing: String?
+    @State private var acting: String?
 
     var body: some View {
         List {
@@ -55,28 +55,40 @@ struct ManageTagsView: View {
     }
 
     private func row(_ tag: TagEntry) -> some View {
-        LabeledContent {
-            Text(tag.relevance, format: .number).monospacedDigit()
+        Button {
+            acting = tag.name
         } label: {
-            Text(tag.name).foregroundStyle(tag.style(default: .primary))
+            LabeledContent {
+                Text(tag.relevance, format: .number).monospacedDigit()
+            } label: {
+                Text(tag.name).foregroundStyle(tag.style(default: .primary))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .confirmationDialog(tag.name, isPresented: isActing(on: tag.name), titleVisibility: .visible) {
+            Button("Change Color…") { editing = tag.name }
+            Button("Default Color") { tasks.setTagColor(tag.name, to: nil) }
+                .disabled(tag.color == nil)
+            Button("Reset to 0") { tasks.resetTagRelevance(tag.name) }
+                .disabled(tag.relevance == 0)
         }
         .swipeActions(edge: .trailing) {
             Button("Delete", systemImage: "trash", role: .destructive) { deletion.ask(for: tag.name) }
-            Button("Edit", systemImage: "pencil") { editing = tag.name }.tint(.accentColor)
-            if tag.relevance > 0 {
-                Button("Reset to 0", systemImage: "arrow.counterclockwise") {
-                    tasks.resetTagRelevance(tag.name)
-                }
-            }
         }
         .contextMenu {
-            Button("Edit", systemImage: "pencil") { editing = tag.name }
+            Button("Change Color…", systemImage: "pencil") { editing = tag.name }
             Button("Default Color") { tasks.setTagColor(tag.name, to: nil) }
                 .disabled(tag.color == nil)
             Button("Reset to 0", systemImage: "arrow.counterclockwise") { tasks.resetTagRelevance(tag.name) }
                 .disabled(tag.relevance == 0)
             Button("Delete", systemImage: "trash", role: .destructive) { deletion.ask(for: tag.name) }
         }
+    }
+
+    /// The actions dialog shows while its Tag is the one tapped.
+    private func isActing(on tag: String) -> Binding<Bool> {
+        Binding(get: { acting == tag }, set: { if !$0 && acting == tag { acting = nil } })
     }
 
     /// The dialog shows while a Tag is pending; dismissing it cancels.

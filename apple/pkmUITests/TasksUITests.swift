@@ -386,3 +386,42 @@ import XCTest
         XCTAssertFalse(app.staticTexts["Learn Rust"].exists)
     }
 }
+
+/// The Tags page in Settings: a tap on a Tag offers its actions, a swipe only Delete.
+@MainActor final class ManageTagsUITests: XCTestCase {
+    private var app: XCUIApplication!
+
+    override func setUpWithError() throws {
+        continueAfterFailure = false
+        app = XCUIApplication()
+        app.launchArguments = ["-UITestingOpenSettings", "-UITestingOpenTasks"]  // the latter: sample Tags
+        app.launch()
+        let link = app.buttons["manage-tags"]
+        try XCTSkipUnless(link.waitForExistence(timeout: 10))
+        link.tap()
+        XCTAssertTrue(app.navigationBars["Tags"].waitForExistence(timeout: 5))
+    }
+
+    /// The first Tag's row; the list's header is the cell before it.
+    private var tag: XCUIElement { app.cells.element(boundBy: 1) }
+
+    func testATapOffersTheTagsActions() {
+        tag.tap()
+        XCTAssertTrue(app.buttons["Change Color…"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Reset to 0"].exists)  // "Default Color" is disabled, so not exposed
+        XCTAssertFalse(app.buttons["Delete"].exists)
+    }
+
+    func testASwipeOffersOnlyDelete() {
+        tag.swipeLeft()
+        XCTAssertTrue(app.buttons["Delete"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Edit"].exists)
+        XCTAssertFalse(app.buttons["Reset to 0"].exists)
+    }
+
+    func testChangeColorOpensThePicker() {
+        tag.tap()
+        app.buttons["Change Color…"].tap()
+        XCTAssertTrue(app.navigationBars["backlog"].firstMatch.waitForExistence(timeout: 5))
+    }
+}
