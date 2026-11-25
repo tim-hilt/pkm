@@ -490,7 +490,9 @@ private struct TaskQuickActions: ViewModifier {
         content
             .swipeActions(edge: .trailing) {
                 if !task.done {
-                    Button("Reject", role: .destructive) { model.close(task, as: .rejected) }
+                    Button("Reject", systemImage: "xmark.circle", role: .destructive) {
+                        model.close(task, as: .rejected)
+                    }
                 }
             }
             #if os(iOS)
