@@ -493,12 +493,14 @@ private struct TaskQuickActions: ViewModifier {
                     Button("Reject", systemImage: "xmark.circle", role: .destructive) {
                         model.close(task, as: .rejected)
                     }
+                    .accessibilityLabel("Reject")
                 }
             }
             #if os(iOS)
                 .swipeActions(edge: .leading, allowsFullSwipe: true) {
                     if !task.done {
                         Button("Tags", systemImage: "tag") { isPickingTags = true }.tint(.accentColor)
+                        .accessibilityLabel("Tags")
                     }
                 }
             #endif

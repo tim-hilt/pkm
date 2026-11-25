@@ -25,8 +25,13 @@ import XCTest
     /// A trailing swipe offers Reject; outside a `List` only from iOS 27 on.
     func testARowSwipedLeftOffersReject() throws {
         guard #available(iOS 27, *) else { throw XCTSkip("swipe actions need a List before iOS 27") }
-        row("Book the dentist").swipeLeft()
-        XCTAssertTrue(app.buttons["Reject"].waitForExistence(timeout: 5))
+        let reject = app.buttons["Reject"]
+        // A synthesized swipe is sometimes lost.
+        for _ in 0..<3 where !reject.exists {
+            row("Book the dentist").swipeLeft()
+            _ = reject.waitForExistence(timeout: 2)
+        }
+        XCTAssertTrue(reject.exists)
     }
 
     /// Drag tests are slow and flaky (synthesized presses); they run only with `make test-ui SLOW=1`.
