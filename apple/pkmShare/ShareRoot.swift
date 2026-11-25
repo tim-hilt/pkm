@@ -52,17 +52,31 @@ struct ShareRoot: View {
         if let provider = providers.first(where: {
             $0.hasItemConformingToTypeIdentifier(UTType.propertyList.identifier)
         }),
-            let item = try? await provider.loadItem(forTypeIdentifier: UTType.propertyList.identifier)
-                as? [String: Any],
+            let data = await provider.data(for: .propertyList),
+            let item = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
             let results = item[NSExtensionJavaScriptPreprocessingResultsKey] as? [String: Any],
             let page = SharedPage(preprocessed: results)
         {
             return page
         }
         guard let provider = providers.first(where: { $0.hasItemConformingToTypeIdentifier(UTType.url.identifier) }),
-            let url = try? await provider.loadItem(forTypeIdentifier: UTType.url.identifier) as? URL
+            let url = await provider.url()
         else { return nil }
         return SharedPage(address: url.absoluteString)
+    }
+}
+
+extension NSItemProvider {
+    @MainActor fileprivate func data(for type: UTType) async -> Data? {
+        await withCheckedContinuation { c in
+            _ = loadDataRepresentation(for: type) { data, _ in c.resume(returning: data) }
+        }
+    }
+
+    @MainActor fileprivate func url() async -> URL? {
+        await withCheckedContinuation { c in
+            _ = loadObject(ofClass: URL.self) { url, _ in c.resume(returning: url) }
+        }
     }
 }
 
