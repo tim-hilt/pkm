@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { type Core, type Editor, loadCore } from "../../core/Core";
 import { Excalifont } from "../text/Excalifont";
 import { drag } from "../testing/Gestures";
@@ -42,6 +42,10 @@ class FakeClipboard implements SystemClipboard {
     this.text = text;
     this.held = [{ type: "text/plain", data: text }];
   }
+  written: ClipboardItem[] = [];
+  async write(items: ClipboardItem[]) {
+    this.written = items;
+  }
   async read() {
     return [
       {
@@ -64,6 +68,50 @@ function setup(editor: Editor, system = new FakeClipboard()) {
   });
   return { clipboard, system, inserted, changes: () => changes };
 }
+
+describe("copying an image", () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1]);
+  const jpeg = new Uint8Array([0xff, 0xd8, 1]);
+  const converted = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 9]);
+  const codec = {
+    size: async () => undefined,
+    encode: async () => ({ bytes: converted, width: 1, height: 1 }),
+  };
+  class FakeItem {
+    constructor(readonly data: Record<string, Promise<Blob>>) {}
+  }
+  vi.stubGlobal("ClipboardItem", FakeItem);
+  afterEach(() => vi.clearAllMocks());
+
+  async function copied(bytes: Uint8Array) {
+    const editor = empty();
+    editor.insertImages([{ fileId: "f1", mimeType: "image/png", bytes, width: 10, height: 10 }]);
+    const system = new FakeClipboard();
+    const clipboard = new CanvasClipboard(
+      editor,
+      system,
+      { images: () => {}, changed: () => {} },
+      codec,
+    );
+    await clipboard.copyImage();
+    const [item] = system.written as unknown as FakeItem[];
+    return item && new Uint8Array(await (await item.data["image/png"]).arrayBuffer());
+  }
+
+  it("writes a PNG as it is", async () => {
+    expect(await copied(png)).toEqual(png);
+  });
+
+  it("converts other pictures to PNG", async () => {
+    expect(await copied(jpeg)).toEqual(converted);
+  });
+
+  it("writes nothing with no single image selected", async () => {
+    const system = new FakeClipboard();
+    await setup(withSelection(), system).clipboard.copyImage();
+    expect(system.written).toEqual([]);
+  });
+});
 
 describe("copying and pasting Elements", () => {
   it("copies the Selection as Excalidraw clipboard JSON, which pastes into another Canvas", async () => {

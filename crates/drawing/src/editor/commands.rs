@@ -38,6 +38,18 @@ impl Editor {
         clipboard::copy(&self.scene, &self.selection)
     }
 
+    /// The id of the file of the selected image, if the Selection is exactly
+    /// one image that has a file; its bytes are [`Editor::file_bytes`]. What
+    /// clients offer "Copy Image" for.
+    pub fn selected_image(&self) -> Option<String> {
+        let mut chosen = self.selection.covered(&self.scene);
+        let image = chosen.next().filter(|e| e.kind() == ElementType::Image)?;
+        if chosen.next().is_some() {
+            return None;
+        }
+        image.file_id().map(str::to_owned)
+    }
+
     /// Copies the Selection (see [`Editor::copy_selection`]) and deletes it
     /// (see [`Editor::delete_selection`]), which is one undo step. `None`,
     /// and nothing deleted, with nothing selected or while a pointer is

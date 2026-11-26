@@ -551,6 +551,17 @@
         }
       }
     },
+    "Copy Image": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy Image"
+          }
+        }
+      }
+    },
     "Copy to Clipboard": {
       "extractionState": "manual",
       "localizations": {

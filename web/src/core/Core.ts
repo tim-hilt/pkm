@@ -624,6 +624,11 @@ export class Editor {
     return this.inner.fileBytes(id);
   }
 
+  /** The id of the image file of the Selection if it is exactly one image; `undefined` otherwise. */
+  selectedImage(): string | undefined {
+    return this.inner.selectedImage();
+  }
+
   /** What to rasterise for a PNG of `scope`; `undefined` if there is nothing to export. */
   export(scope: ExportScope): ImageExport | undefined {
     const inner = this.inner.export(scope);

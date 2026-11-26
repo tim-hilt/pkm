@@ -1633,6 +1633,12 @@ impl Editor {
         self.editor().file_bytes(&id)
     }
 
+    /// The id of the image file of the Selection if it is exactly one image;
+    /// see [`pkm_drawing::Editor::selected_image`].
+    pub fn selected_image(&self) -> Option<String> {
+        self.editor().selected_image()
+    }
+
     /// What a PNG export of `scope` shows, `None` if nothing; see
     /// [`pkm_drawing::Editor::export`].
     pub fn export(&self, scope: ExportScope) -> Option<Export> {

@@ -59,6 +59,19 @@ import Testing
             #expect(try action("Delete", in: menu).attributes.contains(.destructive))
         }
 
+        @Test func copyImageIsOnlyOfferedForASelectedImage() async throws {
+            let setup = try makeSetup()
+            #expect(titles(setup.canvas.elementMenu(canGroup: false, canUngroup: false)) == plainTitles)
+            #expect(try #require(press(setup, at: CGPoint(x: 150, y: 125))).children.count == plainTitles.count)
+
+            await setup.canvas.insertImages(from: [TestImages.quadrants(size: 40)])
+            let menu = try #require(press(setup, at: CGPoint(x: 400, y: 300)))
+
+            #expect(titles(menu).prefix(3) == ["Cut", "Copy", "Copy Image"])
+        }
+
+        private let plainTitles = ["Cut", "Copy", "Paste", "Duplicate", "Group", "Ungroup", "Arrange", "Delete"]
+
         @Test func groupAndUngroupAreEnabledAsTheCoreSays() throws {
             for (canGroup, canUngroup) in [(true, false), (false, true), (false, false)] {
                 let menu = try makeSetup().canvas.elementMenu(canGroup: canGroup, canUngroup: canUngroup)

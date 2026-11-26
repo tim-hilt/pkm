@@ -1,4 +1,6 @@
 import type { Editor } from "../../core/Core";
+import { browserImageCodec } from "../images/BrowserImageCodec";
+import type { ImageCodec } from "../images/ImageImporter";
 
 /** One thing on the clipboard, offered in several types; the Async Clipboard API's `ClipboardItem`. */
 export interface ClipboardEntry {
@@ -10,6 +12,7 @@ export interface ClipboardEntry {
 export interface SystemClipboard {
   writeText(text: string): Promise<void>;
   read(): Promise<ClipboardEntry[]>;
+  write(items: ClipboardItem[]): Promise<void>;
 }
 
 /** What the clipboard needs of the Canvas. */
@@ -44,9 +47,13 @@ type Point = { x: number; y: number };
  */
 export class CanvasClipboard {
   constructor(
-    private readonly editor: Pick<Editor, "copySelection" | "cutSelection" | "paste">,
+    private readonly editor: Pick<
+      Editor,
+      "copySelection" | "cutSelection" | "paste" | "selectedImage" | "fileBytes"
+    >,
     private readonly system: SystemClipboard,
     private readonly host: ClipboardHost,
+    private readonly codec: ImageCodec = browserImageCodec,
   ) {}
 
   /**
@@ -88,6 +95,28 @@ export class CanvasClipboard {
   /** Puts the Selection on the clipboard. */
   async copy(): Promise<void> {
     await this.write(this.editor.copySelection());
+  }
+
+  /**
+   * Puts the selected image on the clipboard as PNG, the one picture type
+   * every browser writes. Its bytes are handed over as a promise, so that
+   * Safari still counts the write as part of the click that asked for it.
+   */
+  async copyImage(): Promise<void> {
+    const id = this.editor.selectedImage();
+    const bytes = id === undefined ? undefined : this.editor.fileBytes(id);
+    if (!bytes) return;
+    const png = (async () => {
+      const isPng = [0x89, 0x50, 0x4e, 0x47].every((byte, at) => bytes[at] === byte);
+      const out = isPng ? bytes : (await this.codec.encode(bytes, Infinity, "image/png", 1))?.bytes;
+      if (!out) throw new Error("Image can't be read");
+      return new Blob([out as Uint8Array<ArrayBuffer>], { type: "image/png" });
+    })();
+    try {
+      await this.system.write([new ClipboardItem({ "image/png": png })]);
+    } catch {
+      // Refused or unreadable: nothing happens.
+    }
   }
 
   /** Puts the Selection on the clipboard and deletes it from the Scene. */

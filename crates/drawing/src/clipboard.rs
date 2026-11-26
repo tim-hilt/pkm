@@ -340,6 +340,28 @@ mod tests {
     }
 
     #[test]
+    fn a_single_selected_image_names_its_file() {
+        let mut editor = blank();
+        let image = |id: &str| ImageFile {
+            file_id: id.into(),
+            mime_type: "image/png".into(),
+            bytes: b"foobar".to_vec(),
+            width: 10,
+            height: 10,
+        };
+        editor.insert_images(vec![image("f1")]);
+        assert_eq!(editor.selected_image().as_deref(), Some("f1"));
+
+        editor.insert_images(vec![image("f2"), image("f3")]);
+        assert_eq!(editor.selection().len(), 2);
+        assert_eq!(editor.selected_image(), None);
+
+        common::tap(&mut editor, "mouse", (-5000.0, -5000.0), 0.0);
+        assert!(editor.selection().is_empty());
+        assert_eq!(editor.selected_image(), None);
+    }
+
+    #[test]
     fn copy_does_not_change_the_scene_or_the_selection() {
         let editor = drawn();
         let before = editor.save();

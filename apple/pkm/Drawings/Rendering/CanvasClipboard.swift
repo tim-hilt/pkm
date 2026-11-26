@@ -77,6 +77,14 @@ extension CanvasMetalView {
             UIPasteboard.general.string = text
         }
 
+        /// Puts the selected image on the pasteboard as a picture.
+        func copyImageToPasteboard() {
+            guard let id = editor?.selectedImage(), let bytes = editor?.fileBytes(id: id),
+                let image = UIImage(data: bytes)
+            else { return }
+            UIPasteboard.general.image = image
+        }
+
         override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
             switch action {
             case #selector(copy(_:)), #selector(cut(_:)): canCopy

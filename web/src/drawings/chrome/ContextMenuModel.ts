@@ -20,7 +20,7 @@ type Point = { x: number; y: number };
  */
 export function openContextMenu(
   editor: Editor,
-  clipboard: Pick<CanvasClipboard, "copy" | "cut" | "paste">,
+  clipboard: Pick<CanvasClipboard, "copy" | "copyImage" | "cut" | "paste">,
   at: Point,
   kind: PointerKind,
 ): MenuEntry[] | undefined {
@@ -34,9 +34,13 @@ export function openContextMenu(
     label,
     run: () => editor.moveInZOrder(how),
   });
+  const copyImage: MenuEntry[] = editor.selectedImage()
+    ? [{ label: "Copy Image", run: () => clipboard.copyImage() }]
+    : [];
   return [
     { label: "Cut", run: () => clipboard.cut() },
     { label: "Copy", run: () => clipboard.copy() },
+    ...copyImage,
     paste,
     { label: "Duplicate", run: () => editor.duplicate() },
     { label: "Group", disabled: !menu.canGroup, run: () => editor.group() },

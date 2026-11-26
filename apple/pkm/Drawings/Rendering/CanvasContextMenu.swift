@@ -50,11 +50,15 @@
         /// menu, which the system hands over without one.
         func contextMenuForPress(at point: CGPoint, kind: PointerKind) -> UIMenu? {
             var result: ContextMenu?
-            perform { result = $0.longPress(x: point.x, y: point.y, kind: kind) }
+            var imageSelected = false
+            perform {
+                result = $0.longPress(x: point.x, y: point.y, kind: kind)
+                imageSelected = $0.selectedImage() != nil
+            }
             switch result {
             case .element(let canGroup, let canUngroup):
                 contextMenuPoint = point
-                return elementMenu(canGroup: canGroup, canUngroup: canUngroup)
+                return elementMenu(canGroup: canGroup, canUngroup: canUngroup, canCopyImage: imageSelected)
             case .canvas:
                 contextMenuPoint = point
                 return canvasMenu()
@@ -87,7 +91,7 @@
         /// The menu of the Selection: Excalidraw's entries and order. Group and
         /// Ungroup are always there, enabled as the core says; each entry runs
         /// the command the same name has elsewhere.
-        func elementMenu(canGroup: Bool, canUngroup: Bool) -> UIMenu {
+        func elementMenu(canGroup: Bool, canUngroup: Bool, canCopyImage: Bool = false) -> UIMenu {
             func item(
                 _ title: LocalizedStringResource, _ symbol: String, disabled: Bool = false,
                 destructive: Bool = false, _ run: @escaping (CanvasMetalView) -> Void
@@ -118,16 +122,22 @@
                         $0.perform { $0.moveInZOrder(how: .toBack) }
                     },
                 ])
-            return UIMenu(children: [
+            var children: [UIMenuElement] = [
                 item("Cut", "scissors") { $0.cut(nil) },
                 item("Copy", "doc.on.doc") { $0.copy(nil) },
+            ]
+            if canCopyImage {
+                children.append(item("Copy Image", "photo.on.rectangle") { $0.copyImageToPasteboard() })
+            }
+            children += [
                 pasteItem(),
                 item("Duplicate", "plus.square.on.square") { $0.perform { $0.duplicate() } },
                 item("Group", "rectangle.3.group", disabled: !canGroup) { $0.perform { $0.group() } },
                 item("Ungroup", "rectangle.3.offgrid", disabled: !canUngroup) { $0.perform { $0.ungroup() } },
                 arrange,
                 item("Delete", "trash", destructive: true) { $0.perform { $0.deleteSelection() } },
-            ])
+            ]
+            return UIMenu(children: children)
         }
     }
 

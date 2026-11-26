@@ -565,6 +565,13 @@ impl Editor {
         self.inner.borrow().file_bytes(id)
     }
 
+    /// The id of the image file of the Selection if it is exactly one image;
+    /// see [`pkm_drawing::Editor::selected_image`].
+    #[wasm_bindgen(js_name = selectedImage)]
+    pub fn selected_image(&self) -> Option<String> {
+        self.inner.borrow().selected_image()
+    }
+
     /// What a PNG export shows; `undefined` if there is nothing to export.
     pub fn export(&self, scope: ExportScope) -> Option<Export> {
         let export = self.inner.borrow().export(scope.into())?;

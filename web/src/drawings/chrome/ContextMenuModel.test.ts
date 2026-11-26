@@ -35,6 +35,7 @@ function fakeClipboard() {
     calls,
     at,
     copy: async () => void calls.push("copy"),
+    copyImage: async () => void calls.push("copyImage"),
     cut: async () => void calls.push("cut"),
     paste: async (point?: { x: number; y: number }) => {
       calls.push("paste");
@@ -130,6 +131,35 @@ describe("the Element menu", () => {
   });
 });
 
+describe("the Element menu of an image", () => {
+  const image = {
+    fileId: "f1",
+    mimeType: "image/png",
+    bytes: new Uint8Array([1, 2, 3]),
+    width: 100,
+    height: 50,
+  };
+
+  it("has Copy Image after Copy, running the clipboard's copyImage", () => {
+    const editor = makeEditor();
+    editor.insertImages([image]);
+    const { entries, clipboard } = open(editor, { x: 400, y: 300 });
+
+    expect(labels(entries!).slice(0, 4)).toEqual(["Cut", "Copy", "Copy Image", "Paste"]);
+    entry(entries!, "Copy Image").run!();
+    expect(clipboard.calls).toEqual(["copyImage"]);
+  });
+
+  it("is left out for other Selections", () => {
+    const editor = makeEditor();
+    editor.insertImages([image]);
+    editor.selectAll();
+
+    expect(labels(open(editor, onElement).entries!)).not.toContain("Copy Image");
+    expect(labels(open(makeEditor()).entries!)).not.toContain("Copy Image");
+  });
+});
+
 describe("the Canvas menu", () => {
   it("has Paste and Select All and keeps the Selection", () => {
     const editor = makeEditor();
@@ -150,6 +180,7 @@ describe("the Canvas menu", () => {
     editor.deleteSelection();
     const system: SystemClipboard = {
       writeText: async () => {},
+      write: async () => {},
       read: async () => [
         { types: ["text/plain"], getType: async () => new Blob([text], { type: "text/plain" }) },
       ],
