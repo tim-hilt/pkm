@@ -94,6 +94,9 @@ struct TagPicker: View {
                 .searchPresentationToolbarBehavior(.avoidHidingContent)
             #endif
             .autocorrectionDisabled()
+            #if os(iOS)
+                .textInputAutocapitalization(.never)
+            #endif
             .onChange(of: query) { _, text in
                 let allowed = TasksModel.allowedTagText(text)
                 refusedText = allowed != text

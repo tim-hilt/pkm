@@ -143,6 +143,9 @@ struct ShareTagsField: View {
             #endif
             .searchable(text: $query, prompt: "Search or create")
             .autocorrectionDisabled()
+            #if os(iOS)
+                .textInputAutocapitalization(.never)
+            #endif
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { isPicking = false } }
             }
