@@ -24,6 +24,17 @@ import XCTest
         XCTAssertTrue(noteBody.waitForExistence(timeout: 5), "the Note is still open")
     }
 
+    func testEachTabShowsTheAddButtonOfItsScreenInFront() {
+        XCTAssertFalse(app.buttons["add-note"].exists, "a pushed Note has no \"+\"")
+        app.tabBars.buttons["Drawings"].tap()
+        XCTAssertTrue(app.buttons["new-drawing"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["add-note"].exists, "not the \"+\" of another tab")
+        app.tabBars.buttons["Notes"].tap()
+        app.tabBars.buttons["Notes"].tap()
+        XCTAssertTrue(app.buttons["add-note"].waitForExistence(timeout: 5), "the list's \"+\"")
+        XCTAssertFalse(app.buttons["new-drawing"].exists)
+    }
+
     func testTappingTheSelectedTabAgainReturnsToTheFirstScreen() {
         app.tabBars.buttons["Notes"].tap()
         XCTAssertTrue(noteBody.waitForNonExistence(timeout: 5), "the Note is popped")

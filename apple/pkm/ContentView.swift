@@ -99,6 +99,7 @@ extension ContentView {
         .tabViewStyle(.sidebarAdaptable)
         #if os(iOS)
             .tabBarMinimizeBehavior(.onScrollDown)
+            .addButtonAccessory()
         #endif
     }
 

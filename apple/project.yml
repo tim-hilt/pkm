@@ -5,7 +5,7 @@ options:
   bundleIdPrefix: com.timhilt
   developmentLanguage: en
   deploymentTarget:
-    iOS: "26.0"
+    iOS: "26.1"
     macOS: "27.0"
 targets:
   # One multiplatform target serves iOS, iPadOS and macOS.
