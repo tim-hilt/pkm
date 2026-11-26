@@ -790,7 +790,9 @@ private struct EditTaskForm: View {
                         autofocus: false, onSubmit: commitQuickAdd, onBlur: commitQuickAdd
                     )
                     .font(.title2.weight(.semibold))
-                    .padding(.vertical, -8)  // the editor's own inset, so that the circle lines up with the text
+                    .padding(.top, -8)  // the editor's own inset, so that the circle lines up with the text
+                    .fixedSize(horizontal: false, vertical: true)  // as tall as its lines
+                    .padding(.bottom, 4)  // the gap to the Description
                     .accessibilityIdentifier("task-title")
                 }
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 0, trailing: 16))
