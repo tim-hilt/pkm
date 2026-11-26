@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import UniformTypeIdentifiers
 
 @testable import pkm
 
@@ -118,5 +119,21 @@ import Testing
     @Test func htmlBeyondTheLimitIsLeftOutSoThePageIsDownloadedInstead() {
         let huge = String(repeating: "x", count: Download.limit + 1)
         #expect(SharedPage(preprocessed: ["url": "https://example.com/a", "html": huge])?.html == nil)
+    }
+
+    /// Safari hands over the results of `ShareExtension.js` as a dictionary, and no URL besides.
+    @Test func aPageSharedByABrowserIsReadFromItsPreprocessingResults() async {
+        let results: NSDictionary = [
+            NSExtensionJavaScriptPreprocessingResultsKey: ["url": "https://example.com/a", "html": "<p>Hi</p>"]
+        ]
+        let item = NSExtensionItem()
+        item.attachments = [NSItemProvider(item: results, typeIdentifier: UTType.propertyList.identifier)]
+        #expect(await SharedPage(items: [item]) == SharedPage(address: "https://example.com/a", html: "<p>Hi</p>"))
+    }
+
+    @Test func aUrlSharedByAnotherAppIsReadAsItsAddress() async {
+        let item = NSExtensionItem()
+        item.attachments = [NSItemProvider(object: URL(string: "https://example.com/a")! as NSURL)]
+        #expect(await SharedPage(items: [item]) == SharedPage(address: "https://example.com/a"))
     }
 }
